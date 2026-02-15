@@ -75,69 +75,81 @@ class Scheduler {
 
     /**
      * Schedule executions for a specific shift
+     * Scripts are executed based on shift assignments, not cameras
      */
     async scheduleShiftExecutions(shift, prepTimeMinutes) {
         try {
             const shiftStartTime = new Date(shift.shift_start_datetime);
+            const shiftEndTime = new Date(shift.shift_end_datetime);
             const now = new Date();
-            const timeDiff = (shiftStartTime - now) / 1000 / 60; // minutes
 
-            // Only schedule if shift is starting within prep time window
-            if (timeDiff > prepTimeMinutes || timeDiff < 0) {
+            // Get shift-based script assignments for this shift
+            const ShiftScriptAssignment = require('../models/ShiftScriptAssignment');
+            const scriptAssignments = await ShiftScriptAssignment.findByShiftId(shift.shift_id);
+
+            if (scriptAssignments.length === 0) {
+                logger.debug(`No script assignments found for shift ${shift.shift_id}`);
                 return;
             }
 
-            logger.info(`Scheduling executions for shift: ${shift.shift_name} on ${shift.exam_date}`);
-
-            // Get all active analytics tasks for this exam
-            const analyticsTasks = await AnalyticsTask.findByExamId(shift.exam_id, { is_active: true });
-
-            // Get all active cameras for this exam
-            const cameras = await CameraLink.findByExamId(shift.exam_id, { is_active: true });
-
-            if (cameras.length === 0) {
-                logger.warn(`No cameras found for exam ${shift.exam_id}`);
-                return;
-            }
-
-            // Create execution records for each task-camera combination
+            // Create execution records for each script assignment
             const executions = [];
 
-            for (const task of analyticsTasks) {
-                // Check if task should run during this shift time
-                if (!this.shouldTaskRunInShift(task, shift)) {
-                    continue;
+            for (const assignment of scriptAssignments) {
+                // Determine the scheduled time for this assignment
+                let scheduledTime = shiftStartTime;
+
+                // If custom start time is specified, use it
+                if (assignment.custom_start_time) {
+                    const [hours, minutes, seconds] = assignment.custom_start_time.split(':');
+                    scheduledTime = new Date(shift.shift_start_datetime);
+                    scheduledTime.setHours(parseInt(hours), parseInt(minutes), parseInt(seconds || 0));
                 }
 
-                for (const camera of cameras) {
-                    // Check if execution already exists
-                    const existing = await this.checkExistingExecution(
-                        shift.shift_id,
-                        camera.id,
-                        task.id,
-                        shiftStartTime
-                    );
+                // Check if this specific script should be scheduled
+                const timeDiff = (scheduledTime - now) / 1000 / 60; // minutes
 
-                    if (!existing) {
-                        executions.push({
-                            shift_id: shift.shift_id,
-                            camera_link_id: camera.id,
-                            analytics_task_id: task.id,
-                            scheduled_time: shiftStartTime,
-                            execution_metadata: {
-                                exam_name: shift.exam_name,
-                                shift_name: shift.shift_name,
-                                camera_id: camera.camera_id,
-                                task_name: task.task_name
-                            }
-                        });
-                    }
+                // Only schedule if:
+                // 1. Script time is within prep window (upcoming)
+                // 2. Script time hasn't passed yet
+                // 3. Script is before shift end time
+                if (timeDiff > prepTimeMinutes || timeDiff < 0 || scheduledTime > shiftEndTime) {
+                    continue; // Skip this assignment
+                }
+
+                logger.info(`Scheduling script ${assignment.task_name} for ${scheduledTime.toISOString()}`);
+
+                // Check if execution already exists
+                const existing = await this.checkExistingExecution(
+                    shift.shift_id,
+                    null, // No camera required
+                    assignment.analytics_task_id,
+                    scheduledTime
+                );
+
+                if (!existing) {
+                    executions.push({
+                        shift_id: shift.shift_id,
+                        camera_link_id: null, // Scripts run without specific camera
+                        analytics_task_id: assignment.analytics_task_id,
+                        scheduled_time: scheduledTime,
+                        execution_metadata: {
+                            exam_name: shift.exam_name,
+                            exam_id: shift.exam_id,
+                            shift_name: shift.shift_name,
+                            task_name: assignment.task_name,
+                            assignment_id: assignment.id,
+                            script_path: assignment.script_path
+                        }
+                    });
                 }
             }
 
             if (executions.length > 0) {
                 await ScriptExecution.bulkCreate(executions);
                 logger.info(`Created ${executions.length} execution records for shift ${shift.shift_name}`);
+            } else {
+                logger.debug(`No new executions to create for shift ${shift.shift_name}`);
             }
         } catch (error) {
             logger.error(`Error scheduling shift executions:`, error);

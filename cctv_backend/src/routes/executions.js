@@ -197,4 +197,26 @@ router.get('/recent',
     })
 );
 
+/**
+ * @route   GET /api/shifts/:shiftId/executions
+ * @desc    Get executions for a specific shift
+ * @access  Private
+ */
+router.get('/shifts/:shiftId/executions',
+    authenticate,
+    asyncHandler(async (req, res) => {
+        const { limit = 50 } = req.query;
+        const executions = await ScriptExecution.findByShiftId(
+            req.params.shiftId,
+            parseInt(limit)
+        );
+
+        res.json({
+            success: true,
+            count: executions.length,
+            data: executions
+        });
+    })
+);
+
 module.exports = router;

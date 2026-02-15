@@ -43,56 +43,60 @@ class ScriptExecution {
         return results;
     }
 
+
     /**
      * Get pending executions for script server
      */
     static async getPendingExecutions(limit = 50) {
         const sql = `
-      SELECT 
-        se.*,
-        at.script_path,
-        at.parameters as task_parameters,
-        cl.stream_url,
-        cl.stream_type,
-        cl.camera_id
-      FROM script_executions se
-      JOIN analytics_tasks at ON se.analytics_task_id = at.id
-      LEFT JOIN camera_links cl ON se.camera_link_id = cl.id
-      WHERE se.status = 'PENDING' 
-        AND se.scheduled_time <= NOW()
-      ORDER BY se.scheduled_time ASC
-      LIMIT ?
-    `;
+            SELECT 
+                se.*,
+                at.script_path,
+                at.parameters as task_parameters,
+                cl.stream_url,
+                cl.stream_type,
+                cl.camera_id
+            FROM script_executions se
+            JOIN analytics_tasks at ON se.analytics_task_id = at.id
+            LEFT JOIN camera_links cl ON se.camera_link_id = cl.id
+            WHERE se.status = 'PENDING' 
+                AND se.scheduled_time <= NOW()
+            ORDER BY se.scheduled_time ASC
+            LIMIT ?
+        `;
+
         const results = await query(sql, [limit]);
 
         return results.map(exec => ({
             ...exec,
-            execution_metadata: exec.execution_metadata ? JSON.parse(exec.execution_metadata) : null,
-            task_parameters: exec.task_parameters ? JSON.parse(exec.task_parameters) : null
+            execution_metadata: typeof exec.execution_metadata === 'string'
+                ? JSON.parse(exec.execution_metadata)
+                : exec.execution_metadata,
+            task_parameters: typeof exec.task_parameters === 'string'
+                ? JSON.parse(exec.task_parameters)
+                : exec.task_parameters
         }));
     }
+
 
     /**
      * Get execution by ID
      */
     static async findById(id) {
-        const sql = `
-      SELECT 
-        se.*,
-        at.task_name,
-        at.script_path
-      FROM script_executions se
-      JOIN analytics_tasks at ON se.analytics_task_id = at.id
-      WHERE se.id = ?
-    `;
+        const sql = 'SELECT * FROM script_executions WHERE id = ?';
         const results = await query(sql, [id]);
+
         if (results.length === 0) return null;
 
         const exec = results[0];
         return {
             ...exec,
-            execution_metadata: exec.execution_metadata ? JSON.parse(exec.execution_metadata) : null,
-            result_data: exec.result_data ? JSON.parse(exec.result_data) : null
+            execution_metadata: typeof exec.execution_metadata === 'string'
+                ? JSON.parse(exec.execution_metadata)
+                : exec.execution_metadata,
+            result_data: typeof exec.result_data === 'string'
+                ? JSON.parse(exec.result_data)
+                : exec.result_data
         };
     }
 

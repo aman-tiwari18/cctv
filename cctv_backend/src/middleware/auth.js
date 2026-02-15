@@ -6,6 +6,18 @@ const logger = require('../utils/logger');
  */
 const authenticate = (req, res, next) => {
     try {
+        // Check for API key first (for script-server)
+        const apiKey = req.headers['x-api-key'];
+        if (apiKey && apiKey === process.env.SCRIPT_SERVER_API_KEY) {
+            // API key authentication for script-server
+            req.user = {
+                id: 999,
+                username: 'script-server',
+                role: 'service'
+            };
+            return next();
+        }
+
         // Get token from header
         const authHeader = req.headers.authorization;
 

@@ -7,7 +7,7 @@ class Poller {
         this.isRunning = false;
         this.pollInterval = null;
         this.backendUrl = process.env.MAIN_BACKEND_URL;
-        this.jwtToken = process.env.JWT_TOKEN;
+        this.apiKey = process.env.API_KEY;
         this.pollIntervalMs = parseInt(process.env.POLL_INTERVAL_MS) || 30000;
         this.runningScripts = new Map();
     }
@@ -51,10 +51,10 @@ class Poller {
             logger.debug('Polling for pending executions...');
 
             const response = await axios.get(
-                `${this.backendUrl}/api/executions/pending`,
+                `${this.backendUrl}/executions/pending`,
                 {
                     headers: {
-                        'Authorization': `Bearer ${this.jwtToken}`
+                        'X-API-Key': this.apiKey
                     },
                     params: {
                         limit: 10
@@ -133,14 +133,14 @@ class Poller {
     async updateExecutionStatus(executionId, status, data = {}) {
         try {
             await axios.put(
-                `${this.backendUrl}/api/executions/${executionId}/status`,
+                `${this.backendUrl}/executions/${executionId}/status`,
                 {
                     status,
                     ...data
                 },
                 {
                     headers: {
-                        'Authorization': `Bearer ${this.jwtToken}`,
+                        'X-API-Key': this.apiKey,
                         'Content-Type': 'application/json'
                     }
                 }

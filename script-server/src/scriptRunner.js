@@ -41,8 +41,20 @@ class ScriptRunner {
             // Prepare script arguments
             const args = this.buildScriptArguments(execution);
 
+            // Determine context-aware interpreter
+            const ext = path.extname(fullScriptPath);
+            let command = 'python3'; // Default to python3 for .py files
+
+            if (ext === '.sh') {
+                command = 'bash';
+            } else if (ext === '.js') {
+                command = 'node';
+            }
+
+            logger.info(`Using interpreter: ${command} for script: ${fullScriptPath}`);
+
             // Spawn the script process
-            const scriptProcess = spawn('python', [fullScriptPath, ...args], {
+            const scriptProcess = spawn(command, [fullScriptPath, ...args], {
                 cwd: this.scriptsDir,
                 env: {
                     ...process.env,

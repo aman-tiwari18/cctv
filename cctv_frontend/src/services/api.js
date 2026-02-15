@@ -76,6 +76,7 @@ export const schedulesAPI = {
 
 export const analyticsAPI = {
     getAll: (examId) => api.get(`/exams/${examId}/analytics`),
+    getAllTasks: () => api.get('/analytics/allTask'), // Get all analytics tasks
     create: (examId, taskData) => api.post(`/exams/${examId}/analytics`, taskData),
     upload: (examId, file) => {
         const formData = new FormData();

@@ -186,4 +186,27 @@ router.delete('/:id',
     })
 );
 
+/**
+ * @route   GET /api/analytics
+ * @desc    Get all analytics tasks (across all exams)
+ * @access  Private
+ */
+router.get('/allTask',
+    authenticate,
+    asyncHandler(async (req, res) => {
+        const { is_active } = req.query;
+        const filters = {};
+        if (is_active !== undefined) filters.is_active = is_active === 'true';
+
+        // Use findByExamId with null to get all tasks
+        const tasks = await AnalyticsTask.findAll(filters);
+
+        res.json({
+            success: true,
+            count: tasks.length,
+            data: tasks
+        });
+    })
+);
+
 module.exports = router;

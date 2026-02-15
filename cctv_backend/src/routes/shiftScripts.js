@@ -26,6 +26,7 @@ router.post('/:shiftId/scripts',
 
         // Verify analytics task exists
         const task = await AnalyticsTask.findById(analytics_task_id);
+        console.log(task);
         if (!task) {
             return res.status(404).json({
                 success: false,

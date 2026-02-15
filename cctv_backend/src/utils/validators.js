@@ -68,7 +68,16 @@ const cameraLinkValidation = {
 const scheduleValidation = {
     create: [
         param('examId').isInt().withMessage('Invalid exam ID'),
-        body('exam_date').isDate().withMessage('Valid exam date is required'),
+        body('exam_date')
+            .customSanitizer(value => {
+                // Convert ISO timestamp to date string (YYYY-MM-DD)
+                if (value && typeof value === 'string' && value.includes('T')) {
+                    return value.split('T')[0];
+                }
+                return value;
+            })
+            .isDate()
+            .withMessage('Valid exam date is required'),
         body('shifts').isArray({ min: 1 }).withMessage('At least one shift is required'),
         body('shifts.*.shift_name').trim().notEmpty().withMessage('Shift name is required'),
         body('shifts.*.start_time')
@@ -96,7 +105,17 @@ const scheduleValidation = {
     ],
     update: [
         param('id').isInt().withMessage('Invalid schedule ID'),
-        body('exam_date').optional().isDate(),
+        body('exam_date')
+            .optional()
+            .customSanitizer(value => {
+                // Convert ISO timestamp to date string (YYYY-MM-DD)
+                if (value && typeof value === 'string' && value.includes('T')) {
+                    return value.split('T')[0];
+                }
+                return value;
+            })
+            .isDate()
+            .withMessage('Valid exam date is required'),
         body('notes').optional().trim(),
         body('is_active').optional().isBoolean(),
         validate

@@ -74,6 +74,27 @@ class AnalyticsTask {
     }
 
     /**
+     * Get all analytics tasks (across all exams)
+     */
+    static async findAll({ is_active = true } = {}) {
+        let sql = 'SELECT * FROM analytics_tasks WHERE 1=1';
+        const params = [];
+
+        if (is_active !== null) {
+            sql += ' AND is_active = ?';
+            params.push(is_active);
+        }
+
+        sql += ' ORDER BY created_at DESC';
+        const results = await query(sql, params);
+
+        return results.map(task => ({
+            ...task,
+            parameters: task.parameters ? JSON.parse(task.parameters) : null
+        }));
+    }
+
+    /**
      * Get analytics task by ID
      */
     static async findById(id) {

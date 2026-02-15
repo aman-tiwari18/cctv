@@ -107,7 +107,7 @@ router.put('/:id',
  */
 router.delete('/:id',
     authenticate,
-    authorize('ADMIN'),
+    authorize('ADMIN', 'OPERATOR'),
     asyncHandler(async (req, res) => {
         await Exam.delete(req.params.id);
 

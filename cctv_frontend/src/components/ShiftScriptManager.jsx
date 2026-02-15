@@ -25,7 +25,7 @@ import {
     Edit,
     Schedule
 } from '@mui/icons-material';
-import { shiftScriptsAPI, scriptsAPI, executionsAPI } from '../services/api';
+import { shiftScriptsAPI, scriptsAPI, executionsAPI, analyticsAPI } from '../services/api';
 import ExecutionStatusBadge from './ExecutionStatusBadge';
 
 const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
@@ -54,7 +54,8 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
 
     const loadScripts = async () => {
         try {
-            const response = await scriptsAPI.getAll();
+            // Load all analytics tasks (not filtered by exam)
+            const response = await analyticsAPI.getAllTasks();
             setScripts(response.data.data);
         } catch (error) {
             console.error('Error loading scripts:', error);
@@ -275,7 +276,7 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
                         <MenuItem value="">Select a script</MenuItem>
                         {scripts.map((script) => (
                             <MenuItem key={script.id} value={script.id}>
-                                {script.name}
+                                {script.task_name}
                             </MenuItem>
                         ))}
                     </TextField>
