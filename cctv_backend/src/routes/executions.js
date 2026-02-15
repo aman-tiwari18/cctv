@@ -95,6 +95,29 @@ router.get('/',
 );
 
 /**
+ * @route   GET /api/executions/statistics
+ * @desc    Get execution statistics
+ * @access  Private
+ */
+router.get('/stats/summary',
+    authenticate,
+    asyncHandler(async (req, res) => {
+        const { exam_id, from_date, to_date } = req.query;
+
+        const stats = await ScriptExecution.getStatistics({
+            exam_id: exam_id ? parseInt(exam_id) : null,
+            from_date,
+            to_date
+        });
+
+        res.json({
+            success: true,
+            data: stats
+        });
+    })
+);
+
+/**
  * @route   GET /api/executions/:id
  * @desc    Get execution details
  * @access  Private
@@ -119,24 +142,57 @@ router.get('/:id',
 );
 
 /**
- * @route   GET /api/executions/statistics
- * @desc    Get execution statistics
+ * @route   GET /api/shifts/:shiftId/executions
+ * @desc    Get executions for a specific shift
  * @access  Private
  */
-router.get('/stats/summary',
+router.get('/shifts/:shiftId/executions',
     authenticate,
     asyncHandler(async (req, res) => {
-        const { exam_id, from_date, to_date } = req.query;
-
-        const stats = await ScriptExecution.getStatistics({
-            exam_id: exam_id ? parseInt(exam_id) : null,
+        const {
+            status,
             from_date,
-            to_date
-        });
+            to_date,
+            limit,
+            offset
+        } = req.query;
+
+        const filters = {
+            status,
+            from_date,
+            to_date,
+            limit: limit ? parseInt(limit) : 100,
+            offset: offset ? parseInt(offset) : 0
+        };
+
+        const executions = await ScriptExecution.getExecutionsByShift(
+            req.params.shiftId,
+            filters
+        );
 
         res.json({
             success: true,
-            data: stats
+            count: executions.length,
+            data: executions
+        });
+    })
+);
+
+/**
+ * @route   GET /api/executions/recent
+ * @desc    Get recent executions
+ * @access  Private
+ */
+router.get('/recent',
+    authenticate,
+    asyncHandler(async (req, res) => {
+        const limit = parseInt(req.query.limit) || 20;
+        const executions = await ScriptExecution.getRecentExecutions(limit);
+
+        res.json({
+            success: true,
+            count: executions.length,
+            data: executions
         });
     })
 );

@@ -1,6 +1,7 @@
 const { spawn } = require('child_process');
 const path = require('path');
 const logger = require('./logger');
+const logManager = require('./logManager');
 
 class ScriptRunner {
     constructor() {
@@ -32,6 +33,11 @@ class ScriptRunner {
                 execution_id: execution.id
             });
 
+            // Log execution start
+            logManager.writeLog(execution.id, `Starting execution: ${fullScriptPath}`, 'INFO');
+            logManager.writeLog(execution.id, `Camera ID: ${camera_id || 'N/A'}`, 'INFO');
+            logManager.writeLog(execution.id, `Stream URL: ${stream_url || 'N/A'}`, 'INFO');
+
             // Prepare script arguments
             const args = this.buildScriptArguments(execution);
 
@@ -54,6 +60,7 @@ class ScriptRunner {
                 const output = data.toString();
                 stdout += output;
                 logger.debug(`Script ${execution.id} stdout:`, output.trim());
+                logManager.writeLog(execution.id, output.trim(), 'INFO');
             });
 
             // Capture stderr
@@ -61,12 +68,14 @@ class ScriptRunner {
                 const output = data.toString();
                 stderr += output;
                 logger.warn(`Script ${execution.id} stderr:`, output.trim());
+                logManager.writeLog(execution.id, output.trim(), 'ERROR');
             });
 
             // Handle script completion
             scriptProcess.on('close', (code) => {
                 if (code === 0) {
                     logger.info(`Script ${execution.id} completed successfully`);
+                    logManager.writeLog(execution.id, `Script completed successfully with exit code ${code}`, 'INFO');
 
                     // Try to parse stdout as JSON for structured results
                     let result;
@@ -79,6 +88,8 @@ class ScriptRunner {
                     resolve(result);
                 } else {
                     logger.error(`Script ${execution.id} exited with code ${code}`);
+                    logManager.writeLog(execution.id, `Script failed with exit code ${code}`, 'ERROR');
+                    logManager.writeLog(execution.id, `Error: ${stderr}`, 'ERROR');
                     reject(new Error(`Script exited with code ${code}: ${stderr}`));
                 }
             });
@@ -86,6 +97,7 @@ class ScriptRunner {
             // Handle script errors
             scriptProcess.on('error', (error) => {
                 logger.error(`Script ${execution.id} error:`, error);
+                logManager.writeLog(execution.id, `Script error: ${error.message}`, 'ERROR');
                 reject(error);
             });
 

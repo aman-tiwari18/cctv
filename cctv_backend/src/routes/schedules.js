@@ -1,5 +1,5 @@
 const express = require('express');
-const router = express.Router();
+const router = express.Router({ mergeParams: true }); // Enable access to params from parent route
 const fs = require('fs');
 const ExamSchedule = require('../models/ExamSchedule');
 const Exam = require('../models/Exam');
@@ -14,13 +14,13 @@ const { upload, cleanupOnError } = require('../middleware/upload');
  * @desc    Add schedule manually
  * @access  Private (Admin/Operator)
  */
-router.post('/:examId',
+router.post('/:examId/schedules',
     authenticate,
     authorize('ADMIN', 'OPERATOR'),
     scheduleValidation.create,
     asyncHandler(async (req, res) => {
         const { exam_date, shifts, notes } = req.body;
-        const exam_id = req.params.examId;
+        const exam_id = req.params.examId; // From route mount path
 
         // Verify exam exists
         const exam = await Exam.findById(exam_id);
@@ -51,13 +51,13 @@ router.post('/:examId',
  * @desc    Upload Excel file with exam schedules
  * @access  Private (Admin/Operator)
  */
-router.post('/:examId/upload',
+router.post('/:examId/schedules/upload',
     authenticate,
     authorize('ADMIN', 'OPERATOR'),
     upload.single('file'),
     cleanupOnError,
     asyncHandler(async (req, res) => {
-        const exam_id = req.params.examId;
+        const exam_id = req.params.examId; // From route mount path
 
         // Verify exam exists
         const exam = await Exam.findById(exam_id);
@@ -107,7 +107,7 @@ router.post('/:examId/upload',
  * @desc    Get all schedules for an exam
  * @access  Private
  */
-router.get('/:examId',
+router.get('/:examId/schedules',
     authenticate,
     asyncHandler(async (req, res) => {
         const { is_active, include_shifts } = req.query;

@@ -35,7 +35,7 @@ import { schedulesAPI, examsAPI } from '../services/api';
 const Schedules = () => {
   const [searchParams] = useSearchParams();
   const examId = searchParams.get('exam');
-  
+
   const [schedules, setSchedules] = useState([]);
   const [exams, setExams] = useState([]);
   const [selectedExam, setSelectedExam] = useState(examId || '');
@@ -80,9 +80,9 @@ const Schedules = () => {
     if (!selectedExam) return;
     setLoading(true);
     try {
-      const response = await schedulesAPI.getByExam(selectedExam, { 
+      const response = await schedulesAPI.getAll(selectedExam, {
         is_active: true,
-        include_shifts: true 
+        include_shifts: true
       });
       setSchedules(response.data.data);
     } catch (error) {
@@ -153,7 +153,7 @@ const Schedules = () => {
       setError('Please select an exam first');
       return;
     }
-    
+
     try {
       if (editingSchedule) {
         await schedulesAPI.update(editingSchedule.id, formData);
@@ -345,7 +345,7 @@ const Schedules = () => {
             multiline
             rows={2}
           />
-          
+
           <Typography variant="subtitle1" mt={2} mb={1}>
             Shifts
           </Typography>

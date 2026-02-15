@@ -1,8 +1,9 @@
 const express = require('express');
-const router = express.Router();
+const router = express.Router({ mergeParams: true }); // Enable access to params from parent route
 const fs = require('fs');
 const AnalyticsTask = require('../models/AnalyticsTask');
 const Exam = require('../models/Exam');
+const scriptRegistry = require('../config/scriptRegistry');
 const ExcelParser = require('../services/excelParser');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { analyticsTaskValidation } = require('../utils/validators');
@@ -14,22 +15,20 @@ const { upload, cleanupOnError } = require('../middleware/upload');
  * @desc    Add analytics task manually
  * @access  Private (Admin/Operator)
  */
-router.post('/:examId',
+router.post('/:examId/analytics',
     authenticate,
     authorize('ADMIN', 'OPERATOR'),
     analyticsTaskValidation.create,
     asyncHandler(async (req, res) => {
         const {
-            task_name,
-            description,
-            script_path,
+            script_id,
             frequency_minutes,
             duration_minutes,
             start_time,
             end_time,
             parameters
         } = req.body;
-        const exam_id = req.params.examId;
+        const exam_id = req.params.examId; // From route mount path
 
         // Verify exam exists
         const exam = await Exam.findById(exam_id);
@@ -40,13 +39,17 @@ router.post('/:examId',
             });
         }
 
+        // Get script details from registry
+        const scriptConfig = scriptRegistry[script_id];
+
+        // Use provided values or defaults from registry
         const task = await AnalyticsTask.create({
             exam_id,
-            task_name,
-            description,
-            script_path,
-            frequency_minutes,
-            duration_minutes,
+            task_name: scriptConfig.name,
+            description: scriptConfig.description,
+            script_path: scriptConfig.script_path,
+            frequency_minutes: frequency_minutes || scriptConfig.default_frequency,
+            duration_minutes: duration_minutes || scriptConfig.default_duration,
             start_time,
             end_time,
             parameters
@@ -65,13 +68,13 @@ router.post('/:examId',
  * @desc    Upload Excel file with analytics tasks
  * @access  Private (Admin/Operator)
  */
-router.post('/:examId/upload',
+router.post('/:examId/analytics/upload',
     authenticate,
     authorize('ADMIN', 'OPERATOR'),
     upload.single('file'),
     cleanupOnError,
     asyncHandler(async (req, res) => {
-        const exam_id = req.params.examId;
+        const exam_id = req.params.examId; // From route mount path
 
         // Verify exam exists
         const exam = await Exam.findById(exam_id);
@@ -121,7 +124,7 @@ router.post('/:examId/upload',
  * @desc    Get all analytics tasks for an exam
  * @access  Private
  */
-router.get('/:examId',
+router.get('/:examId/analytics',
     authenticate,
     asyncHandler(async (req, res) => {
         const { is_active } = req.query;

@@ -71,8 +71,26 @@ const scheduleValidation = {
         body('exam_date').isDate().withMessage('Valid exam date is required'),
         body('shifts').isArray({ min: 1 }).withMessage('At least one shift is required'),
         body('shifts.*.shift_name').trim().notEmpty().withMessage('Shift name is required'),
-        body('shifts.*.start_time').matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/).withMessage('Valid start time is required (HH:MM:SS)'),
-        body('shifts.*.end_time').matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/).withMessage('Valid end time is required (HH:MM:SS)'),
+        body('shifts.*.start_time')
+            .customSanitizer(value => {
+                // Accept both HH:MM and HH:MM:SS formats
+                if (value && /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(value)) {
+                    return value + ':00'; // Add seconds if missing
+                }
+                return value;
+            })
+            .matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/)
+            .withMessage('Valid start time is required (HH:MM or HH:MM:SS)'),
+        body('shifts.*.end_time')
+            .customSanitizer(value => {
+                // Accept both HH:MM and HH:MM:SS formats
+                if (value && /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(value)) {
+                    return value + ':00'; // Add seconds if missing
+                }
+                return value;
+            })
+            .matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/)
+            .withMessage('Valid end time is required (HH:MM or HH:MM:SS)'),
         body('notes').optional().trim(),
         validate
     ],
@@ -91,14 +109,22 @@ const scheduleValidation = {
 const analyticsTaskValidation = {
     create: [
         param('examId').isInt().withMessage('Invalid exam ID'),
-        body('task_name').trim().notEmpty().withMessage('Task name is required'),
-        body('script_path').trim().notEmpty().withMessage('Script path is required'),
-        body('frequency_minutes').isInt({ min: 1 }).withMessage('Frequency must be a positive integer'),
+        body('script_id').trim().notEmpty().withMessage('Script ID is required'),
+        body('frequency_minutes').optional().isInt({ min: 1 }),
         body('duration_minutes').optional().isInt({ min: 1 }),
-        body('start_time').optional().matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/),
-        body('end_time').optional().matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/),
-        body('description').optional().trim(),
+        body('start_time').optional().matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/),
+        body('end_time').optional().matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/),
         body('parameters').optional().isObject(),
+
+        // validate script_id exists in registry
+        body('script_id').custom(value => {
+            const scriptRegistry = require('../config/scriptRegistry');
+            if (!scriptRegistry[value]) {
+                throw new Error('Invalid script ID');
+            }
+            return true;
+        }),
+
         validate
     ],
     update: [

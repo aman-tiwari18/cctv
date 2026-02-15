@@ -1,13 +1,8 @@
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api';
-
-// Create axios instance
+// Create axios instance with base URL
 const api = axios.create({
-    baseURL: API_BASE_URL,
-    headers: {
-        'Content-Type': 'application/json',
-    },
+    baseURL: 'http://localhost:3000/api'
 });
 
 // Request interceptor to add auth token
@@ -28,84 +23,90 @@ api.interceptors.request.use(
 api.interceptors.response.use(
     (response) => response,
     (error) => {
-        if (error.response?.status === 401) {
-            // Unauthorized - clear token and redirect to login
+        if (error.response && error.response.status === 401) {
+            // Clear token and redirect to login on 401
             localStorage.removeItem('token');
-            localStorage.removeItem('user');
             window.location.href = '/login';
         }
         return Promise.reject(error);
     }
 );
 
-// Authentication API
 export const authAPI = {
     login: (credentials) => api.post('/auth/login', credentials),
-    register: (userData) => api.post('/auth/register', userData),
-    getCurrentUser: () => api.get('/auth/me'),
+    getCurrentUser: () => api.get('/auth/me')
 };
 
-// Exams API
 export const examsAPI = {
     getAll: (params) => api.get('/exams', { params }),
     getById: (id) => api.get(`/exams/${id}`),
-    create: (data) => api.post('/exams', data),
-    update: (id, data) => api.put(`/exams/${id}`, data),
-    delete: (id) => api.delete(`/exams/${id}`),
+    create: (examData) => api.post('/exams', examData),
+    update: (id, examData) => api.put(`/exams/${id}`, examData),
+    delete: (id) => api.delete(`/exams/${id}`)
 };
 
-// Camera Links API
 export const camerasAPI = {
-    getByExam: (examId, params) => api.get(`/exams/${examId}/cameras`, { params }),
-    create: (examId, data) => api.post(`/exams/${examId}/cameras`, data),
-    uploadExcel: (examId, file) => {
+    getAll: (examId) => api.get(`/exams/${examId}/cameras`),
+    create: (examId, cameraData) => api.post(`/exams/${examId}/cameras`, cameraData),
+    upload: (examId, file) => {
         const formData = new FormData();
         formData.append('file', file);
         return api.post(`/exams/${examId}/cameras/upload`, formData, {
-            headers: { 'Content-Type': 'multipart/form-data' },
+            headers: { 'Content-Type': 'multipart/form-data' }
         });
     },
-    update: (id, data) => api.put(`/cameras/${id}`, data),
-    delete: (id) => api.delete(`/cameras/${id}`),
+    update: (id, cameraData) => api.put(`/cameras/${id}`, cameraData),
+    delete: (id) => api.delete(`/cameras/${id}`)
 };
 
-// Schedules API
 export const schedulesAPI = {
-    getByExam: (examId, params) => api.get(`/exams/${examId}/schedules`, { params }),
-    create: (examId, data) => api.post(`/exams/${examId}/schedules`, data),
-    uploadExcel: (examId, file) => {
+    getAll: (examId) => api.get(`/exams/${examId}/schedules`),
+    create: (examId, scheduleData) => api.post(`/exams/${examId}/schedules`, scheduleData),
+    upload: (examId, file) => {
         const formData = new FormData();
         formData.append('file', file);
         return api.post(`/exams/${examId}/schedules/upload`, formData, {
-            headers: { 'Content-Type': 'multipart/form-data' },
+            headers: { 'Content-Type': 'multipart/form-data' }
         });
     },
-    getUpcoming: (hours = 24) => api.get('/schedules/upcoming', { params: { hours } }),
-    update: (id, data) => api.put(`/schedules/${id}`, data),
+    update: (id, scheduleData) => api.put(`/schedules/${id}`, scheduleData),
     delete: (id) => api.delete(`/schedules/${id}`),
+    getUpcoming: (hours = 24) => api.get(`/schedules/upcoming?hours=${hours}`)
 };
 
-// Analytics Tasks API
 export const analyticsAPI = {
-    getByExam: (examId, params) => api.get(`/exams/${examId}/analytics`, { params }),
-    create: (examId, data) => api.post(`/exams/${examId}/analytics`, data),
-    uploadExcel: (examId, file) => {
+    getAll: (examId) => api.get(`/exams/${examId}/analytics`),
+    create: (examId, taskData) => api.post(`/exams/${examId}/analytics`, taskData),
+    upload: (examId, file) => {
         const formData = new FormData();
         formData.append('file', file);
         return api.post(`/exams/${examId}/analytics/upload`, formData, {
-            headers: { 'Content-Type': 'multipart/form-data' },
+            headers: { 'Content-Type': 'multipart/form-data' }
         });
     },
-    update: (id, data) => api.put(`/analytics/${id}`, data),
-    delete: (id) => api.delete(`/analytics/${id}`),
+    update: (id, taskData) => api.put(`/analytics/${id}`, taskData),
+    delete: (id) => api.delete(`/analytics/${id}`)
 };
 
-// Executions API
+export const scriptsAPI = {
+    getAll: () => api.get('/scripts')
+};
+
 export const executionsAPI = {
     getAll: (params) => api.get('/executions', { params }),
     getById: (id) => api.get(`/executions/${id}`),
     getStatistics: (params) => api.get('/executions/stats/summary', { params }),
-    getPending: (limit = 50) => api.get('/executions/pending', { params: { limit } }),
+    getByShift: (shiftId, params) => api.get(`/shifts/${shiftId}/executions`, { params }),
+    getRecent: (limit = 20) => api.get(`/executions/recent?limit=${limit}`)
+};
+
+export const shiftScriptsAPI = {
+    getByShift: (shiftId, params) => api.get(`/shifts/${shiftId}/scripts`, { params }),
+    getByExam: (examId, params) => api.get(`/exams/${examId}/shift-scripts`, { params }),
+    assign: (shiftId, scriptData) => api.post(`/shifts/${shiftId}/scripts`, scriptData),
+    bulkAssign: (shiftId, scripts) => api.post(`/shifts/${shiftId}/scripts/bulk`, { scripts }),
+    update: (id, data) => api.put(`/shift-scripts/${id}`, data),
+    delete: (id) => api.delete(`/shift-scripts/${id}`)
 };
 
 export default api;

@@ -222,6 +222,83 @@ class ScriptExecution {
         const results = await query(sql, params);
         return results[0];
     }
+
+    /**
+     * Get executions for a specific shift
+     */
+    static async getExecutionsByShift(shift_id, {
+        status = null,
+        from_date = null,
+        to_date = null,
+        limit = 100,
+        offset = 0
+    } = {}) {
+        let sql = `
+      SELECT 
+        se.*,
+        at.task_name,
+        at.script_path,
+        ssa.custom_frequency_minutes
+      FROM script_executions se
+      JOIN analytics_tasks at ON se.analytics_task_id = at.id
+      LEFT JOIN shift_script_assignments ssa ON se.shift_script_assignment_id = ssa.id
+      WHERE se.shift_id = ?
+    `;
+        const params = [shift_id];
+
+        if (status) {
+            sql += ' AND se.status = ?';
+            params.push(status);
+        }
+
+        if (from_date) {
+            sql += ' AND se.scheduled_time >= ?';
+            params.push(from_date);
+        }
+
+        if (to_date) {
+            sql += ' AND se.scheduled_time <= ?';
+            params.push(to_date);
+        }
+
+        sql += ' ORDER BY se.scheduled_time DESC LIMIT ? OFFSET ?';
+        params.push(limit, offset);
+
+        const results = await query(sql, params);
+        return results.map(exec => ({
+            ...exec,
+            execution_metadata: exec.execution_metadata ? JSON.parse(exec.execution_metadata) : null,
+            result_data: exec.result_data ? JSON.parse(exec.result_data) : null
+        }));
+    }
+
+    /**
+     * Get recent executions across all shifts
+     */
+    static async getRecentExecutions(limit = 20) {
+        const sql = `
+      SELECT 
+        se.*,
+        at.task_name,
+        at.script_path,
+        ss.shift_name,
+        es.exam_date,
+        e.exam_name
+      FROM script_executions se
+      JOIN analytics_tasks at ON se.analytics_task_id = at.id
+      LEFT JOIN schedule_shifts ss ON se.shift_id = ss.id
+      LEFT JOIN exam_schedules es ON ss.schedule_id = es.id
+      LEFT JOIN exams e ON at.exam_id = e.id
+      ORDER BY se.created_at DESC
+      LIMIT ?
+    `;
+        const results = await query(sql, [limit]);
+        return results.map(exec => ({
+            ...exec,
+            execution_metadata: exec.execution_metadata ? JSON.parse(exec.execution_metadata) : null,
+            result_data: exec.result_data ? JSON.parse(exec.result_data) : null
+        }));
+    }
 }
 
 module.exports = ScriptExecution;

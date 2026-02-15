@@ -1,5 +1,5 @@
 const express = require('express');
-const router = express.Router();
+const router = express.Router({ mergeParams: true }); // Enable access to params from parent route
 const fs = require('fs');
 const CameraLink = require('../models/CameraLink');
 const Exam = require('../models/Exam');
@@ -14,13 +14,13 @@ const { upload, cleanupOnError } = require('../middleware/upload');
  * @desc    Add camera link manually
  * @access  Private (Admin/Operator)
  */
-router.post('/:examId',
+router.post('/:examId/cameras',
     authenticate,
     authorize('ADMIN', 'OPERATOR'),
     cameraLinkValidation.create,
     asyncHandler(async (req, res) => {
         const { camera_id, stream_url, stream_type, location, metadata } = req.body;
-        const exam_id = req.params.examId;
+        const exam_id = req.params.examId; // From route mount path
 
         // Verify exam exists
         const exam = await Exam.findById(exam_id);
@@ -53,13 +53,13 @@ router.post('/:examId',
  * @desc    Upload Excel file with camera links
  * @access  Private (Admin/Operator)
  */
-router.post('/:examId/upload',
+router.post('/:examId/cameras/upload',
     authenticate,
     authorize('ADMIN', 'OPERATOR'),
     upload.single('file'),
     cleanupOnError,
     asyncHandler(async (req, res) => {
-        const exam_id = req.params.examId;
+        const exam_id = req.params.examId; // From route mount path
 
         // Verify exam exists
         const exam = await Exam.findById(exam_id);
@@ -114,7 +114,7 @@ router.post('/:examId/upload',
  * @desc    Get all camera links for an exam
  * @access  Private
  */
-router.get('/:examId',
+router.get('/:examId/cameras',
     authenticate,
     asyncHandler(async (req, res) => {
         const { is_active } = req.query;

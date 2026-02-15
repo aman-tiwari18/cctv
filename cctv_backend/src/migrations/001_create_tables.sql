@@ -160,7 +160,7 @@ INSERT INTO users (username, email, password_hash, full_name, role)
 VALUES (
   'admin', 
   'admin@example.com', 
-  '$2a$10$rQZ5qGqYqGqYqGqYqGqYqOqYqGqYqGqYqGqYqGqYqGqYqGqYqGqYq', 
+  '$2a$10$sPWmm5xLOruCv.hDLs3BW.RZvgbGa3w32IwEiJKr.q19F7mXQyN/m', 
   'System Administrator', 
   'ADMIN'
 ) ON DUPLICATE KEY UPDATE username=username;

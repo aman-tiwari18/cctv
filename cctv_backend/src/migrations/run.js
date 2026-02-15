@@ -13,11 +13,13 @@ const runMigrations = async () => {
         const migrationFile = path.join(__dirname, '001_create_tables.sql');
         const sql = fs.readFileSync(migrationFile, 'utf8');
 
-        // Split SQL file by semicolons and execute each statement
+        // Remove comments and split by semicolons
         const statements = sql
+            .replace(/--.*$/gm, '') // Remove single-line comments
+            .replace(/\/\*[\s\S]*?\*\//g, '') // Remove multi-line comments
             .split(';')
             .map(stmt => stmt.trim())
-            .filter(stmt => stmt.length > 0 && !stmt.startsWith('--'));
+            .filter(stmt => stmt.length > 0);
 
         for (const statement of statements) {
             try {

@@ -10,6 +10,7 @@ const cameraLinkRoutes = require('./routes/cameraLinks');
 const scheduleRoutes = require('./routes/schedules');
 const analyticsRoutes = require('./routes/analytics');
 const executionRoutes = require('./routes/executions');
+const shiftScriptRoutes = require('./routes/shiftScripts');
 
 // Create Express app
 const app = express();
@@ -39,14 +40,21 @@ app.get('/health', (req, res) => {
 
 // API Routes
 app.use('/api/auth', authRoutes);
-app.use('/api/exams', examRoutes);
-app.use('/api/exams', cameraLinkRoutes);  // Camera links are nested under exams
-app.use('/api/cameras', cameraLinkRoutes); // Also allow direct camera access
-app.use('/api/exams', scheduleRoutes);     // Schedules are nested under exams
-app.use('/api/schedules', scheduleRoutes); // Also allow direct schedule access
-app.use('/api/exams', analyticsRoutes);    // Analytics are nested under exams
-app.use('/api/analytics', analyticsRoutes); // Also allow direct analytics access
+// IMPORTANT: Nested routes MUST come BEFORE base exam routes
+// Otherwise /api/exams/:id will match /api/exams/4/schedules before the schedule router
+app.use('/api/exams', scheduleRoutes);     // Handles /api/exams/:examId/schedules/*
+app.use('/api/exams', cameraLinkRoutes);   // Handles /api/exams/:examId/cameras/*
+app.use('/api/exams', analyticsRoutes);    // Handles /api/exams/:examId/analytics/*
+app.use('/api/exams', shiftScriptRoutes);  // Handles /api/exams/:examId/shift-scripts/*
+app.use('/api/shifts', shiftScriptRoutes); // Handles /api/shifts/:shiftId/scripts/*
+app.use('/api/exams', examRoutes);         // Base exam routes (GET /:id, etc.)
+// Direct access routes
+app.use('/api/schedules', scheduleRoutes); // Direct schedule access
+app.use('/api/cameras', cameraLinkRoutes); // Direct camera access
+app.use('/api/analytics', analyticsRoutes); // Direct analytics access
 app.use('/api/executions', executionRoutes);
+app.use('/api/scripts', require('./routes/scripts')); // Script registry routes
+app.use('/api', shiftScriptRoutes);        // Direct shift-script access
 
 // 404 handler
 app.use(notFoundHandler);
