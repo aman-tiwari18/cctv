@@ -71,7 +71,7 @@ class Poller {
                     await this.processExecution(execution);
                 }
             } else {
-                logger.debug('No pending executions found');
+                logger.info('No pending executions found');
             }
 
         } catch (error) {
