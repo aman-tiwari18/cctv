@@ -1,8 +1,11 @@
 const cron = require('node-cron');
+const { Op } = require('sequelize');
+const { query } = require('../config/database');
 const ExamSchedule = require('../models/ExamSchedule');
 const AnalyticsTask = require('../models/AnalyticsTask');
 const ScriptExecution = require('../models/ScriptExecution');
 const CameraLink = require('../models/CameraLink');
+const ShiftScriptAssignment = require('../models/ShiftScriptAssignment');
 const logger = require('../utils/logger');
 
 /**
@@ -57,8 +60,12 @@ class Scheduler {
             // Get preparation time from env (default 5 minutes)
             const prepTimeMinutes = parseInt(process.env.EXECUTION_PREP_TIME_MINUTES || '5');
 
-            // Get upcoming shifts (within next X hours)
-            const upcomingShifts = await ExamSchedule.getUpcomingShifts(24);
+            // Get upcoming shifts (raw query against the DB view)
+            const upcomingShifts = await query(
+                `SELECT * FROM upcoming_shifts
+                 WHERE shift_start_datetime BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL 24 HOUR)
+                 ORDER BY shift_start_datetime ASC`
+            );
 
             for (const shift of upcomingShifts) {
                 await this.scheduleShiftExecutions(shift, prepTimeMinutes);
@@ -84,8 +91,16 @@ class Scheduler {
             const now = new Date();
 
             // Get shift-based script assignments for this shift
-            const ShiftScriptAssignment = require('../models/ShiftScriptAssignment');
-            const scriptAssignments = await ShiftScriptAssignment.findByShiftId(shift.shift_id);
+            const scriptAssignments = await ShiftScriptAssignment.findAll({
+                where: { shift_id: shift.shift_id, is_active: true },
+                include: [
+                    {
+                        model: AnalyticsTask,
+                        as: 'analyticsTask',
+                        where: { is_active: true },
+                    },
+                ],
+            });
 
             if (scriptAssignments.length === 0) {
                 logger.debug(`No script assignments found for shift ${shift.shift_id}`);
@@ -96,6 +111,8 @@ class Scheduler {
             const executions = [];
 
             for (const assignment of scriptAssignments) {
+                const task = assignment.analyticsTask;
+
                 // Determine the scheduled time for this assignment
                 let scheduledTime = shiftStartTime;
 
@@ -117,7 +134,7 @@ class Scheduler {
                     continue; // Skip this assignment
                 }
 
-                logger.info(`Scheduling script ${assignment.task_name} for ${scheduledTime.toISOString()}`);
+                logger.info(`Scheduling script ${task.task_name} for ${scheduledTime.toISOString()}`);
 
                 // Check if execution already exists
                 const existing = await this.checkExistingExecution(
@@ -137,10 +154,10 @@ class Scheduler {
                             exam_name: shift.exam_name,
                             exam_id: shift.exam_id,
                             shift_name: shift.shift_name,
-                            task_name: assignment.task_name,
+                            task_name: task.task_name,
                             assignment_id: assignment.id,
-                            script_path: assignment.script_path
-                        }
+                            script_path: task.script_path,
+                        },
                     });
                 }
             }
@@ -162,13 +179,29 @@ class Scheduler {
     async scheduleContinuousAnalytics() {
         try {
             const now = new Date();
+            const timeStr = now.toTimeString().split(' ')[0]; // HH:MM:SS
 
             // Get all active tasks for current time
-            const activeTasks = await AnalyticsTask.getActiveTasksForTime(now);
+            const activeTasks = await AnalyticsTask.findAll({
+                where: {
+                    is_active: true,
+                    [Op.or]: [
+                        { start_time: null },
+                        { start_time: { [Op.lte]: timeStr } },
+                    ],
+                    [Op.or]: [
+                        { end_time: null },
+                        { end_time: { [Op.gte]: timeStr } },
+                    ],
+                },
+                order: [['exam_id', 'ASC'], ['task_name', 'ASC']],
+            });
 
             for (const task of activeTasks) {
                 // Get cameras for this exam
-                const cameras = await CameraLink.findByExamId(task.exam_id, { is_active: true });
+                const cameras = await CameraLink.findAll({
+                    where: { exam_id: task.exam_id, is_active: true },
+                });
 
                 for (const camera of cameras) {
                     // Check if we need to schedule based on frequency
@@ -194,8 +227,8 @@ class Scheduler {
                                 execution_metadata: {
                                     task_name: task.task_name,
                                     camera_id: camera.camera_id,
-                                    scheduled_type: 'continuous'
-                                }
+                                    scheduled_type: 'continuous',
+                                },
                             });
 
                             logger.debug(`Scheduled continuous task ${task.task_name} for camera ${camera.camera_id}`);
@@ -238,8 +271,9 @@ class Scheduler {
     async shouldScheduleContinuousTask(task, cameraId) {
         // Get last execution for this task-camera combination
         const executions = await ScriptExecution.findAll({
-            analytics_task_id: task.id,
-            limit: 1
+            where: { analytics_task_id: task.id },
+            order: [['scheduled_time', 'DESC']],
+            limit: 1,
         });
 
         if (executions.length === 0) {
@@ -263,17 +297,18 @@ class Scheduler {
         const startTime = new Date(scheduledTime.getTime() - timeWindow);
         const endTime = new Date(scheduledTime.getTime() + timeWindow);
 
-        const executions = await ScriptExecution.findAll({
+        const where = {
             analytics_task_id: taskId,
-            from_date: startTime,
-            to_date: endTime,
-            limit: 10
-        });
+            scheduled_time: {
+                [Op.between]: [startTime, endTime],
+            },
+        };
 
-        return executions.some(exec =>
-            exec.camera_link_id === cameraId &&
-            (shiftId === null || exec.shift_id === shiftId)
-        );
+        if (cameraId !== null) where.camera_link_id = cameraId;
+        if (shiftId !== null) where.shift_id = shiftId;
+
+        const count = await ScriptExecution.count({ where });
+        return count > 0;
     }
 }
 

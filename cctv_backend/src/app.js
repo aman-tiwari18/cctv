@@ -3,6 +3,9 @@ const cors = require('cors');
 const logger = require('./utils/logger');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 
+// Load all models & register associations
+require('./models');
+
 // Import routes
 const authRoutes = require('./routes/auth');
 const examRoutes = require('./routes/exams');

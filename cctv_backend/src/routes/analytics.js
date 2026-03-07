@@ -1,212 +1,55 @@
-const express = require('express');
-const router = express.Router({ mergeParams: true }); // Enable access to params from parent route
-const fs = require('fs');
-const AnalyticsTask = require('../models/AnalyticsTask');
-const Exam = require('../models/Exam');
-const scriptRegistry = require('../config/scriptRegistry');
-const ExcelParser = require('../services/excelParser');
-const { asyncHandler } = require('../middleware/errorHandler');
-const { analyticsTaskValidation } = require('../utils/validators');
-const { authenticate, authorize } = require('../middleware/auth');
-const { upload, cleanupOnError } = require('../middleware/upload');
+const express = require("express");
+const router = express.Router({ mergeParams: true });
+const AnalyticsController = require("../controllers/AnalyticsController");
+const { asyncHandler } = require("../middleware/errorHandler");
+const { analyticsTaskValidation } = require("../utils/validators");
+const { authenticate, authorize } = require("../middleware/auth");
+const { upload, cleanupOnError } = require("../middleware/upload");
 
-/**
- * @route   POST /api/exams/:examId/analytics
- * @desc    Add analytics task manually
- * @access  Private (Admin/Operator)
- */
-router.post('/:examId/analytics',
+// ── Nested under /api/exams ──────────────────────────────────
+router.post(
+    "/:examId/analytics",
     authenticate,
-    authorize('ADMIN', 'OPERATOR'),
+    authorize("ADMIN", "OPERATOR"),
     analyticsTaskValidation.create,
-    asyncHandler(async (req, res) => {
-        const {
-            script_id,
-            frequency_minutes,
-            duration_minutes,
-            start_time,
-            end_time,
-            parameters
-        } = req.body;
-        const exam_id = req.params.examId; // From route mount path
-
-        // Verify exam exists
-        const exam = await Exam.findById(exam_id);
-        if (!exam) {
-            return res.status(404).json({
-                success: false,
-                message: 'Exam not found'
-            });
-        }
-
-        // Get script details from registry
-        const scriptConfig = scriptRegistry[script_id];
-
-        // Use provided values or defaults from registry
-        const task = await AnalyticsTask.create({
-            exam_id,
-            task_name: scriptConfig.name,
-            description: scriptConfig.description,
-            script_path: scriptConfig.script_path,
-            frequency_minutes: frequency_minutes || scriptConfig.default_frequency,
-            duration_minutes: duration_minutes || scriptConfig.default_duration,
-            start_time,
-            end_time,
-            parameters
-        });
-
-        res.status(201).json({
-            success: true,
-            message: 'Analytics task created successfully',
-            data: task
-        });
-    })
+    asyncHandler(AnalyticsController.createTask)
 );
 
-/**
- * @route   POST /api/exams/:examId/analytics/upload
- * @desc    Upload Excel file with analytics tasks
- * @access  Private (Admin/Operator)
- */
-router.post('/:examId/analytics/upload',
+router.post(
+    "/:examId/analytics/upload",
     authenticate,
-    authorize('ADMIN', 'OPERATOR'),
-    upload.single('file'),
+    authorize("ADMIN", "OPERATOR"),
+    upload.single("file"),
     cleanupOnError,
-    asyncHandler(async (req, res) => {
-        const exam_id = req.params.examId; // From route mount path
-
-        // Verify exam exists
-        const exam = await Exam.findById(exam_id);
-        if (!exam) {
-            if (req.file) fs.unlinkSync(req.file.path);
-            return res.status(404).json({
-                success: false,
-                message: 'Exam not found'
-            });
-        }
-
-        if (!req.file) {
-            return res.status(400).json({
-                success: false,
-                message: 'No file uploaded'
-            });
-        }
-
-        // Parse Excel file
-        const parseResult = ExcelParser.parseAnalyticsTasks(req.file.path, exam_id);
-
-        // Clean up uploaded file
-        fs.unlinkSync(req.file.path);
-
-        if (!parseResult.success || parseResult.data.length === 0) {
-            return res.status(400).json({
-                success: false,
-                message: 'Failed to parse Excel file',
-                errors: parseResult.errors
-            });
-        }
-
-        // Bulk create analytics tasks
-        await AnalyticsTask.bulkCreate(parseResult.data);
-
-        res.status(201).json({
-            success: true,
-            message: `Successfully imported ${parseResult.count} analytics tasks`,
-            count: parseResult.count,
-            errors: parseResult.errors.length > 0 ? parseResult.errors : undefined
-        });
-    })
+    asyncHandler(AnalyticsController.uploadTasks)
 );
 
-/**
- * @route   GET /api/exams/:examId/analytics
- * @desc    Get all analytics tasks for an exam
- * @access  Private
- */
-router.get('/:examId/analytics',
+router.get(
+    "/:examId/analytics",
     authenticate,
-    asyncHandler(async (req, res) => {
-        const { is_active } = req.query;
-        const filters = {};
-        if (is_active !== undefined) filters.is_active = is_active === 'true';
-
-        const tasks = await AnalyticsTask.findByExamId(req.params.examId, filters);
-
-        res.json({
-            success: true,
-            count: tasks.length,
-            data: tasks
-        });
-    })
+    asyncHandler(AnalyticsController.getByExam)
 );
 
-/**
- * @route   PUT /api/analytics/:id
- * @desc    Update analytics task
- * @access  Private (Admin/Operator)
- */
-router.put('/:id',
+// ── Direct access routes (/api/analytics) ────────────────────
+router.get(
+    "/allTask",
     authenticate,
-    authorize('ADMIN', 'OPERATOR'),
+    asyncHandler(AnalyticsController.getAllTasks)
+);
+
+router.put(
+    "/:id",
+    authenticate,
+    authorize("ADMIN", "OPERATOR"),
     analyticsTaskValidation.update,
-    asyncHandler(async (req, res) => {
-        const task = await AnalyticsTask.update(req.params.id, req.body);
-
-        if (!task) {
-            return res.status(404).json({
-                success: false,
-                message: 'Analytics task not found'
-            });
-        }
-
-        res.json({
-            success: true,
-            message: 'Analytics task updated successfully',
-            data: task
-        });
-    })
+    asyncHandler(AnalyticsController.updateTask)
 );
 
-/**
- * @route   DELETE /api/analytics/:id
- * @desc    Delete analytics task (soft delete)
- * @access  Private (Admin/Operator)
- */
-router.delete('/:id',
+router.delete(
+    "/:id",
     authenticate,
-    authorize('ADMIN', 'OPERATOR'),
-    asyncHandler(async (req, res) => {
-        await AnalyticsTask.delete(req.params.id);
-
-        res.json({
-            success: true,
-            message: 'Analytics task deleted successfully'
-        });
-    })
-);
-
-/**
- * @route   GET /api/analytics
- * @desc    Get all analytics tasks (across all exams)
- * @access  Private
- */
-router.get('/allTask',
-    authenticate,
-    asyncHandler(async (req, res) => {
-        const { is_active } = req.query;
-        const filters = {};
-        if (is_active !== undefined) filters.is_active = is_active === 'true';
-
-        // Use findByExamId with null to get all tasks
-        const tasks = await AnalyticsTask.findAll(filters);
-
-        res.json({
-            success: true,
-            count: tasks.length,
-            data: tasks
-        });
-    })
+    authorize("ADMIN", "OPERATOR"),
+    asyncHandler(AnalyticsController.deleteTask)
 );
 
 module.exports = router;
