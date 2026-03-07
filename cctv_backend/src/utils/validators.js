@@ -24,6 +24,34 @@ const examValidation = {
         body('exam_body').trim().notEmpty().withMessage('Exam body is required'),
         body('link_type').isIn(['RTSP', 'HLS']).withMessage('Link type must be RTSP or HLS'),
         body('description').optional().trim(),
+        body('start_date').optional({ nullable: true }).isDate().withMessage('Start date must be a valid date (YYYY-MM-DD)'),
+        body('end_date').optional({ nullable: true }).isDate().withMessage('End date must be a valid date (YYYY-MM-DD)'),
+        body('skip_days').optional().isArray().withMessage('skip_days must be an array'),
+        body('skip_days.*').optional().isIn(['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']).withMessage('Invalid day name'),
+        body('skip_dates').optional().isArray().withMessage('skip_dates must be an array'),
+        body('skip_dates.*').optional().isDate().withMessage('Each skip date must be a valid date'),
+        body('shifts').optional().isArray().withMessage('shifts must be an array'),
+        body('shifts.*.shift_name').optional().trim().notEmpty().withMessage('Shift name is required'),
+        body('shifts.*.start_time')
+            .optional()
+            .customSanitizer(value => {
+                if (value && /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(value)) {
+                    return value + ':00';
+                }
+                return value;
+            })
+            .matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/)
+            .withMessage('Valid start time is required'),
+        body('shifts.*.end_time')
+            .optional()
+            .customSanitizer(value => {
+                if (value && /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(value)) {
+                    return value + ':00';
+                }
+                return value;
+            })
+            .matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/)
+            .withMessage('Valid end time is required'),
         validate
     ],
     update: [
@@ -33,6 +61,34 @@ const examValidation = {
         body('link_type').optional().isIn(['RTSP', 'HLS']),
         body('description').optional().trim(),
         body('is_active').optional().isBoolean(),
+        body('start_date').optional({ nullable: true }).isDate().withMessage('Start date must be a valid date (YYYY-MM-DD)'),
+        body('end_date').optional({ nullable: true }).isDate().withMessage('End date must be a valid date (YYYY-MM-DD)'),
+        body('skip_days').optional().isArray().withMessage('skip_days must be an array'),
+        body('skip_days.*').optional().isIn(['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']).withMessage('Invalid day name'),
+        body('skip_dates').optional().isArray().withMessage('skip_dates must be an array'),
+        body('skip_dates.*').optional().isDate().withMessage('Each skip date must be a valid date'),
+        body('shifts').optional().isArray().withMessage('shifts must be an array'),
+        body('shifts.*.shift_name').optional().trim().notEmpty().withMessage('Shift name is required'),
+        body('shifts.*.start_time')
+            .optional()
+            .customSanitizer(value => {
+                if (value && /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(value)) {
+                    return value + ':00';
+                }
+                return value;
+            })
+            .matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/)
+            .withMessage('Valid start time is required'),
+        body('shifts.*.end_time')
+            .optional()
+            .customSanitizer(value => {
+                if (value && /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(value)) {
+                    return value + ':00';
+                }
+                return value;
+            })
+            .matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/)
+            .withMessage('Valid end time is required'),
         validate
     ]
 };

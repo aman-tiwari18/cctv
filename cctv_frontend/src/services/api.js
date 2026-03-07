@@ -42,7 +42,8 @@ export const examsAPI = {
     getById: (id) => api.get(`/exams/${id}`),
     create: (examData) => api.post('/exams', examData),
     update: (id, examData) => api.put(`/exams/${id}`, examData),
-    delete: (id) => api.delete(`/exams/${id}`)
+    delete: (id) => api.delete(`/exams/${id}`),
+    generateSchedules: (id) => api.post(`/exams/${id}/generate-schedules`),
 };
 
 export const camerasAPI = {

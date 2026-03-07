@@ -1,39 +1,41 @@
 const express = require("express");
-const router = express.Router();
+const router = express.Router({ mergeParams: true });
 const CameraController = require("../controllers/CameraController");
 const { asyncHandler } = require("../middleware/errorHandler");
 const { authenticate, authorize } = require("../middleware/auth");
 
+// ── Nested under /api/exams/:examId/cameras ──────────────────
 router.post(
-    "/",
+    "/:examId/cameras",
     authenticate,
     authorize("ADMIN", "OPERATOR"),
     asyncHandler(CameraController.createCamera)
 );
 
 router.post(
-    "/bulk",
+    "/:examId/cameras/bulk",
     authenticate,
     authorize("ADMIN", "OPERATOR"),
     asyncHandler(CameraController.bulkCreateCamera)
 );
 
 router.get(
-    "/exam/:examId",
+    "/:examId/cameras",
     authenticate,
     asyncHandler(CameraController.getByExam)
 );
 
 router.get(
+    "/:examId/cameras/type/:type",
+    authenticate,
+    asyncHandler(CameraController.getByExamAndType)
+);
+
+// ── Direct access routes (/api/cameras) ──────────────────────
+router.get(
     "/:id",
     authenticate,
     asyncHandler(CameraController.getById)
-);
-
-router.get(
-    "/exam/:examId/type/:type",
-    authenticate,
-    asyncHandler(CameraController.getByExamAndType)
 );
 
 router.put(

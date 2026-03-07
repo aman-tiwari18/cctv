@@ -27,6 +27,30 @@ const Exam = sequelize.define(
             type: DataTypes.TEXT,
         },
 
+        start_date: {
+            type: DataTypes.DATEONLY,
+            allowNull: true,
+        },
+
+        end_date: {
+            type: DataTypes.DATEONLY,
+            allowNull: true,
+        },
+
+        skip_days: {
+            type: DataTypes.JSON,
+            allowNull: true,
+            defaultValue: [],
+            comment: 'Array of day names to skip, e.g. ["Saturday","Sunday"]',
+        },
+
+        skip_dates: {
+            type: DataTypes.JSON,
+            allowNull: true,
+            defaultValue: [],
+            comment: 'Array of specific dates to skip, e.g. ["2026-03-15","2026-03-20"]',
+        },
+
         is_active: {
             type: DataTypes.BOOLEAN,
             defaultValue: true,

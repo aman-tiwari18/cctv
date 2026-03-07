@@ -40,4 +40,12 @@ router.delete(
     asyncHandler(ExamController.deleteExam)
 );
 
+// Generate schedules from exam date range + shifts
+router.post(
+    "/:id/generate-schedules",
+    authenticate,
+    authorize("ADMIN", "OPERATOR"),
+    asyncHandler(ExamController.generateSchedules)
+);
+
 module.exports = router;

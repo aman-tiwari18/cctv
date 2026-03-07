@@ -4,6 +4,7 @@
 const Exam = require("./Exam");
 const CameraLink = require("./CameraLink");
 const ExamSchedule = require("./ExamSchedule");
+const ExamShift = require("./ExamShift");
 const ScheduleShift = require("./ScheduleShift");
 const AnalyticsTask = require("./AnalyticsTask");
 const ShiftScriptAssignment = require("./ShiftScriptAssignment");
@@ -17,6 +18,10 @@ CameraLink.belongsTo(Exam, { foreignKey: "exam_id", as: "exam" });
 // Exam -> ExamSchedules
 Exam.hasMany(ExamSchedule, { foreignKey: "exam_id", as: "schedules" });
 ExamSchedule.belongsTo(Exam, { foreignKey: "exam_id", as: "exam" });
+
+// Exam -> ExamShifts (template shifts at exam level)
+Exam.hasMany(ExamShift, { foreignKey: "exam_id", as: "examShifts" });
+ExamShift.belongsTo(Exam, { foreignKey: "exam_id", as: "exam" });
 
 // ExamSchedule -> ScheduleShifts
 ExamSchedule.hasMany(ScheduleShift, { foreignKey: "schedule_id", as: "shifts" });
@@ -50,6 +55,7 @@ module.exports = {
     Exam,
     CameraLink,
     ExamSchedule,
+    ExamShift,
     ScheduleShift,
     AnalyticsTask,
     ShiftScriptAssignment,

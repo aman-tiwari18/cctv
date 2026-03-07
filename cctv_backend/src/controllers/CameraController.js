@@ -4,7 +4,8 @@ const CameraLink = require("../models/CameraLink");
  * Create Camera Link
  */
 exports.createCamera = async (req, res) => {
-    const camera = await CameraLink.create(req.body);
+    const exam_id = req.params.examId;
+    const camera = await CameraLink.create({ ...req.body, exam_id });
 
     res.status(201).json({
         success: true,
