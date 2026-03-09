@@ -17,7 +17,8 @@ import {
     MenuItem,
     Chip,
     Alert,
-    Divider
+    Divider,
+    CircularProgress
 } from '@mui/material';
 import {
     Add,
@@ -25,7 +26,7 @@ import {
     Edit,
     Schedule
 } from '@mui/icons-material';
-import { shiftScriptsAPI, scriptsAPI, executionsAPI, analyticsAPI } from '../services/api';
+import { shiftScriptsAPI, scriptsAPI, executionsAPI } from '../services/api';
 import ExecutionStatusBadge from './ExecutionStatusBadge';
 
 const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
@@ -36,7 +37,7 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
     const [openDialog, setOpenDialog] = useState(false);
     const [editingAssignment, setEditingAssignment] = useState(null);
     const [formData, setFormData] = useState({
-        analytics_task_id: '',
+        script_id: '',
         custom_frequency_minutes: '',
         custom_start_time: '',
         custom_end_time: '',
@@ -54,8 +55,7 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
 
     const loadScripts = async () => {
         try {
-            // Load all analytics tasks (not filtered by exam)
-            const response = await analyticsAPI.getAllTasks();
+            const response = await scriptsAPI.getAll({ is_active: true });
             setScripts(response.data.data);
         } catch (error) {
             console.error('Error loading scripts:', error);
@@ -89,7 +89,7 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
         if (assignment) {
             setEditingAssignment(assignment);
             setFormData({
-                analytics_task_id: assignment.analytics_task_id,
+                script_id: assignment.script_id,
                 custom_frequency_minutes: assignment.custom_frequency_minutes || '',
                 custom_start_time: assignment.custom_start_time || '',
                 custom_end_time: assignment.custom_end_time || '',
@@ -98,7 +98,7 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
         } else {
             setEditingAssignment(null);
             setFormData({
-                analytics_task_id: '',
+                script_id: '',
                 custom_frequency_minutes: '',
                 custom_start_time: '',
                 custom_end_time: '',
@@ -168,7 +168,7 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
                             {shift.shift_name}
                         </Typography>
                         <Typography variant="body2" color="text.secondary">
-                            {shift.exam_date} • {shift.start_time} - {shift.end_time}
+                            {shift.start_time?.substring(0, 5)} - {shift.end_time?.substring(0, 5)}
                         </Typography>
                     </Box>
                     <Button
@@ -183,7 +183,11 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
 
                 <Divider sx={{ my: 2 }} />
 
-                {assignments.length > 0 ? (
+                {loading ? (
+                    <Box display="flex" justifyContent="center" py={2}>
+                        <CircularProgress size={24} />
+                    </Box>
+                ) : assignments.length > 0 ? (
                     <List>
                         {assignments.map((assignment) => (
                             <ListItem key={assignment.id} divider>
@@ -191,10 +195,18 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
                                     primary={
                                         <Box display="flex" alignItems="center" gap={1}>
                                             <Typography variant="body1" fontWeight="medium">
-                                                {assignment.task_name}
+                                                {assignment.script?.name || 'Unknown Script'}
                                             </Typography>
+                                            {assignment.script?.category && (
+                                                <Chip
+                                                    label={assignment.script.category}
+                                                    size="small"
+                                                    color="secondary"
+                                                    variant="outlined"
+                                                />
+                                            )}
                                             <Chip
-                                                label={`Every ${assignment.effective_frequency} min`}
+                                                label={`Every ${assignment.custom_frequency_minutes || assignment.script?.default_frequency_minutes || '?'} min`}
                                                 size="small"
                                                 color="primary"
                                                 variant="outlined"
@@ -204,11 +216,16 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
                                     secondary={
                                         <Box mt={0.5}>
                                             <Typography variant="caption" display="block">
-                                                {assignment.script_path}
+                                                {assignment.script?.script_path}
                                             </Typography>
-                                            {(assignment.effective_start_time || assignment.effective_end_time) && (
+                                            {(assignment.custom_start_time || assignment.custom_end_time) && (
                                                 <Typography variant="caption" color="text.secondary">
-                                                    Time: {assignment.effective_start_time || 'N/A'} - {assignment.effective_end_time || 'N/A'}
+                                                    Custom Time: {assignment.custom_start_time || 'N/A'} - {assignment.custom_end_time || 'N/A'}
+                                                </Typography>
+                                            )}
+                                            {assignment.notes && (
+                                                <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5 }}>
+                                                    Note: {assignment.notes}
                                                 </Typography>
                                             )}
                                         </Box>
@@ -241,7 +258,7 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
                         {executions.slice(0, 5).map((execution) => (
                             <ListItem key={execution.id}>
                                 <ListItemText
-                                    primary={execution.task_name}
+                                    primary={execution.script?.name || execution.execution_metadata?.script_name || 'Script'}
                                     secondary={new Date(execution.scheduled_time).toLocaleString()}
                                 />
                                 <ExecutionStatusBadge status={execution.status} size="small" />
@@ -266,8 +283,8 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
                         select
                         fullWidth
                         label="Select Script"
-                        name="analytics_task_id"
-                        value={formData.analytics_task_id}
+                        name="script_id"
+                        value={formData.script_id}
                         onChange={handleChange}
                         margin="normal"
                         required
@@ -276,7 +293,12 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
                         <MenuItem value="">Select a script</MenuItem>
                         {scripts.map((script) => (
                             <MenuItem key={script.id} value={script.id}>
-                                {script.task_name}
+                                <Box>
+                                    <Typography variant="body2">{script.name}</Typography>
+                                    <Typography variant="caption" color="text.secondary">
+                                        {script.category} • {script.script_path}
+                                    </Typography>
+                                </Box>
                             </MenuItem>
                         ))}
                     </TextField>
@@ -288,7 +310,7 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
                         value={formData.custom_frequency_minutes}
                         onChange={handleChange}
                         margin="normal"
-                        helperText="Leave empty to use default frequency"
+                        helperText="Leave empty to use script's default frequency"
                     />
                     <Box display="flex" gap={2}>
                         <TextField
@@ -327,7 +349,7 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
                 </DialogContent>
                 <DialogActions>
                     <Button onClick={handleCloseDialog}>Cancel</Button>
-                    <Button onClick={handleSubmit} variant="contained">
+                    <Button onClick={handleSubmit} variant="contained" disabled={!formData.script_id}>
                         {editingAssignment ? 'Update' : 'Assign'}
                     </Button>
                 </DialogActions>

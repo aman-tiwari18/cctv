@@ -5,42 +5,49 @@ const { asyncHandler } = require("../middleware/errorHandler");
 const { executionValidation } = require("../utils/validators");
 const { authenticate } = require("../middleware/auth");
 
+// Pending assignments (for script server polling)
 router.get(
     "/pending",
     authenticate,
     asyncHandler(ExecutionController.getPending)
 );
 
+// Recent assignments
 router.get(
     "/recent",
     authenticate,
     asyncHandler(ExecutionController.getRecent)
 );
 
+// Execution statistics
 router.get(
     "/stats/summary",
     authenticate,
     asyncHandler(ExecutionController.getStats)
 );
 
+// Assignments by shift
 router.get(
-    "/shifts/:shiftId/executions",
+    "/shifts/:shiftId",
     authenticate,
     asyncHandler(ExecutionController.getByShift)
 );
 
+// All assignments (with filters)
 router.get(
     "/",
     authenticate,
     asyncHandler(ExecutionController.getAll)
 );
 
+// Get assignment by ID
 router.get(
     "/:id",
     authenticate,
     asyncHandler(ExecutionController.getById)
 );
 
+// Update assignment status (called by script server)
 router.put(
     "/:id/status",
     authenticate,

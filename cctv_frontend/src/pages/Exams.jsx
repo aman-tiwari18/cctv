@@ -24,7 +24,6 @@ import {
   FormGroup,
   FormControlLabel,
   Checkbox,
-  Tooltip,
   Snackbar,
   Paper,
 } from '@mui/material';
@@ -36,7 +35,6 @@ import {
   Schedule,
   Analytics,
   CalendarMonth,
-  AutoFixHigh,
   EventBusy,
   Close,
   AccessTime,
@@ -64,7 +62,6 @@ const Exams = () => {
   });
   const [error, setError] = useState('');
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
-  const [generatingId, setGeneratingId] = useState(null);
   const [newSkipDate, setNewSkipDate] = useState('');
 
   useEffect(() => {
@@ -213,28 +210,6 @@ const Exams = () => {
       } catch (error) {
         alert('Failed to delete exam');
       }
-    }
-  };
-
-  const handleGenerateSchedules = async (examId) => {
-    setGeneratingId(examId);
-    try {
-      const response = await examsAPI.generateSchedules(examId);
-      const data = response.data;
-      setSnackbar({
-        open: true,
-        message: `${data.message}${data.skipped_existing > 0 ? ` (${data.skipped_existing} already existed)` : ''}`,
-        severity: 'success',
-      });
-      loadExams();
-    } catch (error) {
-      setSnackbar({
-        open: true,
-        message: error.response?.data?.message || 'Failed to generate schedules',
-        severity: 'error',
-      });
-    } finally {
-      setGeneratingId(null);
     }
   };
 
@@ -394,7 +369,7 @@ const Exams = () => {
                     <Box display="flex" alignItems="center" gap={0.5}>
                       <Schedule fontSize="small" color="action" />
                       <Typography variant="caption">
-                        {exam.schedule_count || 0} schedules
+                        {exam.examShifts?.length || 0} shifts
                       </Typography>
                     </Box>
                     <Box display="flex" alignItems="center" gap={0.5}>
@@ -414,29 +389,10 @@ const Exams = () => {
                   </Button>
                   <Button
                     size="small"
-                    onClick={() => navigate(`/schedules?exam=${exam.id}`)}
+                    onClick={() => navigate(`/shifts?exam=${exam.id}`)}
                   >
-                    Schedules
+                    Shifts
                   </Button>
-                  {exam.start_date && exam.end_date && exam.examShifts?.length > 0 && (
-                    <Tooltip title="Auto-generate schedules for all valid dates">
-                      <Button
-                        size="small"
-                        color="success"
-                        startIcon={
-                          generatingId === exam.id ? (
-                            <CircularProgress size={16} />
-                          ) : (
-                            <AutoFixHigh />
-                          )
-                        }
-                        onClick={() => handleGenerateSchedules(exam.id)}
-                        disabled={generatingId === exam.id}
-                      >
-                        Generate
-                      </Button>
-                    </Tooltip>
-                  )}
                   <Box flexGrow={1} />
                   <IconButton size="small" onClick={() => handleOpenDialog(exam)}>
                     <Edit fontSize="small" />

@@ -2,10 +2,9 @@ const { DataTypes } = require("sequelize");
 const { sequelize } = require("../config/db");
 
 /**
- * ExamShift – template shifts defined at the exam level.
- * These are the "master" shifts that apply to every exam date.
- * When schedules are generated, ScheduleShift entries are created
- * from these templates for each valid date.
+ * ExamShift – shifts defined at the exam level.
+ * Scripts are assigned directly to these shifts
+ * via ShiftScriptAssignment.
  */
 const ExamShift = sequelize.define(
     "ExamShift",

@@ -119,99 +119,31 @@ const cameraLinkValidation = {
 };
 
 /**
- * Validation rules for schedules
+ * Validation rules for scripts
  */
-const scheduleValidation = {
+const scriptValidation = {
     create: [
-        param('examId').isInt().withMessage('Invalid exam ID'),
-        body('exam_date')
-            .customSanitizer(value => {
-                // Convert ISO timestamp to date string (YYYY-MM-DD)
-                if (value && typeof value === 'string' && value.includes('T')) {
-                    return value.split('T')[0];
-                }
-                return value;
-            })
-            .isDate()
-            .withMessage('Valid exam date is required'),
-        body('shifts').isArray({ min: 1 }).withMessage('At least one shift is required'),
-        body('shifts.*.shift_name').trim().notEmpty().withMessage('Shift name is required'),
-        body('shifts.*.start_time')
-            .customSanitizer(value => {
-                // Accept both HH:MM and HH:MM:SS formats
-                if (value && /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(value)) {
-                    return value + ':00'; // Add seconds if missing
-                }
-                return value;
-            })
-            .matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/)
-            .withMessage('Valid start time is required (HH:MM or HH:MM:SS)'),
-        body('shifts.*.end_time')
-            .customSanitizer(value => {
-                // Accept both HH:MM and HH:MM:SS formats
-                if (value && /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(value)) {
-                    return value + ':00'; // Add seconds if missing
-                }
-                return value;
-            })
-            .matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/)
-            .withMessage('Valid end time is required (HH:MM or HH:MM:SS)'),
-        body('notes').optional().trim(),
-        validate
-    ],
-    update: [
-        param('id').isInt().withMessage('Invalid schedule ID'),
-        body('exam_date')
-            .optional()
-            .customSanitizer(value => {
-                // Convert ISO timestamp to date string (YYYY-MM-DD)
-                if (value && typeof value === 'string' && value.includes('T')) {
-                    return value.split('T')[0];
-                }
-                return value;
-            })
-            .isDate()
-            .withMessage('Valid exam date is required'),
-        body('notes').optional().trim(),
-        body('is_active').optional().isBoolean(),
-        validate
-    ]
-};
-
-/**
- * Validation rules for analytics tasks
- */
-const analyticsTaskValidation = {
-    create: [
-        param('examId').isInt().withMessage('Invalid exam ID'),
         body('script_id').trim().notEmpty().withMessage('Script ID is required'),
-        body('frequency_minutes').optional().isInt({ min: 1 }),
-        body('duration_minutes').optional().isInt({ min: 1 }),
-        body('start_time').optional().matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/),
-        body('end_time').optional().matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$/),
-        body('parameters').optional().isObject(),
-
-        // validate script_id exists in registry
-        body('script_id').custom(value => {
-            const scriptRegistry = require('../config/scriptRegistry');
-            if (!scriptRegistry[value]) {
-                throw new Error('Invalid script ID');
-            }
-            return true;
-        }),
-
+        body('name').trim().notEmpty().withMessage('Script name is required'),
+        body('script_path').trim().notEmpty().withMessage('Script path is required'),
+        body('description').optional().trim(),
+        body('default_frequency_minutes').optional().isInt({ min: 1 }),
+        body('default_duration_minutes').optional().isInt({ min: 1 }),
+        body('category').optional().trim(),
+        body('parameters_schema').optional().isObject(),
+        body('version').optional().trim(),
         validate
     ],
     update: [
-        param('id').isInt().withMessage('Invalid analytics task ID'),
-        body('task_name').optional().trim().notEmpty(),
+        param('id').isInt().withMessage('Invalid script ID'),
+        body('name').optional().trim().notEmpty(),
         body('script_path').optional().trim().notEmpty(),
-        body('frequency_minutes').optional().isInt({ min: 1 }),
-        body('duration_minutes').optional().isInt({ min: 1 }),
-        body('start_time').optional().matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/),
-        body('end_time').optional().matches(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/),
         body('description').optional().trim(),
-        body('parameters').optional().isObject(),
+        body('default_frequency_minutes').optional().isInt({ min: 1 }),
+        body('default_duration_minutes').optional().isInt({ min: 1 }),
+        body('category').optional().trim(),
+        body('parameters_schema').optional().isObject(),
+        body('version').optional().trim(),
         body('is_active').optional().isBoolean(),
         validate
     ]
@@ -233,7 +165,6 @@ const executionValidation = {
 module.exports = {
     examValidation,
     cameraLinkValidation,
-    scheduleValidation,
-    analyticsTaskValidation,
+    scriptValidation,
     executionValidation
 };

@@ -33,32 +33,28 @@ const statusColors = {
 };
 
 const Executions = () => {
-  const [executions, setExecutions] = useState([]);
+  const [assignments, setAssignments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({
     status: '',
-    from_date: '',
-    to_date: '',
   });
-  const [selectedExecution, setSelectedExecution] = useState(null);
+  const [selectedAssignment, setSelectedAssignment] = useState(null);
   const [openDialog, setOpenDialog] = useState(false);
 
   useEffect(() => {
-    loadExecutions();
+    loadAssignments();
   }, [filters]);
 
-  const loadExecutions = async () => {
+  const loadAssignments = async () => {
     setLoading(true);
     try {
       const params = {};
       if (filters.status) params.status = filters.status;
-      if (filters.from_date) params.from_date = filters.from_date;
-      if (filters.to_date) params.to_date = filters.to_date;
       
       const response = await executionsAPI.getAll(params);
-      setExecutions(response.data.data);
+      setAssignments(response.data.data);
     } catch (error) {
-      console.error('Error loading executions:', error);
+      console.error('Error loading assignments:', error);
     } finally {
       setLoading(false);
     }
@@ -71,19 +67,19 @@ const Executions = () => {
     });
   };
 
-  const handleViewDetails = async (execution) => {
+  const handleViewDetails = async (assignment) => {
     try {
-      const response = await executionsAPI.getById(execution.id);
-      setSelectedExecution(response.data.data);
+      const response = await executionsAPI.getById(assignment.id);
+      setSelectedAssignment(response.data.data);
       setOpenDialog(true);
     } catch (error) {
-      console.error('Error loading execution details:', error);
+      console.error('Error loading assignment details:', error);
     }
   };
 
   const handleCloseDialog = () => {
     setOpenDialog(false);
-    setSelectedExecution(null);
+    setSelectedAssignment(null);
   };
 
   return (
@@ -94,10 +90,10 @@ const Executions = () => {
             Script Executions
           </Typography>
           <Typography variant="body1" color="text.secondary">
-            Monitor script execution status and results
+            Monitor script assignment status and results
           </Typography>
         </Box>
-        <IconButton onClick={loadExecutions} color="primary">
+        <IconButton onClick={loadAssignments} color="primary">
           <Refresh />
         </IconButton>
       </Box>
@@ -120,22 +116,6 @@ const Executions = () => {
             <MenuItem value="FAILED">Failed</MenuItem>
             <MenuItem value="CANCELLED">Cancelled</MenuItem>
           </TextField>
-          <TextField
-            type="date"
-            label="From Date"
-            name="from_date"
-            value={filters.from_date}
-            onChange={handleFilterChange}
-            InputLabelProps={{ shrink: true }}
-          />
-          <TextField
-            type="date"
-            label="To Date"
-            name="to_date"
-            value={filters.to_date}
-            onChange={handleFilterChange}
-            InputLabelProps={{ shrink: true }}
-          />
         </Box>
       </Paper>
 
@@ -143,50 +123,52 @@ const Executions = () => {
         <Box display="flex" justifyContent="center" py={4}>
           <CircularProgress />
         </Box>
-      ) : executions.length > 0 ? (
+      ) : assignments.length > 0 ? (
         <TableContainer component={Paper}>
           <Table>
             <TableHead>
               <TableRow>
                 <TableCell><strong>ID</strong></TableCell>
-                <TableCell><strong>Task Name</strong></TableCell>
-                <TableCell><strong>Camera</strong></TableCell>
-                <TableCell><strong>Scheduled Time</strong></TableCell>
+                <TableCell><strong>Script Name</strong></TableCell>
+                <TableCell><strong>Shift</strong></TableCell>
                 <TableCell><strong>Status</strong></TableCell>
-                <TableCell><strong>Duration</strong></TableCell>
+                <TableCell><strong>Started At</strong></TableCell>
+                <TableCell><strong>Completed At</strong></TableCell>
                 <TableCell align="right"><strong>Actions</strong></TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {executions.map((execution) => (
-                <TableRow key={execution.id}>
-                  <TableCell>#{execution.id}</TableCell>
-                  <TableCell>{execution.task_name || '-'}</TableCell>
-                  <TableCell>{execution.camera_id || '-'}</TableCell>
+              {assignments.map((assignment) => (
+                <TableRow key={assignment.id}>
+                  <TableCell>#{assignment.id}</TableCell>
                   <TableCell>
-                    {execution.scheduled_time
-                      ? format(new Date(execution.scheduled_time), 'MMM dd, yyyy HH:mm')
-                      : '-'}
+                    {assignment.script?.name || '-'}
+                    {assignment.script?.category && (
+                      <Typography variant="caption" display="block" color="text.secondary">
+                        {assignment.script.category}
+                      </Typography>
+                    )}
                   </TableCell>
+                  <TableCell>{assignment.shift?.shift_name || '-'}</TableCell>
                   <TableCell>
                     <Chip
-                      label={execution.status}
-                      color={statusColors[execution.status]}
+                      label={assignment.status}
+                      color={statusColors[assignment.status]}
                       size="small"
                     />
                   </TableCell>
                   <TableCell>
-                    {execution.actual_start_time && execution.actual_end_time
-                      ? `${Math.round(
-                          (new Date(execution.actual_end_time) -
-                            new Date(execution.actual_start_time)) /
-                            1000 /
-                            60
-                        )} min`
+                    {assignment.started_at
+                      ? format(new Date(assignment.started_at), 'MMM dd, yyyy HH:mm')
+                      : '-'}
+                  </TableCell>
+                  <TableCell>
+                    {assignment.completed_at
+                      ? format(new Date(assignment.completed_at), 'MMM dd, yyyy HH:mm')
                       : '-'}
                   </TableCell>
                   <TableCell align="right">
-                    <IconButton size="small" onClick={() => handleViewDetails(execution)}>
+                    <IconButton size="small" onClick={() => handleViewDetails(assignment)}>
                       <Visibility fontSize="small" />
                     </IconButton>
                   </TableCell>
@@ -198,114 +180,129 @@ const Executions = () => {
       ) : (
         <Paper sx={{ p: 4, textAlign: 'center' }}>
           <Typography variant="body1" color="text.secondary">
-            No executions found
+            No script assignments found
           </Typography>
         </Paper>
       )}
 
       {/* Details Dialog */}
       <Dialog open={openDialog} onClose={handleCloseDialog} maxWidth="md" fullWidth>
-        <DialogTitle>Execution Details</DialogTitle>
+        <DialogTitle>Assignment Details</DialogTitle>
         <DialogContent>
-          {selectedExecution && (
+          {selectedAssignment && (
             <Box>
               <Box mb={2}>
                 <Typography variant="subtitle2" color="text.secondary">
                   Status
                 </Typography>
                 <Chip
-                  label={selectedExecution.status}
-                  color={statusColors[selectedExecution.status]}
+                  label={selectedAssignment.status}
+                  color={statusColors[selectedAssignment.status]}
                   sx={{ mt: 0.5 }}
                 />
               </Box>
 
               <Box mb={2}>
                 <Typography variant="subtitle2" color="text.secondary">
-                  Task Name
+                  Script Name
                 </Typography>
-                <Typography variant="body1">{selectedExecution.task_name || '-'}</Typography>
+                <Typography variant="body1">
+                  {selectedAssignment.script?.name || '-'}
+                </Typography>
               </Box>
 
               <Box mb={2}>
                 <Typography variant="subtitle2" color="text.secondary">
                   Script Path
                 </Typography>
-                <Typography variant="body1">{selectedExecution.script_path || '-'}</Typography>
-              </Box>
-
-              <Box mb={2}>
-                <Typography variant="subtitle2" color="text.secondary">
-                  Camera ID
-                </Typography>
-                <Typography variant="body1">{selectedExecution.camera_id || '-'}</Typography>
-              </Box>
-
-              <Box mb={2}>
-                <Typography variant="subtitle2" color="text.secondary">
-                  Stream URL
-                </Typography>
-                <Typography variant="body2" sx={{ wordBreak: 'break-all' }}>
-                  {selectedExecution.stream_url || '-'}
+                <Typography variant="body1">
+                  {selectedAssignment.script?.script_path || '-'}
                 </Typography>
               </Box>
 
               <Box mb={2}>
                 <Typography variant="subtitle2" color="text.secondary">
-                  Scheduled Time
+                  Shift
                 </Typography>
                 <Typography variant="body1">
-                  {selectedExecution.scheduled_time
-                    ? format(new Date(selectedExecution.scheduled_time), 'MMM dd, yyyy HH:mm:ss')
-                    : '-'}
+                  {selectedAssignment.shift?.shift_name || '-'}
+                  {selectedAssignment.shift?.exam?.exam_name && (
+                    <Typography variant="caption" display="block" color="text.secondary">
+                      Exam: {selectedAssignment.shift.exam.exam_name}
+                    </Typography>
+                  )}
                 </Typography>
               </Box>
 
-              {selectedExecution.actual_start_time && (
+              {selectedAssignment.started_at && (
                 <Box mb={2}>
                   <Typography variant="subtitle2" color="text.secondary">
-                    Actual Start Time
+                    Started At
                   </Typography>
                   <Typography variant="body1">
-                    {format(new Date(selectedExecution.actual_start_time), 'MMM dd, yyyy HH:mm:ss')}
+                    {format(new Date(selectedAssignment.started_at), 'MMM dd, yyyy HH:mm:ss')}
                   </Typography>
                 </Box>
               )}
 
-              {selectedExecution.actual_end_time && (
+              {selectedAssignment.completed_at && (
                 <Box mb={2}>
                   <Typography variant="subtitle2" color="text.secondary">
-                    Actual End Time
+                    Completed At
                   </Typography>
                   <Typography variant="body1">
-                    {format(new Date(selectedExecution.actual_end_time), 'MMM dd, yyyy HH:mm:ss')}
+                    {format(new Date(selectedAssignment.completed_at), 'MMM dd, yyyy HH:mm:ss')}
                   </Typography>
                 </Box>
               )}
 
-              {selectedExecution.result_data && (
+              {selectedAssignment.started_at && selectedAssignment.completed_at && (
+                <Box mb={2}>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Duration
+                  </Typography>
+                  <Typography variant="body1">
+                    {Math.round(
+                      (new Date(selectedAssignment.completed_at) - new Date(selectedAssignment.started_at)) / 1000
+                    )} seconds
+                  </Typography>
+                </Box>
+              )}
+
+              {selectedAssignment.result_data && (
                 <Box mb={2}>
                   <Typography variant="subtitle2" color="text.secondary">
                     Result Data
                   </Typography>
                   <Paper sx={{ p: 2, bgcolor: '#f5f5f5', mt: 1 }}>
                     <pre style={{ margin: 0, fontSize: '12px', overflow: 'auto' }}>
-                      {JSON.stringify(selectedExecution.result_data, null, 2)}
+                      {JSON.stringify(selectedAssignment.result_data, null, 2)}
                     </pre>
                   </Paper>
                 </Box>
               )}
 
-              {selectedExecution.error_log && (
+              {selectedAssignment.error_log && (
                 <Box mb={2}>
                   <Typography variant="subtitle2" color="error">
                     Error Log
                   </Typography>
                   <Paper sx={{ p: 2, bgcolor: '#ffebee', mt: 1 }}>
                     <Typography variant="body2" color="error">
-                      {selectedExecution.error_log}
+                      {selectedAssignment.error_log}
                     </Typography>
                   </Paper>
+                </Box>
+              )}
+
+              {selectedAssignment.notes && (
+                <Box mb={2}>
+                  <Typography variant="subtitle2" color="text.secondary">
+                    Notes
+                  </Typography>
+                  <Typography variant="body1">
+                    {selectedAssignment.notes}
+                  </Typography>
                 </Box>
               )}
             </Box>

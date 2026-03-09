@@ -9,7 +9,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Exams from './pages/Exams';
 import Cameras from './pages/Cameras';
-import Schedules from './pages/Schedules';
+import Shifts from './pages/Shifts';
 import Analytics from './pages/Analytics';
 import Executions from './pages/Executions';
 
@@ -71,7 +71,7 @@ function App() {
               <Route index element={<Dashboard />} />
               <Route path="exams" element={<Exams />} />
               <Route path="cameras" element={<Cameras />} />
-              <Route path="schedules" element={<Schedules />} />
+              <Route path="shifts" element={<Shifts />} />
               <Route path="analytics" element={<Analytics />} />
               <Route path="executions" element={<Executions />} />
             </Route>

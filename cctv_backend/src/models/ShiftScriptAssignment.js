@@ -15,9 +15,28 @@ const ShiftScriptAssignment = sequelize.define(
             allowNull: false,
         },
 
-        analytics_task_id: {
+        script_id: {
             type: DataTypes.INTEGER,
             allowNull: false,
+            comment: "Reference to scripts.id",
+        },
+
+        // Keep for backward compat, but new assignments use script_id
+        analytics_task_id: {
+            type: DataTypes.INTEGER,
+            allowNull: true,
+        },
+
+        status: {
+            type: DataTypes.ENUM(
+                "PENDING",
+                "RUNNING",
+                "COMPLETED",
+                "FAILED",
+                "CANCELLED"
+            ),
+            defaultValue: "PENDING",
+            comment: "Execution status of this assignment",
         },
 
         custom_start_time: {
@@ -37,6 +56,26 @@ const ShiftScriptAssignment = sequelize.define(
 
         notes: {
             type: DataTypes.TEXT,
+            allowNull: true,
+        },
+
+        started_at: {
+            type: DataTypes.DATE,
+            allowNull: true,
+        },
+
+        completed_at: {
+            type: DataTypes.DATE,
+            allowNull: true,
+        },
+
+        error_log: {
+            type: DataTypes.TEXT,
+            allowNull: true,
+        },
+
+        result_data: {
+            type: DataTypes.JSON,
             allowNull: true,
         },
 

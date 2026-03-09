@@ -8,7 +8,7 @@ const { upload, cleanupOnError } = require("../middleware/upload");
 
 // ── Nested under /api/exams ──────────────────────────────────
 router.post(
-    "/:examId/analytics",
+    "/exams/:examId/analytics",
     authenticate,
     authorize("ADMIN", "OPERATOR"),
     analyticsTaskValidation.create,
@@ -16,7 +16,7 @@ router.post(
 );
 
 router.post(
-    "/:examId/analytics/upload",
+    "/exams/:examId/analytics/upload",
     authenticate,
     authorize("ADMIN", "OPERATOR"),
     upload.single("file"),
@@ -25,20 +25,20 @@ router.post(
 );
 
 router.get(
-    "/:examId/analytics",
+    "/exams/:examId/analytics",
     authenticate,
     asyncHandler(AnalyticsController.getByExam)
 );
 
 // ── Direct access routes (/api/analytics) ────────────────────
 router.get(
-    "/allTask",
+    "/analytics/allTask",
     authenticate,
     asyncHandler(AnalyticsController.getAllTasks)
 );
 
 router.put(
-    "/:id",
+    "/analytics/:id",
     authenticate,
     authorize("ADMIN", "OPERATOR"),
     analyticsTaskValidation.update,
@@ -46,7 +46,7 @@ router.put(
 );
 
 router.delete(
-    "/:id",
+    "/analytics/:id",
     authenticate,
     authorize("ADMIN", "OPERATOR"),
     asyncHandler(AnalyticsController.deleteTask)

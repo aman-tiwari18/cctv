@@ -1,7 +1,6 @@
 const ShiftScriptAssignment = require("../models/ShiftScriptAssignment");
-const AnalyticsTask = require("../models/AnalyticsTask");
-const ScheduleShift = require("../models/ScheduleShift");
-const ExamSchedule = require("../models/ExamSchedule");
+const Script = require("../models/Script");
+const ExamShift = require("../models/ExamShift");
 
 
 /**
@@ -9,7 +8,7 @@ const ExamSchedule = require("../models/ExamSchedule");
  */
 exports.assignScript = async (req, res) => {
     const {
-        analytics_task_id,
+        script_id,
         custom_start_time,
         custom_end_time,
         custom_frequency_minutes,
@@ -17,18 +16,27 @@ exports.assignScript = async (req, res) => {
     } = req.body;
     const shift_id = req.params.shiftId;
 
-    // Verify analytics task exists
-    const task = await AnalyticsTask.findByPk(analytics_task_id);
-    if (!task) {
+    // Verify shift exists
+    const shift = await ExamShift.findByPk(shift_id);
+    if (!shift) {
         return res.status(404).json({
             success: false,
-            message: "Analytics task not found",
+            message: "Shift not found",
         });
     }
 
-    // Check if assignment already exists
+    // Verify script exists
+    const script = await Script.findByPk(script_id);
+    if (!script) {
+        return res.status(404).json({
+            success: false,
+            message: "Script not found",
+        });
+    }
+
+    // Check if already assigned
     const existing = await ShiftScriptAssignment.findOne({
-        where: { shift_id, analytics_task_id },
+        where: { shift_id, script_id },
     });
     if (existing) {
         return res.status(400).json({
@@ -39,17 +47,22 @@ exports.assignScript = async (req, res) => {
 
     const assignment = await ShiftScriptAssignment.create({
         shift_id,
-        analytics_task_id,
+        script_id,
         custom_start_time: custom_start_time || null,
         custom_end_time: custom_end_time || null,
         custom_frequency_minutes: custom_frequency_minutes || null,
         notes: notes || null,
     });
 
+    // Reload with script data
+    const result = await ShiftScriptAssignment.findByPk(assignment.id, {
+        include: [{ model: Script, as: "script" }],
+    });
+
     res.status(201).json({
         success: true,
         message: "Script assigned to shift successfully",
-        data: assignment,
+        data: result,
     });
 };
 
@@ -68,9 +81,13 @@ exports.bulkAssign = async (req, res) => {
         });
     }
 
-    const assignments = scripts.map((script) => ({
+    const assignments = scripts.map((s) => ({
         shift_id,
-        ...script,
+        script_id: s.script_id,
+        custom_start_time: s.custom_start_time || null,
+        custom_end_time: s.custom_end_time || null,
+        custom_frequency_minutes: s.custom_frequency_minutes || null,
+        notes: s.notes || null,
     }));
 
     const results = await ShiftScriptAssignment.bulkCreate(assignments, {
@@ -99,21 +116,21 @@ exports.getByShift = async (req, res) => {
         where,
         include: [
             {
-                model: AnalyticsTask,
-                as: "analyticsTask",
+                model: Script,
+                as: "script",
                 attributes: [
-                    "task_name",
+                    "id",
+                    "script_id",
+                    "name",
                     "description",
                     "script_path",
-                    "frequency_minutes",
-                    "duration_minutes",
-                    "start_time",
-                    "end_time",
-                    "parameters",
+                    "default_frequency_minutes",
+                    "default_duration_minutes",
+                    "category",
                 ],
             },
         ],
-        order: [[{ model: AnalyticsTask, as: "analyticsTask" }, "task_name", "ASC"]],
+        order: [[{ model: Script, as: "script" }, "name", "ASC"]],
     });
 
     res.json({
@@ -137,25 +154,20 @@ exports.getByExam = async (req, res) => {
         where,
         include: [
             {
-                model: ScheduleShift,
+                model: ExamShift,
                 as: "shift",
                 required: true,
-                include: [
-                    {
-                        model: ExamSchedule,
-                        as: "schedule",
-                        required: true,
-                        where: { exam_id: req.params.examId },
-                    },
-                ],
+                where: { exam_id: req.params.examId },
             },
             {
-                model: AnalyticsTask,
-                as: "analyticsTask",
+                model: Script,
+                as: "script",
                 attributes: [
-                    "task_name",
+                    "id",
+                    "script_id",
+                    "name",
                     "script_path",
-                    "frequency_minutes",
+                    "default_frequency_minutes",
                 ],
             },
         ],

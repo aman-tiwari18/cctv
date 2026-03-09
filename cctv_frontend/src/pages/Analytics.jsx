@@ -10,23 +10,15 @@ import {
   Grid,
   Card,
   CardContent,
-  CardActions,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
   Chip,
   CircularProgress,
   Alert,
-  Tabs,
-  Tab
 } from '@mui/material';
 import {
-  ExpandMore,
-  CalendarToday,
-  Schedule as ScheduleIcon,
-  Refresh
+  AccessTime,
+  Refresh,
 } from '@mui/icons-material';
-import { examsAPI, schedulesAPI, shiftScriptsAPI } from '../services/api';
+import { examsAPI } from '../services/api';
 import ShiftScriptManager from '../components/ShiftScriptManager';
 
 const Analytics = () => {
@@ -35,11 +27,10 @@ const Analytics = () => {
 
   const [exams, setExams] = useState([]);
   const [selectedExam, setSelectedExam] = useState(examId || '');
-  const [schedules, setSchedules] = useState([]);
+  const [shifts, setShifts] = useState([]);
   const [selectedShift, setSelectedShift] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [tabValue, setTabValue] = useState(0);
 
   useEffect(() => {
     loadExams();
@@ -47,9 +38,9 @@ const Analytics = () => {
 
   useEffect(() => {
     if (selectedExam) {
-      loadSchedules();
+      loadShifts();
     } else {
-      setSchedules([]);
+      setShifts([]);
       setSelectedShift(null);
     }
   }, [selectedExam]);
@@ -67,31 +58,27 @@ const Analytics = () => {
     }
   };
 
-  const loadSchedules = async () => {
+  const loadShifts = async () => {
     if (!selectedExam) return;
     setLoading(true);
     setError('');
     try {
-      const response = await schedulesAPI.getAll(selectedExam);
-      setSchedules(response.data.data);
+      const response = await examsAPI.getById(selectedExam);
+      setShifts(response.data.data.examShifts || []);
     } catch (error) {
-      console.error('Error loading schedules:', error);
-      setError('Failed to load schedules');
+      console.error('Error loading shifts:', error);
+      setError('Failed to load shifts');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleShiftSelect = (shift, schedule) => {
-    setSelectedShift({
-      ...shift,
-      exam_date: schedule.exam_date,
-      schedule_id: schedule.id
-    });
+  const handleShiftSelect = (shift) => {
+    setSelectedShift(shift);
   };
 
   const handleRefresh = () => {
-    loadSchedules();
+    loadShifts();
     if (selectedShift) {
       // Refresh the selected shift to update execution status
       setSelectedShift({ ...selectedShift });
@@ -148,78 +135,50 @@ const Analytics = () => {
         </Box>
       ) : selectedExam ? (
         <Grid container spacing={3}>
-          {/* Left Panel - Schedules and Shifts */}
+          {/* Left Panel - Shifts */}
           <Grid item xs={12} md={5}>
             <Paper sx={{ p: 2, maxHeight: '70vh', overflow: 'auto' }}>
               <Typography variant="h6" fontWeight="bold" mb={2}>
-                Exam Schedules & Shifts
+                Exam Shifts
               </Typography>
 
-              {schedules.length > 0 ? (
-                schedules.map((schedule) => (
-                  <Accordion key={schedule.id} defaultExpanded={schedules.length === 1}>
-                    <AccordionSummary expandIcon={<ExpandMore />}>
-                      <Box display="flex" alignItems="center" gap={1}>
-                        <CalendarToday fontSize="small" color="primary" />
-                        <Typography fontWeight="medium">
-                          {new Date(schedule.exam_date).toLocaleDateString()}
-                        </Typography>
-                        {schedule.shifts && (
-                          <Chip
-                            label={`${schedule.shifts.length} shifts`}
-                            size="small"
-                            color="primary"
-                            variant="outlined"
-                          />
-                        )}
-                      </Box>
-                    </AccordionSummary>
-                    <AccordionDetails>
-                      {schedule.shifts && schedule.shifts.length > 0 ? (
-                        <Box display="flex" flexDirection="column" gap={1}>
-                          {schedule.shifts.map((shift) => (
-                            <Card
-                              key={shift.id}
-                              variant="outlined"
-                              sx={{
-                                cursor: 'pointer',
-                                bgcolor: selectedShift?.id === shift.id ? 'action.selected' : 'background.paper',
-                                '&:hover': { bgcolor: 'action.hover' }
-                              }}
-                              onClick={() => handleShiftSelect(shift, schedule)}
-                            >
-                              <CardContent sx={{ py: 1.5, px: 2, '&:last-child': { pb: 1.5 } }}>
-                                <Box display="flex" justifyContent="space-between" alignItems="center">
-                                  <Box>
-                                    <Typography variant="body1" fontWeight="medium">
-                                      {shift.shift_name}
-                                    </Typography>
-                                    <Box display="flex" alignItems="center" gap={0.5} mt={0.5}>
-                                      <ScheduleIcon fontSize="small" sx={{ fontSize: 16 }} />
-                                      <Typography variant="caption" color="text.secondary">
-                                        {shift.start_time} - {shift.end_time}
-                                      </Typography>
-                                    </Box>
-                                  </Box>
-                                  {selectedShift?.id === shift.id && (
-                                    <Chip label="Selected" size="small" color="primary" />
-                                  )}
-                                </Box>
-                              </CardContent>
-                            </Card>
-                          ))}
+              {shifts.length > 0 ? (
+                <Box display="flex" flexDirection="column" gap={1}>
+                  {shifts.map((shift) => (
+                    <Card
+                      key={shift.id}
+                      variant="outlined"
+                      sx={{
+                        cursor: 'pointer',
+                        bgcolor: selectedShift?.id === shift.id ? 'action.selected' : 'background.paper',
+                        '&:hover': { bgcolor: 'action.hover' }
+                      }}
+                      onClick={() => handleShiftSelect(shift)}
+                    >
+                      <CardContent sx={{ py: 1.5, px: 2, '&:last-child': { pb: 1.5 } }}>
+                        <Box display="flex" justifyContent="space-between" alignItems="center">
+                          <Box>
+                            <Typography variant="body1" fontWeight="medium">
+                              {shift.shift_name}
+                            </Typography>
+                            <Box display="flex" alignItems="center" gap={0.5} mt={0.5}>
+                              <AccessTime fontSize="small" sx={{ fontSize: 16 }} />
+                              <Typography variant="caption" color="text.secondary">
+                                {shift.start_time?.substring(0, 5)} - {shift.end_time?.substring(0, 5)}
+                              </Typography>
+                            </Box>
+                          </Box>
+                          {selectedShift?.id === shift.id && (
+                            <Chip label="Selected" size="small" color="primary" />
+                          )}
                         </Box>
-                      ) : (
-                        <Typography variant="body2" color="text.secondary">
-                          No shifts defined for this date
-                        </Typography>
-                      )}
-                    </AccordionDetails>
-                  </Accordion>
-                ))
+                      </CardContent>
+                    </Card>
+                  ))}
+                </Box>
               ) : (
                 <Typography variant="body2" color="text.secondary" textAlign="center" py={4}>
-                  No schedules found for this exam. Add schedules in the Schedules page.
+                  No shifts found for this exam. Add shifts in the Exams page.
                 </Typography>
               )}
             </Paper>

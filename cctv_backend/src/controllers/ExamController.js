@@ -1,7 +1,5 @@
 const Exam = require("../models/Exam");
 const ExamShift = require("../models/ExamShift");
-const ExamSchedule = require("../models/ExamSchedule");
-const ScheduleShift = require("../models/ScheduleShift");
 const { sequelize } = require("../config/db");
 
 
@@ -118,7 +116,7 @@ exports.updateExam = async (req, res) => {
 
         // If shifts are provided, replace all exam-level shifts
         if (shifts !== undefined) {
-            // Deactivate old shifts
+            // Delete old shifts
             await ExamShift.destroy({
                 where: { exam_id: id },
                 transaction: t,
@@ -152,29 +150,7 @@ exports.updateExam = async (req, res) => {
 exports.deleteExam = async (req, res) => {
     const id = req.params.id;
 
-    await Exam.update(
-        { is_active: false },
-        { where: { id } }
-    );
-
-    res.json({
-        success: true,
-        message: "Exam deleted successfully",
-    });
-};
-
-
-/**
- * Generate schedules from exam date range configuration.
- * Creates ExamSchedule + ScheduleShift entries for each valid date
- * that falls within [start_date, end_date] and is not skipped.
- */
-exports.generateSchedules = async (req, res) => {
-    const examId = req.params.id;
-
-    const exam = await Exam.findByPk(examId, {
-        include: [{ model: ExamShift, as: "examShifts" }],
-    });
+    const exam = await Exam.findByPk(id);
 
     if (!exam) {
         return res.status(404).json({
@@ -183,105 +159,15 @@ exports.generateSchedules = async (req, res) => {
         });
     }
 
-    if (!exam.start_date || !exam.end_date) {
-        return res.status(400).json({
-            success: false,
-            message: "Exam must have start_date and end_date configured",
-        });
-    }
-
-    if (!exam.examShifts || exam.examShifts.length === 0) {
-        return res.status(400).json({
-            success: false,
-            message: "Exam must have at least one shift defined",
-        });
-    }
-
-    const skipDays = exam.skip_days || [];
-    const skipDates = (exam.skip_dates || []).map((d) => d.toString());
-
-    const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-
-    // Calculate valid dates
-    const validDates = [];
-    const current = new Date(exam.start_date);
-    const end = new Date(exam.end_date);
-
-    while (current <= end) {
-        const dateStr = current.toISOString().split("T")[0];
-        const dayName = dayNames[current.getDay()];
-
-        const isSkippedDay = skipDays.includes(dayName);
-        const isSkippedDate = skipDates.includes(dateStr);
-
-        if (!isSkippedDay && !isSkippedDate) {
-            validDates.push(dateStr);
-        }
-
-        current.setDate(current.getDate() + 1);
-    }
-
-    if (validDates.length === 0) {
-        return res.status(400).json({
-            success: false,
-            message: "No valid dates found after applying skip rules",
-        });
-    }
-
-    // Check for already existing schedules for this exam
-    const existingSchedules = await ExamSchedule.findAll({
-        where: { exam_id: examId, is_active: true },
-        attributes: ["exam_date"],
-    });
-    const existingDates = existingSchedules.map((s) => s.exam_date.toString());
-
-    // Filter out dates that already have schedules
-    const newDates = validDates.filter((d) => !existingDates.includes(d));
-
-    if (newDates.length === 0) {
-        return res.json({
-            success: true,
-            message: "All valid dates already have schedules",
-            generated: 0,
-            total_valid_dates: validDates.length,
-        });
-    }
-
-    // Create schedules + shifts inside a transaction
-    const createdSchedules = await sequelize.transaction(async (t) => {
-        const results = [];
-
-        for (const dateStr of newDates) {
-            const schedule = await ExamSchedule.create(
-                {
-                    exam_id: examId,
-                    exam_date: dateStr,
-                    notes: null,
-                },
-                { transaction: t }
-            );
-
-            // Create schedule shifts from exam shifts
-            const shiftData = exam.examShifts.map((es) => ({
-                schedule_id: schedule.id,
-                shift_name: es.shift_name,
-                start_time: es.start_time,
-                end_time: es.end_time,
-            }));
-            await ScheduleShift.bulkCreate(shiftData, { transaction: t });
-
-            results.push(schedule);
-        }
-
-        return results;
+    await sequelize.transaction(async (t) => {
+        // Delete related shifts (cascade should handle, but be explicit)
+        await ExamShift.destroy({ where: { exam_id: id }, transaction: t });
+        // Delete the exam
+        await exam.destroy({ transaction: t });
     });
 
-    res.status(201).json({
+    res.json({
         success: true,
-        message: `Generated ${createdSchedules.length} schedules`,
-        generated: createdSchedules.length,
-        total_valid_dates: validDates.length,
-        skipped_existing: validDates.length - newDates.length,
-        dates: newDates,
+        message: "Exam deleted successfully",
     });
 };

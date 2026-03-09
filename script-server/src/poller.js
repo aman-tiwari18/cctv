@@ -13,7 +13,7 @@ class Poller {
     }
 
     /**
-     * Start polling for pending executions
+     * Start polling for pending assignments
      */
     start() {
         if (this.isRunning) {
@@ -44,11 +44,11 @@ class Poller {
     }
 
     /**
-     * Poll main backend for pending executions
+     * Poll main backend for pending assignments
      */
     async poll() {
         try {
-            logger.debug('Polling for pending executions...');
+            logger.debug('Polling for pending assignments...');
 
             const response = await axios.get(
                 `${this.backendUrl}/executions/pending`,
@@ -62,20 +62,20 @@ class Poller {
                 }
             );
 
-            const pendingExecutions = response.data.data || [];
+            const pendingAssignments = response.data.data || [];
 
-            if (pendingExecutions.length > 0) {
-                logger.info(`Found ${pendingExecutions.length} pending executions`);
+            if (pendingAssignments.length > 0) {
+                logger.info(`Found ${pendingAssignments.length} pending assignments`);
 
-                for (const execution of pendingExecutions) {
-                    await this.processExecution(execution);
+                for (const assignment of pendingAssignments) {
+                    await this.processAssignment(assignment);
                 }
             } else {
-                logger.info('No pending executions found');
+                logger.info('No pending assignments found');
             }
 
         } catch (error) {
-            logger.error('Error polling for executions:', {
+            logger.error('Error polling for assignments:', {
                 message: error.message,
                 url: error.config?.url
             });
@@ -83,57 +83,57 @@ class Poller {
     }
 
     /**
-     * Process a single execution
+     * Process a single assignment
      */
-    async processExecution(execution) {
-        const executionId = execution.id;
+    async processAssignment(assignment) {
+        const assignmentId = assignment.id;
 
         // Skip if already running
-        if (this.runningScripts.has(executionId)) {
-            logger.debug(`Execution ${executionId} is already running`);
+        if (this.runningScripts.has(assignmentId)) {
+            logger.debug(`Assignment ${assignmentId} is already running`);
             return;
         }
 
         try {
-            logger.info(`Processing execution ${executionId}: ${execution.task_name}`);
+            logger.info(`Processing assignment ${assignmentId}: ${assignment.task_name}`);
 
             // Mark as running in backend
-            await this.updateExecutionStatus(executionId, 'RUNNING');
+            await this.updateAssignmentStatus(assignmentId, 'RUNNING');
 
             // Track as running locally
-            this.runningScripts.set(executionId, true);
+            this.runningScripts.set(assignmentId, true);
 
             // Execute the script
-            const result = await scriptRunner.executeScript(execution);
+            const result = await scriptRunner.executeScript(assignment);
 
             // Mark as completed
-            await this.updateExecutionStatus(executionId, 'COMPLETED', {
+            await this.updateAssignmentStatus(assignmentId, 'COMPLETED', {
                 result_data: result
             });
 
-            logger.info(`Execution ${executionId} completed successfully`);
+            logger.info(`Assignment ${assignmentId} completed successfully`);
 
         } catch (error) {
-            logger.error(`Execution ${executionId} failed:`, error);
+            logger.error(`Assignment ${assignmentId} failed:`, error);
 
             // Mark as failed
-            await this.updateExecutionStatus(executionId, 'FAILED', {
+            await this.updateAssignmentStatus(assignmentId, 'FAILED', {
                 error_log: error.message
             });
 
         } finally {
             // Remove from running scripts
-            this.runningScripts.delete(executionId);
+            this.runningScripts.delete(assignmentId);
         }
     }
 
     /**
-     * Update execution status in main backend
+     * Update assignment status in main backend
      */
-    async updateExecutionStatus(executionId, status, data = {}) {
+    async updateAssignmentStatus(assignmentId, status, data = {}) {
         try {
             await axios.put(
-                `${this.backendUrl}/executions/${executionId}/status`,
+                `${this.backendUrl}/executions/${assignmentId}/status`,
                 {
                     status,
                     ...data
@@ -146,9 +146,9 @@ class Poller {
                 }
             );
 
-            logger.debug(`Updated execution ${executionId} status to ${status}`);
+            logger.debug(`Updated assignment ${assignmentId} status to ${status}`);
         } catch (error) {
-            logger.error(`Failed to update execution ${executionId} status:`, error.message);
+            logger.error(`Failed to update assignment ${assignmentId} status:`, error.message);
             throw error;
         }
     }

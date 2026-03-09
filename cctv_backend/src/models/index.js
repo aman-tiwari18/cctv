@@ -3,10 +3,8 @@
  */
 const Exam = require("./Exam");
 const CameraLink = require("./CameraLink");
-const ExamSchedule = require("./ExamSchedule");
 const ExamShift = require("./ExamShift");
-const ScheduleShift = require("./ScheduleShift");
-const AnalyticsTask = require("./AnalyticsTask");
+const Script = require("./Script");
 const ShiftScriptAssignment = require("./ShiftScriptAssignment");
 const ScriptExecution = require("./ScriptExecution");
 
@@ -15,49 +13,35 @@ const ScriptExecution = require("./ScriptExecution");
 Exam.hasMany(CameraLink, { foreignKey: "exam_id", as: "cameraLinks" });
 CameraLink.belongsTo(Exam, { foreignKey: "exam_id", as: "exam" });
 
-// Exam -> ExamSchedules
-Exam.hasMany(ExamSchedule, { foreignKey: "exam_id", as: "schedules" });
-ExamSchedule.belongsTo(Exam, { foreignKey: "exam_id", as: "exam" });
-
-// Exam -> ExamShifts (template shifts at exam level)
+// Exam -> ExamShifts
 Exam.hasMany(ExamShift, { foreignKey: "exam_id", as: "examShifts" });
 ExamShift.belongsTo(Exam, { foreignKey: "exam_id", as: "exam" });
 
-// ExamSchedule -> ScheduleShifts
-ExamSchedule.hasMany(ScheduleShift, { foreignKey: "schedule_id", as: "shifts" });
-ScheduleShift.belongsTo(ExamSchedule, { foreignKey: "schedule_id", as: "schedule" });
+// ExamShift -> ShiftScriptAssignments
+ExamShift.hasMany(ShiftScriptAssignment, { foreignKey: "shift_id", as: "scriptAssignments" });
+ShiftScriptAssignment.belongsTo(ExamShift, { foreignKey: "shift_id", as: "shift" });
 
-// Exam -> AnalyticsTasks
-Exam.hasMany(AnalyticsTask, { foreignKey: "exam_id", as: "analyticsTasks" });
-AnalyticsTask.belongsTo(Exam, { foreignKey: "exam_id", as: "exam" });
+// Script -> ShiftScriptAssignments
+Script.hasMany(ShiftScriptAssignment, { foreignKey: "script_id", as: "shiftAssignments" });
+ShiftScriptAssignment.belongsTo(Script, { foreignKey: "script_id", as: "script" });
 
-// ScheduleShift -> ShiftScriptAssignments
-ScheduleShift.hasMany(ShiftScriptAssignment, { foreignKey: "shift_id", as: "scriptAssignments" });
-ShiftScriptAssignment.belongsTo(ScheduleShift, { foreignKey: "shift_id", as: "shift" });
+// Script -> ScriptExecutions
+Script.hasMany(ScriptExecution, { foreignKey: "script_id", as: "executions" });
+ScriptExecution.belongsTo(Script, { foreignKey: "script_id", as: "script" });
 
-// AnalyticsTask -> ShiftScriptAssignments
-AnalyticsTask.hasMany(ShiftScriptAssignment, { foreignKey: "analytics_task_id", as: "shiftAssignments" });
-ShiftScriptAssignment.belongsTo(AnalyticsTask, { foreignKey: "analytics_task_id", as: "analyticsTask" });
+// ExamShift -> ScriptExecutions (shift_id)
+ExamShift.hasMany(ScriptExecution, { foreignKey: "shift_id", as: "executions" });
+ScriptExecution.belongsTo(ExamShift, { foreignKey: "shift_id", as: "shift" });
 
-// AnalyticsTask -> ScriptExecutions
-AnalyticsTask.hasMany(ScriptExecution, { foreignKey: "analytics_task_id", as: "executions" });
-ScriptExecution.belongsTo(AnalyticsTask, { foreignKey: "analytics_task_id", as: "analyticsTask" });
-
-// ScheduleShift -> ScriptExecutions  (shift_id)
-ScheduleShift.hasMany(ScriptExecution, { foreignKey: "shift_id", as: "executions" });
-ScriptExecution.belongsTo(ScheduleShift, { foreignKey: "shift_id", as: "shift" });
-
-// CameraLink -> ScriptExecutions  (camera_link_id)
+// CameraLink -> ScriptExecutions (camera_link_id)
 CameraLink.hasMany(ScriptExecution, { foreignKey: "camera_link_id", as: "executions" });
 ScriptExecution.belongsTo(CameraLink, { foreignKey: "camera_link_id", as: "cameraLink" });
 
 module.exports = {
     Exam,
     CameraLink,
-    ExamSchedule,
     ExamShift,
-    ScheduleShift,
-    AnalyticsTask,
+    Script,
     ShiftScriptAssignment,
     ScriptExecution,
 };

@@ -24,6 +24,7 @@ class ScriptRunner {
                 camera_id,
                 execution_metadata
             } = execution;
+            console.log("passed execution", execution)
 
             // Build script path
             const fullScriptPath = path.join(this.scriptsDir, script_path);

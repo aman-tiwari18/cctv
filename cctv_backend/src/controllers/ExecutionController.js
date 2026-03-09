@@ -1,122 +1,159 @@
-const ScriptExecution = require("../models/ScriptExecution");
-const AnalyticsTask = require("../models/AnalyticsTask");
-const CameraLink = require("../models/CameraLink");
+const ShiftScriptAssignment = require("../models/ShiftScriptAssignment");
+const Script = require("../models/Script");
+const ExamShift = require("../models/ExamShift");
+const Exam = require("../models/Exam");
 const { Op } = require("sequelize");
 
 
 /**
- * Get pending executions (for script server polling)
+ * Get pending assignments (for script server polling)
+ * Returns assignments with status=PENDING that are ready to run
  */
 exports.getPending = async (req, res) => {
     const limit = parseInt(req.query.limit) || 50;
 
-    const executions = await ScriptExecution.findAll({
+    const assignments = await ShiftScriptAssignment.findAll({
         where: {
             status: "PENDING",
-            scheduled_time: { [Op.lte]: new Date() },
+            is_active: true,
         },
         include: [
             {
-                model: AnalyticsTask,
-                as: "analyticsTask",
-                attributes: ["script_path", "parameters"],
+                model: Script,
+                as: "script",
+                attributes: ["id", "script_id", "script_path", "name", "parameters_schema", "default_duration_minutes"],
             },
             {
-                model: CameraLink,
-                as: "cameraLink",
-                attributes: ["stream_url", "stream_type", "camera_id"],
+                model: ExamShift,
+                as: "shift",
+                attributes: ["id", "shift_name", "start_time", "end_time"],
+                include: [
+                    {
+                        model: Exam,
+                        as: "exam",
+                        attributes: ["id", "exam_name"],
+                    },
+                ],
             },
         ],
-        order: [["scheduled_time", "ASC"]],
+        order: [["created_at", "ASC"]],
         limit,
+    });
+
+    // Flatten for the script-server poller
+    const data = assignments.map((a) => {
+        const plain = a.toJSON();
+        return {
+            id: plain.id,
+            script_path: plain.script?.script_path || null,
+            task_name: plain.script?.name || null,
+            task_parameters: plain.script?.parameters_schema || null,
+            duration_minutes: plain.script?.default_duration_minutes || null,
+            shift_name: plain.shift?.shift_name || null,
+            exam_name: plain.shift?.exam?.exam_name || null,
+            execution_metadata: {
+                assignment_id: plain.id,
+                script_id: plain.script?.id,
+                script_name: plain.script?.name,
+                shift_id: plain.shift_id,
+                shift_name: plain.shift?.shift_name,
+                exam_name: plain.shift?.exam?.exam_name,
+            },
+        };
     });
 
     res.json({
         success: true,
-        count: executions.length,
-        data: executions,
+        count: data.length,
+        data,
     });
 };
 
 
 /**
- * Update execution status (called by script server)
+ * Update assignment execution status (called by script server)
  */
 exports.updateStatus = async (req, res) => {
     const { status, error_log, result_data } = req.body;
 
-    const execution = await ScriptExecution.findByPk(req.params.id);
+    const assignment = await ShiftScriptAssignment.findByPk(req.params.id);
 
-    if (!execution) {
+    if (!assignment) {
         return res.status(404).json({
             success: false,
-            message: "Execution not found",
+            message: "Assignment not found",
         });
     }
 
     const updates = { status };
 
-    if (status === "RUNNING" && !execution.started_at) {
+    if (status === "RUNNING" && !assignment.started_at) {
         updates.started_at = new Date();
     }
-    if (["COMPLETED", "FAILED", "CANCELLED"].includes(status) && !execution.completed_at) {
+    if (["COMPLETED", "FAILED", "CANCELLED"].includes(status) && !assignment.completed_at) {
         updates.completed_at = new Date();
     }
     if (error_log) updates.error_log = error_log;
     if (result_data) updates.result_data = result_data;
 
-    await execution.update(updates);
+    await assignment.update(updates);
 
     res.json({
         success: true,
-        message: "Execution status updated successfully",
-        data: execution,
+        message: "Assignment status updated successfully",
+        data: assignment,
     });
 };
 
 
 /**
- * Get all executions with filters
+ * Get all assignments with filters (execution history view)
  */
 exports.getAll = async (req, res) => {
     const {
         status,
-        analytics_task_id,
+        script_id,
         shift_id,
-        from_date,
-        to_date,
+        exam_id,
         limit,
         offset,
     } = req.query;
 
     const where = {};
     if (status) where.status = status;
-    if (analytics_task_id) where.analytics_task_id = parseInt(analytics_task_id);
+    if (script_id) where.script_id = parseInt(script_id);
     if (shift_id) where.shift_id = parseInt(shift_id);
-    if (from_date || to_date) {
-        where.scheduled_time = {};
-        if (from_date) where.scheduled_time[Op.gte] = from_date;
-        if (to_date) where.scheduled_time[Op.lte] = to_date;
+
+    const includeShift = {
+        model: ExamShift,
+        as: "shift",
+        attributes: ["id", "shift_name", "start_time", "end_time", "exam_id"],
+    };
+
+    if (exam_id) {
+        includeShift.where = { exam_id: parseInt(exam_id) };
+        includeShift.required = true;
     }
 
-    const executions = await ScriptExecution.findAll({
+    const assignments = await ShiftScriptAssignment.findAll({
         where,
         include: [
             {
-                model: AnalyticsTask,
-                as: "analyticsTask",
-                attributes: ["task_name", "script_path"],
+                model: Script,
+                as: "script",
+                attributes: ["id", "name", "script_path", "script_id", "category"],
             },
+            includeShift,
         ],
-        order: [["scheduled_time", "DESC"]],
+        order: [["updated_at", "DESC"]],
         limit: limit ? parseInt(limit) : 100,
         offset: offset ? parseInt(offset) : 0,
     });
 
     res.json({
         success: true,
-        count: executions.length,
-        data: executions,
+        count: assignments.length,
+        data: assignments,
     });
 };
 
@@ -125,37 +162,19 @@ exports.getAll = async (req, res) => {
  * Get execution statistics
  */
 exports.getStats = async (req, res) => {
-    const { exam_id, from_date, to_date } = req.query;
-    const { query: rawQuery } = require("../config/database");
+    const { sequelize } = require("../config/db");
 
-    let sql = `
+    const [results] = await sequelize.query(`
         SELECT 
             COUNT(*) as total,
-            SUM(CASE WHEN se.status = 'COMPLETED' THEN 1 ELSE 0 END) as completed,
-            SUM(CASE WHEN se.status = 'FAILED' THEN 1 ELSE 0 END) as failed,
-            SUM(CASE WHEN se.status = 'RUNNING' THEN 1 ELSE 0 END) as running,
-            SUM(CASE WHEN se.status = 'PENDING' THEN 1 ELSE 0 END) as pending,
-            SUM(CASE WHEN se.status = 'CANCELLED' THEN 1 ELSE 0 END) as cancelled
-        FROM script_executions se
-        JOIN analytics_tasks at ON se.analytics_task_id = at.id
-        WHERE 1=1
-    `;
-    const params = [];
-
-    if (exam_id) {
-        sql += " AND at.exam_id = ?";
-        params.push(parseInt(exam_id));
-    }
-    if (from_date) {
-        sql += " AND se.scheduled_time >= ?";
-        params.push(from_date);
-    }
-    if (to_date) {
-        sql += " AND se.scheduled_time <= ?";
-        params.push(to_date);
-    }
-
-    const results = await rawQuery(sql, params);
+            SUM(CASE WHEN ssa.status = 'COMPLETED' THEN 1 ELSE 0 END) as completed,
+            SUM(CASE WHEN ssa.status = 'FAILED' THEN 1 ELSE 0 END) as failed,
+            SUM(CASE WHEN ssa.status = 'RUNNING' THEN 1 ELSE 0 END) as running,
+            SUM(CASE WHEN ssa.status = 'PENDING' THEN 1 ELSE 0 END) as pending,
+            SUM(CASE WHEN ssa.status = 'CANCELLED' THEN 1 ELSE 0 END) as cancelled
+        FROM shift_script_assignments ssa
+        WHERE ssa.is_active = TRUE
+    `);
 
     res.json({
         success: true,
@@ -165,90 +184,109 @@ exports.getStats = async (req, res) => {
 
 
 /**
- * Get execution by ID
+ * Get assignment by ID (with full details)
  */
 exports.getById = async (req, res) => {
-    const execution = await ScriptExecution.findByPk(req.params.id, {
+    const assignment = await ShiftScriptAssignment.findByPk(req.params.id, {
         include: [
             {
-                model: AnalyticsTask,
-                as: "analyticsTask",
-                attributes: ["task_name", "script_path"],
+                model: Script,
+                as: "script",
+                attributes: ["id", "name", "script_path", "script_id", "category", "description"],
+            },
+            {
+                model: ExamShift,
+                as: "shift",
+                attributes: ["id", "shift_name", "start_time", "end_time"],
+                include: [
+                    {
+                        model: Exam,
+                        as: "exam",
+                        attributes: ["id", "exam_name", "exam_body"],
+                    },
+                ],
             },
         ],
     });
 
-    if (!execution) {
+    if (!assignment) {
         return res.status(404).json({
             success: false,
-            message: "Execution not found",
+            message: "Assignment not found",
         });
     }
 
     res.json({
         success: true,
-        data: execution,
+        data: assignment,
     });
 };
 
 
 /**
- * Get executions for a specific shift
+ * Get assignments for a specific shift
  */
 exports.getByShift = async (req, res) => {
-    const { status, from_date, to_date, limit, offset } = req.query;
+    const { status, limit, offset } = req.query;
 
     const where = { shift_id: req.params.shiftId };
     if (status) where.status = status;
-    if (from_date || to_date) {
-        where.scheduled_time = {};
-        if (from_date) where.scheduled_time[Op.gte] = from_date;
-        if (to_date) where.scheduled_time[Op.lte] = to_date;
-    }
 
-    const executions = await ScriptExecution.findAll({
+    const assignments = await ShiftScriptAssignment.findAll({
         where,
         include: [
             {
-                model: AnalyticsTask,
-                as: "analyticsTask",
-                attributes: ["task_name", "script_path"],
+                model: Script,
+                as: "script",
+                attributes: ["id", "name", "script_path", "script_id", "category"],
             },
         ],
-        order: [["scheduled_time", "DESC"]],
+        order: [["updated_at", "DESC"]],
         limit: limit ? parseInt(limit) : 100,
         offset: offset ? parseInt(offset) : 0,
     });
 
     res.json({
         success: true,
-        count: executions.length,
-        data: executions,
+        count: assignments.length,
+        data: assignments,
     });
 };
 
 
 /**
- * Get recent executions
+ * Get recent assignments (by most recently updated)
  */
 exports.getRecent = async (req, res) => {
     const limit = parseInt(req.query.limit) || 20;
 
-    const executions = await ScriptExecution.findAll({
+    const assignments = await ShiftScriptAssignment.findAll({
         include: [
             {
-                model: AnalyticsTask,
-                as: "analyticsTask",
-                attributes: ["task_name", "script_path"],
+                model: Script,
+                as: "script",
+                attributes: ["id", "name", "script_path", "script_id"],
+            },
+            {
+                model: ExamShift,
+                as: "shift",
+                attributes: ["id", "shift_name"],
+                include: [
+                    {
+                        model: Exam,
+                        as: "exam",
+                        attributes: ["id", "exam_name"],
+                    },
+                ],
             },
         ],
-        order: [["created_at", "DESC"]],
+        order: [["updated_at", "DESC"]],
         limit,
     });
 
     res.json({
         success: true,
-        count: executions.length,
-        data: executions,
+        count: assignments.length,
+        data: assignments,
     });
 };

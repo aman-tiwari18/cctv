@@ -19,7 +19,7 @@ import {
   Pending,
 } from '@mui/icons-material';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { examsAPI, executionsAPI, schedulesAPI } from '../services/api';
+import { examsAPI, executionsAPI } from '../services/api';
 
 const StatCard = ({ title, value, icon, color, loading }) => (
   <Card sx={{ height: '100%' }}>
@@ -61,15 +61,20 @@ const Dashboard = () => {
 
   const loadDashboardData = async () => {
     try {
-      const [examsRes, shiftsRes, executionsRes] = await Promise.all([
+      const [examsRes, executionsRes] = await Promise.all([
         examsAPI.getAll({ is_active: true }),
-        schedulesAPI.getUpcoming(24),
         executionsAPI.getStatistics(),
       ]);
 
+      // Count total shifts across all exams
+      const totalShifts = examsRes.data.data.reduce(
+        (sum, exam) => sum + (exam.examShifts?.length || 0),
+        0
+      );
+
       setStats({
         exams: examsRes.data.count,
-        upcomingShifts: shiftsRes.data.count,
+        upcomingShifts: totalShifts,
         executions: executionsRes.data.data,
       });
     } catch (error) {
@@ -110,7 +115,7 @@ const Dashboard = () => {
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
           <StatCard
-            title="Upcoming Shifts (24h)"
+            title="Total Shifts"
             value={stats.upcomingShifts}
             icon={<Schedule />}
             color="#f093fb"

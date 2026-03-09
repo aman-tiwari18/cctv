@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { pool } = require('../config/database');
+const { sequelize } = require('../config/database');
 const logger = require('../utils/logger');
 
 /**
@@ -10,7 +10,7 @@ const runMigrations = async () => {
     try {
         logger.info('Starting database migrations...');
 
-        const migrationFile = path.join(__dirname, '001_create_tables.sql');
+        const migrationFile = path.join(__dirname, '006_add_status_to_assignments.sql');
         const sql = fs.readFileSync(migrationFile, 'utf8');
 
         // Remove comments and split by semicolons
@@ -23,12 +23,13 @@ const runMigrations = async () => {
 
         for (const statement of statements) {
             try {
-                await pool.query(statement);
+                await sequelize.query(statement);
             } catch (error) {
-                // Ignore "already exists" errors
-                if (!error.message.includes('already exists')) {
+                // Ignore "already exists" / "duplicate column" errors
+                if (!error.message.includes('already exists') && !error.message.includes('Duplicate column')) {
                     throw error;
                 }
+                logger.info(`Skipped (already applied): ${statement.substring(0, 60)}...`);
             }
         }
 

@@ -1,0 +1,77 @@
+const { DataTypes } = require("sequelize");
+const { sequelize } = require("../config/db");
+
+/**
+ * Script – master registry of all available analytics scripts.
+ * Independent of exams. Used as the source of truth when
+ * assigning scripts to shifts.
+ */
+const Script = sequelize.define(
+    "Script",
+    {
+        id: {
+            type: DataTypes.INTEGER,
+            primaryKey: true,
+            autoIncrement: true,
+        },
+
+        script_id: {
+            type: DataTypes.STRING(100),
+            allowNull: false,
+            unique: true,
+            comment: "Technical identifier, e.g. face_detection",
+        },
+
+        name: {
+            type: DataTypes.STRING,
+            allowNull: false,
+        },
+
+        description: {
+            type: DataTypes.TEXT,
+            allowNull: true,
+        },
+
+        script_path: {
+            type: DataTypes.STRING(500),
+            allowNull: false,
+        },
+
+        default_frequency_minutes: {
+            type: DataTypes.INTEGER,
+            defaultValue: 5,
+        },
+
+        default_duration_minutes: {
+            type: DataTypes.INTEGER,
+            defaultValue: 1,
+        },
+
+        category: {
+            type: DataTypes.STRING(100),
+            allowNull: true,
+        },
+
+        parameters_schema: {
+            type: DataTypes.JSON,
+            allowNull: true,
+        },
+
+        version: {
+            type: DataTypes.STRING(50),
+            defaultValue: "1.0.0",
+        },
+
+        is_active: {
+            type: DataTypes.BOOLEAN,
+            defaultValue: true,
+        },
+    },
+    {
+        tableName: "scripts",
+        timestamps: true,
+        underscored: true,
+    }
+);
+
+module.exports = Script;

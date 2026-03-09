@@ -65,20 +65,20 @@ class HttpServer {
                     isPolling: poller.isRunning,
                     pollInterval: poller.pollIntervalMs,
                     runningScripts: runningScripts.length,
-                    runningExecutionIds: runningScripts,
+                    runningAssignmentIds: runningScripts,
                     backendUrl: poller.backendUrl
                 }
             });
         });
 
-        // Get currently running executions
+        // Get currently running assignments
         this.app.get('/executions/running', (req, res) => {
             const runningScripts = Array.from(poller.runningScripts.keys());
 
             res.json({
                 success: true,
                 count: runningScripts.length,
-                data: runningScripts.map(id => ({ executionId: id }))
+                data: runningScripts.map(id => ({ assignmentId: id }))
             });
         });
 

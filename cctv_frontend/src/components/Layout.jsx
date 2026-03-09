@@ -36,7 +36,7 @@ const menuItems = [
   { text: 'Dashboard', icon: <Dashboard />, path: '/' },
   { text: 'Exams', icon: <School />, path: '/exams' },
   { text: 'Cameras', icon: <Videocam />, path: '/cameras' },
-  { text: 'Schedules', icon: <Schedule />, path: '/schedules' },
+  { text: 'Shifts', icon: <Schedule />, path: '/shifts' },
   { text: 'Analytics Tasks', icon: <Analytics />, path: '/analytics' },
   { text: 'Executions', icon: <PlayCircle />, path: '/executions' },
 ];
