@@ -2,16 +2,24 @@
  * Model Index – loads every Sequelize model and sets up associations
  */
 const Exam = require("./Exam");
-const CameraLink = require("./CameraLink");
 const ExamShift = require("./ExamShift");
 const Script = require("./Script");
 const ShiftScriptAssignment = require("./ShiftScriptAssignment");
 const ScriptExecution = require("./ScriptExecution");
 
+const CameraLinkHLS = require("./CameraLinkHLS");
+const CameraLinkRTSP = require("./CameraLinkRTSP");
+
 // ── Associations ────────────────────────────────────────────
-// Exam -> CameraLinks
-Exam.hasMany(CameraLink, { foreignKey: "exam_id", as: "cameraLinks" });
-CameraLink.belongsTo(Exam, { foreignKey: "exam_id", as: "exam" });
+
+// Exam -> CameraLinkHLS
+Exam.hasMany(CameraLinkHLS, { foreignKey: "exam_id", as: "hlsCameras" });
+CameraLinkHLS.belongsTo(Exam, { foreignKey: "exam_id", as: "exam" });
+
+// Exam -> CameraLinkRTSP
+Exam.hasMany(CameraLinkRTSP, { foreignKey: "exam_id", as: "rtspCameras" });
+CameraLinkRTSP.belongsTo(Exam, { foreignKey: "exam_id", as: "exam" });
+
 
 // Exam -> ExamShifts
 Exam.hasMany(ExamShift, { foreignKey: "exam_id", as: "examShifts" });
@@ -33,13 +41,10 @@ ScriptExecution.belongsTo(Script, { foreignKey: "script_id", as: "script" });
 ExamShift.hasMany(ScriptExecution, { foreignKey: "shift_id", as: "executions" });
 ScriptExecution.belongsTo(ExamShift, { foreignKey: "shift_id", as: "shift" });
 
-// CameraLink -> ScriptExecutions (camera_link_id)
-CameraLink.hasMany(ScriptExecution, { foreignKey: "camera_link_id", as: "executions" });
-ScriptExecution.belongsTo(CameraLink, { foreignKey: "camera_link_id", as: "cameraLink" });
-
 module.exports = {
     Exam,
-    CameraLink,
+    CameraLinkHLS,
+    CameraLinkRTSP,
     ExamShift,
     Script,
     ShiftScriptAssignment,

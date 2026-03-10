@@ -52,6 +52,8 @@ const Cameras = () => {
   const [error, setError] = useState('');
   const [uploadResult, setUploadResult] = useState(null);
 
+  const [examLinkType, setExamLinkType] = useState(null);
+
   useEffect(() => {
     loadExams();
   }, []);
@@ -80,6 +82,7 @@ const Cameras = () => {
     try {
       const response = await camerasAPI.getByExam(selectedExam, { is_active: true });
       setCameras(response.data.data);
+      setExamLinkType(response.data.linkType);
     } catch (error) {
       console.error('Error loading cameras:', error);
     } finally {
@@ -91,18 +94,34 @@ const Cameras = () => {
     if (camera) {
       setEditingCamera(camera);
       setFormData({
-        camera_id: camera.camera_id,
-        stream_url: camera.stream_url,
-        stream_type: camera.stream_type,
-        location: camera.location || '',
+        tc_name: camera.tc_name || '',
+        tc_code: camera.tc_code || '',
+        camera_name: camera.camera_name || '',
+        url: camera.url || '',
+        camera_category: camera.camera_category || '',
+        ...(examLinkType === 'HLS' ? {
+          date_of_assessment: camera.date_of_assessment || '',
+          shift_of_assessment: camera.shift_of_assessment || '',
+        } : {
+          city: camera.city || '',
+          state: camera.state || '',
+        })
       });
     } else {
       setEditingCamera(null);
       setFormData({
-        camera_id: '',
-        stream_url: '',
-        stream_type: 'RTSP',
-        location: '',
+        tc_name: '',
+        tc_code: '',
+        camera_name: '',
+        url: '',
+        camera_category: '',
+        ...(examLinkType === 'HLS' ? {
+          date_of_assessment: '',
+          shift_of_assessment: '',
+        } : {
+          city: '',
+          state: '',
+        })
       });
     }
     setOpenDialog(true);
@@ -130,7 +149,7 @@ const Cameras = () => {
     
     try {
       if (editingCamera) {
-        await camerasAPI.update(editingCamera.id, formData);
+        await camerasAPI.update(editingCamera.id, formData, selectedExam);
       } else {
         await camerasAPI.create(selectedExam, formData);
       }
@@ -144,7 +163,7 @@ const Cameras = () => {
   const handleDelete = async (id) => {
     if (window.confirm('Are you sure you want to delete this camera?')) {
       try {
-        await camerasAPI.delete(id);
+        await camerasAPI.delete(id, selectedExam);
         loadCameras();
       } catch (error) {
         alert('Failed to delete camera');
@@ -178,6 +197,9 @@ const Cameras = () => {
     }
   };
 
+  const selectedExamData = exams.find((e) => e.id === Number(selectedExam));
+  const currentLinkType = examLinkType || selectedExamData?.link_type || 'Unknown';
+
   return (
     <Box>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
@@ -186,7 +208,7 @@ const Cameras = () => {
             Camera Links
           </Typography>
           <Typography variant="body1" color="text.secondary">
-            Manage CCTV camera stream URLs
+            Manage CCTV camera stream URLs {selectedExamData && `(${currentLinkType})`}
           </Typography>
         </Box>
         <Box display="flex" gap={2}>
@@ -220,7 +242,7 @@ const Cameras = () => {
           <MenuItem value="">Select an exam</MenuItem>
           {exams.map((exam) => (
             <MenuItem key={exam.id} value={exam.id}>
-              {exam.exam_name} ({exam.exam_body})
+              {exam.exam_name} ({exam.exam_body}) - {exam.link_type}
             </MenuItem>
           ))}
         </TextField>
@@ -228,8 +250,7 @@ const Cameras = () => {
 
       {uploadResult && (
         <Alert severity="success" sx={{ mb: 3 }} onClose={() => setUploadResult(null)}>
-          Successfully imported {uploadResult.count} camera links
-          {uploadResult.errors?.length > 0 && ` (${uploadResult.errors.length} errors)`}
+          {uploadResult.message || `Successfully imported camera links`}
         </Alert>
       )}
 
@@ -242,28 +263,54 @@ const Cameras = () => {
           <Table>
             <TableHead>
               <TableRow>
-                <TableCell><strong>Camera ID</strong></TableCell>
-                <TableCell><strong>Stream URL</strong></TableCell>
-                <TableCell><strong>Type</strong></TableCell>
-                <TableCell><strong>Location</strong></TableCell>
+                <TableCell><strong>TC Name</strong></TableCell>
+                <TableCell><strong>TC Code</strong></TableCell>
+                <TableCell><strong>Camera Name</strong></TableCell>
+                {examLinkType === 'HLS' && (
+                  <>
+                    <TableCell><strong>Date of Assessment</strong></TableCell>
+                    <TableCell><strong>Shift</strong></TableCell>
+                  </>
+                )}
+                {examLinkType === 'RTSP' && (
+                  <>
+                    <TableCell><strong>City</strong></TableCell>
+                    <TableCell><strong>State</strong></TableCell>
+                  </>
+                )}
+                <TableCell><strong>Category</strong></TableCell>
+                <TableCell><strong>URL</strong></TableCell>
                 <TableCell align="right"><strong>Actions</strong></TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {cameras.map((camera) => (
                 <TableRow key={camera.id}>
-                  <TableCell>{camera.camera_id}</TableCell>
-                  <TableCell sx={{ maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {camera.stream_url}
-                  </TableCell>
+                  <TableCell>{camera.tc_name || '-'}</TableCell>
+                  <TableCell>{camera.tc_code || '-'}</TableCell>
+                  <TableCell>{camera.camera_name || '-'}</TableCell>
+                  {examLinkType === 'HLS' && (
+                    <>
+                      <TableCell>{camera.date_of_assessment || '-'}</TableCell>
+                      <TableCell>{camera.shift_of_assessment || '-'}</TableCell>
+                    </>
+                  )}
+                  {examLinkType === 'RTSP' && (
+                    <>
+                      <TableCell>{camera.city || '-'}</TableCell>
+                      <TableCell>{camera.state || '-'}</TableCell>
+                    </>
+                  )}
                   <TableCell>
                     <Chip
-                      label={camera.stream_type}
+                      label={camera.camera_category || 'N/A'}
                       size="small"
-                      color={camera.stream_type === 'RTSP' ? 'primary' : 'secondary'}
+                      color="default"
                     />
                   </TableCell>
-                  <TableCell>{camera.location || '-'}</TableCell>
+                  <TableCell sx={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }} title={camera.url}>
+                    {camera.url}
+                  </TableCell>
                   <TableCell align="right">
                     <IconButton size="small" onClick={() => handleOpenDialog(camera)}>
                       <Edit fontSize="small" />
@@ -294,46 +341,92 @@ const Cameras = () => {
               {error}
             </Alert>
           )}
+          
           <TextField
-            fullWidth
-            label="Camera ID"
-            name="camera_id"
-            value={formData.camera_id}
-            onChange={handleChange}
-            margin="normal"
-            required
-          />
+             fullWidth
+             label="TC Name"
+             name="tc_name"
+             value={formData.tc_name}
+             onChange={handleChange}
+             margin="normal"
+           />
+           <TextField
+             fullWidth
+             label="TC Code"
+             name="tc_code"
+             value={formData.tc_code}
+             onChange={handleChange}
+             margin="normal"
+           />
+           <TextField
+             fullWidth
+             label="Camera Name"
+             name="camera_name"
+             value={formData.camera_name}
+             onChange={handleChange}
+             margin="normal"
+           />
+           <TextField
+             fullWidth
+             label="Camera Category"
+             name="camera_category"
+             value={formData.camera_category}
+             onChange={handleChange}
+             margin="normal"
+           />
+           
+           {currentLinkType === 'HLS' && (
+             <>
+               <TextField
+                 fullWidth
+                 label="Date of Assessment"
+                 name="date_of_assessment"
+                 value={formData.date_of_assessment}
+                 onChange={handleChange}
+                 margin="normal"
+                 placeholder="YYYY-MM-DD"
+               />
+               <TextField
+                 fullWidth
+                 label="Shift of Assessment"
+                 name="shift_of_assessment"
+                 value={formData.shift_of_assessment}
+                 onChange={handleChange}
+                 margin="normal"
+               />
+             </>
+           )}
+
+           {currentLinkType === 'RTSP' && (
+             <>
+               <TextField
+                 fullWidth
+                 label="City"
+                 name="city"
+                 value={formData.city}
+                 onChange={handleChange}
+                 margin="normal"
+               />
+               <TextField
+                 fullWidth
+                 label="State"
+                 name="state"
+                 value={formData.state}
+                 onChange={handleChange}
+                 margin="normal"
+               />
+             </>
+           )}
+
           <TextField
             fullWidth
             label="Stream URL"
-            name="stream_url"
-            value={formData.stream_url}
+            name="url"
+            value={formData.url}
             onChange={handleChange}
             margin="normal"
             required
-            placeholder="rtsp://192.168.1.100:554/stream"
-          />
-          <TextField
-            fullWidth
-            select
-            label="Stream Type"
-            name="stream_type"
-            value={formData.stream_type}
-            onChange={handleChange}
-            margin="normal"
-            required
-          >
-            <MenuItem value="RTSP">RTSP</MenuItem>
-            <MenuItem value="HLS">HLS</MenuItem>
-          </TextField>
-          <TextField
-            fullWidth
-            label="Location"
-            name="location"
-            value={formData.location}
-            onChange={handleChange}
-            margin="normal"
-            placeholder="Room 101, Building A"
+            placeholder={currentLinkType === 'RTSP' ? "rtsp://192.168.1.100:554/stream" : "https://domain.com/stream.m3u8"}
           />
         </DialogContent>
         <DialogActions>
@@ -354,7 +447,9 @@ const Cameras = () => {
             </Alert>
           )}
           <Typography variant="body2" color="text.secondary" mb={2}>
-            Upload an Excel file with columns: camera_id, stream_url, location
+            {currentLinkType === 'HLS' 
+              ? "Upload an Excel file with columns: TC Name, TC code, Camera Name, Date of Assessment, Shift of Assessment, URL, camera category" 
+              : "Upload an Excel file with columns: TC Name, TC Code, Camera Name, City, State, URL, camera category"}
           </Typography>
           <Button
             variant="outlined"

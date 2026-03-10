@@ -7,57 +7,114 @@ const { Op } = require("sequelize");
 
 /**
  * Get pending assignments (for script server polling)
- * Returns assignments with status=PENDING that are ready to run
+ *
+ * Returns PENDING assignments that are coming up within the next
+ * LOOKAHEAD_MINUTES (default: 3) or are up to GRACE_MINUTES (default: 30)
+ * overdue — so the poller can schedule them via setTimeout to fire at exactly
+ * custom_start_time.
+ *
+ * Checks:
+ *   1. status = PENDING, is_active = TRUE on assignment
+ *   2. Exam is active and today is within exam's start_date / end_date
+ *   3. custom_start_time falls within (NOW - grace) … (NOW + lookahead)
+ *      Falls back to shift start_time when custom_start_time is NULL
+ *
+ * NOTE: No dependency on shift start/end window — the poller owns scheduling.
  */
 exports.getPending = async (req, res) => {
-    const limit = parseInt(req.query.limit) || 50;
+    const limit         = parseInt(req.query.limit)    || 50;
+    const lookaheadMins = parseInt(req.query.lookahead) || 3;
+    const graceMins     = parseInt(req.query.grace)     || 30;
 
-    const assignments = await ShiftScriptAssignment.findAll({
-        where: {
-            status: "PENDING",
-            is_active: true,
-        },
-        include: [
-            {
-                model: Script,
-                as: "script",
-                attributes: ["id", "script_id", "script_path", "name", "parameters_schema", "default_duration_minutes"],
-            },
-            {
-                model: ExamShift,
-                as: "shift",
-                attributes: ["id", "shift_name", "start_time", "end_time"],
-                include: [
-                    {
-                        model: Exam,
-                        as: "exam",
-                        attributes: ["id", "exam_name"],
-                    },
-                ],
-            },
-        ],
-        order: [["created_at", "ASC"]],
-        limit,
+    const { sequelize } = require("../config/db");
+
+    // Compute window boundaries in JS — avoids unreliable SEC_TO_TIME(:param) in Sequelize
+    const toTimeStr = (date) =>
+        date.toTimeString().substring(0, 8); // "HH:MM:SS"
+
+    const now        = new Date();
+    const windowStart = new Date(now.getTime() - graceMins      * 60 * 1000);
+    const windowEnd   = new Date(now.getTime() + lookaheadMins  * 60 * 1000);
+    const windowStartStr = toTimeStr(windowStart); // e.g. "11:28:05"
+    const windowEndStr   = toTimeStr(windowEnd);   // e.g. "12:01:05"
+    const todayStr       = now.toISOString().split("T")[0];
+
+    const rows = await sequelize.query(`
+        SELECT
+            ssa.id,
+            ssa.shift_id,
+            ssa.script_id,
+            ssa.custom_start_time,
+            ssa.custom_end_time,
+            ssa.custom_frequency_minutes,
+            ssa.notes,
+            s.script_path,
+            s.name                     AS task_name,
+            s.parameters_schema        AS task_parameters,
+            s.default_duration_minutes AS duration_minutes,
+            es.shift_name,
+            es.start_time              AS shift_start_time,
+            es.end_time                AS shift_end_time,
+            e.exam_name,
+            e.id                       AS exam_id,
+            e.skip_days,
+            e.skip_dates
+        FROM shift_script_assignments ssa
+        JOIN scripts     s  ON s.id  = ssa.script_id
+        JOIN exam_shifts es ON es.id = ssa.shift_id
+        JOIN exams       e  ON e.id  = es.exam_id
+        WHERE
+            ssa.status    = 'PENDING'
+            AND ssa.is_active = TRUE
+            AND e.is_active   = TRUE
+            AND (e.start_date IS NULL OR e.start_date <= ?)
+            AND (e.end_date   IS NULL OR e.end_date   >= ?)
+            AND COALESCE(ssa.custom_start_time, es.start_time) BETWEEN ? AND ?
+        ORDER BY COALESCE(ssa.custom_start_time, es.start_time) ASC
+        LIMIT ?
+    `, {
+        replacements: [todayStr, todayStr, windowStartStr, windowEndStr, limit],
+        type: sequelize.QueryTypes.SELECT,
     });
 
-    // Flatten for the script-server poller
-    const data = assignments.map((a) => {
-        const plain = a.toJSON();
+
+
+    // Filter skip_days / skip_dates in JS (JSON columns are easier here)
+    const DAY_NAMES = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+    const todayDay  = DAY_NAMES[now.getDay()];
+    // todayStr already defined above
+
+    const ready = rows.filter((row) => {
+        const skipDays  = Array.isArray(row.skip_days)
+            ? row.skip_days  : (row.skip_days  ? JSON.parse(row.skip_days)  : []);
+        const skipDates = Array.isArray(row.skip_dates)
+            ? row.skip_dates : (row.skip_dates ? JSON.parse(row.skip_dates) : []);
+        if (skipDays.includes(todayDay))   return false;
+        if (skipDates.includes(todayStr)) return false;
+        return true;
+    });
+
+    // Attach the resolved scheduled_time string so the poller can compute its delay
+    const data = ready.map((row) => {
+        const startTimeStr = row.custom_start_time || row.shift_start_time; // "HH:MM:SS"
         return {
-            id: plain.id,
-            script_path: plain.script?.script_path || null,
-            task_name: plain.script?.name || null,
-            task_parameters: plain.script?.parameters_schema || null,
-            duration_minutes: plain.script?.default_duration_minutes || null,
-            shift_name: plain.shift?.shift_name || null,
-            exam_name: plain.shift?.exam?.exam_name || null,
+            id:               row.id,
+            script_path:      row.script_path,
+            task_name:        row.task_name,
+            task_parameters:  row.task_parameters,
+            duration_minutes: row.duration_minutes,
+            shift_name:       row.shift_name,
+            exam_name:        row.exam_name,
+            // ISO datetime the poller should fire this assignment at exactly
+            scheduled_at:     `${todayStr}T${startTimeStr}`,
             execution_metadata: {
-                assignment_id: plain.id,
-                script_id: plain.script?.id,
-                script_name: plain.script?.name,
-                shift_id: plain.shift_id,
-                shift_name: plain.shift?.shift_name,
-                exam_name: plain.shift?.exam?.exam_name,
+                assignment_id: row.id,
+                script_id:     row.script_id,
+                script_name:   row.task_name,
+                shift_id:      row.shift_id,
+                shift_name:    row.shift_name,
+                exam_name:     row.exam_name,
+                exam_id:       row.exam_id,
             },
         };
     });

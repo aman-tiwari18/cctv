@@ -189,58 +189,75 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
                     </Box>
                 ) : assignments.length > 0 ? (
                     <List>
-                        {assignments.map((assignment) => (
-                            <ListItem key={assignment.id} divider>
-                                <ListItemText
-                                    primary={
-                                        <Box display="flex" alignItems="center" gap={1}>
-                                            <Typography variant="body1" fontWeight="medium">
-                                                {assignment.script?.name || 'Unknown Script'}
-                                            </Typography>
-                                            {assignment.script?.category && (
+                        {assignments
+                            .filter((assignment) => assignment.is_active)
+                            .map((assignment) => (
+                                <ListItem key={assignment.id} divider>
+                                    <ListItemText
+                                        primary={
+                                            <Box display="flex" alignItems="center" gap={1}>
+                                                <Typography variant="body1" fontWeight="medium">
+                                                    {assignment.script?.name || 'Unknown Script'}
+                                                </Typography>
+
+                                                {assignment.script?.category && (
+                                                    <Chip
+                                                        label={assignment.script.category}
+                                                        size="small"
+                                                        color="secondary"
+                                                        variant="outlined"
+                                                    />
+                                                )}
+
                                                 <Chip
-                                                    label={assignment.script.category}
+                                                    label={`Every ${assignment.custom_frequency_minutes ||
+                                                        assignment.script?.default_frequency_minutes ||
+                                                        '?'
+                                                        } min`}
                                                     size="small"
-                                                    color="secondary"
+                                                    color="primary"
                                                     variant="outlined"
                                                 />
-                                            )}
-                                            <Chip
-                                                label={`Every ${assignment.custom_frequency_minutes || assignment.script?.default_frequency_minutes || '?'} min`}
-                                                size="small"
-                                                color="primary"
-                                                variant="outlined"
-                                            />
-                                        </Box>
-                                    }
-                                    secondary={
-                                        <Box mt={0.5}>
-                                            <Typography variant="caption" display="block">
-                                                {assignment.script?.script_path}
-                                            </Typography>
-                                            {(assignment.custom_start_time || assignment.custom_end_time) && (
-                                                <Typography variant="caption" color="text.secondary">
-                                                    Custom Time: {assignment.custom_start_time || 'N/A'} - {assignment.custom_end_time || 'N/A'}
+                                            </Box>
+                                        }
+                                        secondary={
+                                            <Box mt={0.5}>
+                                                <Typography variant="caption" display="block">
+                                                    {assignment.script?.script_path}
                                                 </Typography>
-                                            )}
-                                            {assignment.notes && (
-                                                <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5 }}>
-                                                    Note: {assignment.notes}
-                                                </Typography>
-                                            )}
-                                        </Box>
-                                    }
-                                />
-                                <ListItemSecondaryAction>
-                                    <IconButton size="small" onClick={() => handleOpenDialog(assignment)}>
-                                        <Edit fontSize="small" />
-                                    </IconButton>
-                                    <IconButton size="small" onClick={() => handleDelete(assignment.id)}>
-                                        <Delete fontSize="small" />
-                                    </IconButton>
-                                </ListItemSecondaryAction>
-                            </ListItem>
-                        ))}
+
+                                                {(assignment.custom_start_time || assignment.custom_end_time) && (
+                                                    <Typography variant="caption" color="text.secondary">
+                                                        Custom Time: {assignment.custom_start_time || 'N/A'} -{' '}
+                                                        {assignment.custom_end_time || 'N/A'}
+                                                    </Typography>
+                                                )}
+
+                                                {assignment.notes && (
+                                                    <Typography
+                                                        variant="caption"
+                                                        display="block"
+                                                        color="text.secondary"
+                                                        sx={{ mt: 0.5 }}
+                                                    >
+                                                        Note: {assignment.notes}
+                                                    </Typography>
+                                                )}
+                                            </Box>
+                                        }
+                                    />
+
+                                    <ListItemSecondaryAction>
+                                        <IconButton size="small" onClick={() => handleOpenDialog(assignment)}>
+                                            <Edit fontSize="small" />
+                                        </IconButton>
+
+                                        <IconButton size="small" onClick={() => handleDelete(assignment.id)}>
+                                            <Delete fontSize="small" />
+                                        </IconButton>
+                                    </ListItemSecondaryAction>
+                                </ListItem>
+                            ))}
                     </List>
                 ) : (
                     <Typography variant="body2" color="text.secondary" textAlign="center" py={2}>

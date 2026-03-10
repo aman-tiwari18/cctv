@@ -42,17 +42,17 @@ export const examsAPI = {
 };
 
 export const camerasAPI = {
-    getAll: (examId) => api.get(`/exams/${examId}/cameras`),
+    getByExam: (examId, params) => api.get(`/exams/${examId}/cameras`, { params }),
     create: (examId, cameraData) => api.post(`/exams/${examId}/cameras`, cameraData),
-    upload: (examId, file) => {
+    uploadExcel: (examId, file) => {
         const formData = new FormData();
         formData.append('file', file);
         return api.post(`/exams/${examId}/cameras/upload`, formData, {
             headers: { 'Content-Type': 'multipart/form-data' }
         });
     },
-    update: (id, cameraData) => api.put(`/cameras/${id}`, cameraData),
-    delete: (id) => api.delete(`/cameras/${id}`)
+    update: (id, cameraData, examId) => api.put(`/exams/${examId}/cameras/${id}`, cameraData),
+    delete: (id, examId) => api.delete(`/exams/${examId}/cameras/${id}`)
 };
 
 export const scriptsAPI = {

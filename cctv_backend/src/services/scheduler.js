@@ -4,7 +4,6 @@ const ExamShift = require('../models/ExamShift');
 const Exam = require('../models/Exam');
 const Script = require('../models/Script');
 const ScriptExecution = require('../models/ScriptExecution');
-const CameraLink = require('../models/CameraLink');
 const ShiftScriptAssignment = require('../models/ShiftScriptAssignment');
 const logger = require('../utils/logger');
 
