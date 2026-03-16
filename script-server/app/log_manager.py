@@ -61,7 +61,7 @@ class LogManager:
         for file_path in day_dir.iterdir():
             if file_path.is_file() and file_path.name.endswith(".log"):
                 import re
-                match = re.search(r"execution-(\d+)\.log", file_path.name)
+                match = re.search(r"execution-([\w-]+)\.log", file_path.name)
                 execution_id = match.group(1) if match else None
                 files.append({
                     "filename": file_path.name,

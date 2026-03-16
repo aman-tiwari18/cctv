@@ -22,6 +22,9 @@ class ScriptRunner:
         execution_id = str(execution.get("id"))
 
         full_script_path = self.scripts_dir / script_path
+
+        if not full_script_path.exists():
+            raise FileNotFoundError(f"Script not found: {full_script_path}")
         
         logger.info(f"Executing script: {full_script_path} for execution {execution_id}")
 
@@ -75,7 +78,7 @@ class ScriptRunner:
                         logger.debug(f"Script {execution_id} stdout: {text}")
                         log_manager.write_log(execution_id, text, "INFO")
                         
-            return "\\n".join(data_chunks)
+            return "\n".join(data_chunks)
 
         try:
             if timeout_s:
