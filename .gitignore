@@ -57,5 +57,7 @@ Desktop.ini
 cctv_backend/uploads/
 cctv_backend/logs/ 
 cctv_backend/script-server/logs/
+venv/
 .venv/
-
+script_server/venv
+node_modules/
