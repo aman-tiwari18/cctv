@@ -106,35 +106,26 @@ CREATE TABLE IF NOT EXISTS scripts (
   id                        INT AUTO_INCREMENT PRIMARY KEY,
   script_id                 VARCHAR(100) NOT NULL UNIQUE COMMENT 'e.g. face_detection',
   name                      VARCHAR(255) NOT NULL,
-  description               TEXT,
-  script_path               VARCHAR(500) NOT NULL,
   default_frequency_minutes INT         DEFAULT 5,
   default_duration_minutes  INT         DEFAULT 1,
-  category                  VARCHAR(100),
-  parameters_schema         JSON,
-  version                   VARCHAR(50)  DEFAULT '1.0.0',
   is_active                 BOOLEAN      DEFAULT TRUE,
   created_at                TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
   updated_at                TIMESTAMP    DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_script_id (script_id),
-  INDEX idx_category  (category),
   INDEX idx_is_active (is_active)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Seed scripts
-INSERT INTO scripts (script_id, name, description, script_path, default_frequency_minutes, default_duration_minutes, category) VALUES
-  ('face_detection',  'Face Recognition & Detection', 'Detects and recognizes faces in the camera feed. Alerts on unauthorized persons.', 'face_detection.sh',  5,  2, 'Detection'),
-  ('motion_detection','Motion Activity Monitoring',   'Detects significant motion in exam halls during restricted times.',               'motion_detection.py', 15, 5, 'Detection'),
-  ('object_detection','Object Detection',             'Detects objects of interest in the camera feed.',                                'object_detection.py', 10, 3, 'Detection'),
-  ('face_recognition','Face Recognition',             'Recognizes and matches faces against a reference database.',                      'face_recognition.py', 10, 3, 'Detection'),
-  ('audio_analysis',  'Audio Level Monitoring',       'Monitors noise levels to detect potential cheating via communication.',           'scripts/audio_analysis.sh', 10, 3, 'Monitoring'),
-  ('test_simple',     'System Health Check (Simple)', 'Basic connectivity and system health verification.',                             'test_simple.sh',      60, 1, 'Testing'),
-  ('test_param',      'Parameter Validation Test',    'Verifies that parameters are correctly passed to the analysis engine.',           'scripts/test_param.sh', 30, 1, 'Testing'),
-  ('test_random',     'Random Result Generator',      'Randomly generates success/failure results to test error handling.',             'scripts/test_random.sh', 10, 1, 'Testing')
+INSERT INTO scripts (script_id, name, default_frequency_minutes, default_duration_minutes, is_active) VALUES
+  ('server',      'Server Room Detection',  5, 1, 1),
+  ('crowd',       'Crowd Detection',        5, 1, 1),
+  ('intruder',    'Intruder Detection',     5, 1, 1),
+  ('entry_exit',  'Entry Exit Detection',   5, 1, 1),
+  ('proximity',   'Proximity Detection',    5, 1, 1),
+  ('phone',       'Phone Detection',        5, 1, 1),
+  ('invigilator', 'Invigilator Detection',  5, 1, 1)
 ON DUPLICATE KEY UPDATE
-  name        = VALUES(name),
-  description = VALUES(description),
-  script_path = VALUES(script_path);
+  name        = VALUES(name);
 
 -- ============================================================
 -- Table: shift_script_assignments

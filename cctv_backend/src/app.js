@@ -42,11 +42,19 @@ app.get('/health', (req, res) => {
 
 // API Routes
 app.use('/api/auth', authRoutes);
-app.use('/api', cameraLinkRoutes);          // /api/exams/:examId/cameras, /api/cameras/:id
-app.use('/api', shiftScriptRoutes);         // /api/shifts/:shiftId/scripts, /api/exams/:examId/shift-scripts
-app.use('/api/exams', examRoutes);          // /api/exams (CRUD)
-app.use('/api/executions', executionRoutes); // /api/executions
-app.use('/api/scripts', scriptRoutes);       // /api/scripts (CRUD)
+app.use('/api', cameraLinkRoutes);
+app.use('/api', shiftScriptRoutes);
+app.use('/api/exams', examRoutes);
+app.use('/api/executions', executionRoutes);
+app.use('/api/scripts', scriptRoutes);
+
+// Support for /cctv prefixed routes as requested
+app.use('/cctv/api/auth', authRoutes);
+app.use('/cctv/api', cameraLinkRoutes);
+app.use('/cctv/api', shiftScriptRoutes);
+app.use('/cctv/api/exams', examRoutes);
+app.use('/cctv/api/executions', executionRoutes);
+app.use('/cctv/api/scripts', scriptRoutes);
 
 // 404 handler
 app.use(notFoundHandler);

@@ -87,7 +87,10 @@ class Poller:
             if scheduled_at_str.endswith("Z"):
                 scheduled_at_str = scheduled_at_str[:-1] + "+00:00"
             scheduled_at = datetime.fromisoformat(scheduled_at_str)
-            now = datetime.now(timezone.utc)
+            if scheduled_at.tzinfo is not None:
+                now = datetime.now(timezone.utc)
+            else:
+                now = datetime.now()
             delay_s = (scheduled_at - now).total_seconds()
         except Exception as e:
             logger.error(f"Failed to parse time for assignment {assignment_id}: {e}")
@@ -127,8 +130,12 @@ class Poller:
             logger.info(f"✔ Assignment {assignment_id} completed")
             
         except Exception as e:
-            logger.error(f"✘ Assignment {assignment_id} failed: {e}")
-            await self.update_assignment_status(assignment_id, "FAILED", {"error_log": str(e)})
+            if "__TIMEOUT_COMPLETED__" in str(e):
+                logger.info(f"✔ Assignment {assignment_id} timed out after duration — marking COMPLETED")
+                await self.update_assignment_status(assignment_id, "COMPLETED", {"result_data": {"note": "Script ran for full duration"}})
+            else:
+                logger.error(f"✘ Assignment {assignment_id} failed: {e}")
+                await self.update_assignment_status(assignment_id, "FAILED", {"error_log": str(e)})
             
         finally:
             self.running_scripts.discard(assignment_id)

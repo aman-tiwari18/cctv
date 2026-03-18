@@ -4,15 +4,14 @@ const Script = require("../models/Script");
  * Get all available scripts
  */
 exports.getAll = async (req, res) => {
-    const { is_active, category } = req.query;
+    const { is_active } = req.query;
 
     const where = {};
     if (is_active !== undefined) where.is_active = is_active === "true";
-    if (category) where.category = category;
 
     const scripts = await Script.findAll({
         where,
-        order: [["category", "ASC"], ["name", "ASC"]],
+        order: [["name", "ASC"]],
     });
 
     res.json({
@@ -48,13 +47,8 @@ exports.createScript = async (req, res) => {
     const {
         script_id,
         name,
-        description,
-        script_path,
         default_frequency_minutes,
         default_duration_minutes,
-        category,
-        parameters_schema,
-        version,
     } = req.body;
 
     // Check for duplicate script_id
@@ -69,13 +63,8 @@ exports.createScript = async (req, res) => {
     const script = await Script.create({
         script_id,
         name,
-        description,
-        script_path,
         default_frequency_minutes: default_frequency_minutes || 5,
         default_duration_minutes: default_duration_minutes || 1,
-        category: category || null,
-        parameters_schema: parameters_schema || null,
-        version: version || "1.0.0",
     });
 
     res.status(201).json({

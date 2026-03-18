@@ -8,9 +8,21 @@ export default defineConfig({
         port: 5173,
         proxy: {
             '/api': {
-                target: 'http://localhost:3000',
+                target: 'http://localhost:3001',
                 changeOrigin: true,
-            }
+            },
+            '/cctv/api': {
+                target: 'http://localhost:3001',
+                changeOrigin: true,
+            },
+            '/detections': {
+                target: 'http://localhost:8000',
+                changeOrigin: true,
+            },
+            '/detection-images': {
+                target: 'http://localhost:8000',
+                changeOrigin: true,
+            },
         }
     }
 })

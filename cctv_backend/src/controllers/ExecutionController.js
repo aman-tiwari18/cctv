@@ -44,13 +44,12 @@ exports.getPending = async (req, res) => {
             ssa.id,
             ssa.shift_id,
             ssa.script_id,
+            s.script_id                AS script_code,
             ssa.custom_start_time,
             ssa.custom_end_time,
             ssa.custom_frequency_minutes,
             ssa.notes,
-            s.script_path,
             s.name                     AS task_name,
-            s.parameters_schema        AS task_parameters,
             s.default_duration_minutes AS duration_minutes,
             es.shift_name,
             es.start_time              AS shift_start_time,
@@ -97,19 +96,21 @@ exports.getPending = async (req, res) => {
     // Attach the resolved scheduled_time string so the poller can compute its delay
     const data = ready.map((row) => {
         const startTimeStr = row.custom_start_time || row.shift_start_time; // "HH:MM:SS"
+        const endTimeStr   = row.custom_end_time   || row.shift_end_time;   // "HH:MM:SS"
         return {
             id:               row.id,
-            script_path:      row.script_path,
             task_name:        row.task_name,
-            task_parameters:  row.task_parameters,
             duration_minutes: row.duration_minutes,
             shift_name:       row.shift_name,
             exam_name:        row.exam_name,
             // ISO datetime the poller should fire this assignment at exactly
             scheduled_at:     `${todayStr}T${startTimeStr}`,
+            // ISO datetime the script should stop at
+            end_at:           endTimeStr ? `${todayStr}T${endTimeStr}` : null,
             execution_metadata: {
                 assignment_id: row.id,
                 script_id:     row.script_id,
+                script_code:   row.script_code,
                 script_name:   row.task_name,
                 shift_id:      row.shift_id,
                 shift_name:    row.shift_name,
@@ -198,7 +199,7 @@ exports.getAll = async (req, res) => {
             {
                 model: Script,
                 as: "script",
-                attributes: ["id", "name", "script_path", "script_id", "category"],
+                attributes: ["id", "name", "script_id"],
             },
             includeShift,
         ],
@@ -249,7 +250,7 @@ exports.getById = async (req, res) => {
             {
                 model: Script,
                 as: "script",
-                attributes: ["id", "name", "script_path", "script_id", "category", "description"],
+                attributes: ["id", "name", "script_id"],
             },
             {
                 model: ExamShift,
@@ -295,7 +296,7 @@ exports.getByShift = async (req, res) => {
             {
                 model: Script,
                 as: "script",
-                attributes: ["id", "name", "script_path", "script_id", "category"],
+                attributes: ["id", "name", "script_id"],
             },
         ],
         order: [["updated_at", "DESC"]],
@@ -322,7 +323,7 @@ exports.getRecent = async (req, res) => {
             {
                 model: Script,
                 as: "script",
-                attributes: ["id", "name", "script_path", "script_id"],
+                attributes: ["id", "name", "script_id"],
             },
             {
                 model: ExamShift,

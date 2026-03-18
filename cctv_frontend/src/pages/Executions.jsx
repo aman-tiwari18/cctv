@@ -143,11 +143,6 @@ const Executions = () => {
                   <TableCell>#{assignment.id}</TableCell>
                   <TableCell>
                     {assignment.script?.name || '-'}
-                    {assignment.script?.category && (
-                      <Typography variant="caption" display="block" color="text.secondary">
-                        {assignment.script.category}
-                      </Typography>
-                    )}
                   </TableCell>
                   <TableCell>{assignment.shift?.shift_name || '-'}</TableCell>
                   <TableCell>
@@ -208,15 +203,6 @@ const Executions = () => {
                 </Typography>
                 <Typography variant="body1">
                   {selectedAssignment.script?.name || '-'}
-                </Typography>
-              </Box>
-
-              <Box mb={2}>
-                <Typography variant="subtitle2" color="text.secondary">
-                  Script Path
-                </Typography>
-                <Typography variant="body1">
-                  {selectedAssignment.script?.script_path || '-'}
                 </Typography>
               </Box>
 

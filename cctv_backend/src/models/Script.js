@@ -27,16 +27,6 @@ const Script = sequelize.define(
             allowNull: false,
         },
 
-        description: {
-            type: DataTypes.TEXT,
-            allowNull: true,
-        },
-
-        script_path: {
-            type: DataTypes.STRING(500),
-            allowNull: false,
-        },
-
         default_frequency_minutes: {
             type: DataTypes.INTEGER,
             defaultValue: 5,
@@ -45,21 +35,6 @@ const Script = sequelize.define(
         default_duration_minutes: {
             type: DataTypes.INTEGER,
             defaultValue: 1,
-        },
-
-        category: {
-            type: DataTypes.STRING(100),
-            allowNull: true,
-        },
-
-        parameters_schema: {
-            type: DataTypes.JSON,
-            allowNull: true,
-        },
-
-        version: {
-            type: DataTypes.STRING(50),
-            defaultValue: "1.0.0",
         },
 
         is_active: {

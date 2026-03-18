@@ -200,15 +200,6 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
                                                     {assignment.script?.name || 'Unknown Script'}
                                                 </Typography>
 
-                                                {assignment.script?.category && (
-                                                    <Chip
-                                                        label={assignment.script.category}
-                                                        size="small"
-                                                        color="secondary"
-                                                        variant="outlined"
-                                                    />
-                                                )}
-
                                                 <Chip
                                                     label={`Every ${assignment.custom_frequency_minutes ||
                                                         assignment.script?.default_frequency_minutes ||
@@ -221,12 +212,7 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
                                             </Box>
                                         }
                                         secondary={
-                                            <Box mt={0.5}>
-                                                <Typography variant="caption" display="block">
-                                                    {assignment.script?.script_path}
-                                                </Typography>
-
-                                                {(assignment.custom_start_time || assignment.custom_end_time) && (
+                                            <Box mt={0.5}>                                                {(assignment.custom_start_time || assignment.custom_end_time) && (
                                                     <Typography variant="caption" color="text.secondary">
                                                         Custom Time: {assignment.custom_start_time || 'N/A'} -{' '}
                                                         {assignment.custom_end_time || 'N/A'}
@@ -312,9 +298,6 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
                             <MenuItem key={script.id} value={script.id}>
                                 <Box>
                                     <Typography variant="body2">{script.name}</Typography>
-                                    <Typography variant="caption" color="text.secondary">
-                                        {script.category} • {script.script_path}
-                                    </Typography>
                                 </Box>
                             </MenuItem>
                         ))}

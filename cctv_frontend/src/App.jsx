@@ -12,6 +12,7 @@ import Cameras from './pages/Cameras';
 import Shifts from './pages/Shifts';
 import Analytics from './pages/Analytics';
 import Executions from './pages/Executions';
+import Detections from './pages/Detections';
 
 // Create Material-UI theme
 const theme = createTheme({
@@ -74,6 +75,7 @@ function App() {
               <Route path="shifts" element={<Shifts />} />
               <Route path="analytics" element={<Analytics />} />
               <Route path="executions" element={<Executions />} />
+              <Route path="detections" element={<Detections />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

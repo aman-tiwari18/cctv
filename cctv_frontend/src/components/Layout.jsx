@@ -27,6 +27,7 @@ import {
   PlayCircle,
   Logout,
   AccountCircle,
+  CameraAlt,
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -39,6 +40,7 @@ const menuItems = [
   { text: 'Shifts', icon: <Schedule />, path: '/shifts' },
   { text: 'Schedule Scripts', icon: <Analytics />, path: '/analytics' },
   { text: 'Executions', icon: <PlayCircle />, path: '/executions' },
+  { text: 'Detections', icon: <CameraAlt />, path: '/detections' },
 ];
 
 const Layout = () => {

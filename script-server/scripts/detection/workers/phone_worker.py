@@ -1,0 +1,527 @@
+# import time
+# import os
+# import logging
+# from datetime import datetime
+# import cv2
+# from ultralytics import YOLO
+
+# # ================= LOGGING =================
+# logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+# # ================= CONFIG ==================
+# PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+# MODEL_PATH = os.path.join(PROJECT_ROOT, "models/yolov10m.pt")
+# SAVE_FOLDER = os.path.join(PROJECT_ROOT, "results/phone_detection_results")
+
+# CONF_THRESHOLD = 0.25
+# COOLDOWN_TIME = 480  # seconds
+
+# DEVICE_ID = "DAV_NVR"
+# CAMERA_NO = "CH19"
+
+# os.makedirs(SAVE_FOLDER, exist_ok=True)
+
+# # ================= YOLO ====================
+# print("🔄 [PhoneWorker] Loading YOLO model...")
+# yolo_model = YOLO(MODEL_PATH)
+
+# last_save_time = 0
+
+# # =====================================================
+# # PHONE DETECTION LOGIC (SAME CORE)
+# # =====================================================
+# def detect_phone(frame):
+#     global last_save_time
+
+#     results = yolo_model(frame, conf=CONF_THRESHOLD, verbose=False)[0]
+
+#     phone_boxes = []
+
+#     for box in results.boxes:
+#         cls_id = int(box.cls[0])
+#         if results.names.get(cls_id, "") == "cell phone":
+#             phone_boxes.append(box)
+
+#     # draw boxes
+#     for box in phone_boxes:
+#         x1, y1, x2, y2 = map(int, box.xyxy[0])
+#         conf = float(box.conf[0])
+#         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+#         cv2.putText(
+#             frame,
+#             f"Phone {conf:.2f}",
+#             (x1, y1 - 8),
+#             cv2.FONT_HERSHEY_SIMPLEX,
+#             0.6,
+#             (0, 0, 255),
+#             2
+#         )
+
+#     now = time.time()
+
+#     if phone_boxes and (now - last_save_time) >= COOLDOWN_TIME:
+#         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+#         path = f"{SAVE_FOLDER}/{DEVICE_ID}_{CAMERA_NO}_{ts}_phones{len(phone_boxes)}.jpg"
+#         cv2.imwrite(path, frame)
+#         last_save_time = now
+#         logging.warning(
+#             f"[PhoneWorker] 📱 Phone detected! Count={len(phone_boxes)}, saved={path}"
+#         )
+
+#     return len(phone_boxes)
+
+# # =====================================================
+# # WORKER LOOP
+# # =====================================================
+# def phone_worker(frame_queue):
+#     logging.info("🟢 Phone Worker started")
+
+#     while True:
+#         frame = frame_queue.get()
+
+#         if frame is None:
+#             logging.info("🔴 Phone Worker stopping")
+#             break
+
+#         # IMPORTANT: work on a copy
+#         frame = frame.copy()
+
+#         detect_phone(frame)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#working before hls
+# #phone_worker.py
+# import time
+# import os
+# import logging
+# from datetime import datetime
+# import cv2
+# from ultralytics import YOLO
+
+# # ================= LOGGING =================
+# logging.basicConfig(
+#     level=logging.INFO,
+#     format="%(asctime)s - %(levelname)s - %(message)s"
+# )
+
+# # ================= CONFIG ==================
+# PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+# MODEL_PATH = os.path.join(PROJECT_ROOT, "models/yolov10m.pt")
+# SAVE_FOLDER = os.path.join(PROJECT_ROOT, "results/phone_detection_results")
+
+# CONF_THRESHOLD = 0.25
+# COOLDOWN_TIME = 480  # seconds
+
+# os.makedirs(SAVE_FOLDER, exist_ok=True)
+
+# # ================= YOLO ====================
+# print("🔄 [PhoneWorker] Loading YOLO model...")
+# yolo_model = YOLO(MODEL_PATH)
+
+# last_save_times = {}
+
+# # =====================================================
+# # PHONE DETECTION
+# # =====================================================
+# def detect_phone(frame, device_id, camera_no):
+#     results = yolo_model(frame, conf=CONF_THRESHOLD, verbose=False)[0]
+
+#     phone_boxes = []
+
+#     for box in results.boxes:
+#         cls_id = int(box.cls[0])
+#         if results.names.get(cls_id, "") == "cell phone":
+#             phone_boxes.append(box)
+
+#     # draw boxes
+#     for box in phone_boxes:
+#         x1, y1, x2, y2 = map(int, box.xyxy[0])
+#         conf = float(box.conf[0])
+
+#         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+#         cv2.putText(
+#             frame,
+#             f"Phone {conf:.2f}",
+#             (x1, y1 - 8),
+#             cv2.FONT_HERSHEY_SIMPLEX,
+#             0.6,
+#             (0, 0, 255),
+#             2
+#         )
+
+#     key = f"{device_id}_{camera_no}"
+#     now = time.time()
+#     elapsed = now - last_save_times.get(key, 0)
+
+#     if phone_boxes and elapsed >= COOLDOWN_TIME:
+#         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+#         path = (
+#             f"{SAVE_FOLDER}/{key}_{ts}"
+#             f"_phones{len(phone_boxes)}.jpg"
+#         )
+
+#         cv2.imwrite(path, frame)
+#         last_save_times[key] = now
+
+#         logging.warning(
+#             f"[PhoneWorker] 📱 Phone detected! "
+#             f"Device={device_id}, Cam={camera_no}, Count={len(phone_boxes)}"
+#         )
+
+#     return len(phone_boxes)
+
+# # =====================================================
+# # WORKER LOOP (UPDATED)
+# # =====================================================
+# def phone_worker(frame_queue):
+#     logging.info("🟢 Phone Worker started")
+
+#     while True:
+#         data = frame_queue.get()
+
+#         if data is None:
+#             logging.info("🔴 Phone Worker stopping")
+#             break
+
+#         # 🔥 unpack metadata
+#         frame, device_id, camera_no = data
+
+#         frame = frame.copy()
+
+#         detect_phone(frame, device_id, camera_no)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#test
+# workers/phone_worker.py
+"""
+Phone Worker — supports both RTSP (via master_pipeline producer)
+and HLS (via its own internal OpenCV reader).
+
+Merged from:
+  - phone_det_complete.py  (RTSP / DSS flow)
+  - phone_det_tcs.py       (HLS / TCS flow)
+"""
+
+import time
+import os
+import logging
+import threading
+import signal
+from datetime import datetime
+
+import cv2
+from ultralytics import YOLO
+
+# ================= GRACEFUL STOP FLAG =================
+_STOP_EVENT = threading.Event()
+
+def _handle_stop(sig, frame):
+    _STOP_EVENT.set()
+
+signal.signal(signal.SIGINT,  _handle_stop)
+signal.signal(signal.SIGTERM, _handle_stop)
+
+# ================= LOGGING =================
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
+
+# ================= CONFIG ==================
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+MODEL_PATH   = os.path.join(PROJECT_ROOT, "models/yolov10m.pt")
+
+RTSP_SAVE_FOLDER = os.path.join(PROJECT_ROOT, "results/phone_detection_results")
+HLS_SAVE_FOLDER  = os.path.join(PROJECT_ROOT, "results/tcs_detections/phone_detection")
+
+os.makedirs(RTSP_SAVE_FOLDER, exist_ok=True)
+os.makedirs(HLS_SAVE_FOLDER,  exist_ok=True)
+
+CONF_THRESHOLD = 0.25
+COOLDOWN_TIME  = 480    # seconds between saves per camera
+
+HLS_SAMPLE_EVERY = 15   # process every Nth frame
+HLS_FAIL_LIMIT   = 3
+
+# ================= SHARED STATE ============
+last_save_times = {}
+phone_counts    = {}
+_state_lock     = threading.Lock()
+
+# ================= YOLO ====================
+print("🔄 [PhoneWorker] Loading YOLO model...")
+yolo_model = YOLO(MODEL_PATH)
+logger.info("✅ [PhoneWorker] YOLO model loaded")
+
+
+# =====================================================
+# 🔍 CORE DETECTION  (shared by RTSP + HLS paths)
+# =====================================================
+def detect_phone(frame, device_id: str, camera_no: str, save_folder: str):
+    """
+    Run YOLO, detect cell phones, save if found and cooldown passed.
+
+    Returns:
+        phone_count (int)
+    """
+    results   = yolo_model(frame, conf=CONF_THRESHOLD, verbose=False)[0]
+    names     = results.names
+
+    phone_boxes = [
+        box for box in results.boxes
+        if names.get(int(box.cls[0]), "") == "cell phone"
+    ]
+
+    phone_count = len(phone_boxes)
+
+    # ── Draw bounding boxes ──────────────────────────────
+    for box in phone_boxes:
+        x1, y1, x2, y2 = map(int, box.xyxy[0])
+        conf = float(box.conf[0])
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+        cv2.putText(
+            frame, f"Phone {conf:.2f}",
+            (x1, y1 - 8),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2
+        )
+
+    # ── Overlay info ─────────────────────────────────────
+    cv2.putText(frame, f"Phones: {phone_count}",
+                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    cv2.putText(frame, f"Device: {device_id}  Cam: {camera_no}",
+                (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+    # ── Save logic ───────────────────────────────────────
+    key = f"{device_id}_{camera_no}"
+    now = time.time()
+
+    with _state_lock:
+        elapsed = now - last_save_times.get(key, 0)
+
+        if phone_boxes and elapsed >= COOLDOWN_TIME:
+            ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
+            path = os.path.join(
+                save_folder,
+                f"{key}_{ts}_phones{phone_count}.jpg"
+            )
+            cv2.imwrite(path, frame)
+            last_save_times[key] = now
+            logger.warning(
+                f"[PhoneWorker] 📱 Phone detected! "
+                f"Device={device_id} Cam={camera_no} "
+                f"Count={phone_count} "
+                f"💾 Saved → {path}"
+            )
+        elif phone_boxes:
+            remaining = int(COOLDOWN_TIME - elapsed)
+            logger.debug(
+                f"[PhoneWorker] ⏳ Phone detected but cooldown active "
+                f"({remaining}s left) → {key}"
+            )
+
+        phone_counts[key] = phone_counts.get(key, 0) + phone_count
+
+    return phone_count
+
+
+# =====================================================
+# 📡  RTSP PATH  — called by master_pipeline producer
+# =====================================================
+def phone_worker(frame_queue):
+    """
+    Queue-based worker — receives (frame, device_id, camera_no)
+    packets from the RTSP producer.
+    """
+    logger.info("🟢 Phone Worker started")
+
+    while True:
+        data = frame_queue.get()
+        if data is None:
+            logger.info("🔴 Phone Worker stopping")
+            break
+
+        frame, device_id, camera_no = data
+        detect_phone(
+            frame.copy(),
+            str(device_id),
+            str(camera_no),
+            save_folder=RTSP_SAVE_FOLDER
+        )
+
+
+# =====================================================
+# 📡  HLS PATH  — standalone, reads its own stream
+# =====================================================
+def _run_hls_camera(camera_id: str, hls_url: str, camera_name: str = "", max_frames=None):
+    """Open HLS stream and run phone detection until stopped."""
+    from tcs_hls_utils import open_hls_stream
+
+    cap = open_hls_stream(hls_url)
+    if cap is None or not cap.isOpened():
+        logger.error(f"[PhoneWorker][HLS] ❌ Could not open stream for {camera_id}")
+        return False
+
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    if fps <= 0 or fps > 60:
+        fps = 25.0
+
+    logger.info(f"[PhoneWorker][HLS] 🟢 Detection started for {camera_id} @ {fps:.1f} FPS")
+
+    frame_count = 0
+    fail_count  = 0
+    start_time  = time.time()
+    label       = camera_name if camera_name else camera_id
+
+    try:
+        while not _STOP_EVENT.is_set():
+            # Non-blocking read with 5s timeout
+            read_result = [None, None]
+            def _read():
+                read_result[0], read_result[1] = cap.read()
+            t = threading.Thread(target=_read, daemon=True)
+            t.start()
+            t.join(timeout=5)
+
+            if _STOP_EVENT.is_set():
+                break
+
+            ret, frame = read_result
+            if not ret or frame is None:
+                fail_count += 1
+                logger.warning(f"[PhoneWorker][HLS] ⚠️ Frame fail #{fail_count} → {camera_id}")
+                if fail_count >= HLS_FAIL_LIMIT:
+                    logger.error(f"[PhoneWorker][HLS] ❌ Max failures → {camera_id}")
+                    break
+                time.sleep(3)
+                continue
+
+            fail_count   = 0
+            frame_count += 1
+
+            if frame_count % HLS_SAMPLE_EVERY == 0:
+                phone_count = detect_phone(
+                    frame.copy(),
+                    device_id=label,
+                    camera_no="",
+                    save_folder=HLS_SAVE_FOLDER
+                )
+
+                if (frame_count // HLS_SAMPLE_EVERY) % 90 == 0:
+                    if phone_count:
+                        logger.warning(
+                            f"[PhoneWorker][HLS] 📱 Phone detected: {phone_count} → {camera_id}"
+                        )
+                    else:
+                        logger.info(
+                            f"[PhoneWorker][HLS] ✅ Monitoring OK → {camera_id}"
+                        )
+
+            if max_frames and frame_count >= max_frames:
+                break
+
+    except KeyboardInterrupt:
+        _STOP_EVENT.set()
+        logger.info(f"[PhoneWorker][HLS] Interrupted → {camera_id}")
+    except Exception as e:
+        logger.error(f"[PhoneWorker][HLS] Error → {camera_id}: {e}")
+    finally:
+        cap.release()
+        elapsed    = time.time() - start_time
+        actual_fps = frame_count / elapsed if elapsed > 0 else 0
+        logger.info(
+            f"[PhoneWorker][HLS] 🔴 Stopped → {camera_id} | "
+            f"Frames: {frame_count} | Time: {elapsed:.1f}s | FPS: {actual_fps:.1f}"
+        )
+
+    return True
+
+
+def phone_worker_hls(camera_config: dict, max_frames=None):
+    """
+    HLS worker entry point — used by master_pipeline for HLS cameras.
+
+    camera_config = {
+        'camera_id':   str,
+        'stream_url':  str,
+        'camera_name': str,
+    }
+    """
+    from tcs_hls_utils import extract_hls_streaming_url, test_hls_stream
+
+    camera_id   = camera_config.get("camera_id", "unknown")
+    initial_url = camera_config.get("stream_url", "")
+    camera_name = camera_config.get("camera_name", "")
+
+    hls_url = extract_hls_streaming_url(initial_url)
+    if not hls_url:
+        logger.error(f"[PhoneWorker][HLS] ❌ Could not resolve URL for {camera_id}")
+        return
+
+    if not test_hls_stream(hls_url):
+        logger.error(f"[PhoneWorker][HLS] ❌ Stream test failed for {camera_id}")
+        return
+
+    logger.info(f"[PhoneWorker][HLS] ▶ Starting → {camera_id} ({camera_name})  URL: {hls_url}")
+    _run_hls_camera(camera_id, hls_url, camera_name=camera_name, max_frames=max_frames)
