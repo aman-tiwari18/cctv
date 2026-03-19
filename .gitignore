@@ -75,3 +75,4 @@ script-server/scripts/motion_detection.py
 script-server/scripts/object_detection.py
 script-server/scripts/test_simple.sh
 script-server/scripts/detection/results/tcs_detections/*
+script-server/scripts/detection/models/*
