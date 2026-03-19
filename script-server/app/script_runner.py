@@ -33,18 +33,34 @@ def _compute_timeout(execution: dict) -> float | None:
     """
     Calculate seconds until end_at (ISO datetime from backend),
     falling back to duration_minutes if end_at is absent.
+
+    Handles overnight shifts: if end_at is in the past but within 24 h,
+    it was an overnight assignment whose end is on the next day.
     Returns None if no timeout should be applied.
     """
     end_at_str = execution.get("end_at")
     if end_at_str:
         try:
-            # The backend sends e.g. "2026-03-18T17:30:00"
             end_at = datetime.fromisoformat(end_at_str)
             remaining = (end_at - datetime.now()).total_seconds()
+
             if remaining > 0:
                 return remaining
-            # Already past end time — run for at least 30 s so it starts
-            return 30.0
+
+            # end_at is in the past — overnight shift guard:
+            # if it's within 24 h behind us, add one day to get the real stop time.
+            if remaining > -86400:
+                from datetime import timedelta
+                overnight_end = end_at + timedelta(days=1)
+                remaining_overnight = (overnight_end - datetime.now()).total_seconds()
+                if remaining_overnight > 0:
+                    logger.info(
+                        f"Overnight shift detected: end_at {end_at_str} was in the past "
+                        f"— treating as next-day end at {overnight_end.isoformat()}"
+                    )
+                    return remaining_overnight
+
+            logger.warning(f"end_at {end_at_str} is more than 24h in the past — using duration fallback")
         except Exception as e:
             logger.warning(f"Could not parse end_at '{end_at_str}': {e}")
 
@@ -61,6 +77,8 @@ class ScriptRunner:
         self.scripts_dir = Path(SCRIPTS_DIR).resolve()
         self.max_concurrent = MAX_CONCURRENT_SCRIPTS
         self.running_count = 0
+        # execution_id -> asyncio.subprocess.Process
+        self._active_processes: dict = {}
 
     async def execute_script(self, execution):
         execution_metadata = execution.get("execution_metadata", {})
@@ -141,6 +159,9 @@ class ScriptRunner:
             stderr=asyncio.subprocess.PIPE
         )
 
+        # Register so cancel() can reach this process
+        self._active_processes[execution_id] = process
+
         async def read_stream(stream, is_stderr=False):
             """Read output line by line, writing to both named log and log_manager."""
             data_chunks = []
@@ -200,7 +221,8 @@ class ScriptRunner:
             raise Exception("__TIMEOUT_COMPLETED__")
 
         finally:
-            # Close the file handler in all normal-exit paths too
+            # Deregister and close file handler in all exit paths
+            self._active_processes.pop(execution_id, None)
             try:
                 file_handler.close()
                 named_log.removeHandler(file_handler)
@@ -230,6 +252,25 @@ class ScriptRunner:
         if script_code:
             args.extend(["--analytics", script_code])
         return args
+
+    def cancel(self, execution_id: str) -> bool:
+        """
+        Terminate a running script process by execution_id.
+        Returns True if the process was found and killed, False if not found.
+        """
+        process = self._active_processes.get(str(execution_id))
+        if process is None:
+            return False
+        try:
+            process.terminate()   # SIGTERM — graceful
+            logger.info(f"⏹ Cancelled script {execution_id} (SIGTERM sent)")
+        except ProcessLookupError:
+            pass   # already dead
+        return True
+
+    def list_running(self) -> list[str]:
+        """Return list of currently running execution IDs."""
+        return list(self._active_processes.keys())
 
 
 script_runner = ScriptRunner()

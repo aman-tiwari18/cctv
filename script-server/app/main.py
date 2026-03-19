@@ -100,6 +100,40 @@ async def get_running():
         "data": [{"assignmentId": id} for id in running_scripts]
     }
 
+@app.post("/executions/{execution_id}/cancel")
+async def cancel_execution(execution_id: str):
+    """
+    Manually cancel a running script without stopping the server.
+    Sends SIGTERM to the subprocess, marks the assignment CANCELLED in the DB,
+    and removes it from the poller's running set.
+    """
+    from app.script_runner import script_runner
+
+    killed = script_runner.cancel(execution_id)
+
+    if not killed:
+        # Not in active processes — check if it's tracked by poller at all
+        if execution_id not in poller_service.running_scripts:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No running script with execution_id={execution_id}"
+            )
+
+    # Remove from poller's running set so it won't be re-queued
+    poller_service.running_scripts.discard(execution_id)
+
+    # Mark CANCELLED in the main backend DB
+    await poller_service.update_assignment_status(
+        execution_id, "CANCELLED", {"error_log": "Manually cancelled via API"}
+    )
+
+    logger.info(f"⏹ Assignment {execution_id} cancelled by user request")
+    return {
+        "success": True,
+        "message": f"Assignment {execution_id} has been cancelled",
+        "process_killed": killed,
+    }
+
 @app.get("/executions/recent")
 async def get_recent(limit: int = 20, date: Optional[str] = None):
     try:

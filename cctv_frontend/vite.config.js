@@ -23,6 +23,13 @@ export default defineConfig({
                 target: 'http://localhost:8000',
                 changeOrigin: true,
             },
+            // Script-server direct routes (cancel, health, status)
+            // Use /ss/... prefix to avoid clashing with /cctv/api/executions
+            '/ss': {
+                target: 'http://localhost:8000',
+                changeOrigin: true,
+                rewrite: (path) => path.replace(/^\/ss/, ''),
+            },
         }
     }
 })

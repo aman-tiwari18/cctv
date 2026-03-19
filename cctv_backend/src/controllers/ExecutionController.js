@@ -97,6 +97,15 @@ exports.getPending = async (req, res) => {
     const data = ready.map((row) => {
         const startTimeStr = row.custom_start_time || row.shift_start_time; // "HH:MM:SS"
         const endTimeStr   = row.custom_end_time   || row.shift_end_time;   // "HH:MM:SS"
+
+        // Detect overnight shift: if end time is earlier than start time,
+        // the script runs past midnight → end_at is on the NEXT day.
+        let endDateStr = todayStr;
+        if (endTimeStr && startTimeStr && endTimeStr <= startTimeStr) {
+            const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+            endDateStr = tomorrow.toISOString().split("T")[0];
+        }
+
         return {
             id:               row.id,
             task_name:        row.task_name,
@@ -105,8 +114,8 @@ exports.getPending = async (req, res) => {
             exam_name:        row.exam_name,
             // ISO datetime the poller should fire this assignment at exactly
             scheduled_at:     `${todayStr}T${startTimeStr}`,
-            // ISO datetime the script should stop at
-            end_at:           endTimeStr ? `${todayStr}T${endTimeStr}` : null,
+            // ISO datetime the script should stop at (next day if overnight)
+            end_at:           endTimeStr ? `${endDateStr}T${endTimeStr}` : null,
             execution_metadata: {
                 assignment_id: row.id,
                 script_id:     row.script_id,
