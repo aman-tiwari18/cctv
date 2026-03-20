@@ -58,28 +58,28 @@ function App() {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <AuthProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route
-              path="/"
-              element={
-                <ProtectedRoute>
-                  <Layout />
-                </ProtectedRoute>
-              }
-            >
-              <Route index element={<Dashboard />} />
-              <Route path="exams" element={<Exams />} />
-              <Route path="cameras" element={<Cameras />} />
-              <Route path="shifts" element={<Shifts />} />
-              <Route path="analytics" element={<Analytics />} />
-              <Route path="executions" element={<Executions />} />
-              <Route path="detections" element={<Detections />} />
-            </Route>
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </BrowserRouter>
+        {/* <BrowserRouter> */}
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route
+            path="/"
+            element={
+              <ProtectedRoute>
+                <Layout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<Dashboard />} />
+            <Route path="exams" element={<Exams />} />
+            <Route path="cameras" element={<Cameras />} />
+            <Route path="shifts" element={<Shifts />} />
+            <Route path="analytics" element={<Analytics />} />
+            <Route path="executions" element={<Executions />} />
+            <Route path="detections" element={<Detections />} />
+          </Route>
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+        {/* </BrowserRouter> */}
       </AuthProvider>
     </ThemeProvider>
   );

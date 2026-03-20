@@ -14,6 +14,8 @@ const executionRoutes = require('./routes/executions');
 const shiftScriptRoutes = require('./routes/shiftScripts');
 const scriptRoutes = require('./routes/scripts');
 
+const path = require('path');
+
 // Create Express app
 const app = express();
 
@@ -31,8 +33,10 @@ app.use((req, res, next) => {
     next();
 });
 
-// Health check endpoint
-app.get('/health', (req, res) => {
+// ==========================
+// Health check
+// ==========================
+app.get('/cctv_analytics/health', (req, res) => {
     res.json({
         success: true,
         message: 'CCTV Monitoring Backend is running',
@@ -40,26 +44,35 @@ app.get('/health', (req, res) => {
     });
 });
 
-// API Routes
-app.use('/api/auth', authRoutes);
-app.use('/api', cameraLinkRoutes);
-app.use('/api', shiftScriptRoutes);
-app.use('/api/exams', examRoutes);
-app.use('/api/executions', executionRoutes);
-app.use('/api/scripts', scriptRoutes);
+// ==========================
+// API Routes (MAIN PREFIX)
+// ==========================
+const BASE = '/cctv_analytics';
 
-// Support for /cctv prefixed routes as requested
-app.use('/cctv/api/auth', authRoutes);
-app.use('/cctv/api', cameraLinkRoutes);
-app.use('/cctv/api', shiftScriptRoutes);
-app.use('/cctv/api/exams', examRoutes);
-app.use('/cctv/api/executions', executionRoutes);
-app.use('/cctv/api/scripts', scriptRoutes);
+app.use(`${BASE}/api/auth`, authRoutes);
+app.use(`${BASE}/api`, cameraLinkRoutes);
+app.use(`${BASE}/api`, shiftScriptRoutes);
+app.use(`${BASE}/api/exams`, examRoutes);
+app.use(`${BASE}/api/executions`, executionRoutes);
+app.use(`${BASE}/api/scripts`, scriptRoutes);
 
-// 404 handler
+// ==========================
+// Frontend (optional)
+// ==========================
+const FRONTEND_PATH = path.join(__dirname, '../../cctv_frontend/dist');
+
+// Serve frontend ONLY under /cctv_analytics
+app.use('/cctv_analytics', express.static(FRONTEND_PATH));
+
+// SPA fallback ONLY for this path
+app.get('/cctv_analytics/*', (req, res) => {
+    res.sendFile(path.join(FRONTEND_PATH, 'index.html'));
+});
+
+// ==========================
+// Error handling
+// ==========================
 app.use(notFoundHandler);
-
-// Error handler (must be last)
 app.use(errorHandler);
 
 module.exports = app;

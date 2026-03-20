@@ -54,7 +54,11 @@ async def lifespan(app: FastAPI):
     await poller_service.stop()
     cleanup_task.cancel()
 
-app = FastAPI(lifespan=lifespan)
+# app = FastAPI(lifespan=lifespan)
+app = FastAPI(
+    lifespan=lifespan,
+    root_path="/cctv_dev"
+)
 
 # ── Static file serving for detection images ──────────────────
 RESULTS_DIR = Path(SCRIPTS_DIR).resolve() / "detection" / "results" / "tcs_detections"
@@ -279,7 +283,8 @@ def parse_detection_filename(filename: str, type_key: str) -> dict:
         "date":        f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}" if date_str else "",
         "confidence":  confidence,
         "count":       count,
-        "image_url":   f"/detection-images/{DETECTION_FOLDERS[type_key]}/{filename}",
+        # "image_url":   f"/detection-images/{DETECTION_FOLDERS[type_key]}/{filename}",
+        "image_url": f"/cctv_dev/detection-images/{DETECTION_FOLDERS[type_key]}/{filename}",
     }
 
 @app.get("/detections")

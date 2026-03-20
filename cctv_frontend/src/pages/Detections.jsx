@@ -11,20 +11,19 @@ import {
   AccessTime, Warning, Person, FilterList, Refresh,
 } from '@mui/icons-material';
 import axios from 'axios';
+import { API_BASE_1, IMG_BASE } from '../constants/data';
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-// Both API calls and images go through Vite proxy (relative URLs)
-const API_BASE = '';
-const IMG_BASE = '';
+
+
 
 const TYPE_META = {
-  proximity:   { label: 'Close Proximity', color: '#f59e0b', bg: '#fef3c7', icon: '⚠️' },
-  crowd:       { label: 'Crowd Detection', color: '#3b82f6', bg: '#dbeafe', icon: '👥' },
-  server:      { label: 'Server Room',     color: '#ef4444', bg: '#fee2e2', icon: '🖥️' },
-  intruder:    { label: 'Intruder',        color: '#8b5cf6', bg: '#ede9fe', icon: '🚨' },
-  entry_exit:  { label: 'Entry/Exit',      color: '#10b981', bg: '#d1fae5', icon: '🚪' },
-  phone:       { label: 'Phone',           color: '#6366f1', bg: '#e0e7ff', icon: '📱' },
-  invigilator: { label: 'Invigilator',     color: '#ec4899', bg: '#fce7f3', icon: '👁️' },
+  proximity: { label: 'Close Proximity', color: '#f59e0b', bg: '#fef3c7', icon: '⚠️' },
+  crowd: { label: 'Crowd Detection', color: '#3b82f6', bg: '#dbeafe', icon: '👥' },
+  server: { label: 'Server Room', color: '#ef4444', bg: '#fee2e2', icon: '🖥️' },
+  intruder: { label: 'Intruder', color: '#8b5cf6', bg: '#ede9fe', icon: '🚨' },
+  entry_exit: { label: 'Entry/Exit', color: '#10b981', bg: '#d1fae5', icon: '🚪' },
+  phone: { label: 'Phone', color: '#6366f1', bg: '#e0e7ff', icon: '📱' },
+  invigilator: { label: 'Invigilator', color: '#ec4899', bg: '#fce7f3', icon: '👁️' },
 };
 
 const PAGE_SIZE = 50;
@@ -177,7 +176,7 @@ export default function Detections() {
       if (dateFilter) params.append('date', dateFilter);
       if (search.trim()) params.append('search', search.trim());
 
-      const res = await axios.get(`${API_BASE}/detections?${params}`);
+      const res = await axios.get(`${API_BASE_1}/detections?${params}`);
       if (res.data.success) {
         setData(res.data.data);
         setTotal(res.data.total);

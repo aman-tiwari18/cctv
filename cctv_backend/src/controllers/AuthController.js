@@ -1,8 +1,6 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { query } = require("../config/database");
-
-
 /**
  * Login
  */
@@ -36,6 +34,9 @@ exports.login = async (req, res) => {
 
     // Update last login
     await query("UPDATE users SET last_login = NOW() WHERE id = ?", [user.id]);
+
+    console.log("jwt secret", process.env.JWT_SECRET)
+    console.log("jwt expire", process.env.JWT_EXPIRES_IN)
 
     // Generate JWT token
     const token = jwt.sign(

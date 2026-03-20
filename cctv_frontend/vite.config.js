@@ -1,30 +1,27 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
-// https://vitejs.dev/config/
 export default defineConfig({
+    base: '/cctv_analytics/',   // 🔥 REQUIRED for production
+
     plugins: [react()],
+
     server: {
         port: 5173,
         proxy: {
-            '/api': {
+            // Node backend
+            '/cctv_analytics/api': {
                 target: 'http://localhost:3000',
                 changeOrigin: true,
             },
-            '/cctv/api': {
-                target: 'http://localhost:3000',
-                changeOrigin: true,
-            },
-            '/detections': {
+
+            // FastAPI
+            '/cctv_dev': {
                 target: 'http://localhost:8000',
                 changeOrigin: true,
             },
-            '/detection-images': {
-                target: 'http://localhost:8000',
-                changeOrigin: true,
-            },
-            // Script-server direct routes (cancel, health, status)
-            // Use /ss/... prefix to avoid clashing with /cctv/api/executions
+
+            // Optional script server
             '/ss': {
                 target: 'http://localhost:8000',
                 changeOrigin: true,

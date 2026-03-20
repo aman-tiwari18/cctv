@@ -1,8 +1,11 @@
-require('dotenv').config();
+// require('dotenv').config();
+// require('dotenv').config({ path: './.env' });
+require('dotenv').config({ path: __dirname + '/.env' });
 const app = require('./app');
 const { testConnection } = require('./config/database');
 const scheduler = require('./services/scheduler');
 const logger = require('./utils/logger');
+
 
 const PORT = process.env.PORT || 3000;
 
@@ -17,9 +20,9 @@ const startServer = async () => {
 
         // Start Express server
         const server = app.listen(PORT, () => {
-            logger.info(`Server is running on port ${PORT}`);
-            logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
-            logger.info(`Health check: http://localhost:${PORT}/health`);
+            logger.info(`Base URL: http://localhost:${PORT}/cctv_analytics`);
+            logger.info(`API Base: http://localhost:${PORT}/cctv_analytics/api`);
+            logger.info(`Health check: http://localhost:${PORT}/cctv_analytics/health`);
         });
 
         // Start scheduler service

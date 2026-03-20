@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-    baseURL: 'http://localhost:3000/cctv/api'
+    baseURL: 'http://161.248.106.78/cctv_analytics/api'
 });
 
 // Request interceptor to add auth token

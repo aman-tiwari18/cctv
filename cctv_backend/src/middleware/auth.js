@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const logger = require('../utils/logger');
-
+const dotenv = require('dotenv')
+require('dotenv').config();
 /**
  * Verify JWT token and attach user to request
  */
