@@ -23,6 +23,13 @@ router.post(
     asyncHandler(CameraController.uploadCameras)
 );
 
+// Download blank Excel template (no auth required so user can grab it easily)
+router.get(
+    "/exams/:examId/cameras/template/:type",
+    authenticate,
+    asyncHandler(CameraController.downloadTemplate)
+);
+
 router.post(
     "/exams/:examId/cameras/bulk",
     authenticate,

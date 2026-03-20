@@ -1,4 +1,4 @@
-const { CameraLinkHLS, CameraLinkRTSP, Exam } = require("../models");
+const { CameraLinkHLS, CameraLinkRTSP, Exam, ExamShift } = require("../models");
 const xlsx = require("xlsx");
 const fs = require("fs");
 
@@ -8,12 +8,33 @@ const fs = require("fs");
 const getModelByExam = async (examId) => {
     const exam = await Exam.findByPk(examId);
     if (!exam) throw new Error("Exam not found");
-    
+
     if (exam.link_type && exam.link_type.toUpperCase() === "RTSP") {
-        return { Model: CameraLinkRTSP, linkType: "RTSP" };
+        return { Model: CameraLinkRTSP, linkType: "RTSP", exam };
     }
-    // Default to HLS
-    return { Model: CameraLinkHLS, linkType: "HLS" };
+    return { Model: CameraLinkHLS, linkType: "HLS", exam };
+};
+
+/**
+ * Pick first truthy value by checking row keys (case-insensitive and trimmed)
+ */
+const pick = (row, ...keys) => {
+    // Normalise row keys to lowercase/trimmed
+    const normalizedRow = {};
+    for (const [k, v] of Object.entries(row)) {
+        if (k && typeof k === "string") {
+            normalizedRow[k.trim().toLowerCase()] = v;
+        }
+    }
+    
+    // Check for keys
+    for (const k of keys) {
+        const checkKey = k.trim().toLowerCase();
+        if (normalizedRow[checkKey] !== undefined && normalizedRow[checkKey] !== "") {
+            return normalizedRow[checkKey];
+        }
+    }
+    return "";
 };
 
 /**
@@ -22,92 +43,122 @@ const getModelByExam = async (examId) => {
 exports.uploadCameras = async (req, res) => {
     try {
         const examId = req.params.examId;
+        const { shiftId, examDate } = req.body; // optional filters from form-data
 
         if (!req.file) {
-            return res.status(400).json({
-                success: false,
-                message: "No file uploaded",
-            });
+            return res.status(400).json({ success: false, message: "No file uploaded" });
         }
 
         const { Model, linkType } = await getModelByExam(examId);
 
-        // Read Excel file
+        // Read Excel
         const workbook = xlsx.readFile(req.file.path);
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
-        
-        // Convert to JSON
         const data = xlsx.utils.sheet_to_json(worksheet, { defval: "" });
 
         if (!data || data.length === 0) {
-            return res.status(400).json({
-                success: false,
-                message: "Excel file is empty",
-            });
+            return res.status(400).json({ success: false, message: "Excel file is empty" });
+        }
+
+        // Validate exam_date against exam dates if provided
+        if (examDate && linkType === "HLS") {
+            const shifts = await ExamShift.findAll({ where: { exam_id: examId } });
+            const validDates = [...new Set(shifts.map((s) => s.exam_date?.toString().split("T")[0]))].filter(Boolean);
+            if (validDates.length > 0 && !validDates.includes(examDate)) {
+                return res.status(400).json({
+                    success: false,
+                    message: `No exam scheduled on ${examDate}. Valid dates: ${validDates.join(", ")}`,
+                });
+            }
         }
 
         const validRecords = [];
 
-        // Map Excel columns to DB fields
         for (const row of data) {
             if (linkType === "HLS") {
-                // Expected HLS columns based on user instruction:
-                // Tc_name, tc_code, camera_name, date_of_assessment, shift_of_assessment, url, camera_category
-                const url = row["url"] || row["URL"] || row["CCTV URL"] || row["Link"];
-                
-                if (url) {
-                    validRecords.push({
-                        exam_id: examId,
-                        tc_name: row["Tc_name"] || row["TC NAME"] || row["TC Name"] || "",
-                        tc_code: row["tc_code"] || row["TC Code"] || row["TC code"] || "",
-                        camera_name: row["camera_name"] || row["Camera Name"] || "",
-                        date_of_assessment: row["date_of_assessment"] || row["Date of Assessment"] || "",
-                        shift_of_assessment: row["shift_of_assessment"] || row["Shift of Assessment"] || "",
-                        url: url,
-                        camera_category: row["camera_category"] || row["camera category"] || row["Camera Category"] || "",
-                        is_active: true
-                    });
-                }
+                const cctv_url = pick(row, "cctv_url", "CCTV URL", "url", "URL", "Link", "CCTV_URL");
+                if (!cctv_url) continue;
+
+                validRecords.push({
+                    exam_id: examId,
+                    centre_name: pick(row, "Centre Name", "center_name", "centre_name", "TC Name", "TC NAME", "Tc_name"),
+                    tc_code:      pick(row, "TC Code", "tc_code", "TC_CODE", "TC code"),
+                    city:         pick(row, "City", "city", "CITY"),
+                    state:        pick(row, "State", "state", "STATE"),
+                    camera_name:  pick(row, "Camera Name", "camera_name", "LAN and Lab Name", "LAN & Lab Name"),
+                    ch_code:      pick(row, "ch_no", "Ch No", "CH NO", "ch_code", "CH Code", "unique key", "unique key value"),
+                    cctv_url,
+                    camera_category: pick(row, "Camera Category", "camera_category", "camera category"),
+                    classification:  pick(row, "Classification", "classification") || null,
+                    exam_date: examDate || null,
+                    shift_id:  shiftId  || null,
+                    is_active: true,
+                });
             } else {
-                // Expected RTSP columns:
-                // Tc_name, tc_code, camera_name, city, state, url, camera_category
-                const url = row["url"] || row["URL"] || row["Server Address"] || row["Link"];
-                
-                if (url) {
-                    validRecords.push({
-                        exam_id: examId,
-                        tc_name: row["Tc_name"] || row["TC NAME"] || row["TC name"] || row["Center Name"] || "",
-                        tc_code: row["tc_code"] || row["TC Code"] || row["TC Code"] || "",
-                        camera_name: row["camera_name"] || row["Camera Name"] || "",
-                        city: row["city"] || row["City"] || "",
-                        state: row["state"] || row["State"] || "",
-                        url: url,
-                        camera_category: row["camera_category"] || row["camera category"] || row["Camera Category"] || "",
-                        is_active: true
-                    });
-                }
+                // RTSP
+                const url = pick(row, "url", "URL", "Server Address", "CCTV URL", "Link");
+                if (!url) continue;
+
+                validRecords.push({
+                    exam_id:         examId,
+                    tc_name:         pick(row, "TC Name", "TC NAME", "Tc_name", "Centre Name", "center_name"),
+                    tc_code:         pick(row, "TC Code", "tc_code"),
+                    camera_name:     pick(row, "Camera Name", "camera_name"),
+                    city:            pick(row, "City", "city"),
+                    state:           pick(row, "State", "state"),
+                    url,
+                    camera_category: pick(row, "Camera Category", "camera_category", "camera category"),
+                    is_active: true,
+                });
             }
         }
 
         if (validRecords.length === 0) {
             return res.status(400).json({
                 success: false,
-                message: "No valid records found. Make sure the excel file contains the required columns including 'url' or 'CCTV URL'.",
+                message: "No valid records found. Make sure the Excel contains a 'CCTV URL' column.",
             });
         }
 
-        // Bulk insert
         await Model.bulkCreate(validRecords);
+        // Cleanup temp file
+        try { fs.unlinkSync(req.file.path); } catch (_) {}
 
         res.status(200).json({
             success: true,
             message: `Successfully uploaded ${validRecords.length} cameras.`,
         });
-
     } catch (error) {
         throw error;
     }
+};
+
+/**
+ * Download blank Excel template for HLS or RTSP
+ */
+exports.downloadTemplate = async (req, res) => {
+    const { type } = req.params; // "hls" or "rtsp"
+    const isHLS = type?.toLowerCase() === "hls";
+
+    const headers = isHLS
+        ? [["S.No.", "TC Code", "Centre Name", "City", "State", "LIS IF/IDZ", "LAN and Lab Name", "Camera Name", "CCTV URL", "ch_no", "unique key value", "Camera Category"]]
+        : [["TC Code", "TC Name", "City", "State", "Camera Name", "URL", "Camera Category"]];
+
+    const wb = xlsx.utils.book_new();
+    const ws = xlsx.utils.aoa_to_sheet(headers);
+
+    // Column widths
+    ws["!cols"] = headers[0].map((h) => ({ wch: Math.max(h.length + 4, 18) }));
+
+    xlsx.utils.book_append_sheet(wb, ws, isHLS ? "HLS Cameras" : "RTSP Cameras");
+
+    const buf = xlsx.write(wb, { type: "buffer", bookType: "xlsx" });
+    const filename = isHLS ? "HLS_Camera_Template.xlsx" : "RTSP_Camera_Template.xlsx";
+
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.send(buf);
 };
 
 /**
@@ -117,37 +168,51 @@ exports.createCamera = async (req, res) => {
     const exam_id = req.params.examId;
     const { Model } = await getModelByExam(exam_id);
 
-    const camera = await Model.create({ ...req.body, exam_id });
+    // Map url → cctv_url for HLS if client sends "url"
+    const body = { ...req.body, exam_id };
+    if (body.url && !body.cctv_url) { body.cctv_url = body.url; delete body.url; }
 
-    res.status(201).json({
-        success: true,
-        message: "Camera link created",
-        data: camera,
-    });
+    const camera = await Model.create(body);
+    res.status(201).json({ success: true, message: "Camera link created", data: camera });
 };
 
 /**
- * Get By Exam
+ * Get By Exam (with optional shift/date filter for HLS and pagination)
  */
 exports.getByExam = async (req, res) => {
     const { examId } = req.params;
-    const { is_active = true } = req.query;
-
+    const { is_active = true, shift_id, exam_date, page = 1, limit = 50 } = req.query;
     const { Model, linkType } = await getModelByExam(examId);
 
-    const cameras = await Model.findAll({
-        where: {
-            exam_id: examId,
-            is_active: is_active === "true" || is_active === true,
-        },
+    const where = {
+        exam_id: examId,
+        is_active: is_active === "true" || is_active === true,
+    };
+
+    if (linkType === "HLS") {
+        if (shift_id)   where.shift_id  = shift_id;
+        if (exam_date)  where.exam_date = exam_date;
+    }
+
+    const parsedLimit = parseInt(limit, 10) || 50;
+    const parsedPage = parseInt(page, 10) || 1;
+    const offset = (parsedPage - 1) * parsedLimit;
+
+    const result = await Model.findAndCountAll({ 
+        where, 
         order: [["created_at", "DESC"]],
+        limit: parsedLimit,
+        offset: offset
     });
 
-    res.json({
-        success: true,
-        count: cameras.length,
-        linkType: linkType,
-        data: cameras,
+    res.json({ 
+        success: true, 
+        totalCount: result.count,
+        count: result.rows.length,
+        totalPages: Math.ceil(result.count / parsedLimit),
+        currentPage: parsedPage,
+        linkType, 
+        data: result.rows 
     });
 };
 
@@ -157,21 +222,9 @@ exports.getByExam = async (req, res) => {
 exports.getById = async (req, res) => {
     const { examId, id } = req.params;
     const { Model, linkType } = await getModelByExam(examId);
-
     const camera = await Model.findByPk(id);
-
-    if (!camera) {
-        return res.status(404).json({
-            success: false,
-            message: "Camera not found",
-        });
-    }
-
-    res.json({
-        success: true,
-        type: linkType,
-        data: camera,
-    });
+    if (!camera) return res.status(404).json({ success: false, message: "Camera not found" });
+    res.json({ success: true, type: linkType, data: camera });
 };
 
 /**
@@ -180,23 +233,12 @@ exports.getById = async (req, res) => {
 exports.updateCamera = async (req, res) => {
     const { examId, id } = req.params;
     const { Model } = await getModelByExam(examId);
-
     const camera = await Model.findByPk(id);
-
-    if (!camera) {
-        return res.status(404).json({
-            success: false,
-            message: "Camera not found",
-        });
-    }
-
-    await camera.update(req.body);
-
-    res.json({
-        success: true,
-        message: "Camera updated",
-        data: camera,
-    });
+    if (!camera) return res.status(404).json({ success: false, message: "Camera not found" });
+    const body = { ...req.body };
+    if (body.url && !body.cctv_url) { body.cctv_url = body.url; delete body.url; }
+    await camera.update(body);
+    res.json({ success: true, message: "Camera updated", data: camera });
 };
 
 /**
@@ -205,14 +247,30 @@ exports.updateCamera = async (req, res) => {
 exports.deleteCamera = async (req, res) => {
     const { examId, id } = req.params;
     const { Model } = await getModelByExam(examId);
+    await Model.update({ is_active: false }, { where: { id } });
+    res.json({ success: true, message: "Camera deleted" });
+};
 
-    await Model.update(
-        { is_active: false },
-        { where: { id: id } }
-    );
-
-    res.json({
-        success: true,
-        message: "Camera deleted",
+/**
+ * Bulk create (kept for compatibility)
+ */
+exports.bulkCreateCamera = async (req, res) => {
+    const exam_id = req.params.examId;
+    const { Model } = await getModelByExam(exam_id);
+    const records = (req.body.cameras || []).map((c) => {
+        if (c.url && !c.cctv_url) { c.cctv_url = c.url; delete c.url; }
+        return { ...c, exam_id };
     });
+    await Model.bulkCreate(records);
+    res.status(201).json({ success: true, message: `Created ${records.length} cameras` });
+};
+
+/**
+ * Get cameras by exam + type (HLS/RTSP direct filter)
+ */
+exports.getByExamAndType = async (req, res) => {
+    const { examId } = req.params;
+    const { Model, linkType } = await getModelByExam(examId);
+    const cameras = await Model.findAll({ where: { exam_id: examId, is_active: true } });
+    res.json({ success: true, linkType, count: cameras.length, data: cameras });
 };

@@ -4,7 +4,7 @@
   "description": "Backend system for automated CCTV exam monitoring with schedule management",
   "main": "src/server.js",
   "scripts": {
-    "start": "node src/server.js",
+    "start": "nodemon src/server.js",
     "dev": "nodemon src/server.js",
     "migrate": "node src/migrations/run.js",
     "test": "jest --coverage"
