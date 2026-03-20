@@ -12,13 +12,21 @@ const CameraLinkHLS = sequelize.define(
         exam_id: {
             type: DataTypes.INTEGER,
             allowNull: false,
-            comment: "Foreign key to exams table",
         },
-        tc_name: {
+        centre_name: {
+            type: DataTypes.STRING,
+            allowNull: true,
+            comment: "Test centre / TC name",
+        },
+        tc_code: {
             type: DataTypes.STRING,
             allowNull: true,
         },
-        tc_code: {
+        city: {
+            type: DataTypes.STRING,
+            allowNull: true,
+        },
+        state: {
             type: DataTypes.STRING,
             allowNull: true,
         },
@@ -26,21 +34,32 @@ const CameraLinkHLS = sequelize.define(
             type: DataTypes.STRING,
             allowNull: true,
         },
-        date_of_assessment: {
+        ch_code: {
             type: DataTypes.STRING,
             allowNull: true,
+            comment: "Unique channel key (ch_no from Excel)",
         },
-        shift_of_assessment: {
-            type: DataTypes.STRING,
-            allowNull: true,
-        },
-        url: {
+        cctv_url: {
             type: DataTypes.TEXT,
             allowNull: false,
         },
         camera_category: {
             type: DataTypes.STRING,
             allowNull: true,
+        },
+        classification: {
+            type: DataTypes.STRING,
+            allowNull: true,
+        },
+        exam_date: {
+            type: DataTypes.DATEONLY,
+            allowNull: true,
+            comment: "Date of assessment",
+        },
+        shift_id: {
+            type: DataTypes.INTEGER,
+            allowNull: true,
+            comment: "FK to exam_shifts; NULL means applies to all shifts",
         },
         is_active: {
             type: DataTypes.BOOLEAN,

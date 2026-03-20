@@ -44,15 +44,36 @@ export const examsAPI = {
 export const camerasAPI = {
     getByExam: (examId, params) => api.get(`/exams/${examId}/cameras`, { params }),
     create: (examId, cameraData) => api.post(`/exams/${examId}/cameras`, cameraData),
-    uploadExcel: (examId, file) => {
+    uploadExcel: (examId, file, { shiftId, examDate } = {}) => {
         const formData = new FormData();
         formData.append('file', file);
+        if (shiftId)  formData.append('shiftId', shiftId);
+        if (examDate) formData.append('examDate', examDate);
         return api.post(`/exams/${examId}/cameras/upload`, formData, {
             headers: { 'Content-Type': 'multipart/form-data' }
         });
     },
+    // Download blank Excel template: type = 'hls' | 'rtsp'
+    downloadTemplate: async (examId, type) => {
+        const response = await api.get(`/exams/${examId}/cameras/template/${type}`, {
+            responseType: 'blob',
+        });
+        const url = window.URL.createObjectURL(new Blob([response.data]));
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        a.download = type.toUpperCase() === 'HLS' ? 'HLS_Camera_Template.xlsx' : 'RTSP_Camera_Template.xlsx';
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+    },
     update: (id, cameraData, examId) => api.put(`/exams/${examId}/cameras/${id}`, cameraData),
-    delete: (id, examId) => api.delete(`/exams/${examId}/cameras/${id}`)
+    delete: (id, examId) => api.delete(`/exams/${examId}/cameras/${id}`),
+};
+
+export const shiftsAPI = {
+    getByExam: (examId) => api.get(`/exams/${examId}/shifts`),
 };
 
 export const scriptsAPI = {
