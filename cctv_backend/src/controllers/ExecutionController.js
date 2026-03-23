@@ -55,6 +55,7 @@ exports.getPending = async (req, res) => {
             es.start_time              AS shift_start_time,
             es.end_time                AS shift_end_time,
             e.exam_name,
+            e.link_type,
             e.id                       AS exam_id,
             e.skip_days,
             e.skip_dates
@@ -125,6 +126,7 @@ exports.getPending = async (req, res) => {
                 shift_name:    row.shift_name,
                 exam_name:     row.exam_name,
                 exam_id:       row.exam_id,
+                link_type: row.link_type,
             },
         };
     });

@@ -9,12 +9,18 @@ const CameraLinkRTSP = sequelize.define(
             primaryKey: true,
             autoIncrement: true,
         },
+        device_id: {
+            type: DataTypes.STRING,
+            allowNull: false,
+            unique: true,
+            comment: "Unique device identifier",
+        },
         exam_id: {
             type: DataTypes.INTEGER,
             allowNull: false,
             comment: "Foreign key to exams table",
         },
-        tc_name: {
+        centre_name: {
             type: DataTypes.STRING,
             allowNull: true,
         },
@@ -34,13 +40,9 @@ const CameraLinkRTSP = sequelize.define(
             type: DataTypes.STRING,
             allowNull: true,
         },
-        url: {
+        cctv_url: {
             type: DataTypes.TEXT,
             allowNull: false,
-        },
-        camera_category: {
-            type: DataTypes.STRING,
-            allowNull: true,
         },
         is_active: {
             type: DataTypes.BOOLEAN,

@@ -24,8 +24,8 @@ const HLS_EMPTY   = {
   classification: '', exam_date: '', shift_id: '',
 };
 const RTSP_EMPTY  = {
-  tc_name: '', tc_code: '', camera_name: '', city: '',
-  state: '', url: '', camera_category: '',
+  device_id: '', tc_code: '', camera_name: '', centre_name: '',
+  city: '', state: '', cctv_url: '',
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -112,10 +112,10 @@ const Cameras = () => {
             cctv_url: camera.cctv_url || '', camera_category: camera.camera_category || '',
             classification: camera.classification || '',
             exam_date: camera.exam_date || '', shift_id: camera.shift_id || '' }
-        : { tc_name: camera.tc_name || '', tc_code: camera.tc_code || '',
+          : { device_id: camera.device_id || '', tc_code: camera.tc_code || '',
             camera_name: camera.camera_name || '', city: camera.city || '',
-            state: camera.state || '', url: camera.url || '',
-            camera_category: camera.camera_category || '' });
+            centre_name: camera.centre_name || camera.tc_name || '',
+            state: camera.state || '', cctv_url: camera.cctv_url || camera.url || '' });
     } else {
       setEditingCamera(null);
       setFormData(isHLS ? { ...HLS_EMPTY } : { ...RTSP_EMPTY });
@@ -126,6 +126,11 @@ const Cameras = () => {
 
   const handleSubmit = async () => {
     if (!selectedExam) { setFormError('Select an exam first'); return; }
+    if (!isHLS) {
+      if (!formData.device_id?.trim()) { setFormError('Device ID is required'); return; }
+      if (!formData.camera_name?.trim()) { setFormError('Camera Name is required'); return; }
+      if (!formData.cctv_url?.trim()) { setFormError('CCTV URL is required'); return; }
+    }
     try {
       if (editingCamera) {
         await camerasAPI.update(editingCamera.id, formData, selectedExam);
@@ -274,12 +279,12 @@ const Cameras = () => {
                     </>
                   ) : (
                     <>
-                      <TableCell><strong>TC Name</strong></TableCell>
+                      <TableCell><strong>Device ID</strong></TableCell>
                       <TableCell><strong>TC Code</strong></TableCell>
                       <TableCell><strong>Camera Name</strong></TableCell>
+                      <TableCell><strong>Centre Name</strong></TableCell>
                       <TableCell><strong>City</strong></TableCell>
                       <TableCell><strong>State</strong></TableCell>
-                      <TableCell><strong>Category</strong></TableCell>
                     </>
                   )}
                   <TableCell><strong>CCTV URL</strong></TableCell>
@@ -313,14 +318,12 @@ const Cameras = () => {
                       </>
                     ) : (
                       <>
-                        <TableCell>{cam.tc_name || '-'}</TableCell>
+                        <TableCell>{cam.device_id || '-'}</TableCell>
                         <TableCell>{cam.tc_code || '-'}</TableCell>
                         <TableCell>{cam.camera_name || '-'}</TableCell>
+                        <TableCell>{cam.centre_name || cam.tc_name || '-'}</TableCell>
                         <TableCell>{cam.city || '-'}</TableCell>
                         <TableCell>{cam.state || '-'}</TableCell>
-                        <TableCell>
-                          <Chip label={cam.camera_category || 'N/A'} size="small" />
-                        </TableCell>
                       </>
                     )}
                     <TableCell sx={{ maxWidth: 220 }}>
@@ -406,7 +409,15 @@ const Cameras = () => {
                 margin="dense" size="small" InputLabelProps={{ shrink: true }} />
               <TextField select fullWidth label="Shift (leave blank = all shifts)" name="shift_id"
                 value={formData.shift_id || ''} onChange={(e) => setFormData({ ...formData, shift_id: e.target.value })}
-                margin="dense" size="small">
+                margin="dense" size="small"
+                SelectProps={{
+                  displayEmpty: true,
+                  renderValue: (value) => {
+                    if (!value) return 'All shifts';
+                    const matchedShift = shifts.find((s) => String(s.id) === String(value));
+                    return matchedShift?.shift_name || `#${value}`;
+                  },
+                }}>
                 <MenuItem value="">All shifts</MenuItem>
                 {shifts.map((s) => (
                   <MenuItem key={s.id} value={s.id}>{s.shift_name}</MenuItem>
@@ -415,14 +426,17 @@ const Cameras = () => {
             </>
           ) : (
             <>
-              <TextField fullWidth label="TC Name" name="tc_name"
-                value={formData.tc_name || ''} onChange={(e) => setFormData({ ...formData, tc_name: e.target.value })}
-                margin="dense" size="small" />
+              <TextField fullWidth label="Device ID" name="device_id"
+                value={formData.device_id || ''} onChange={(e) => setFormData({ ...formData, device_id: e.target.value })}
+                margin="dense" size="small" required />
               <TextField fullWidth label="TC Code" name="tc_code"
                 value={formData.tc_code || ''} onChange={(e) => setFormData({ ...formData, tc_code: e.target.value })}
                 margin="dense" size="small" />
               <TextField fullWidth label="Camera Name" name="camera_name"
                 value={formData.camera_name || ''} onChange={(e) => setFormData({ ...formData, camera_name: e.target.value })}
+                margin="dense" size="small" required />
+              <TextField fullWidth label="Centre Name" name="centre_name"
+                value={formData.centre_name || ''} onChange={(e) => setFormData({ ...formData, centre_name: e.target.value })}
                 margin="dense" size="small" />
               <Box display="flex" gap={1}>
                 <TextField fullWidth label="City" name="city"
@@ -432,12 +446,9 @@ const Cameras = () => {
                   value={formData.state || ''} onChange={(e) => setFormData({ ...formData, state: e.target.value })}
                   margin="dense" size="small" />
               </Box>
-              <TextField fullWidth label="Stream URL (rtsp://...)" name="url"
-                value={formData.url || ''} onChange={(e) => setFormData({ ...formData, url: e.target.value })}
+              <TextField fullWidth label="CCTV URL" name="cctv_url"
+                value={formData.cctv_url || ''} onChange={(e) => setFormData({ ...formData, cctv_url: e.target.value })}
                 margin="dense" size="small" required />
-              <TextField fullWidth label="Camera Category" name="camera_category"
-                value={formData.camera_category || ''} onChange={(e) => setFormData({ ...formData, camera_category: e.target.value })}
-                margin="dense" size="small" />
             </>
           )}
         </DialogContent>
@@ -460,7 +471,7 @@ const Cameras = () => {
           <Alert severity="info" sx={{ mb: 2 }}>
             {isHLS
               ? 'Expected HLS columns: TC Code, Centre Name, City, State, Camera Name, ch_no, CCTV URL, Camera Category'
-              : 'Expected RTSP columns: TC Code, TC Name, City, State, Camera Name, URL, Camera Category'}
+              : 'Expected RTSP columns: Device ID, TC Code, Camera Name, Centre Name, City, State, Server Address'}
             <br />
             <strong>Download the template below to get the exact format.</strong>
           </Alert>
@@ -475,7 +486,15 @@ const Cameras = () => {
           {isHLS && (
             <Box display="flex" gap={2} mt={1}>
               <TextField select fullWidth label="Shift (optional — blank = all shifts)"
-                value={uploadShiftId} onChange={(e) => setUploadShiftId(e.target.value)} size="small">
+                value={uploadShiftId} onChange={(e) => setUploadShiftId(e.target.value)} size="small"
+                SelectProps={{
+                  displayEmpty: true,
+                  renderValue: (value) => {
+                    if (!value) return 'All shifts';
+                    const matchedShift = shifts.find((s) => String(s.id) === String(value));
+                    return matchedShift?.shift_name || `#${value}`;
+                  },
+                }}>
                 <MenuItem value="">All shifts</MenuItem>
                 {shifts.map((s) => (
                   <MenuItem key={s.id} value={s.id}>{s.shift_name}</MenuItem>
