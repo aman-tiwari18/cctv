@@ -3,6 +3,7 @@ import re
 import json
 import asyncio
 import logging
+import sys
 from pathlib import Path
 from datetime import datetime
 
@@ -142,7 +143,7 @@ class ScriptRunner:
         args = self.build_script_arguments(execution)
 
         ext = full_script_path.suffix
-        command = "python3"
+        command = sys.executable
         if ext == ".sh":  command = "bash"
         elif ext == ".js": command = "node"
 

@@ -93,7 +93,8 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
     const loadScripts = async () => {
         try {
             const response = await scriptsAPI.getAll({ is_active: true });
-            setScripts(response.data.data);
+            const scriptList = Array.isArray(response?.data?.data) ? response.data.data : [];
+            setScripts(scriptList);
         } catch (error) {
             console.error('Error loading scripts:', error);
         }
@@ -104,7 +105,8 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
         setLoading(true);
         try {
             const response = await shiftScriptsAPI.getByShift(shift.id);
-            setAssignments(response.data.data);
+            const assignmentList = Array.isArray(response?.data?.data) ? response.data.data : [];
+            setAssignments(assignmentList);
         } catch (error) {
             console.error('Error loading assignments:', error);
         } finally {
@@ -116,9 +118,11 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
         if (!shift?.id) return;
         try {
             const response = await executionsAPI.getByShift(shift.id, { limit: 10 });
-            setExecutions(response.data.data);
+            const executionList = Array.isArray(response?.data?.data) ? response.data.data : [];
+            setExecutions(executionList);
         } catch (error) {
             console.error('Error loading executions:', error);
+            setExecutions([]);
         }
     };
 

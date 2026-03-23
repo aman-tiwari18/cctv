@@ -48,8 +48,9 @@ const Analytics = () => {
   const loadExams = async () => {
     try {
       const response = await examsAPI.getAll({ is_active: true });
-      setExams(response.data.data);
-      if (examId && response.data.data.length > 0) {
+      const examList = Array.isArray(response?.data?.data) ? response.data.data : [];
+      setExams(examList);
+      if (examId && examList.length > 0) {
         setSelectedExam(examId);
       }
     } catch (error) {
@@ -64,7 +65,10 @@ const Analytics = () => {
     setError('');
     try {
       const response = await examsAPI.getById(selectedExam);
-      setShifts(response.data.data.examShifts || []);
+      const shiftList = Array.isArray(response?.data?.data?.examShifts)
+        ? response.data.data.examShifts
+        : [];
+      setShifts(shiftList);
     } catch (error) {
       console.error('Error loading shifts:', error);
       setError('Failed to load shifts');

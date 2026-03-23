@@ -392,4 +392,5 @@ async def disconnect(sid):
     logger.info(f"Socket.IO client disconnected: {sid}")
 
 
+fastapi_app = app
 app = socketio.ASGIApp(sio, other_asgi_app=fastapi_app, socketio_path="socket.io")

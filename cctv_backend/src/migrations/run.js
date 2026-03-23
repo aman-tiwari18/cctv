@@ -10,7 +10,7 @@ const runMigrations = async () => {
     try {
         logger.info('Starting database migrations...');
 
-        const migrationFile = path.join(__dirname, '010_add_assignment_date_to_shift_script_assignments.sql');
+        const migrationFile = path.join(__dirname, 'schema_full.sql');
         const sql = fs.readFileSync(migrationFile, 'utf8');
 
         // Remove comments and split by semicolons

@@ -12,6 +12,7 @@ import {
 } from '@mui/icons-material';
 import axios from 'axios';
 import { io } from 'socket.io-client';
+import { API_BASE_1, IMG_BASE } from '../constants/data';
 
 
 const TYPE_META = {
@@ -25,6 +26,15 @@ const TYPE_META = {
 };
 
 const PAGE_SIZE = 50;
+const socketBase = (() => {
+  try {
+    return new URL(API_BASE_1);
+  } catch {
+    return new URL(window.location.origin);
+  }
+})();
+const SOCKET_URL = socketBase.origin;
+const SOCKET_PATH = `${socketBase.pathname.replace(/\/$/, '') || ''}/socket.io`;
 
 // ─── Stat Card ────────────────────────────────────────────────────────────────
 function StatCard({ typeKey, count, selected, onClick }) {
@@ -202,8 +212,8 @@ export default function Detections() {
   }, [fetchDetections]);
 
   useEffect(() => {
-    const socket = io({
-      path: '/socket.io',
+    const socket = io(SOCKET_URL, {
+      path: SOCKET_PATH,
       transports: ['polling'],
       reconnection: true,
       reconnectionAttempts: Infinity,
