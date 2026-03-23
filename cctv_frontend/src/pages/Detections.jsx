@@ -4,16 +4,14 @@ import {
   TextField, Select, MenuItem, FormControl, InputLabel,
   ToggleButtonGroup, ToggleButton, Pagination, CircularProgress,
   Dialog, DialogContent, IconButton, Skeleton, Badge,
-  InputAdornment, Button, Tooltip,
+  InputAdornment, Button, Tooltip, Snackbar, Alert,
 } from '@mui/material';
 import {
   GridView, ViewList, Search, Close, CameraAlt,
   AccessTime, Warning, Person, FilterList, Refresh,
 } from '@mui/icons-material';
 import axios from 'axios';
-import { API_BASE_1, IMG_BASE } from '../constants/data';
-
-
+import { io } from 'socket.io-client';
 
 
 const TYPE_META = {
@@ -167,6 +165,8 @@ export default function Detections() {
   const [typeFilter, setTypeFilter] = useState('');
   const [dateFilter, setDateFilter] = useState('');
   const [selected, setSelected] = useState(null);
+  const [liveAlert, setLiveAlert] = useState(null);
+  const [socketConnected, setSocketConnected] = useState(false);
 
   const fetchDetections = useCallback(async (pg = 1) => {
     setLoading(true);
@@ -189,10 +189,57 @@ export default function Detections() {
     }
   }, [typeFilter, dateFilter, search]);
 
+  const matchesFilters = useCallback((item) => {
+    if (typeFilter && item.type !== typeFilter) return false;
+    if (dateFilter && item.date !== dateFilter) return false;
+    if (search.trim() && !item.camera_id.toLowerCase().includes(search.trim().toLowerCase())) return false;
+    return true;
+  }, [typeFilter, dateFilter, search]);
+
   useEffect(() => {
     setPage(1);
     fetchDetections(1);
   }, [fetchDetections]);
+
+  useEffect(() => {
+    const socket = io({
+      path: '/socket.io',
+      transports: ['polling'],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+    });
+
+    socket.on('connect', () => {
+      setSocketConnected(true);
+    });
+
+    socket.on('disconnect', () => {
+      setSocketConnected(false);
+    });
+
+    socket.on('detection:new', (item) => {
+      setLiveAlert(item);
+
+      if (!matchesFilters(item)) {
+        return;
+      }
+
+      setTotal((prev) => prev + 1);
+      setCounts((prev) => ({
+        ...prev,
+        [item.type]: (prev[item.type] || 0) + 1,
+      }));
+
+      if (page === 1) {
+        setData((prev) => [item, ...prev].slice(0, PAGE_SIZE));
+      }
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, [matchesFilters, page]);
 
   const handlePageChange = (_, pg) => {
     setPage(pg);
@@ -212,11 +259,19 @@ export default function Detections() {
             {total.toLocaleString()} detections across all cameras
           </Typography>
         </Box>
-        <Tooltip title="Refresh">
-          <IconButton onClick={() => fetchDetections(page)} color="primary" sx={{ bgcolor: '#ede9fe' }}>
-            <Refresh />
-          </IconButton>
-        </Tooltip>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Chip
+            size="small"
+            label={socketConnected ? 'Live connected' : 'Live disconnected'}
+            color={socketConnected ? 'success' : 'default'}
+            variant={socketConnected ? 'filled' : 'outlined'}
+          />
+          <Tooltip title="Refresh">
+            <IconButton onClick={() => fetchDetections(page)} color="primary" sx={{ bgcolor: '#ede9fe' }}>
+              <Refresh />
+            </IconButton>
+          </Tooltip>
+        </Box>
       </Box>
 
       {/* Stat Cards */}
@@ -382,6 +437,28 @@ export default function Detections() {
 
       {/* Lightbox */}
       <Lightbox item={selected} onClose={() => setSelected(null)} />
+
+      <Snackbar
+        open={Boolean(liveAlert)}
+        autoHideDuration={5000}
+        onClose={() => setLiveAlert(null)}
+        anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+      >
+        <Alert
+          onClose={() => setLiveAlert(null)}
+          severity="warning"
+          variant="filled"
+          sx={{ width: '100%', cursor: liveAlert ? 'pointer' : 'default' }}
+          onClick={() => {
+            if (liveAlert) {
+              setSelected(liveAlert);
+              setLiveAlert(null);
+            }
+          }}
+        >
+          {liveAlert ? `New ${TYPE_META[liveAlert.type]?.label || liveAlert.type} alert from ${liveAlert.camera_id}` : ''}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }

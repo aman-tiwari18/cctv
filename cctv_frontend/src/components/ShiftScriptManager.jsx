@@ -18,7 +18,10 @@ import {
     Chip,
     Alert,
     Divider,
-    CircularProgress
+    CircularProgress,
+    FormControl,
+    InputLabel,
+    Select
 } from '@mui/material';
 import {
     Add,
@@ -33,6 +36,7 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
     const [assignments, setAssignments] = useState([]);
     const [scripts, setScripts] = useState([]);
     const [executions, setExecutions] = useState([]);
+    const [selectedDate, setSelectedDate] = useState('');
     const [loading, setLoading] = useState(false);
     const [openDialog, setOpenDialog] = useState(false);
     const [editingAssignment, setEditingAssignment] = useState(null);
@@ -50,8 +54,41 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
             loadScripts();
             loadAssignments();
             loadExecutions();
+        } else {
+            setSelectedDate('');
         }
     }, [shift]);
+
+    useEffect(() => {
+        const activeAssignments = assignments.filter((assignment) => assignment.is_active);
+        const dates = [...new Set(activeAssignments.map((assignment) => assignment.assignment_date).filter(Boolean))].sort();
+
+        if (dates.length === 0) {
+            if (selectedDate) {
+                setSelectedDate('');
+            }
+            return;
+        }
+
+        if (!selectedDate || !dates.includes(selectedDate)) {
+            setSelectedDate(dates[0]);
+        }
+    }, [assignments, selectedDate]);
+
+    const activeAssignments = assignments.filter((assignment) => assignment.is_active);
+    const availableDates = [...new Set(activeAssignments.map((assignment) => assignment.assignment_date).filter(Boolean))].sort();
+    const visibleAssignments = selectedDate
+        ? activeAssignments.filter((assignment) => assignment.assignment_date === selectedDate)
+        : activeAssignments;
+
+    const formatAssignmentDate = (value) => {
+        if (!value) return 'No date';
+        const parts = String(value).split('-');
+        if (parts.length === 3) {
+            return `${parts[2]}-${parts[1]}-${parts[0]}`;
+        }
+        return value;
+    };
 
     const loadScripts = async () => {
         try {
@@ -183,15 +220,39 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
 
                 <Divider sx={{ my: 2 }} />
 
+                {availableDates.length > 0 && (
+                    <Box mb={2} display="flex" gap={2} alignItems={{ xs: 'stretch', sm: 'center' }} flexDirection={{ xs: 'column', sm: 'row' }}>
+                        <FormControl size="small" sx={{ minWidth: 220 }}>
+                            <InputLabel id="assignment-date-label">Assignment Date</InputLabel>
+                            <Select
+                                labelId="assignment-date-label"
+                                value={selectedDate}
+                                label="Assignment Date"
+                                onChange={(e) => setSelectedDate(e.target.value)}
+                            >
+                                {availableDates.map((date) => (
+                                    <MenuItem key={date} value={date}>
+                                        {formatAssignmentDate(date)}
+                                    </MenuItem>
+                                ))}
+                            </Select>
+                        </FormControl>
+
+                        <Chip
+                            label={`${visibleAssignments.length} script${visibleAssignments.length === 1 ? '' : 's'} on ${formatAssignmentDate(selectedDate)}`}
+                            color="primary"
+                            variant="outlined"
+                        />
+                    </Box>
+                )}
+
                 {loading ? (
                     <Box display="flex" justifyContent="center" py={2}>
                         <CircularProgress size={24} />
                     </Box>
-                ) : assignments.length > 0 ? (
+                ) : visibleAssignments.length > 0 ? (
                     <List>
-                        {assignments
-                            .filter((assignment) => assignment.is_active)
-                            .map((assignment) => (
+                        {visibleAssignments.map((assignment) => (
                                 <ListItem key={assignment.id} divider>
                                     <ListItemText
                                         primary={
@@ -199,6 +260,14 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
                                                 <Typography variant="body1" fontWeight="medium">
                                                     {assignment.script?.name || 'Unknown Script'}
                                                 </Typography>
+
+                                                {assignment.assignment_date && (
+                                                    <Chip
+                                                        label={formatAssignmentDate(assignment.assignment_date)}
+                                                        size="small"
+                                                        variant="outlined"
+                                                    />
+                                                )}
 
                                                 <Chip
                                                     label={`Every ${assignment.custom_frequency_minutes ||
@@ -212,7 +281,8 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
                                             </Box>
                                         }
                                         secondary={
-                                            <Box mt={0.5}>                                                {(assignment.custom_start_time || assignment.custom_end_time) && (
+                                            <Box mt={0.5}>
+                                                {(assignment.custom_start_time || assignment.custom_end_time) && (
                                                     <Typography variant="caption" color="text.secondary">
                                                         Custom Time: {assignment.custom_start_time || 'N/A'} -{' '}
                                                         {assignment.custom_end_time || 'N/A'}
@@ -247,7 +317,9 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
                     </List>
                 ) : (
                     <Typography variant="body2" color="text.secondary" textAlign="center" py={2}>
-                        No scripts assigned to this shift. Click "Add Script" to assign one.
+                        {availableDates.length > 0
+                            ? `No scripts assigned for ${formatAssignmentDate(selectedDate)}.`
+                            : 'No scripts assigned to this shift. Click "Add Script" to assign one.'}
                     </Typography>
                 )}
             </Paper>

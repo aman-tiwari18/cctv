@@ -20,8 +20,17 @@ export default defineConfig({
                 target: 'http://localhost:8000',
                 changeOrigin: true,
             },
-
-            // Optional script server
+            '/detection-images': {
+                target: 'http://localhost:8000',
+                changeOrigin: true,
+            },
+            '/socket.io': {
+                target: 'http://localhost:8000',
+                changeOrigin: true,
+                ws: true,
+            },
+            // Script-server direct routes (cancel, health, status)
+            // Use /ss/... prefix to avoid clashing with /cctv/api/executions
             '/ss': {
                 target: 'http://localhost:8000',
                 changeOrigin: true,

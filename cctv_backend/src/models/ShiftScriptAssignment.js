@@ -39,6 +39,12 @@ const ShiftScriptAssignment = sequelize.define(
             comment: "Execution status of this assignment",
         },
 
+        assignment_date: {
+            type: DataTypes.DATEONLY,
+            allowNull: false,
+            comment: "Date on which this assignment should run",
+        },
+
         custom_start_time: {
             type: DataTypes.TIME,
             allowNull: true,

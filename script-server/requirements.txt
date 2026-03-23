@@ -89,6 +89,7 @@ idna==3.11
 certifi==2026.2.25
 charset-normalizer==3.4.6
 urllib3==2.6.3
+python-socketio==5.16.1
 
 # ─── Date / time ──────────────────────────────────────────────
 python-dateutil==2.9.0.post0
