@@ -8,7 +8,7 @@ const { authenticate } = require("../middleware/auth");
 // Pending assignments (for script server polling)
 router.get(
     "/pending",
-    authenticate,
+    // authenticate,
     asyncHandler(ExecutionController.getPending)
 );
 

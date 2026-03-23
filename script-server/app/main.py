@@ -4,6 +4,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List
+import socketio
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -23,6 +24,47 @@ from scripts.detection.backend.pipeline_manager import (
     cleanup_old_pipelines, processes, ALL_ANALYTICS
 )
 
+DETECTION_SCAN_INTERVAL_SECONDS = 2
+known_detection_files = {}
+
+
+def list_detection_files() -> dict:
+    snapshot = {}
+    for type_key, folder_name in DETECTION_FOLDERS.items():
+        folder = RESULTS_DIR / folder_name
+        if not folder.exists():
+            snapshot[type_key] = set()
+            continue
+
+        snapshot[type_key] = {
+            f.name
+            for f in folder.iterdir()
+            if f.is_file() and f.suffix.lower() in (".jpg", ".jpeg", ".png")
+        }
+    return snapshot
+
+
+async def detection_watch_loop():
+    global known_detection_files
+
+    while True:
+        await asyncio.sleep(DETECTION_SCAN_INTERVAL_SECONDS)
+        current_snapshot = list_detection_files()
+
+        for type_key, current_files in current_snapshot.items():
+            previous_files = known_detection_files.get(type_key, set())
+            new_files = sorted(current_files - previous_files)
+
+            for filename in new_files:
+                payload = parse_detection_filename(filename, type_key)
+                await sio.emit("detection:new", payload)
+                logger.info(f"Live detection emitted: {type_key} {filename}")
+
+        known_detection_files = current_snapshot
+
+
+sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Old fastAPI startup hook logic for pipeline cleanup 
@@ -37,6 +79,9 @@ async def lifespan(app: FastAPI):
     
     # Start poller
     await poller_service.start()
+
+    global known_detection_files
+    known_detection_files = list_detection_files()
     
     # Background log cleanup task
     async def cleanup_loop():
@@ -45,6 +90,7 @@ async def lifespan(app: FastAPI):
             log_manager.cleanup_old_logs(30)
             
     cleanup_task = asyncio.create_task(cleanup_loop())
+    detection_task = asyncio.create_task(detection_watch_loop())
     logger.info("Script execution server started successfully")
     
     yield
@@ -53,6 +99,7 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down...")
     await poller_service.stop()
     cleanup_task.cancel()
+    detection_task.cancel()
 
 # app = FastAPI(lifespan=lifespan)
 app = FastAPI(
@@ -332,3 +379,17 @@ def list_detections(
         "counts":  counts,
         "data":    paginated,
     }
+
+
+@sio.event
+async def connect(sid, environ, auth):
+    logger.info(f"Socket.IO client connected: {sid}")
+    await sio.emit("detections:connected", {"success": True}, to=sid)
+
+
+@sio.event
+async def disconnect(sid):
+    logger.info(f"Socket.IO client disconnected: {sid}")
+
+
+app = socketio.ASGIApp(sio, other_asgi_app=fastapi_app, socketio_path="socket.io")

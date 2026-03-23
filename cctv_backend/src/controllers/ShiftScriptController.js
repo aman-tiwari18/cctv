@@ -1,6 +1,55 @@
 const ShiftScriptAssignment = require("../models/ShiftScriptAssignment");
 const Script = require("../models/Script");
 const ExamShift = require("../models/ExamShift");
+const Exam = require("../models/Exam");
+const { Op } = require("sequelize");
+
+const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+const toDateOnly = (value) => {
+    if (!value) return null;
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toISOString().split("T")[0];
+};
+
+const safeArray = (value) => {
+    if (!value) return [];
+    if (Array.isArray(value)) return value;
+    if (typeof value === "string") {
+        try {
+            const parsed = JSON.parse(value);
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (_) {
+            return [];
+        }
+    }
+    return [];
+};
+
+const getAssignableDates = (exam) => {
+    const start = toDateOnly(exam.start_date);
+    const end = toDateOnly(exam.end_date);
+    if (!start || !end) return [];
+
+    const skipDays = new Set(safeArray(exam.skip_days));
+    const skipDates = new Set(safeArray(exam.skip_dates).map(toDateOnly).filter(Boolean));
+
+    const dates = [];
+    const cursor = new Date(`${start}T00:00:00Z`);
+    const endDate = new Date(`${end}T00:00:00Z`);
+
+    while (cursor <= endDate) {
+        const dateStr = cursor.toISOString().split("T")[0];
+        const dayName = DAY_NAMES[cursor.getUTCDay()];
+        if (!skipDays.has(dayName) && !skipDates.has(dateStr)) {
+            dates.push(dateStr);
+        }
+        cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+
+    return dates;
+};
 
 
 /**
@@ -25,6 +74,23 @@ exports.assignScript = async (req, res) => {
         });
     }
 
+    // Verify exam exists and has a date range
+    const exam = await Exam.findByPk(shift.exam_id);
+    if (!exam) {
+        return res.status(404).json({
+            success: false,
+            message: "Exam not found for this shift",
+        });
+    }
+
+    const assignableDates = getAssignableDates(exam);
+    if (assignableDates.length === 0) {
+        return res.status(400).json({
+            success: false,
+            message: "No assignable dates found. Please set exam start_date/end_date and verify skip_days/skip_dates.",
+        });
+    }
+
     // Verify script exists
     const script = await Script.findByPk(script_id);
     if (!script) {
@@ -34,35 +100,50 @@ exports.assignScript = async (req, res) => {
         });
     }
 
-    // Check if already assigned
-    const existing = await ShiftScriptAssignment.findOne({
-        where: { shift_id, script_id },
+    const existingAssignments = await ShiftScriptAssignment.findAll({
+        attributes: ["assignment_date"],
+        where: {
+            shift_id,
+            script_id,
+            assignment_date: { [Op.in]: assignableDates },
+        },
+        raw: true,
     });
-    if (existing) {
-        return res.status(400).json({
-            success: false,
-            message: "Script already assigned to this shift",
-        });
+
+    const existingDateSet = new Set(existingAssignments.map((row) => row.assignment_date));
+    const newRecords = assignableDates
+        .filter((date) => !existingDateSet.has(date))
+        .map((date) => ({
+            shift_id,
+            script_id,
+            assignment_date: date,
+            custom_start_time: custom_start_time || null,
+            custom_end_time: custom_end_time || null,
+            custom_frequency_minutes: custom_frequency_minutes || null,
+            notes: notes || null,
+        }));
+
+    if (newRecords.length > 0) {
+        await ShiftScriptAssignment.bulkCreate(newRecords);
     }
 
-    const assignment = await ShiftScriptAssignment.create({
-        shift_id,
-        script_id,
-        custom_start_time: custom_start_time || null,
-        custom_end_time: custom_end_time || null,
-        custom_frequency_minutes: custom_frequency_minutes || null,
-        notes: notes || null,
-    });
-
-    // Reload with script data
-    const result = await ShiftScriptAssignment.findByPk(assignment.id, {
+    const results = await ShiftScriptAssignment.findAll({
+        where: {
+            shift_id,
+            script_id,
+            assignment_date: { [Op.in]: assignableDates },
+        },
         include: [{ model: Script, as: "script" }],
+        order: [["assignment_date", "ASC"]],
     });
 
     res.status(201).json({
         success: true,
-        message: "Script assigned to shift successfully",
-        data: result,
+        message: `Script assigned for ${newRecords.length} date(s). Skipped ${existingAssignments.length} already assigned date(s).`,
+        count: results.length,
+        createdCount: newRecords.length,
+        skippedCount: existingAssignments.length,
+        data: results,
     });
 };
 
@@ -81,24 +162,92 @@ exports.bulkAssign = async (req, res) => {
         });
     }
 
-    const assignments = scripts.map((s) => ({
-        shift_id,
-        script_id: s.script_id,
-        custom_start_time: s.custom_start_time || null,
-        custom_end_time: s.custom_end_time || null,
-        custom_frequency_minutes: s.custom_frequency_minutes || null,
-        notes: s.notes || null,
-    }));
+    const shift = await ExamShift.findByPk(shift_id);
+    if (!shift) {
+        return res.status(404).json({
+            success: false,
+            message: "Shift not found",
+        });
+    }
 
-    const results = await ShiftScriptAssignment.bulkCreate(assignments, {
-        ignoreDuplicates: true,
+    const exam = await Exam.findByPk(shift.exam_id);
+    if (!exam) {
+        return res.status(404).json({
+            success: false,
+            message: "Exam not found for this shift",
+        });
+    }
+
+    const assignableDates = getAssignableDates(exam);
+    if (assignableDates.length === 0) {
+        return res.status(400).json({
+            success: false,
+            message: "No assignable dates found. Please set exam start_date/end_date and verify skip_days/skip_dates.",
+        });
+    }
+
+    const scriptIds = [...new Set(scripts.map((s) => s.script_id).filter(Boolean))];
+    const existingScripts = await Script.findAll({
+        attributes: ["id"],
+        where: { id: { [Op.in]: scriptIds } },
+        raw: true,
     });
+    const validScriptIdSet = new Set(existingScripts.map((s) => s.id));
+
+    const prepared = scripts.filter((s) => validScriptIdSet.has(s.script_id));
+    if (prepared.length === 0) {
+        return res.status(400).json({
+            success: false,
+            message: "No valid scripts found in request",
+        });
+    }
+
+    const existingAssignments = await ShiftScriptAssignment.findAll({
+        attributes: ["script_id", "assignment_date"],
+        where: {
+            shift_id,
+            script_id: { [Op.in]: prepared.map((s) => s.script_id) },
+            assignment_date: { [Op.in]: assignableDates },
+        },
+        raw: true,
+    });
+
+    const existingKeySet = new Set(
+        existingAssignments.map((row) => `${row.script_id}::${row.assignment_date}`)
+    );
+
+    const assignments = [];
+    for (const s of prepared) {
+        for (const date of assignableDates) {
+            const key = `${s.script_id}::${date}`;
+            if (existingKeySet.has(key)) continue;
+
+            assignments.push({
+                shift_id,
+                script_id: s.script_id,
+                assignment_date: date,
+                custom_start_time: s.custom_start_time || null,
+                custom_end_time: s.custom_end_time || null,
+                custom_frequency_minutes: s.custom_frequency_minutes || null,
+                notes: s.notes || null,
+            });
+        }
+    }
+
+    if (assignments.length > 0) {
+        await ShiftScriptAssignment.bulkCreate(assignments);
+    }
 
     res.status(201).json({
         success: true,
-        message: `Successfully assigned ${results.length} scripts to shift`,
-        count: results.length,
-        data: results,
+        message: `Successfully created ${assignments.length} assignment(s) across ${assignableDates.length} date(s).`,
+        count: assignments.length,
+        data: {
+            created: assignments.length,
+            skippedExisting: existingAssignments.length,
+            validDates: assignableDates.length,
+            validScripts: prepared.length,
+        },
     });
 };
 
@@ -107,10 +256,11 @@ exports.bulkAssign = async (req, res) => {
  * Get all scripts assigned to a shift
  */
 exports.getByShift = async (req, res) => {
-    const { is_active } = req.query;
+    const { is_active, assignment_date } = req.query;
 
     const where = { shift_id: req.params.shiftId };
     if (is_active !== undefined) where.is_active = is_active === "true";
+    if (assignment_date) where.assignment_date = assignment_date;
 
     const assignments = await ShiftScriptAssignment.findAll({
         where,
@@ -127,7 +277,7 @@ exports.getByShift = async (req, res) => {
                 ],
             },
         ],
-        order: [[{ model: Script, as: "script" }, "name", "ASC"]],
+        order: [["assignment_date", "ASC"], [{ model: Script, as: "script" }, "name", "ASC"]],
     });
 
     res.json({
@@ -142,10 +292,11 @@ exports.getByShift = async (req, res) => {
  * Get all shift-script assignments for an exam
  */
 exports.getByExam = async (req, res) => {
-    const { is_active } = req.query;
+    const { is_active, assignment_date } = req.query;
 
     const where = {};
     if (is_active !== undefined) where.is_active = is_active === "true";
+    if (assignment_date) where.assignment_date = assignment_date;
 
     const assignments = await ShiftScriptAssignment.findAll({
         where,
@@ -167,6 +318,7 @@ exports.getByExam = async (req, res) => {
                 ],
             },
         ],
+        order: [["assignment_date", "ASC"], [{ model: Script, as: "script" }, "name", "ASC"]],
     });
 
     res.json({

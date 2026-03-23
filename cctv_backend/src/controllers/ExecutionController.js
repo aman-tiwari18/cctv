@@ -2,7 +2,6 @@ const ShiftScriptAssignment = require("../models/ShiftScriptAssignment");
 const Script = require("../models/Script");
 const ExamShift = require("../models/ExamShift");
 const Exam = require("../models/Exam");
-const { Op } = require("sequelize");
 
 
 /**
@@ -15,7 +14,7 @@ const { Op } = require("sequelize");
  *
  * Checks:
  *   1. status = PENDING, is_active = TRUE on assignment
- *   2. Exam is active and today is within exam's start_date / end_date
+ *   2. assignment_date = today (date-first filtering)
  *   3. custom_start_time falls within (NOW - grace) … (NOW + lookahead)
  *      Falls back to shift start_time when custom_start_time is NULL
  *
@@ -32,6 +31,13 @@ exports.getPending = async (req, res) => {
     const toTimeStr = (date) =>
         date.toTimeString().substring(0, 8); // "HH:MM:SS"
 
+    const toDateOnly = (value) => {
+        if (!value) return null;
+        if (typeof value === "string") return value.split("T")[0];
+        const d = new Date(value);
+        return Number.isNaN(d.getTime()) ? null : d.toISOString().split("T")[0];
+    };
+
     const now        = new Date();
     const windowStart = new Date(now.getTime() - graceMins      * 60 * 1000);
     const windowEnd   = new Date(now.getTime() + lookaheadMins  * 60 * 1000);
@@ -44,6 +50,7 @@ exports.getPending = async (req, res) => {
             ssa.id,
             ssa.shift_id,
             ssa.script_id,
+            ssa.assignment_date,
             s.script_id                AS script_code,
             ssa.custom_start_time,
             ssa.custom_end_time,
@@ -56,9 +63,7 @@ exports.getPending = async (req, res) => {
             es.end_time                AS shift_end_time,
             e.exam_name,
             e.link_type,
-            e.id                       AS exam_id,
-            e.skip_days,
-            e.skip_dates
+            e.id                       AS exam_id
         FROM shift_script_assignments ssa
         JOIN scripts     s  ON s.id  = ssa.script_id
         JOIN exam_shifts es ON es.id = ssa.shift_id
@@ -67,43 +72,27 @@ exports.getPending = async (req, res) => {
             ssa.status    = 'PENDING'
             AND ssa.is_active = TRUE
             AND e.is_active   = TRUE
-            AND (e.start_date IS NULL OR e.start_date <= ?)
-            AND (e.end_date   IS NULL OR e.end_date   >= ?)
+            AND ssa.assignment_date = ?
             AND COALESCE(ssa.custom_start_time, es.start_time) BETWEEN ? AND ?
         ORDER BY COALESCE(ssa.custom_start_time, es.start_time) ASC
         LIMIT ?
     `, {
-        replacements: [todayStr, todayStr, windowStartStr, windowEndStr, limit],
+        replacements: [todayStr, windowStartStr, windowEndStr, limit],
         type: sequelize.QueryTypes.SELECT,
     });
 
-
-
-    // Filter skip_days / skip_dates in JS (JSON columns are easier here)
-    const DAY_NAMES = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
-    const todayDay  = DAY_NAMES[now.getDay()];
-    // todayStr already defined above
-
-    const ready = rows.filter((row) => {
-        const skipDays  = Array.isArray(row.skip_days)
-            ? row.skip_days  : (row.skip_days  ? JSON.parse(row.skip_days)  : []);
-        const skipDates = Array.isArray(row.skip_dates)
-            ? row.skip_dates : (row.skip_dates ? JSON.parse(row.skip_dates) : []);
-        if (skipDays.includes(todayDay))   return false;
-        if (skipDates.includes(todayStr)) return false;
-        return true;
-    });
-
     // Attach the resolved scheduled_time string so the poller can compute its delay
-    const data = ready.map((row) => {
+    const data = rows.map((row) => {
+        const assignmentDate = toDateOnly(row.assignment_date) || todayStr;
         const startTimeStr = row.custom_start_time || row.shift_start_time; // "HH:MM:SS"
         const endTimeStr   = row.custom_end_time   || row.shift_end_time;   // "HH:MM:SS"
 
         // Detect overnight shift: if end time is earlier than start time,
         // the script runs past midnight → end_at is on the NEXT day.
-        let endDateStr = todayStr;
+        let endDateStr = assignmentDate;
         if (endTimeStr && startTimeStr && endTimeStr <= startTimeStr) {
-            const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+            const tomorrow = new Date(`${assignmentDate}T00:00:00Z`);
+            tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
             endDateStr = tomorrow.toISOString().split("T")[0];
         }
 
@@ -114,11 +103,12 @@ exports.getPending = async (req, res) => {
             shift_name:       row.shift_name,
             exam_name:        row.exam_name,
             // ISO datetime the poller should fire this assignment at exactly
-            scheduled_at:     `${todayStr}T${startTimeStr}`,
+            scheduled_at:     `${assignmentDate}T${startTimeStr}`,
             // ISO datetime the script should stop at (next day if overnight)
             end_at:           endTimeStr ? `${endDateStr}T${endTimeStr}` : null,
             execution_metadata: {
                 assignment_id: row.id,
+                assignment_date: assignmentDate,
                 script_id:     row.script_id,
                 script_code:   row.script_code,
                 script_name:   row.task_name,
