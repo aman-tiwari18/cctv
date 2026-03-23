@@ -10,7 +10,7 @@ const runMigrations = async () => {
     try {
         logger.info('Starting database migrations...');
 
-        const migrationFile = path.join(__dirname, 'db.sql');
+        const migrationFile = path.join(__dirname, '009_alter_camera_links_rtsp_new_headers.sql');
         const sql = fs.readFileSync(migrationFile, 'utf8');
 
         // Remove comments and split by semicolons

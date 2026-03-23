@@ -1,4 +1,5 @@
 const { CameraLinkHLS, CameraLinkRTSP, Exam, ExamShift } = require("../models");
+const { Op } = require("sequelize");
 const xlsx = require("xlsx");
 const fs = require("fs");
 
@@ -18,22 +19,64 @@ const getModelByExam = async (examId) => {
 /**
  * Pick first truthy value by checking row keys (case-insensitive and trimmed)
  */
+const normalizeHeaderKey = (key) =>
+    String(key || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
+
+const normalizeCellValue = (value) => {
+    if (typeof value === "string") return value.trim();
+    return value;
+};
+
 const pick = (row, ...keys) => {
-    // Normalise row keys to lowercase/trimmed
+    // Normalise row keys so variants like "ch_no", "Ch No", "CH-NO" all match.
     const normalizedRow = {};
     for (const [k, v] of Object.entries(row)) {
-        if (k && typeof k === "string") {
-            normalizedRow[k.trim().toLowerCase()] = v;
+        const normalizedKey = normalizeHeaderKey(k);
+        if (normalizedKey) {
+            const normalizedValue = normalizeCellValue(v);
+
+            // Preserve first non-empty value for duplicate-like headers.
+            if (
+                normalizedRow[normalizedKey] === undefined ||
+                normalizedRow[normalizedKey] === ""
+            ) {
+                normalizedRow[normalizedKey] = normalizedValue;
+            }
         }
     }
-    
+
     // Check for keys
     for (const k of keys) {
-        const checkKey = k.trim().toLowerCase();
+        const checkKey = normalizeHeaderKey(k);
         if (normalizedRow[checkKey] !== undefined && normalizedRow[checkKey] !== "") {
             return normalizedRow[checkKey];
         }
     }
+    return "";
+};
+
+/**
+ * Pick value from a header that contains all provided tokens.
+ * Useful for merged headers like "ch_no(unique key value)".
+ */
+const pickByHeaderTokens = (row, ...tokens) => {
+    const normalizedTokens = tokens.map((t) => normalizeHeaderKey(t)).filter(Boolean);
+    if (normalizedTokens.length === 0) return "";
+
+    for (const [k, v] of Object.entries(row)) {
+        const normalizedKey = normalizeHeaderKey(k);
+        if (!normalizedKey) continue;
+
+        const isMatch = normalizedTokens.every((token) => normalizedKey.includes(token));
+        if (!isMatch) continue;
+
+        const value = normalizeCellValue(v);
+        if (value !== undefined && value !== "") return value;
+    }
+
     return "";
 };
 
@@ -80,6 +123,25 @@ exports.uploadCameras = async (req, res) => {
                 const cctv_url = pick(row, "cctv_url", "CCTV URL", "url", "URL", "Link", "CCTV_URL");
                 if (!cctv_url) continue;
 
+                const chCode =
+                    pick(
+                        row,
+                        "ch_no",
+                        "ch no",
+                        "ch-no",
+                        "chno",
+                        "CH NO",
+                        "CH-NO",
+                        "channel no",
+                        "channel_no",
+                        "channel number",
+                        "ch_code",
+                        "CH Code",
+                        "unique key",
+                        "unique key value"
+                    ) ||
+                    pickByHeaderTokens(row, "ch", "no");
+
                 validRecords.push({
                     exam_id: examId,
                     centre_name: pick(row, "Centre Name", "center_name", "centre_name", "TC Name", "TC NAME", "Tc_name"),
@@ -87,7 +149,7 @@ exports.uploadCameras = async (req, res) => {
                     city:         pick(row, "City", "city", "CITY"),
                     state:        pick(row, "State", "state", "STATE"),
                     camera_name:  pick(row, "Camera Name", "camera_name", "LAN and Lab Name", "LAN & Lab Name"),
-                    ch_code:      pick(row, "ch_no", "Ch No", "CH NO", "ch_code", "CH Code", "unique key", "unique key value"),
+                    ch_code:      chCode,
                     cctv_url,
                     camera_category: pick(row, "Camera Category", "camera_category", "camera category"),
                     classification:  pick(row, "Classification", "classification") || null,
@@ -97,39 +159,111 @@ exports.uploadCameras = async (req, res) => {
                 });
             } else {
                 // RTSP
-                const url = pick(row, "url", "URL", "Server Address", "CCTV URL", "Link");
-                if (!url) continue;
+                const device_id = pick(
+                    row,
+                    "Device ID",
+                    "device_id",
+                    "DeviceID",
+                    "Device Id",
+                    "Deive ID",
+                    "DeiveID",
+                    "Deive Id"
+                );
+                const camera_name = pick(row, "Camera Name", "camera_name");
+                const cctv_url = pick(row, "Server Address", "CCTV URL", "cctv_url", "url", "URL", "Link");
+
+                if (!device_id || !camera_name || !cctv_url) continue;
 
                 validRecords.push({
-                    exam_id:         examId,
-                    tc_name:         pick(row, "TC Name", "TC NAME", "Tc_name", "Centre Name", "center_name"),
-                    tc_code:         pick(row, "TC Code", "tc_code"),
-                    camera_name:     pick(row, "Camera Name", "camera_name"),
-                    city:            pick(row, "City", "city"),
-                    state:           pick(row, "State", "state"),
-                    url,
-                    camera_category: pick(row, "Camera Category", "camera_category", "camera category"),
+                    exam_id: examId,
+                    device_id,
+                    centre_name: pick(row, "Centre Name", "Center Name", "center_name", "centre_name", "TC Name", "TC NAME", "Tc_name"),
+                    tc_code: pick(row, "TC Code", "tc_code", "TC_CODE", "TC code"),
+                    camera_name,
+                    city: pick(row, "City", "city", "CITY"),
+                    state: pick(row, "State", "state", "STATE"),
+                    cctv_url,
                     is_active: true,
                 });
             }
         }
 
         if (validRecords.length === 0) {
+            const detectedHeaders = Object.keys(data[0] || {});
+            const missingColumnsMessage =
+                linkType === "RTSP"
+                    ? `No valid records found. Required RTSP columns: Device ID (or Deive ID), TC Code, Camera Name, Centre/Center Name, City, State, Server Address (or CCTV URL). Detected headers: ${detectedHeaders.join(", ")}`
+                    : "No valid records found. Make sure the Excel contains a 'CCTV URL' column.";
+
             return res.status(400).json({
                 success: false,
-                message: "No valid records found. Make sure the Excel contains a 'CCTV URL' column.",
+                message: missingColumnsMessage,
             });
         }
 
-        await Model.bulkCreate(validRecords);
+        let recordsToInsert = validRecords;
+        let skippedExisting = 0;
+        let skippedInFileDuplicates = 0;
+
+        if (linkType === "RTSP") {
+            // Remove duplicate device IDs inside same file to avoid unique constraint failures.
+            const seenInFile = new Set();
+            recordsToInsert = validRecords.filter((record) => {
+                const key = String(record.device_id || "").trim();
+                if (!key) return false;
+                if (seenInFile.has(key)) {
+                    skippedInFileDuplicates += 1;
+                    return false;
+                }
+                seenInFile.add(key);
+                return true;
+            });
+
+            // Skip records whose device_id already exists in DB.
+            const deviceIds = recordsToInsert.map((record) => record.device_id);
+            if (deviceIds.length > 0) {
+                const existing = await Model.findAll({
+                    attributes: ["device_id"],
+                    where: { device_id: { [Op.in]: deviceIds } },
+                    raw: true,
+                });
+                const existingSet = new Set(existing.map((row) => row.device_id));
+                recordsToInsert = recordsToInsert.filter((record) => {
+                    if (existingSet.has(record.device_id)) {
+                        skippedExisting += 1;
+                        return false;
+                    }
+                    return true;
+                });
+            }
+
+            if (recordsToInsert.length === 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: `No new RTSP records to insert. Skipped ${skippedExisting} existing device_id entries and ${skippedInFileDuplicates} duplicate entries in file.`,
+                });
+            }
+        }
+
+        await Model.bulkCreate(recordsToInsert);
         // Cleanup temp file
         try { fs.unlinkSync(req.file.path); } catch (_) {}
 
         res.status(200).json({
             success: true,
-            message: `Successfully uploaded ${validRecords.length} cameras.`,
+            message:
+                linkType === "RTSP"
+                    ? `Successfully uploaded ${recordsToInsert.length} cameras. Skipped ${skippedExisting} existing device_id entries and ${skippedInFileDuplicates} duplicate entries in file.`
+                    : `Successfully uploaded ${recordsToInsert.length} cameras.`,
         });
     } catch (error) {
+        if (error?.name && error.name.includes("Sequelize")) {
+            const details = (error.errors || []).map((e) => e.message).filter(Boolean);
+            return res.status(400).json({
+                success: false,
+                message: details.length > 0 ? details.join("; ") : "Validation error while uploading cameras",
+            });
+        }
         throw error;
     }
 };
@@ -142,8 +276,8 @@ exports.downloadTemplate = async (req, res) => {
     const isHLS = type?.toLowerCase() === "hls";
 
     const headers = isHLS
-        ? [["S.No.", "TC Code", "Centre Name", "City", "State", "LIS IF/IDZ", "LAN and Lab Name", "Camera Name", "CCTV URL", "ch_no", "unique key value", "Camera Category"]]
-        : [["TC Code", "TC Name", "City", "State", "Camera Name", "URL", "Camera Category"]];
+        ? [["S.No.", "TC Code", "Centre Name", "City", "State", "LIS IF/IDZ", "LAN and Lab Name", "Camera Name", "CCTV URL", "ch_no", "Camera Category"]]
+        : [["Device ID", "TC Code", "Camera Name", "Centre Name", "City", "State", "CCTV URL"]];
 
     const wb = xlsx.utils.book_new();
     const ws = xlsx.utils.aoa_to_sheet(headers);
@@ -166,11 +300,15 @@ exports.downloadTemplate = async (req, res) => {
  */
 exports.createCamera = async (req, res) => {
     const exam_id = req.params.examId;
-    const { Model } = await getModelByExam(exam_id);
+    const { Model, linkType } = await getModelByExam(exam_id);
 
     // Map url → cctv_url for HLS if client sends "url"
     const body = { ...req.body, exam_id };
     if (body.url && !body.cctv_url) { body.cctv_url = body.url; delete body.url; }
+    if (linkType === "RTSP" && body.tc_name && !body.centre_name) {
+        body.centre_name = body.tc_name;
+        delete body.tc_name;
+    }
 
     const camera = await Model.create(body);
     res.status(201).json({ success: true, message: "Camera link created", data: camera });
@@ -232,11 +370,15 @@ exports.getById = async (req, res) => {
  */
 exports.updateCamera = async (req, res) => {
     const { examId, id } = req.params;
-    const { Model } = await getModelByExam(examId);
+    const { Model, linkType } = await getModelByExam(examId);
     const camera = await Model.findByPk(id);
     if (!camera) return res.status(404).json({ success: false, message: "Camera not found" });
     const body = { ...req.body };
     if (body.url && !body.cctv_url) { body.cctv_url = body.url; delete body.url; }
+    if (linkType === "RTSP" && body.tc_name && !body.centre_name) {
+        body.centre_name = body.tc_name;
+        delete body.tc_name;
+    }
     await camera.update(body);
     res.json({ success: true, message: "Camera updated", data: camera });
 };
@@ -256,9 +398,13 @@ exports.deleteCamera = async (req, res) => {
  */
 exports.bulkCreateCamera = async (req, res) => {
     const exam_id = req.params.examId;
-    const { Model } = await getModelByExam(exam_id);
+    const { Model, linkType } = await getModelByExam(exam_id);
     const records = (req.body.cameras || []).map((c) => {
         if (c.url && !c.cctv_url) { c.cctv_url = c.url; delete c.url; }
+        if (linkType === "RTSP" && c.tc_name && !c.centre_name) {
+            c.centre_name = c.tc_name;
+            delete c.tc_name;
+        }
         return { ...c, exam_id };
     });
     await Model.bulkCreate(records);
