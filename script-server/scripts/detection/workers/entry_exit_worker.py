@@ -1,226 +1,508 @@
+# # import time
+# # import os
+# # import logging
+# # from datetime import datetime
+# # import cv2
+# # from ultralytics import YOLO
+
+# # # ================= LOGGING =================
+# # logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+# # # ================= CONFIG ==================
+# # PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+# # MODEL_PATH = os.path.join(PROJECT_ROOT, "models/yolov10m.pt")
+# # SAVE_FOLDER = os.path.join(PROJECT_ROOT, "results/entry_exit_results")
+
+# # MIN_PERSONS = 2
+# # CONF_THRESHOLD = 0.45
+# # COOLDOWN_TIME = 180  # seconds
+
+# # DEVICE_ID = "DAV_NVR"
+# # CAMERA_NO = "CH19"
+
+# # os.makedirs(SAVE_FOLDER, exist_ok=True)
+
+# # # ================= YOLO ====================
+# # print("🔄 [EntryExitWorker] Loading YOLO model...")
+# # yolo_model = YOLO(MODEL_PATH)
+
+# # last_save_times = {}
+
+# # # =====================================================
+# # # SAME LOGIC (frame → entry/exit detection)
+# # # =====================================================
+# # def detect_entry_exit(frame, device_id, camera_no):
+# #     results = yolo_model(frame, conf=CONF_THRESHOLD, verbose=False)[0]
+
+# #     person_detections = [
+# #         box for box in results.boxes
+# #         if int(box.cls[0]) == 0 and box.conf[0] >= CONF_THRESHOLD
+# #     ]
+
+# #     person_count = len(person_detections)
+# #     max_conf = float(max([box.conf[0] for box in person_detections], default=0))
+
+# #     for box in person_detections:
+# #         x1, y1, x2, y2 = map(int, box.xyxy[0])
+# #         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
+
+# #     key = f"{device_id}_{camera_no}"
+# #     now = time.time()
+# #     elapsed = now - last_save_times.get(key, 0)
+
+# #     entry_exit_detected = person_count >= MIN_PERSONS
+
+# #     if entry_exit_detected and elapsed >= COOLDOWN_TIME:
+# #         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+# #         path = (
+# #             f"{SAVE_FOLDER}/{key}_{ts}"
+# #             f"_persons{person_count}_conf{max_conf:.2f}.jpg"
+# #         )
+# #         cv2.imwrite(path, frame)
+# #         last_save_times[key] = now
+# #         logging.info(
+# #             f"[EntryExitWorker] 🚪 Entry/Exit detected! Count={person_count}, saved={path}"
+# #         )
+
+# #     return entry_exit_detected, person_count
+
+# # # =====================================================
+# # # WORKER LOOP
+# # # =====================================================
+# # def entry_exit_worker(frame_queue):
+# #     logging.info("🟢 Entry/Exit Worker started")
+
+# #     while True:
+# #         frame = frame_queue.get()
+
+# #         if frame is None:
+# #             logging.info("🔴 Entry/Exit Worker stopping")
+# #             break
+
+# #         # IMPORTANT: work on a copy
+# #         frame = frame.copy()
+
+# #         detect_entry_exit(frame, DEVICE_ID, CAMERA_NO)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# #working before hls
+# #entry_exit_worker.py
+# # import time
+# # import os
+# # import logging
+# # from datetime import datetime
+# # import cv2
+# # from ultralytics import YOLO
+
+# # # ================= LOGGING =================
+# # logging.basicConfig(
+# #     level=logging.INFO,
+# #     format="%(asctime)s - %(levelname)s - %(message)s"
+# # )
+
+# # # ================= CONFIG ==================
+# # PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+# # MODEL_PATH = os.path.join(PROJECT_ROOT, "models/yolov10m.pt")
+# # SAVE_FOLDER = os.path.join(PROJECT_ROOT, "results/entry_exit_results")
+
+# # MIN_PERSONS = 2
+# # CONF_THRESHOLD = 0.45
+# # COOLDOWN_TIME = 180  # seconds
+
+# # os.makedirs(SAVE_FOLDER, exist_ok=True)
+
+# # # ================= YOLO ====================
+# # print("🔄 [EntryExitWorker] Loading YOLO model...")
+# # yolo_model = YOLO(MODEL_PATH)
+
+# # last_save_times = {}
+
+# # # =====================================================
+# # # ENTRY EXIT DETECTION
+# # # =====================================================
+# # def detect_entry_exit(frame, device_id, camera_no):
+# #     results = yolo_model(frame, conf=CONF_THRESHOLD, verbose=False)[0]
+
+# #     person_detections = [
+# #         box for box in results.boxes
+# #         if int(box.cls[0]) == 0 and box.conf[0] >= CONF_THRESHOLD
+# #     ]
+
+# #     person_count = len(person_detections)
+# #     max_conf = float(max([box.conf[0] for box in person_detections], default=0))
+
+# #     # draw boxes
+# #     for box in person_detections:
+# #         x1, y1, x2, y2 = map(int, box.xyxy[0])
+# #         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
+
+# #     key = f"{device_id}_{camera_no}"
+# #     now = time.time()
+# #     elapsed = now - last_save_times.get(key, 0)
+
+# #     entry_exit_detected = person_count >= MIN_PERSONS
+
+# #     if entry_exit_detected and elapsed >= COOLDOWN_TIME:
+# #         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+# #         path = (
+# #             f"{SAVE_FOLDER}/{key}_{ts}"
+# #             f"_persons{person_count}_conf{max_conf:.2f}.jpg"
+# #         )
+# #         cv2.imwrite(path, frame)
+# #         last_save_times[key] = now
+
+# #         logging.info(
+# #             f"[EntryExitWorker] 🚪 Entry/Exit detected! "
+# #             f"Device={device_id} Cam={camera_no} "
+# #             f"Count={person_count}, saved={path}"
+# #         )
+
+# #     return entry_exit_detected, person_count
+
+# # # =====================================================
+# # # WORKER LOOP (UPDATED)
+# # # =====================================================
+# # def entry_exit_worker(frame_queue):
+# #     logging.info("🟢 Entry/Exit Worker started")
+
+# #     while True:
+# #         data = frame_queue.get()
+
+# #         # 🔴 stop signal
+# #         if data is None:
+# #             logging.info("🔴 Entry/Exit Worker stopping")
+# #             break
+
+# #         # ✅ NEW FORMAT
+# #         frame, device_id, camera_no = data
+
+# #         frame = frame.copy()
+
+# #         detect_entry_exit(frame, device_id, camera_no)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# #test
+# # workers/entry_exit_worker.py
+# """
+# Entry/Exit Worker — supports both RTSP (via master_pipeline producer)
+# and HLS (via its own internal OpenCV reader).
+
+# Merged from:
+#   - Entry_exit_det.py      (RTSP / DSS flow)
+#   - entry_exit_det_tcs.py  (HLS / TCS flow)
+# """
+
 # import time
 # import os
 # import logging
+# import threading
+# import signal
 # from datetime import datetime
+
 # import cv2
 # from ultralytics import YOLO
 
-# # ================= LOGGING =================
-# logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+# # ================= GRACEFUL STOP FLAG =================
+# _STOP_EVENT = threading.Event()
 
-# # ================= CONFIG ==================
-# PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+# def _handle_stop(sig, frame):
+#     _STOP_EVENT.set()
 
-# MODEL_PATH = os.path.join(PROJECT_ROOT, "models/yolov10m.pt")
-# SAVE_FOLDER = os.path.join(PROJECT_ROOT, "results/entry_exit_results")
-
-# MIN_PERSONS = 2
-# CONF_THRESHOLD = 0.45
-# COOLDOWN_TIME = 180  # seconds
-
-# DEVICE_ID = "DAV_NVR"
-# CAMERA_NO = "CH19"
-
-# os.makedirs(SAVE_FOLDER, exist_ok=True)
-
-# # ================= YOLO ====================
-# print("🔄 [EntryExitWorker] Loading YOLO model...")
-# yolo_model = YOLO(MODEL_PATH)
-
-# last_save_times = {}
-
-# # =====================================================
-# # SAME LOGIC (frame → entry/exit detection)
-# # =====================================================
-# def detect_entry_exit(frame, device_id, camera_no):
-#     results = yolo_model(frame, conf=CONF_THRESHOLD, verbose=False)[0]
-
-#     person_detections = [
-#         box for box in results.boxes
-#         if int(box.cls[0]) == 0 and box.conf[0] >= CONF_THRESHOLD
-#     ]
-
-#     person_count = len(person_detections)
-#     max_conf = float(max([box.conf[0] for box in person_detections], default=0))
-
-#     for box in person_detections:
-#         x1, y1, x2, y2 = map(int, box.xyxy[0])
-#         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
-
-#     key = f"{device_id}_{camera_no}"
-#     now = time.time()
-#     elapsed = now - last_save_times.get(key, 0)
-
-#     entry_exit_detected = person_count >= MIN_PERSONS
-
-#     if entry_exit_detected and elapsed >= COOLDOWN_TIME:
-#         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-#         path = (
-#             f"{SAVE_FOLDER}/{key}_{ts}"
-#             f"_persons{person_count}_conf{max_conf:.2f}.jpg"
-#         )
-#         cv2.imwrite(path, frame)
-#         last_save_times[key] = now
-#         logging.info(
-#             f"[EntryExitWorker] 🚪 Entry/Exit detected! Count={person_count}, saved={path}"
-#         )
-
-#     return entry_exit_detected, person_count
-
-# # =====================================================
-# # WORKER LOOP
-# # =====================================================
-# def entry_exit_worker(frame_queue):
-#     logging.info("🟢 Entry/Exit Worker started")
-
-#     while True:
-#         frame = frame_queue.get()
-
-#         if frame is None:
-#             logging.info("🔴 Entry/Exit Worker stopping")
-#             break
-
-#         # IMPORTANT: work on a copy
-#         frame = frame.copy()
-
-#         detect_entry_exit(frame, DEVICE_ID, CAMERA_NO)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-#working before hls
-#entry_exit_worker.py
-# import time
-# import os
-# import logging
-# from datetime import datetime
-# import cv2
-# from ultralytics import YOLO
+# signal.signal(signal.SIGINT,  _handle_stop)
+# signal.signal(signal.SIGTERM, _handle_stop)
 
 # # ================= LOGGING =================
 # logging.basicConfig(
 #     level=logging.INFO,
 #     format="%(asctime)s - %(levelname)s - %(message)s"
 # )
+# logger = logging.getLogger(__name__)
 
 # # ================= CONFIG ==================
 # PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+# MODEL_PATH   = os.path.join(PROJECT_ROOT, "models/yolov10m.pt")
 
-# MODEL_PATH = os.path.join(PROJECT_ROOT, "models/yolov10m.pt")
-# SAVE_FOLDER = os.path.join(PROJECT_ROOT, "results/entry_exit_results")
+# RTSP_SAVE_FOLDER = os.path.join(PROJECT_ROOT, "results/entry_exit_results")
+# HLS_SAVE_FOLDER  = os.path.join(PROJECT_ROOT, "results/tcs_detections/entry_exit_detection")
 
-# MIN_PERSONS = 2
-# CONF_THRESHOLD = 0.45
-# COOLDOWN_TIME = 180  # seconds
+# os.makedirs(RTSP_SAVE_FOLDER, exist_ok=True)
+# os.makedirs(HLS_SAVE_FOLDER,  exist_ok=True)
 
-# os.makedirs(SAVE_FOLDER, exist_ok=True)
+# MIN_PERSONS      = 2      # alert if persons >= this
+# CONF_THRESHOLD   = 0.45
+# COOLDOWN_TIME    = 180    # seconds between saves per camera
+
+# HLS_SAMPLE_EVERY = 5      # process every Nth frame
+# HLS_FAIL_LIMIT   = 3      # consecutive failures before giving up
+
+# # ================= SHARED STATE ============
+# last_save_times = {}       # key → last save epoch
+# person_counts   = {}       # key → cumulative person count
+# _state_lock     = threading.Lock()
 
 # # ================= YOLO ====================
-# print("🔄 [EntryExitWorker] Loading YOLO model...")
+# logger.info("🔄 [EntryExitWorker] Loading YOLO model...")
 # yolo_model = YOLO(MODEL_PATH)
+# logger.info("✅ [EntryExitWorker] YOLO model loaded")
 
-# last_save_times = {}
 
 # # =====================================================
-# # ENTRY EXIT DETECTION
+# # 🔍 CORE DETECTION  (shared by RTSP + HLS paths)
 # # =====================================================
-# def detect_entry_exit(frame, device_id, camera_no):
+# def detect_entry_exit(frame, device_id: str, camera_no: str, save_folder: str):
+#     """
+#     Run YOLO, draw boxes, save if entry/exit threshold met.
+
+#     Returns:
+#         (entry_exit_detected: bool, person_count: int)
+#     """
 #     results = yolo_model(frame, conf=CONF_THRESHOLD, verbose=False)[0]
 
 #     person_detections = [
 #         box for box in results.boxes
-#         if int(box.cls[0]) == 0 and box.conf[0] >= CONF_THRESHOLD
+#         if int(box.cls[0]) == 0 and float(box.conf[0]) >= CONF_THRESHOLD
 #     ]
 
 #     person_count = len(person_detections)
-#     max_conf = float(max([box.conf[0] for box in person_detections], default=0))
+#     max_conf     = float(max((box.conf[0] for box in person_detections), default=0))
 
-#     # draw boxes
+#     # ── Draw bounding boxes ──────────────────────────────────
 #     for box in person_detections:
 #         x1, y1, x2, y2 = map(int, box.xyxy[0])
+#         conf = float(box.conf[0])
 #         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
+#         cv2.putText(
+#             frame, f"Person {conf:.2f}",
+#             (x1, y1 - 10),
+#             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2
+#         )
 
+#     # ── Overlay info ─────────────────────────────────────────
+#     cv2.putText(frame, f"Persons: {person_count}",
+#                 (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+#     cv2.putText(frame, f"Device: {device_id}  Cam: {camera_no}",
+#                 (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+#     # ── Save logic ───────────────────────────────────────────
 #     key = f"{device_id}_{camera_no}"
 #     now = time.time()
-#     elapsed = now - last_save_times.get(key, 0)
 
-#     entry_exit_detected = person_count >= MIN_PERSONS
+#     with _state_lock:
+#         elapsed             = now - last_save_times.get(key, 0)
+#         entry_exit_detected = person_count >= MIN_PERSONS
 
-#     if entry_exit_detected and elapsed >= COOLDOWN_TIME:
-#         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-#         path = (
-#             f"{SAVE_FOLDER}/{key}_{ts}"
-#             f"_persons{person_count}_conf{max_conf:.2f}.jpg"
-#         )
-#         cv2.imwrite(path, frame)
-#         last_save_times[key] = now
+#         if entry_exit_detected and elapsed >= COOLDOWN_TIME:
+#             ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
+#             path = os.path.join(
+#                 save_folder,
+#                 f"{key}_{ts}_persons{person_count}_conf{max_conf:.2f}.jpg"
+#             )
+#             cv2.imwrite(path, frame)
+#             last_save_times[key] = now
+#             logger.info(
+#                 f"[EntryExitWorker] 🚪 Entry/Exit! "
+#                 f"Device={device_id} Cam={camera_no} "
+#                 f"Count={person_count} "
+#                 f"💾 Saved → {path}"
+#             )
+#         elif entry_exit_detected:
+#             remaining = int(COOLDOWN_TIME - elapsed)
+#             logger.debug(
+#                 f"[EntryExitWorker] ⏳ Detected but cooldown active "
+#                 f"({remaining}s left) → {key}"
+#             )
 
-#         logging.info(
-#             f"[EntryExitWorker] 🚪 Entry/Exit detected! "
-#             f"Device={device_id} Cam={camera_no} "
-#             f"Count={person_count}, saved={path}"
-#         )
+#         person_counts[key] = person_counts.get(key, 0) + person_count
 
 #     return entry_exit_detected, person_count
 
+
 # # =====================================================
-# # WORKER LOOP (UPDATED)
+# # 📡  RTSP PATH  — called by master_pipeline producer
 # # =====================================================
 # def entry_exit_worker(frame_queue):
-#     logging.info("🟢 Entry/Exit Worker started")
+#     """
+#     Queue-based worker — receives (frame, device_id, camera_no)
+#     packets from the RTSP producer.
+#     """
+#     logger.info("🟢 [EntryExitWorker] RTSP worker started")
 
 #     while True:
 #         data = frame_queue.get()
-
-#         # 🔴 stop signal
 #         if data is None:
-#             logging.info("🔴 Entry/Exit Worker stopping")
+#             logger.info("🔴 [EntryExitWorker] RTSP worker stopping")
 #             break
 
-#         # ✅ NEW FORMAT
 #         frame, device_id, camera_no = data
-
-#         frame = frame.copy()
-
-#         detect_entry_exit(frame, device_id, camera_no)
-
-
-
-
+#         detect_entry_exit(
+#             frame.copy(),
+#             str(device_id),
+#             str(camera_no),
+#             save_folder=RTSP_SAVE_FOLDER
+#         )
 
 
+# # =====================================================
+# # 📡  HLS PATH  — standalone, reads its own stream
+# # =====================================================
+# def _run_hls_camera(camera_id: str, hls_url: str, camera_name: str = "", max_frames=None):
+#     """Open HLS stream and run entry/exit detection until stopped."""
+#     from tcs_hls_utils import open_hls_stream
+
+#     cap = open_hls_stream(hls_url)
+#     if cap is None or not cap.isOpened():
+#         logger.error(f"[EntryExitWorker][HLS] ❌ Could not open stream for {camera_id}")
+#         return False
+
+#     fps = cap.get(cv2.CAP_PROP_FPS)
+#     if fps <= 0 or fps > 60:
+#         fps = 25.0
+
+#     logger.info(f"[EntryExitWorker][HLS] 🟢 Detection started for {camera_id} @ {fps:.1f} FPS")
+
+#     frame_count = 0
+#     fail_count  = 0
+#     start_time  = time.time()
+
+#     label = camera_name if camera_name else camera_id
+
+#     try:
+#         while not _STOP_EVENT.is_set():
+#             # Non-blocking read with 5s timeout
+#             read_result = [None, None]
+#             def _read():
+#                 read_result[0], read_result[1] = cap.read()
+#             t = threading.Thread(target=_read, daemon=True)
+#             t.start()
+#             t.join(timeout=5)
+
+#             if _STOP_EVENT.is_set():
+#                 break
+
+#             ret, frame = read_result
+#             if not ret or frame is None:
+#                 fail_count += 1
+#                 logger.warning(f"[EntryExitWorker][HLS] ⚠️ Frame fail #{fail_count} → {camera_id}")
+#                 if fail_count >= HLS_FAIL_LIMIT:
+#                     logger.error(f"[EntryExitWorker][HLS] ❌ Max failures → {camera_id}")
+#                     break
+#                 time.sleep(3)
+#                 continue
+
+#             fail_count   = 0
+#             frame_count += 1
+
+#             if frame_count % HLS_SAMPLE_EVERY == 0:
+#                 detected, person_count = detect_entry_exit(
+#                     frame.copy(),
+#                     device_id=label,
+#                     camera_no="",
+#                     save_folder=HLS_SAVE_FOLDER
+#                 )
+
+#                 if (frame_count // HLS_SAMPLE_EVERY) % 90 == 0:
+#                     if detected:
+#                         logger.info(
+#                             f"[EntryExitWorker][HLS] 🚪 Entry/Exit: {person_count} person(s) → {camera_id}"
+#                         )
+#                     else:
+#                         logger.info(
+#                             f"[EntryExitWorker][HLS] ✅ Monitoring OK → {camera_id}"
+#                         )
+
+#             if max_frames and frame_count >= max_frames:
+#                 break
+
+#     except KeyboardInterrupt:
+#         _STOP_EVENT.set()
+#         logger.info(f"[EntryExitWorker][HLS] Interrupted → {camera_id}")
+#     except Exception as e:
+#         logger.error(f"[EntryExitWorker][HLS] Error → {camera_id}: {e}")
+#     finally:
+#         cap.release()
+#         elapsed    = time.time() - start_time
+#         actual_fps = frame_count / elapsed if elapsed > 0 else 0
+#         logger.info(
+#             f"[EntryExitWorker][HLS] 🔴 Stopped → {camera_id} | "
+#             f"Frames: {frame_count} | Time: {elapsed:.1f}s | FPS: {actual_fps:.1f}"
+#         )
+
+#     return True
+
+
+# def entry_exit_worker_hls(camera_config: dict, max_frames=None):
+#     """
+#     HLS worker entry point — used by master_pipeline for HLS cameras.
+
+#     camera_config = {
+#         'camera_id':   str,
+#         'stream_url':  str,
+#         'camera_name': str,   # e.g. "11365_ENTRY_S39"
+#     }
+#     """
+#     from tcs_hls_utils import extract_hls_streaming_url, test_hls_stream
+
+#     camera_id   = camera_config.get("camera_id", "unknown")
+#     initial_url = camera_config.get("stream_url", "")
+#     camera_name = camera_config.get("camera_name", "")
+
+#     hls_url = extract_hls_streaming_url(initial_url)
+#     if not hls_url:
+#         logger.error(f"[EntryExitWorker][HLS] ❌ Could not resolve URL for {camera_id}")
+#         return
+
+#     if not test_hls_stream(hls_url):
+#         logger.error(f"[EntryExitWorker][HLS] ❌ Stream test failed for {camera_id}")
+#         return
+
+#     logger.info(f"[EntryExitWorker][HLS] ▶ Starting → {camera_id} ({camera_name})  URL: {hls_url}")
+#     _run_hls_camera(camera_id, hls_url, camera_name=camera_name, max_frames=max_frames)
 
 
 
-
-
-
-
-
-
-
-
-
-
-
+# added by samarth
 
 
 #test
@@ -291,7 +573,7 @@ logger.info("✅ [EntryExitWorker] YOLO model loaded")
 # =====================================================
 # 🔍 CORE DETECTION  (shared by RTSP + HLS paths)
 # =====================================================
-def detect_entry_exit(frame, device_id: str, camera_no: str, save_folder: str):
+def detect_entry_exit(frame, device_id: str, camera_no: str, save_folder: str, script_name: str = "entry_exit"):
     """
     Run YOLO, draw boxes, save if entry/exit threshold met.
 
@@ -335,9 +617,11 @@ def detect_entry_exit(frame, device_id: str, camera_no: str, save_folder: str):
 
         if entry_exit_detected and elapsed >= COOLDOWN_TIME:
             ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
+            # New naming: {script_name}_{camera_id}_{timestamp}.jpg
             path = os.path.join(
                 save_folder,
-                f"{key}_{ts}_persons{person_count}_conf{max_conf:.2f}.jpg"
+                f"{script_name}_{camera_no}_{ts}.jpg" if camera_no
+                else f"{script_name}_{device_id}_{ts}.jpg"
             )
             cv2.imwrite(path, frame)
             last_save_times[key] = now
@@ -375,127 +659,237 @@ def entry_exit_worker(frame_queue):
             logger.info("🔴 [EntryExitWorker] RTSP worker stopping")
             break
 
-        frame, device_id, camera_no = data
+        # Unpack: (frame, device_id, camera_no) or (frame, device_id, camera_no, script_name)
+        if len(data) == 4:
+            frame, device_id, camera_no, script_name = data
+        else:
+            frame, device_id, camera_no = data
+            script_name = "entry_exit"
+
         detect_entry_exit(
             frame.copy(),
             str(device_id),
             str(camera_no),
-            save_folder=RTSP_SAVE_FOLDER
+            save_folder=RTSP_SAVE_FOLDER,
+            script_name=script_name
         )
 
 
 # =====================================================
-# 📡  HLS PATH  — standalone, reads its own stream
+# 📡  HLS PATH  — GPU Batch Queue Architecture
 # =====================================================
-def _run_hls_camera(camera_id: str, hls_url: str, camera_name: str = "", max_frames=None):
-    """Open HLS stream and run entry/exit detection until stopped."""
-    from tcs_hls_utils import open_hls_stream
+#
+# Architecture (from entry_exit_det_tcs.py):
+#   - Camera threads read HLS streams → push frames to gpu_queue
+#   - Single gpu_worker thread pulls batches → runs detection
+#   - Uses entry_core (Entry_exit_det.py) for actual detection
+#   - tcs_scheduler for frame sampling
+#   - External cooldown + rate limiter for save control
+# =====================================================
 
-    cap = open_hls_stream(hls_url)
-    if cap is None or not cap.isOpened():
-        logger.error(f"[EntryExitWorker][HLS] ❌ Could not open stream for {camera_id}")
-        return False
+import sys
+import queue
 
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    if fps <= 0 or fps > 60:
-        fps = 25.0
+# Ensure detection root is on path for imports
+_DETECTION_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _DETECTION_ROOT not in sys.path:
+    sys.path.insert(0, _DETECTION_ROOT)
 
-    logger.info(f"[EntryExitWorker][HLS] 🟢 Detection started for {camera_id} @ {fps:.1f} FPS")
+_PROJECT_ROOT = os.path.abspath(os.path.join(_DETECTION_ROOT, "../.."))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
-    frame_count = 0
-    fail_count  = 0
-    start_time  = time.time()
+# Import core detection module + utilities
+from scripts.detection import Entry_exit_det as entry_core
+from tcs_scheduler import frame_should_process
+from detection_rate_limiter import get_rate_limiter
 
-    label = camera_name if camera_name else camera_id
+# ── GPU Queue Config ─────────────────────────────────
+GPU_BATCH_SIZE = 8
+GPU_QUEUE_SIZE = 32
+THREAD_DELAY   = 0.2
 
-    try:
-        while not _STOP_EVENT.is_set():
-            # Non-blocking read with 5s timeout
-            read_result = [None, None]
-            def _read():
-                read_result[0], read_result[1] = cap.read()
-            t = threading.Thread(target=_read, daemon=True)
-            t.start()
-            t.join(timeout=5)
+_gpu_queue = queue.Queue(maxsize=GPU_QUEUE_SIZE)
+_last_save_time = {}
 
-            if _STOP_EVENT.is_set():
+
+def _hls_gpu_worker(stop_event, save_folder, cooldown_time=120):
+    """
+    GPU batch worker — pulls frames from _gpu_queue in batches,
+    runs entry_core.detect_persons_in_frame() with save=False,
+    handles save externally with cooldown + rate limiting.
+    """
+    logger.info("🚀 [EntryExitWorker][HLS] GPU worker started")
+
+    rate_limiter = get_rate_limiter('entry_exit', max_per_minute=25)
+
+    while not stop_event.is_set():
+        batch = []
+
+        try:
+            batch.append(_gpu_queue.get(timeout=0.1))
+        except queue.Empty:
+            continue
+
+        # Fill batch up to GPU_BATCH_SIZE
+        while len(batch) < GPU_BATCH_SIZE:
+            try:
+                batch.append(_gpu_queue.get_nowait())
+            except queue.Empty:
                 break
 
-            ret, frame = read_result
-            if not ret or frame is None:
-                fail_count += 1
-                logger.warning(f"[EntryExitWorker][HLS] ⚠️ Frame fail #{fail_count} → {camera_id}")
-                if fail_count >= HLS_FAIL_LIMIT:
-                    logger.error(f"[EntryExitWorker][HLS] ❌ Max failures → {camera_id}")
-                    break
-                time.sleep(3)
-                continue
+        for item in batch:
+            frame       = item['frame']
+            camera_id   = item['camera_id']
+            ch_no       = item['ch_no']
+            script_name = item.get('script_name', 'entry_exit')
 
-            fail_count   = 0
-            frame_count += 1
+            try:
+                # Set save folder on entry_core
+                entry_core.SAVE_FOLDER = save_folder
 
-            if frame_count % HLS_SAMPLE_EVERY == 0:
-                detected, person_count = detect_entry_exit(
-                    frame.copy(),
-                    device_id=label,
-                    camera_no="",
-                    save_folder=HLS_SAVE_FOLDER
+                processed_frame, detected, person_count = entry_core.detect_persons_in_frame(
+                    frame,
+                    device_id=camera_id,
+                    camera_no=camera_id,
+                    script_name=script_name,
+                    save=False   # 🔥 Save handled here
                 )
 
-                if (frame_count // HLS_SAMPLE_EVERY) % 90 == 0:
-                    if detected:
-                        logger.info(
-                            f"[EntryExitWorker][HLS] 🚪 Entry/Exit: {person_count} person(s) → {camera_id}"
-                        )
-                    else:
-                        logger.info(
-                            f"[EntryExitWorker][HLS] ✅ Monitoring OK → {camera_id}"
-                        )
+                logger.debug(f"[HLS-GPU] {camera_id} → persons={person_count}, detected={detected}")
 
-            if max_frames and frame_count >= max_frames:
-                break
+                if not detected:
+                    continue
 
-    except KeyboardInterrupt:
-        _STOP_EVENT.set()
-        logger.info(f"[EntryExitWorker][HLS] Interrupted → {camera_id}")
-    except Exception as e:
-        logger.error(f"[EntryExitWorker][HLS] Error → {camera_id}: {e}")
-    finally:
-        cap.release()
-        elapsed    = time.time() - start_time
-        actual_fps = frame_count / elapsed if elapsed > 0 else 0
-        logger.info(
-            f"[EntryExitWorker][HLS] 🔴 Stopped → {camera_id} | "
-            f"Frames: {frame_count} | Time: {elapsed:.1f}s | FPS: {actual_fps:.1f}"
+                # 🔥 External cooldown
+                now = time.time()
+                last_time = _last_save_time.get(camera_id, 0)
+                if now - last_time < cooldown_time:
+                    continue
+
+                should_save, _, _ = rate_limiter.should_save_detection(camera_id)
+
+                if should_save:
+                    _last_save_time[camera_id] = now
+                    timestamp = time.strftime("%Y%m%d_%H%M%S")
+                    filename = os.path.join(
+                        save_folder,
+                        f"EntryExit_ch{ch_no}_{timestamp}.jpg"
+                    )
+                    cv2.imwrite(filename, processed_frame)
+                    logger.warning(f"[HLS-GPU] 🚪 SAVED {filename}")
+
+            except Exception as e:
+                logger.error(f"[HLS-GPU ERROR] {camera_id} → {e}")
+
+    logger.info("🔴 [EntryExitWorker][HLS] GPU worker stopped")
+
+
+def _hls_camera_thread(cfg, stop_event):
+    """
+    Camera reader thread — opens HLS stream, reads frames,
+    pushes to gpu_queue for batch processing.
+    """
+    from tcs_hls_utils import extract_hls_streaming_url, test_hls_stream, open_hls_stream
+
+    camera_id   = cfg['camera_id']
+    script_name = cfg.get('script_code', 'entry_exit')
+    ch_no       = cfg.get('camera_id', 'unknown')  # ch_code for HLS
+    initial_url = cfg.get('cctv_url') or cfg.get('stream_url', '')
+
+    hls = extract_hls_streaming_url(initial_url)
+    if not hls or not test_hls_stream(hls):
+        logger.error(f"[EntryExitWorker][HLS] ❌ Stream failed for {camera_id}")
+        return
+
+    cap = open_hls_stream(hls)
+    if cap is None:
+        logger.error(f"[EntryExitWorker][HLS] ❌ Could not open stream for {camera_id}")
+        return
+
+    logger.info(f"[EntryExitWorker][HLS] 🟢 Camera thread started → {camera_id}")
+
+    frame_count = 0
+
+    while not stop_event.is_set():
+        ret, frame = cap.read()
+        if not ret:
+            logger.warning(f"[EntryExitWorker][HLS] ⚠️ Stream ended → {camera_id}")
+            break
+
+        frame_count += 1
+
+        if not frame_should_process(frame_count, HLS_SAMPLE_EVERY):
+            continue
+
+        try:
+            _gpu_queue.put_nowait({
+                "frame":       frame,
+                "camera_id":   camera_id,
+                "ch_no":       ch_no,
+                "script_name": script_name,
+            })
+        except queue.Full:
+            continue
+
+    cap.release()
+    logger.info(f"[EntryExitWorker][HLS] 🔴 Camera thread stopped → {camera_id}")
+
+
+def entry_exit_worker_hls(camera_configs, stop_event=None):
+    """
+    HLS worker entry point — GPU batch queue architecture.
+
+    Accepts a LIST of camera configs (from camera_loader) and runs
+    all cameras with a shared GPU worker thread.
+
+    Can also accept a single dict for backward compatibility.
+    """
+    import torch
+
+    # Handle single config (backward compat)
+    if isinstance(camera_configs, dict):
+        camera_configs = [camera_configs]
+
+    if stop_event is None:
+        stop_event = _STOP_EVENT
+
+    # Override save folder on entry_core
+    entry_core.SAVE_FOLDER = HLS_SAVE_FOLDER
+
+    # Start GPU worker thread
+    gpu_t = threading.Thread(
+        target=_hls_gpu_worker,
+        args=(stop_event, HLS_SAVE_FOLDER),
+        daemon=True
+    )
+    gpu_t.start()
+
+    # Start camera threads
+    threads = []
+    for cfg in camera_configs:
+        t = threading.Thread(
+            target=_hls_camera_thread,
+            args=(cfg, stop_event),
+            daemon=True
         )
+        t.start()
+        threads.append(t)
+        time.sleep(THREAD_DELAY)
 
-    return True
+    logger.info(f"[EntryExitWorker][HLS] Started {len(threads)} camera threads + 1 GPU worker")
 
+    # Wait for all camera threads
+    try:
+        for t in threads:
+            t.join()
+    except KeyboardInterrupt:
+        stop_event.set()
 
-def entry_exit_worker_hls(camera_config: dict, max_frames=None):
-    """
-    HLS worker entry point — used by master_pipeline for HLS cameras.
+    # Signal GPU worker to stop
+    stop_event.set()
 
-    camera_config = {
-        'camera_id':   str,
-        'stream_url':  str,
-        'camera_name': str,   # e.g. "11365_ENTRY_S39"
-    }
-    """
-    from tcs_hls_utils import extract_hls_streaming_url, test_hls_stream
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
-    camera_id   = camera_config.get("camera_id", "unknown")
-    initial_url = camera_config.get("stream_url", "")
-    camera_name = camera_config.get("camera_name", "")
-
-    hls_url = extract_hls_streaming_url(initial_url)
-    if not hls_url:
-        logger.error(f"[EntryExitWorker][HLS] ❌ Could not resolve URL for {camera_id}")
-        return
-
-    if not test_hls_stream(hls_url):
-        logger.error(f"[EntryExitWorker][HLS] ❌ Stream test failed for {camera_id}")
-        return
-
-    logger.info(f"[EntryExitWorker][HLS] ▶ Starting → {camera_id} ({camera_name})  URL: {hls_url}")
-    _run_hls_camera(camera_id, hls_url, camera_name=camera_name, max_frames=max_frames)
+    logger.info("[EntryExitWorker][HLS] ✅ All HLS cameras completed")

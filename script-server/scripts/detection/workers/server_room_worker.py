@@ -1,502 +1,786 @@
+# # import time
+# # import os
+# # import logging
+# # from datetime import datetime
+# # import cv2
+# # from ultralytics import YOLO
+
+# # # ================= LOGGING =================
+# # logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+# # # ================= CONFIG ==================
+# # PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
+# # MODEL_PATH = os.path.join(PROJECT_ROOT, "models/yolov10m.pt")
+# # SAVE_FOLDER = os.path.join(PROJECT_ROOT, "results/server_room_detection_results")
+
+# # COOLDOWN_TIME = 90
+# # MIN_PERSONS = 1
+# # CONF_THRESHOLD = 0.45
+
+# # DEVICE_ID = "DAV_NVR"
+# # CAMERA_NO = "CH19"
+
+# # os.makedirs(SAVE_FOLDER, exist_ok=True)
+
+# # # ================= YOLO ====================
+# # print("🔄 [ServerRoom] Loading YOLO model...")
+# # yolo_model = YOLO(MODEL_PATH)
+
+# # last_save_times = {}
+# # person_counts = {}
+
+# # # =====================================================
+# # # SAME LOGIC (UNCHANGED)
+# # # =====================================================
+# # def detect_persons_in_frame(frame, device_id="unknown", camera_no="unknown"):
+# #     results = yolo_model(frame, conf=CONF_THRESHOLD, verbose=False)[0]
+
+# #     person_detections = [
+# #         box for box in results.boxes
+# #         if int(box.cls[0]) == 0 and box.conf[0] >= CONF_THRESHOLD
+# #     ]
+
+# #     person_count = len(person_detections)
+# #     max_conf = float(max([box.conf[0] for box in person_detections], default=0))
+
+# #     for box in person_detections:
+# #         x1, y1, x2, y2 = map(int, box.xyxy[0])
+# #         conf = float(box.conf[0])
+# #         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+# #         cv2.putText(
+# #             frame,
+# #             f"Person {conf:.2f}",
+# #             (x1, y1 - 10),
+# #             cv2.FONT_HERSHEY_SIMPLEX,
+# #             0.6,
+# #             (0, 0, 255),
+# #             2
+# #         )
+
+# #     key = f"{device_id}_{camera_no}"
+# #     now = time.time()
+# #     elapsed = now - last_save_times.get(key, 0)
+
+# #     server_detected = person_count >= MIN_PERSONS
+
+# #     if server_detected and elapsed >= COOLDOWN_TIME:
+# #         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+# #         path = f"{SAVE_FOLDER}/{key}_{ts}_persons{person_count}_conf{max_conf:.2f}.jpg"
+# #         cv2.imwrite(path, frame)
+# #         last_save_times[key] = now
+# #         logging.warning(f"[ServerRoom] 🚨 Intrusion saved: {path}")
+
+# #     person_counts[key] = person_counts.get(key, 0) + person_count
+# #     return server_detected, person_count
+
+# # # =====================================================
+# # # WORKER LOOP (NEW)
+# # # =====================================================
+# # def server_room_worker(frame_queue):
+# #     logging.info("🟢 Server Room Worker started")
+
+# #     while True:
+# #         frame = frame_queue.get()
+
+# #         if frame is None:
+# #             logging.info("🔴 Server Room Worker stopping")
+# #             break
+
+# #         # IMPORTANT: copy frame (safe)
+# #         frame = frame.copy()
+
+# #         detect_persons_in_frame(frame, DEVICE_ID, CAMERA_NO)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# # import time
+# # import os
+# # import logging
+# # from datetime import datetime
+# # import cv2
+# # from ultralytics import YOLO
+
+# # # ================= LOGGING =================
+# # logging.basicConfig(
+# #     level=logging.INFO,
+# #     format="%(asctime)s - %(levelname)s - %(message)s"
+# # )
+
+# # # ================= CONFIG ==================
+# # PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+# # MODEL_PATH = os.path.join(PROJECT_ROOT, "models/yolov10m.pt")
+# # SAVE_FOLDER = os.path.join(PROJECT_ROOT, "results/server_room_detection_results")
+
+# # # 🔧 SAFE & STABLE SETTINGS (SERVER ROOM)
+# # MIN_PERSONS = 1              # server room = 1 person enough
+# # CONF_THRESHOLD = 0.45        # lower for distant / CCTV cams
+# # COOLDOWN_TIME = 90           # seconds
+
+# # DEVICE_ID = "DAV_NVR"
+# # CAMERA_NO = "CH19"
+
+# # os.makedirs(SAVE_FOLDER, exist_ok=True)
+
+# # # ================= YOLO ====================
+# # print("🔄 [ServerRoomWorker] Loading YOLO model...")
+# # yolo_model = YOLO(MODEL_PATH)
+
+# # # ================= STATE ===================
+# # last_save_times = {}
+
+# # # =====================================================
+# # # SERVER ROOM DETECTION LOGIC
+# # # =====================================================
+# # def detect_persons_in_frame(frame, device_id, camera_no):
+# #     """
+# #     Detect persons in server room.
+# #     Save image if >= MIN_PERSONS detected and cooldown passed.
+# #     """
+
+# #     results = yolo_model(frame, conf=CONF_THRESHOLD, verbose=False)[0]
+
+# #     person_boxes = [
+# #         box for box in results.boxes
+# #         if int(box.cls[0]) == 0 and box.conf[0] >= CONF_THRESHOLD
+# #     ]
+
+# #     person_count = len(person_boxes)
+# #     max_conf = float(max([box.conf[0] for box in person_boxes], default=0))
+
+# #     # 🔍 DEBUG (helps during tuning)
+# #     logging.debug(
+# #         f"[SERVER DEBUG] persons={person_count}, conf_th={CONF_THRESHOLD}"
+# #     )
+
+# #     # draw bounding boxes
+# #     for box in person_boxes:
+# #         x1, y1, x2, y2 = map(int, box.xyxy[0])
+# #         conf = float(box.conf[0])
+# #         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+# #         cv2.putText(
+# #             frame,
+# #             f"Person {conf:.2f}",
+# #             (x1, y1 - 6),
+# #             cv2.FONT_HERSHEY_SIMPLEX,
+# #             0.6,
+# #             (0, 0, 255),
+# #             2
+# #         )
+
+# #     key = f"{device_id}_{camera_no}"
+# #     now = time.time()
+# #     elapsed = now - last_save_times.get(key, 0)
+
+# #     server_violation = person_count >= MIN_PERSONS
+
+# #     if server_violation and elapsed >= COOLDOWN_TIME:
+# #         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+# #         path = (
+# #             f"{SAVE_FOLDER}/"
+# #             f"{key}_{ts}_persons{person_count}_conf{max_conf:.2f}.jpg"
+# #         )
+# #         cv2.imwrite(path, frame)
+# #         last_save_times[key] = now
+
+# #         logging.warning(
+# #             f"[ServerRoom] 🚨 Person detected! "
+# #             f"Count={person_count}, saved={path}"
+# #         )
+
+# #     return server_violation, person_count
+
+# # # =====================================================
+# # # WORKER LOOP
+# # # =====================================================
+# # def server_room_worker(frame_queue):
+# #     logging.info("🟢 Server Room Worker started")
+
+# #     while True:
+# #         frame = frame_queue.get()
+
+# #         if frame is None:
+# #             logging.info("🔴 Server Room Worker stopping")
+# #             break
+
+# #         # IMPORTANT: work on copy (shared frame safety)
+# #         frame = frame.copy()
+
+# #         detect_persons_in_frame(frame, DEVICE_ID, CAMERA_NO)
+
+
+
+
+
+
+
+
+
+
+
+
+# #latest working version 
+# # import time
+# # import os
+# # import logging
+# # from datetime import datetime
+# # import cv2
+# # from ultralytics import YOLO
+
+# # # ================= LOGGING =================
+# # logging.basicConfig(
+# #     level=logging.INFO,
+# #     format="%(asctime)s - %(levelname)s - %(message)s"
+# # )
+
+# # # ================= CONFIG ==================
+# # PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+# # MODEL_PATH = os.path.join(PROJECT_ROOT, "models/yolov10m.pt")
+# # SAVE_FOLDER = os.path.join(PROJECT_ROOT, "results/server_room_detection_results")
+
+# # # 🔧 SAFE & STABLE SETTINGS (SERVER ROOM)
+# # MIN_PERSONS = 1              # server room = 1 person enough
+# # CONF_THRESHOLD = 0.45        # lower for distant / CCTV cams
+# # COOLDOWN_TIME = 90           # seconds
+
+# # DEVICE_ID = "DAV_NVR"
+# # CAMERA_NO = "CH19"
+
+# # os.makedirs(SAVE_FOLDER, exist_ok=True)
+
+# # # ================= YOLO ====================
+# # print("🔄 [ServerRoomWorker] Loading YOLO model...")
+# # yolo_model = YOLO(MODEL_PATH)
+
+# # # ================= STATE ===================
+# # last_save_times = {}
+
+# # # =====================================================
+# # # SERVER ROOM DETECTION LOGIC
+# # # =====================================================
+# # def detect_persons_in_frame(frame, device_id, camera_no):
+# #     """
+# #     Detect persons in server room.
+# #     Save image if >= MIN_PERSONS detected and cooldown passed.
+# #     """
+
+# #     results = yolo_model(frame, conf=CONF_THRESHOLD, verbose=False)[0]
+
+# #     person_boxes = [
+# #         box for box in results.boxes
+# #         if int(box.cls[0]) == 0 and box.conf[0] >= CONF_THRESHOLD
+# #     ]
+
+# #     person_count = len(person_boxes)
+# #     max_conf = float(max([box.conf[0] for box in person_boxes], default=0))
+
+# #     # 🔍 DEBUG (helps during tuning)
+# #     logging.debug(
+# #         f"[SERVER DEBUG] persons={person_count}, conf_th={CONF_THRESHOLD}"
+# #     )
+
+# #     # draw bounding boxes
+# #     for box in person_boxes:
+# #         x1, y1, x2, y2 = map(int, box.xyxy[0])
+# #         conf = float(box.conf[0])
+# #         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+# #         cv2.putText(
+# #             frame,
+# #             f"Person {conf:.2f}",
+# #             (x1, y1 - 6),
+# #             cv2.FONT_HERSHEY_SIMPLEX,
+# #             0.6,
+# #             (0, 0, 255),
+# #             2
+# #         )
+
+# #     key = f"{device_id}_{camera_no}"
+# #     now = time.time()
+# #     elapsed = now - last_save_times.get(key, 0)
+
+# #     server_violation = person_count >= MIN_PERSONS
+
+# #     if server_violation and elapsed >= COOLDOWN_TIME:
+# #         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+# #         path = (
+# #             f"{SAVE_FOLDER}/"
+# #             f"{key}_{ts}_persons{person_count}_conf{max_conf:.2f}.jpg"
+# #         )
+# #         cv2.imwrite(path, frame)
+# #         last_save_times[key] = now
+
+# #         logging.warning(
+# #             f"[ServerRoom] 🚨 Person detected! "
+# #             f"Count={person_count}, saved={path}"
+# #         )
+
+# #     return server_violation, person_count
+
+# # # =====================================================
+# # # WORKER LOOP
+# # # =====================================================
+# # def server_room_worker(frame_queue):
+# #     logging.info("🟢 Server Room Worker started")
+
+# #     while True:
+# #         frame = frame_queue.get()
+
+# #         if frame is None:
+# #             logging.info("🔴 Server Room Worker stopping")
+# #             break
+
+# #         # IMPORTANT: work on copy (shared frame safety)
+# #         frame = frame.copy()
+
+# #         detect_persons_in_frame(frame, DEVICE_ID, CAMERA_NO)
+
+
+
+
+
+
+
+
+
+# #working before hls 
+# #server_room_worker.py
+# # import time
+# # import os
+# # import logging
+# # from datetime import datetime
+# # import cv2
+# # from ultralytics import YOLO
+
+# # # ================= LOGGING =================
+# # logging.basicConfig(
+# #     level=logging.INFO,
+# #     format="%(asctime)s - %(levelname)s - %(message)s"
+# # )
+
+# # # ================= CONFIG ==================
+# # PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+# # MODEL_PATH   = os.path.join(PROJECT_ROOT, "models/yolov10m.pt")
+# # SAVE_FOLDER  = os.path.join(PROJECT_ROOT, "results/server_room_detection_results")
+
+# # # 🔧 SAFE & STABLE SETTINGS (SERVER ROOM)
+# # MIN_PERSONS      = 1     # server room = 1 person enough
+# # CONF_THRESHOLD   = 0.45  # lower for distant / CCTV cams
+# # COOLDOWN_TIME    = 90    # seconds
+
+# # os.makedirs(SAVE_FOLDER, exist_ok=True)
+
+# # # ================= YOLO ====================
+# # print("🔄 [ServerRoomWorker] Loading YOLO model...")
+# # yolo_model = YOLO(MODEL_PATH)
+
+# # # ================= STATE ===================
+# # last_save_times = {}
+
+
+# # # =====================================================
+# # # SERVER ROOM DETECTION LOGIC
+# # # =====================================================
+# # def detect_persons_in_frame(frame, device_id, camera_no):
+# #     """
+# #     Detect persons in server room.
+# #     Save image if >= MIN_PERSONS detected and cooldown passed.
+# #     """
+# #     results = yolo_model(frame, conf=CONF_THRESHOLD, verbose=False)[0]
+
+# #     person_boxes = [
+# #         box for box in results.boxes
+# #         if int(box.cls[0]) == 0 and box.conf[0] >= CONF_THRESHOLD
+# #     ]
+
+# #     person_count = len(person_boxes)
+# #     max_conf = float(max([box.conf[0] for box in person_boxes], default=0))
+
+# #     # 🔍 DEBUG (helps during tuning)
+# #     logging.debug(
+# #         f"[SERVER DEBUG] cam={device_id}_{camera_no} "
+# #         f"persons={person_count}, conf_th={CONF_THRESHOLD}"
+# #     )
+
+# #     # Draw bounding boxes
+# #     for box in person_boxes:
+# #         x1, y1, x2, y2 = map(int, box.xyxy[0])
+# #         conf = float(box.conf[0])
+# #         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+# #         cv2.putText(
+# #             frame,
+# #             f"Person {conf:.2f}",
+# #             (x1, y1 - 6),
+# #             cv2.FONT_HERSHEY_SIMPLEX,
+# #             0.6,
+# #             (0, 0, 255),
+# #             2
+# #         )
+
+# #     key     = f"{device_id}_{camera_no}"
+# #     now     = time.time()
+# #     elapsed = now - last_save_times.get(key, 0)
+
+# #     server_violation = person_count >= MIN_PERSONS
+
+# #     if server_violation and elapsed >= COOLDOWN_TIME:
+# #         ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
+# #         path = (
+# #             f"{SAVE_FOLDER}/"
+# #             f"{key}_{ts}_persons{person_count}_conf{max_conf:.2f}.jpg"
+# #         )
+# #         cv2.imwrite(path, frame)
+# #         last_save_times[key] = now
+# #         logging.warning(
+# #             f"[ServerRoom] 🚨 Person detected! "
+# #             f"cam={key} count={person_count} saved={path}"
+# #         )
+
+# #     return server_violation, person_count
+
+
+# # # =====================================================
+# # # WORKER LOOP
+# # # =====================================================
+# # def server_room_worker(frame_queue):
+# #     logging.info("🟢 Server Room Worker started")
+
+# #     while True:
+# #         packet = frame_queue.get()
+
+# #         if packet is None:
+# #             logging.info("🔴 Server Room Worker stopping")
+# #             break
+
+# #         # ✅ Unpack tuple sent by rtsp_producer
+# #         frame, device_id, camera_no = packet
+
+# #         # Work on a copy for shared memory safety
+# #         frame = frame.copy()
+
+# #         detect_persons_in_frame(frame, device_id, camera_no)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# #test
+# # workers/server_room_worker.py
+# """
+# Server Room Worker — supports both RTSP (via master_pipeline producer)
+# and HLS (via its own internal OpenCV reader).
+
+# Merged from:
+#   - Server_room_det.py      (RTSP / DSS flow)
+#   - server_room_det_tcs.py  (HLS / TCS flow)
+# """
+
 # import time
 # import os
 # import logging
+# import threading
+# import signal
 # from datetime import datetime
+
 # import cv2
 # from ultralytics import YOLO
 
-# # ================= LOGGING =================
-# logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+# # ================= GRACEFUL STOP FLAG =================
+# _STOP_EVENT = threading.Event()
 
-# # ================= CONFIG ==================
-# PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
-# MODEL_PATH = os.path.join(PROJECT_ROOT, "models/yolov10m.pt")
-# SAVE_FOLDER = os.path.join(PROJECT_ROOT, "results/server_room_detection_results")
+# def _handle_stop(sig, frame):
+#     _STOP_EVENT.set()
 
-# COOLDOWN_TIME = 90
-# MIN_PERSONS = 1
-# CONF_THRESHOLD = 0.45
-
-# DEVICE_ID = "DAV_NVR"
-# CAMERA_NO = "CH19"
-
-# os.makedirs(SAVE_FOLDER, exist_ok=True)
-
-# # ================= YOLO ====================
-# print("🔄 [ServerRoom] Loading YOLO model...")
-# yolo_model = YOLO(MODEL_PATH)
-
-# last_save_times = {}
-# person_counts = {}
-
-# # =====================================================
-# # SAME LOGIC (UNCHANGED)
-# # =====================================================
-# def detect_persons_in_frame(frame, device_id="unknown", camera_no="unknown"):
-#     results = yolo_model(frame, conf=CONF_THRESHOLD, verbose=False)[0]
-
-#     person_detections = [
-#         box for box in results.boxes
-#         if int(box.cls[0]) == 0 and box.conf[0] >= CONF_THRESHOLD
-#     ]
-
-#     person_count = len(person_detections)
-#     max_conf = float(max([box.conf[0] for box in person_detections], default=0))
-
-#     for box in person_detections:
-#         x1, y1, x2, y2 = map(int, box.xyxy[0])
-#         conf = float(box.conf[0])
-#         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
-#         cv2.putText(
-#             frame,
-#             f"Person {conf:.2f}",
-#             (x1, y1 - 10),
-#             cv2.FONT_HERSHEY_SIMPLEX,
-#             0.6,
-#             (0, 0, 255),
-#             2
-#         )
-
-#     key = f"{device_id}_{camera_no}"
-#     now = time.time()
-#     elapsed = now - last_save_times.get(key, 0)
-
-#     server_detected = person_count >= MIN_PERSONS
-
-#     if server_detected and elapsed >= COOLDOWN_TIME:
-#         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-#         path = f"{SAVE_FOLDER}/{key}_{ts}_persons{person_count}_conf{max_conf:.2f}.jpg"
-#         cv2.imwrite(path, frame)
-#         last_save_times[key] = now
-#         logging.warning(f"[ServerRoom] 🚨 Intrusion saved: {path}")
-
-#     person_counts[key] = person_counts.get(key, 0) + person_count
-#     return server_detected, person_count
-
-# # =====================================================
-# # WORKER LOOP (NEW)
-# # =====================================================
-# def server_room_worker(frame_queue):
-#     logging.info("🟢 Server Room Worker started")
-
-#     while True:
-#         frame = frame_queue.get()
-
-#         if frame is None:
-#             logging.info("🔴 Server Room Worker stopping")
-#             break
-
-#         # IMPORTANT: copy frame (safe)
-#         frame = frame.copy()
-
-#         detect_persons_in_frame(frame, DEVICE_ID, CAMERA_NO)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# import time
-# import os
-# import logging
-# from datetime import datetime
-# import cv2
-# from ultralytics import YOLO
+# signal.signal(signal.SIGINT,  _handle_stop)
+# signal.signal(signal.SIGTERM, _handle_stop)
 
 # # ================= LOGGING =================
 # logging.basicConfig(
 #     level=logging.INFO,
 #     format="%(asctime)s - %(levelname)s - %(message)s"
 # )
-
-# # ================= CONFIG ==================
-# PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-
-# MODEL_PATH = os.path.join(PROJECT_ROOT, "models/yolov10m.pt")
-# SAVE_FOLDER = os.path.join(PROJECT_ROOT, "results/server_room_detection_results")
-
-# # 🔧 SAFE & STABLE SETTINGS (SERVER ROOM)
-# MIN_PERSONS = 1              # server room = 1 person enough
-# CONF_THRESHOLD = 0.45        # lower for distant / CCTV cams
-# COOLDOWN_TIME = 90           # seconds
-
-# DEVICE_ID = "DAV_NVR"
-# CAMERA_NO = "CH19"
-
-# os.makedirs(SAVE_FOLDER, exist_ok=True)
-
-# # ================= YOLO ====================
-# print("🔄 [ServerRoomWorker] Loading YOLO model...")
-# yolo_model = YOLO(MODEL_PATH)
-
-# # ================= STATE ===================
-# last_save_times = {}
-
-# # =====================================================
-# # SERVER ROOM DETECTION LOGIC
-# # =====================================================
-# def detect_persons_in_frame(frame, device_id, camera_no):
-#     """
-#     Detect persons in server room.
-#     Save image if >= MIN_PERSONS detected and cooldown passed.
-#     """
-
-#     results = yolo_model(frame, conf=CONF_THRESHOLD, verbose=False)[0]
-
-#     person_boxes = [
-#         box for box in results.boxes
-#         if int(box.cls[0]) == 0 and box.conf[0] >= CONF_THRESHOLD
-#     ]
-
-#     person_count = len(person_boxes)
-#     max_conf = float(max([box.conf[0] for box in person_boxes], default=0))
-
-#     # 🔍 DEBUG (helps during tuning)
-#     logging.debug(
-#         f"[SERVER DEBUG] persons={person_count}, conf_th={CONF_THRESHOLD}"
-#     )
-
-#     # draw bounding boxes
-#     for box in person_boxes:
-#         x1, y1, x2, y2 = map(int, box.xyxy[0])
-#         conf = float(box.conf[0])
-#         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
-#         cv2.putText(
-#             frame,
-#             f"Person {conf:.2f}",
-#             (x1, y1 - 6),
-#             cv2.FONT_HERSHEY_SIMPLEX,
-#             0.6,
-#             (0, 0, 255),
-#             2
-#         )
-
-#     key = f"{device_id}_{camera_no}"
-#     now = time.time()
-#     elapsed = now - last_save_times.get(key, 0)
-
-#     server_violation = person_count >= MIN_PERSONS
-
-#     if server_violation and elapsed >= COOLDOWN_TIME:
-#         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-#         path = (
-#             f"{SAVE_FOLDER}/"
-#             f"{key}_{ts}_persons{person_count}_conf{max_conf:.2f}.jpg"
-#         )
-#         cv2.imwrite(path, frame)
-#         last_save_times[key] = now
-
-#         logging.warning(
-#             f"[ServerRoom] 🚨 Person detected! "
-#             f"Count={person_count}, saved={path}"
-#         )
-
-#     return server_violation, person_count
-
-# # =====================================================
-# # WORKER LOOP
-# # =====================================================
-# def server_room_worker(frame_queue):
-#     logging.info("🟢 Server Room Worker started")
-
-#     while True:
-#         frame = frame_queue.get()
-
-#         if frame is None:
-#             logging.info("🔴 Server Room Worker stopping")
-#             break
-
-#         # IMPORTANT: work on copy (shared frame safety)
-#         frame = frame.copy()
-
-#         detect_persons_in_frame(frame, DEVICE_ID, CAMERA_NO)
-
-
-
-
-
-
-
-
-
-
-
-
-#latest working version 
-# import time
-# import os
-# import logging
-# from datetime import datetime
-# import cv2
-# from ultralytics import YOLO
-
-# # ================= LOGGING =================
-# logging.basicConfig(
-#     level=logging.INFO,
-#     format="%(asctime)s - %(levelname)s - %(message)s"
-# )
-
-# # ================= CONFIG ==================
-# PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-
-# MODEL_PATH = os.path.join(PROJECT_ROOT, "models/yolov10m.pt")
-# SAVE_FOLDER = os.path.join(PROJECT_ROOT, "results/server_room_detection_results")
-
-# # 🔧 SAFE & STABLE SETTINGS (SERVER ROOM)
-# MIN_PERSONS = 1              # server room = 1 person enough
-# CONF_THRESHOLD = 0.45        # lower for distant / CCTV cams
-# COOLDOWN_TIME = 90           # seconds
-
-# DEVICE_ID = "DAV_NVR"
-# CAMERA_NO = "CH19"
-
-# os.makedirs(SAVE_FOLDER, exist_ok=True)
-
-# # ================= YOLO ====================
-# print("🔄 [ServerRoomWorker] Loading YOLO model...")
-# yolo_model = YOLO(MODEL_PATH)
-
-# # ================= STATE ===================
-# last_save_times = {}
-
-# # =====================================================
-# # SERVER ROOM DETECTION LOGIC
-# # =====================================================
-# def detect_persons_in_frame(frame, device_id, camera_no):
-#     """
-#     Detect persons in server room.
-#     Save image if >= MIN_PERSONS detected and cooldown passed.
-#     """
-
-#     results = yolo_model(frame, conf=CONF_THRESHOLD, verbose=False)[0]
-
-#     person_boxes = [
-#         box for box in results.boxes
-#         if int(box.cls[0]) == 0 and box.conf[0] >= CONF_THRESHOLD
-#     ]
-
-#     person_count = len(person_boxes)
-#     max_conf = float(max([box.conf[0] for box in person_boxes], default=0))
-
-#     # 🔍 DEBUG (helps during tuning)
-#     logging.debug(
-#         f"[SERVER DEBUG] persons={person_count}, conf_th={CONF_THRESHOLD}"
-#     )
-
-#     # draw bounding boxes
-#     for box in person_boxes:
-#         x1, y1, x2, y2 = map(int, box.xyxy[0])
-#         conf = float(box.conf[0])
-#         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
-#         cv2.putText(
-#             frame,
-#             f"Person {conf:.2f}",
-#             (x1, y1 - 6),
-#             cv2.FONT_HERSHEY_SIMPLEX,
-#             0.6,
-#             (0, 0, 255),
-#             2
-#         )
-
-#     key = f"{device_id}_{camera_no}"
-#     now = time.time()
-#     elapsed = now - last_save_times.get(key, 0)
-
-#     server_violation = person_count >= MIN_PERSONS
-
-#     if server_violation and elapsed >= COOLDOWN_TIME:
-#         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-#         path = (
-#             f"{SAVE_FOLDER}/"
-#             f"{key}_{ts}_persons{person_count}_conf{max_conf:.2f}.jpg"
-#         )
-#         cv2.imwrite(path, frame)
-#         last_save_times[key] = now
-
-#         logging.warning(
-#             f"[ServerRoom] 🚨 Person detected! "
-#             f"Count={person_count}, saved={path}"
-#         )
-
-#     return server_violation, person_count
-
-# # =====================================================
-# # WORKER LOOP
-# # =====================================================
-# def server_room_worker(frame_queue):
-#     logging.info("🟢 Server Room Worker started")
-
-#     while True:
-#         frame = frame_queue.get()
-
-#         if frame is None:
-#             logging.info("🔴 Server Room Worker stopping")
-#             break
-
-#         # IMPORTANT: work on copy (shared frame safety)
-#         frame = frame.copy()
-
-#         detect_persons_in_frame(frame, DEVICE_ID, CAMERA_NO)
-
-
-
-
-
-
-
-
-
-#working before hls 
-#server_room_worker.py
-# import time
-# import os
-# import logging
-# from datetime import datetime
-# import cv2
-# from ultralytics import YOLO
-
-# # ================= LOGGING =================
-# logging.basicConfig(
-#     level=logging.INFO,
-#     format="%(asctime)s - %(levelname)s - %(message)s"
-# )
+# logger = logging.getLogger(__name__)
 
 # # ================= CONFIG ==================
 # PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 # MODEL_PATH   = os.path.join(PROJECT_ROOT, "models/yolov10m.pt")
-# SAVE_FOLDER  = os.path.join(PROJECT_ROOT, "results/server_room_detection_results")
 
-# # 🔧 SAFE & STABLE SETTINGS (SERVER ROOM)
-# MIN_PERSONS      = 1     # server room = 1 person enough
-# CONF_THRESHOLD   = 0.45  # lower for distant / CCTV cams
-# COOLDOWN_TIME    = 90    # seconds
+# RTSP_SAVE_FOLDER = os.path.join(PROJECT_ROOT, "results/server_room_detection_results")
+# HLS_SAVE_FOLDER  = os.path.join(PROJECT_ROOT, "results/tcs_detections/server_room_detection")
 
-# os.makedirs(SAVE_FOLDER, exist_ok=True)
+# os.makedirs(RTSP_SAVE_FOLDER, exist_ok=True)
+# os.makedirs(HLS_SAVE_FOLDER,  exist_ok=True)
+
+# MIN_PERSONS    = 1      # server room = 1 person enough
+# CONF_THRESHOLD = 0.45
+# COOLDOWN_TIME  = 90     # seconds between saves per camera
+
+# HLS_SAMPLE_EVERY = 5
+# HLS_FAIL_LIMIT   = 3
+
+# # ================= SHARED STATE ============
+# last_save_times = {}
+# person_counts   = {}
+# _state_lock     = threading.Lock()
 
 # # ================= YOLO ====================
 # print("🔄 [ServerRoomWorker] Loading YOLO model...")
 # yolo_model = YOLO(MODEL_PATH)
-
-# # ================= STATE ===================
-# last_save_times = {}
+# logger.info("✅ [ServerRoomWorker] YOLO model loaded")
 
 
 # # =====================================================
-# # SERVER ROOM DETECTION LOGIC
+# # 🔍 CORE DETECTION  (shared by RTSP + HLS paths)
 # # =====================================================
-# def detect_persons_in_frame(frame, device_id, camera_no):
+# def detect_persons_in_frame(frame, device_id: str, camera_no: str, save_folder: str):
 #     """
-#     Detect persons in server room.
-#     Save image if >= MIN_PERSONS detected and cooldown passed.
+#     Detect persons in server room frame.
+#     Save if >= MIN_PERSONS detected and cooldown passed.
+
+#     Returns:
+#         (server_violation: bool, person_count: int)
 #     """
 #     results = yolo_model(frame, conf=CONF_THRESHOLD, verbose=False)[0]
 
 #     person_boxes = [
 #         box for box in results.boxes
-#         if int(box.cls[0]) == 0 and box.conf[0] >= CONF_THRESHOLD
+#         if int(box.cls[0]) == 0 and float(box.conf[0]) >= CONF_THRESHOLD
 #     ]
 
 #     person_count = len(person_boxes)
-#     max_conf = float(max([box.conf[0] for box in person_boxes], default=0))
+#     max_conf     = float(max((box.conf[0] for box in person_boxes), default=0))
 
-#     # 🔍 DEBUG (helps during tuning)
-#     logging.debug(
-#         f"[SERVER DEBUG] cam={device_id}_{camera_no} "
-#         f"persons={person_count}, conf_th={CONF_THRESHOLD}"
+#     logger.debug(
+#         f"[ServerRoom DEBUG] cam={device_id}_{camera_no} "
+#         f"persons={person_count} conf_th={CONF_THRESHOLD}"
 #     )
 
-#     # Draw bounding boxes
+#     # ── Draw bounding boxes ──────────────────────────────
 #     for box in person_boxes:
 #         x1, y1, x2, y2 = map(int, box.xyxy[0])
 #         conf = float(box.conf[0])
 #         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
 #         cv2.putText(
-#             frame,
-#             f"Person {conf:.2f}",
+#             frame, f"Person {conf:.2f}",
 #             (x1, y1 - 6),
-#             cv2.FONT_HERSHEY_SIMPLEX,
-#             0.6,
-#             (0, 0, 255),
-#             2
+#             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2
 #         )
 
-#     key     = f"{device_id}_{camera_no}"
-#     now     = time.time()
-#     elapsed = now - last_save_times.get(key, 0)
+#     # ── Overlay info ─────────────────────────────────────
+#     cv2.putText(frame, f"Persons: {person_count}",
+#                 (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+#     cv2.putText(frame, f"Device: {device_id}  Cam: {camera_no}",
+#                 (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
-#     server_violation = person_count >= MIN_PERSONS
+#     # ── Save logic ───────────────────────────────────────
+#     key = f"{device_id}_{camera_no}"
+#     now = time.time()
 
-#     if server_violation and elapsed >= COOLDOWN_TIME:
-#         ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
-#         path = (
-#             f"{SAVE_FOLDER}/"
-#             f"{key}_{ts}_persons{person_count}_conf{max_conf:.2f}.jpg"
-#         )
-#         cv2.imwrite(path, frame)
-#         last_save_times[key] = now
-#         logging.warning(
-#             f"[ServerRoom] 🚨 Person detected! "
-#             f"cam={key} count={person_count} saved={path}"
-#         )
+#     with _state_lock:
+#         elapsed           = now - last_save_times.get(key, 0)
+#         server_violation  = person_count >= MIN_PERSONS
+
+#         if server_violation and elapsed >= COOLDOWN_TIME:
+#             ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
+#             path = os.path.join(
+#                 save_folder,
+#                 f"{key}_{ts}_persons{person_count}_conf{max_conf:.2f}.jpg"
+#             )
+#             cv2.imwrite(path, frame)
+#             last_save_times[key] = now
+#             logger.warning(
+#                 f"[ServerRoom] 🚨 Person detected! "
+#                 f"cam={key} count={person_count} "
+#                 f"💾 Saved → {path}"
+#             )
+#         elif server_violation:
+#             remaining = int(COOLDOWN_TIME - elapsed)
+#             logger.debug(
+#                 f"[ServerRoom] ⏳ Detected but cooldown active "
+#                 f"({remaining}s left) → {key}"
+#             )
+
+#         person_counts[key] = person_counts.get(key, 0) + person_count
 
 #     return server_violation, person_count
 
 
 # # =====================================================
-# # WORKER LOOP
+# # 📡  RTSP PATH  — called by master_pipeline producer
 # # =====================================================
 # def server_room_worker(frame_queue):
-#     logging.info("🟢 Server Room Worker started")
+#     """
+#     Queue-based worker — receives (frame, device_id, camera_no)
+#     packets from the RTSP producer.
+#     """
+#     logger.info("🟢 Server Room Worker started")
 
 #     while True:
 #         packet = frame_queue.get()
-
 #         if packet is None:
-#             logging.info("🔴 Server Room Worker stopping")
+#             logger.info("🔴 Server Room Worker stopping")
 #             break
 
-#         # ✅ Unpack tuple sent by rtsp_producer
 #         frame, device_id, camera_no = packet
-
-#         # Work on a copy for shared memory safety
-#         frame = frame.copy()
-
-#         detect_persons_in_frame(frame, device_id, camera_no)
-
-
-
+#         detect_persons_in_frame(
+#             frame.copy(),
+#             str(device_id),
+#             str(camera_no),
+#             save_folder=RTSP_SAVE_FOLDER
+#         )
 
 
+# # =====================================================
+# # 📡  HLS PATH  — standalone, reads its own stream
+# # =====================================================
+# def _run_hls_camera(camera_id: str, hls_url: str, camera_name: str = "", max_frames=None):
+#     """Open HLS stream and run server room detection until stopped."""
+#     from tcs_hls_utils import open_hls_stream
+
+#     cap = open_hls_stream(hls_url)
+#     if cap is None or not cap.isOpened():
+#         logger.error(f"[ServerRoom][HLS] ❌ Could not open stream for {camera_id}")
+#         return False
+
+#     fps = cap.get(cv2.CAP_PROP_FPS)
+#     if fps <= 0 or fps > 60:
+#         fps = 25.0
+
+#     logger.info(f"[ServerRoom][HLS] 🔒 Monitoring started for {camera_id} @ {fps:.1f} FPS")
+
+#     frame_count = 0
+#     fail_count  = 0
+#     start_time  = time.time()
+#     label       = camera_name if camera_name else camera_id
+
+#     try:
+#         while not _STOP_EVENT.is_set():
+#             # Non-blocking read with 5s timeout
+#             read_result = [None, None]
+#             def _read():
+#                 read_result[0], read_result[1] = cap.read()
+#             t = threading.Thread(target=_read, daemon=True)
+#             t.start()
+#             t.join(timeout=5)
+
+#             if _STOP_EVENT.is_set():
+#                 break
+
+#             ret, frame = read_result
+#             if not ret or frame is None:
+#                 fail_count += 1
+#                 logger.warning(f"[ServerRoom][HLS] ⚠️ Frame fail #{fail_count} → {camera_id}")
+#                 if fail_count >= HLS_FAIL_LIMIT:
+#                     logger.error(f"[ServerRoom][HLS] ❌ Max failures → {camera_id}")
+#                     break
+#                 time.sleep(3)
+#                 continue
+
+#             fail_count   = 0
+#             frame_count += 1
+
+#             if frame_count % HLS_SAMPLE_EVERY == 0:
+#                 detected, person_count = detect_persons_in_frame(
+#                     frame.copy(),
+#                     device_id=label,
+#                     camera_no="",
+#                     save_folder=HLS_SAVE_FOLDER
+#                 )
+
+#                 if (frame_count // HLS_SAMPLE_EVERY) % 100 == 0:
+#                     if detected:
+#                         logger.critical(
+#                             f"[ServerRoom][HLS] 🚨 SECURITY ALERT: {person_count} person(s) → {camera_id}"
+#                         )
+#                     else:
+#                         logger.info(
+#                             f"[ServerRoom][HLS] ✓ Secure → {camera_id}"
+#                         )
+
+#             if max_frames and frame_count >= max_frames:
+#                 break
+
+#     except KeyboardInterrupt:
+#         _STOP_EVENT.set()
+#         logger.info(f"[ServerRoom][HLS] Interrupted → {camera_id}")
+#     except Exception as e:
+#         logger.error(f"[ServerRoom][HLS] Error → {camera_id}: {e}")
+#     finally:
+#         cap.release()
+#         elapsed    = time.time() - start_time
+#         actual_fps = frame_count / elapsed if elapsed > 0 else 0
+#         logger.info(
+#             f"[ServerRoom][HLS] 🔴 Stopped → {camera_id} | "
+#             f"Frames: {frame_count} | Time: {elapsed:.1f}s | FPS: {actual_fps:.1f}"
+#         )
+
+#     return True
+
+
+# def server_room_worker_hls(camera_config: dict, max_frames=None):
+#     """
+#     HLS worker entry point — used by master_pipeline for HLS cameras.
+
+#     camera_config = {
+#         'camera_id':   str,
+#         'stream_url':  str,
+#         'camera_name': str,
+#     }
+#     """
+#     from tcs_hls_utils import extract_hls_streaming_url, test_hls_stream
+
+#     camera_id   = camera_config.get("camera_id", "unknown")
+#     initial_url = camera_config.get("stream_url", "")
+#     camera_name = camera_config.get("camera_name", "")
+
+#     hls_url = extract_hls_streaming_url(initial_url)
+#     if not hls_url:
+#         logger.error(f"[ServerRoom][HLS] ❌ Could not resolve URL for {camera_id}")
+#         return
+
+#     if not test_hls_stream(hls_url):
+#         logger.error(f"[ServerRoom][HLS] ❌ Stream test failed for {camera_id}")
+#         return
+
+#     logger.info(f"[ServerRoom][HLS] ▶ Starting → {camera_id} ({camera_name})  URL: {hls_url}")
+#     _run_hls_camera(camera_id, hls_url, camera_name=camera_name, max_frames=max_frames)
 
 
 
+# added by samarth
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-#test
 # workers/server_room_worker.py
 """
 Server Room Worker — supports both RTSP (via master_pipeline producer)
@@ -564,7 +848,7 @@ logger.info("✅ [ServerRoomWorker] YOLO model loaded")
 # =====================================================
 # 🔍 CORE DETECTION  (shared by RTSP + HLS paths)
 # =====================================================
-def detect_persons_in_frame(frame, device_id: str, camera_no: str, save_folder: str):
+def detect_persons_in_frame(frame, device_id: str, camera_no: str, save_folder: str, script_name: str = "server"):
     """
     Detect persons in server room frame.
     Save if >= MIN_PERSONS detected and cooldown passed.
@@ -614,9 +898,11 @@ def detect_persons_in_frame(frame, device_id: str, camera_no: str, save_folder: 
 
         if server_violation and elapsed >= COOLDOWN_TIME:
             ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
+            # New naming: {script_name}_{camera_id}_{timestamp}.jpg
             path = os.path.join(
                 save_folder,
-                f"{key}_{ts}_persons{person_count}_conf{max_conf:.2f}.jpg"
+                f"{script_name}_{camera_no}_{ts}.jpg" if camera_no
+                else f"{script_name}_{device_id}_{ts}.jpg"
             )
             cv2.imwrite(path, frame)
             last_save_times[key] = now
@@ -653,126 +939,242 @@ def server_room_worker(frame_queue):
             logger.info("🔴 Server Room Worker stopping")
             break
 
-        frame, device_id, camera_no = packet
+        # Unpack: (frame, device_id, camera_no) or (frame, device_id, camera_no, script_name)
+        if len(packet) == 4:
+            frame, device_id, camera_no, script_name = packet
+        else:
+            frame, device_id, camera_no = packet
+            script_name = "server"
+
         detect_persons_in_frame(
             frame.copy(),
             str(device_id),
             str(camera_no),
-            save_folder=RTSP_SAVE_FOLDER
+            save_folder=RTSP_SAVE_FOLDER,
+            script_name=script_name
         )
 
 
 # =====================================================
-# 📡  HLS PATH  — standalone, reads its own stream
+# 📡  HLS PATH  — GPU Batch Queue Architecture
 # =====================================================
-def _run_hls_camera(camera_id: str, hls_url: str, camera_name: str = "", max_frames=None):
-    """Open HLS stream and run server room detection until stopped."""
-    from tcs_hls_utils import open_hls_stream
+#
+# Architecture (from server_room_det_tcs.py):
+#   - Camera threads read HLS streams → push frames to gpu_queue
+#   - Single gpu_worker thread pulls batches → runs detection
+#   - Uses server_core (Server_room_det.py) for actual detection
+#   - tcs_scheduler for frame sampling
+#   - detection_rate_limiter for save frequency control
+# =====================================================
 
-    cap = open_hls_stream(hls_url)
-    if cap is None or not cap.isOpened():
-        logger.error(f"[ServerRoom][HLS] ❌ Could not open stream for {camera_id}")
-        return False
+import sys
+import queue
 
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    if fps <= 0 or fps > 60:
-        fps = 25.0
+# Ensure detection root is on path for imports
+_DETECTION_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _DETECTION_ROOT not in sys.path:
+    sys.path.insert(0, _DETECTION_ROOT)
 
-    logger.info(f"[ServerRoom][HLS] 🔒 Monitoring started for {camera_id} @ {fps:.1f} FPS")
+_PROJECT_ROOT = os.path.abspath(os.path.join(_DETECTION_ROOT, "../.."))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
-    frame_count = 0
-    fail_count  = 0
-    start_time  = time.time()
-    label       = camera_name if camera_name else camera_id
+# Import core detection module + utilities
+from scripts.detection import Server_room_det as server_core
+from tcs_scheduler import frame_should_process
+from detection_rate_limiter import get_rate_limiter
 
-    try:
-        while not _STOP_EVENT.is_set():
-            # Non-blocking read with 5s timeout
-            read_result = [None, None]
-            def _read():
-                read_result[0], read_result[1] = cap.read()
-            t = threading.Thread(target=_read, daemon=True)
-            t.start()
-            t.join(timeout=5)
+# ── GPU Queue Config ─────────────────────────────────
+GPU_BATCH_SIZE = 8
+GPU_QUEUE_SIZE = 32
+THREAD_DELAY   = 0.2
 
-            if _STOP_EVENT.is_set():
+_gpu_queue = queue.Queue(maxsize=GPU_QUEUE_SIZE)
+
+
+def _hls_gpu_worker(stop_event, save_folder, cooldown_time=60):
+    """
+    GPU batch worker — pulls frames from _gpu_queue in batches,
+    runs server_core.detect_persons_in_frame() on each.
+    Handles its own save logic with rate limiting.
+    """
+    logger.info("🚀 [ServerRoom][HLS] GPU worker started")
+
+    rate_limiter = get_rate_limiter('server_room', max_per_minute=25)
+
+    while not stop_event.is_set():
+        batch = []
+
+        try:
+            batch.append(_gpu_queue.get(timeout=0.1))
+        except queue.Empty:
+            continue
+
+        # Fill batch up to GPU_BATCH_SIZE
+        while len(batch) < GPU_BATCH_SIZE:
+            try:
+                batch.append(_gpu_queue.get_nowait())
+            except queue.Empty:
                 break
 
-            ret, frame = read_result
-            if not ret or frame is None:
-                fail_count += 1
-                logger.warning(f"[ServerRoom][HLS] ⚠️ Frame fail #{fail_count} → {camera_id}")
-                if fail_count >= HLS_FAIL_LIMIT:
-                    logger.error(f"[ServerRoom][HLS] ❌ Max failures → {camera_id}")
-                    break
-                time.sleep(3)
-                continue
+        for item in batch:
+            frame       = item['frame']
+            camera_id   = item['camera_id']
+            ch_no       = item['ch_no']
+            script_name = item.get('script_name', 'server')
+            state       = item.get('state', {})
 
-            fail_count   = 0
-            frame_count += 1
+            try:
+                # Set save folder on server_core
+                server_core.SAVE_FOLDER = save_folder
 
-            if frame_count % HLS_SAMPLE_EVERY == 0:
-                detected, person_count = detect_persons_in_frame(
-                    frame.copy(),
-                    device_id=label,
-                    camera_no="",
-                    save_folder=HLS_SAVE_FOLDER
+                _, detected, person_count = server_core.detect_persons_in_frame(
+                    frame,
+                    device_id=camera_id,
+                    camera_no=ch_no,
+                    script_name=script_name
                 )
 
-                if (frame_count // HLS_SAMPLE_EVERY) % 100 == 0:
-                    if detected:
-                        logger.critical(
-                            f"[ServerRoom][HLS] 🚨 SECURITY ALERT: {person_count} person(s) → {camera_id}"
-                        )
-                    else:
-                        logger.info(
-                            f"[ServerRoom][HLS] ✓ Secure → {camera_id}"
-                        )
+                logger.debug(f"[HLS-GPU] {camera_id} → persons={person_count}, detected={detected}")
 
-            if max_frames and frame_count >= max_frames:
-                break
+                if not detected:
+                    continue
 
-    except KeyboardInterrupt:
-        _STOP_EVENT.set()
-        logger.info(f"[ServerRoom][HLS] Interrupted → {camera_id}")
-    except Exception as e:
-        logger.error(f"[ServerRoom][HLS] Error → {camera_id}: {e}")
-    finally:
-        cap.release()
-        elapsed    = time.time() - start_time
-        actual_fps = frame_count / elapsed if elapsed > 0 else 0
-        logger.info(
-            f"[ServerRoom][HLS] 🔴 Stopped → {camera_id} | "
-            f"Frames: {frame_count} | Time: {elapsed:.1f}s | FPS: {actual_fps:.1f}"
+                now = time.time()
+                if now - state.get("last_save", 0) < cooldown_time:
+                    continue
+
+                should_save, _, _ = rate_limiter.should_save_detection(camera_id)
+
+                if should_save:
+                    state["last_save"] = now
+                    timestamp = time.strftime("%Y%m%d_%H%M%S")
+                    filename = os.path.join(
+                        save_folder,
+                        f"{script_name}_ch{ch_no}_{timestamp}.jpg"
+                    )
+                    cv2.imwrite(filename, frame)
+                    logger.warning(f"[HLS-GPU] 🚨 SAVED {filename}")
+
+            except Exception as e:
+                logger.error(f"[HLS-GPU ERROR] {camera_id} → {e}")
+
+    logger.info("🔴 [ServerRoom][HLS] GPU worker stopped")
+
+
+def _hls_camera_thread(cfg, stop_event):
+    """
+    Camera reader thread — opens HLS stream, reads frames,
+    pushes to gpu_queue for batch processing.
+    """
+    from tcs_hls_utils import extract_hls_streaming_url, test_hls_stream, open_hls_stream
+
+    camera_id   = cfg['camera_id']
+    script_name = cfg.get('script_code', 'server')
+    ch_no       = cfg.get('camera_id', 'unknown')  # ch_code for HLS
+    initial_url = cfg.get('cctv_url') or cfg.get('stream_url', '')
+
+    hls = extract_hls_streaming_url(initial_url)
+    if not hls or not test_hls_stream(hls):
+        logger.error(f"[ServerRoom][HLS] ❌ Stream failed for {camera_id}")
+        return
+
+    cap = open_hls_stream(hls)
+    if cap is None:
+        logger.error(f"[ServerRoom][HLS] ❌ Could not open stream for {camera_id}")
+        return
+
+    logger.info(f"[ServerRoom][HLS] 🟢 Camera thread started → {camera_id}")
+
+    frame_count = 0
+    state = {"last_save": 0}
+
+    while not stop_event.is_set():
+        ret, frame = cap.read()
+        if not ret:
+            logger.warning(f"[ServerRoom][HLS] ⚠️ Stream ended → {camera_id}")
+            break
+
+        frame_count += 1
+
+        if not frame_should_process(frame_count, HLS_SAMPLE_EVERY):
+            continue
+
+        try:
+            _gpu_queue.put_nowait({
+                "frame":       frame,
+                "camera_id":   camera_id,
+                "ch_no":       ch_no,
+                "script_name": script_name,
+                "state":       state,
+            })
+            logger.debug(f"[HLS-QUEUE] 📤 Frame sent → {camera_id}")
+        except queue.Full:
+            logger.debug(f"[HLS-QUEUE] ❌ Queue full → {camera_id}")
+            continue
+
+    cap.release()
+    logger.info(f"[ServerRoom][HLS] 🔴 Camera thread stopped → {camera_id}")
+
+
+def server_room_worker_hls(camera_configs, stop_event=None):
+    """
+    HLS worker entry point — GPU batch queue architecture.
+
+    Accepts a LIST of camera configs (from camera_loader) and runs
+    all cameras with a shared GPU worker thread.
+
+    Each camera_config dict should contain:
+        camera_id, cctv_url (or stream_url), camera_name,
+        classification, script_code
+
+    Can also accept a single dict for backward compatibility.
+    """
+    import torch
+
+    # Handle single config (backward compat)
+    if isinstance(camera_configs, dict):
+        camera_configs = [camera_configs]
+
+    if stop_event is None:
+        stop_event = _STOP_EVENT
+
+    # Override save folder on server_core
+    server_core.SAVE_FOLDER = HLS_SAVE_FOLDER
+
+    # Start GPU worker thread
+    gpu_t = threading.Thread(
+        target=_hls_gpu_worker,
+        args=(stop_event, HLS_SAVE_FOLDER),
+        daemon=True
+    )
+    gpu_t.start()
+
+    # Start camera threads
+    threads = []
+    for cfg in camera_configs:
+        t = threading.Thread(
+            target=_hls_camera_thread,
+            args=(cfg, stop_event),
+            daemon=True
         )
+        t.start()
+        threads.append(t)
+        time.sleep(THREAD_DELAY)
 
-    return True
+    logger.info(f"[ServerRoom][HLS] Started {len(threads)} camera threads + 1 GPU worker")
 
+    # Wait for all camera threads
+    try:
+        for t in threads:
+            t.join()
+    except KeyboardInterrupt:
+        stop_event.set()
 
-def server_room_worker_hls(camera_config: dict, max_frames=None):
-    """
-    HLS worker entry point — used by master_pipeline for HLS cameras.
+    # Signal GPU worker to stop
+    stop_event.set()
 
-    camera_config = {
-        'camera_id':   str,
-        'stream_url':  str,
-        'camera_name': str,
-    }
-    """
-    from tcs_hls_utils import extract_hls_streaming_url, test_hls_stream
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
-    camera_id   = camera_config.get("camera_id", "unknown")
-    initial_url = camera_config.get("stream_url", "")
-    camera_name = camera_config.get("camera_name", "")
-
-    hls_url = extract_hls_streaming_url(initial_url)
-    if not hls_url:
-        logger.error(f"[ServerRoom][HLS] ❌ Could not resolve URL for {camera_id}")
-        return
-
-    if not test_hls_stream(hls_url):
-        logger.error(f"[ServerRoom][HLS] ❌ Stream test failed for {camera_id}")
-        return
-
-    logger.info(f"[ServerRoom][HLS] ▶ Starting → {camera_id} ({camera_name})  URL: {hls_url}")
-    _run_hls_camera(camera_id, hls_url, camera_name=camera_name, max_frames=max_frames)
+    logger.info("[ServerRoom][HLS] ✅ All HLS cameras completed")
