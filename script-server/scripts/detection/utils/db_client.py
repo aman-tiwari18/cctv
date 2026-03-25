@@ -46,15 +46,17 @@ def get_hls_cameras(exam_id: int, shift_id: int, exam_date: str) -> list:
             camera_category, classification, is_active, exam_date
         FROM camera_links_hls
         WHERE exam_id   = %s
-          AND shift_id  = %s
-          AND exam_date = %s
+          AND (shift_id = %s OR shift_id IS NULL)
+          AND (exam_date = %s OR exam_date IS NULL)
           AND is_active = 1
     """
+    params = [exam_id, shift_id, exam_date]
+
     try:
         conn = _get_connection()
         with conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (exam_id, shift_id, exam_date))
+                cur.execute(sql, tuple(params))
                 rows = cur.fetchall()
                 logger.info(
                     f"[DB] Loaded {len(rows)} HLS cameras "
@@ -64,6 +66,29 @@ def get_hls_cameras(exam_id: int, shift_id: int, exam_date: str) -> list:
     except Exception as e:
         logger.error(f"[DB] Error querying camera_links_hls: {e}")
         return []
+
+
+def update_hls_classification(exam_id: int, shift_id: int, exam_date: str, ch_code: str, classification: str) -> int:
+    """Update classification in camera_links_hls for one camera, scoped by exam/shift/date."""
+    sql = """
+        UPDATE camera_links_hls
+        SET classification = %s
+        WHERE exam_id = %s
+          AND ch_code = %s
+          AND is_active = 1
+          AND (shift_id = %s OR shift_id IS NULL)
+          AND (exam_date = %s OR exam_date IS NULL)
+    """
+    try:
+        conn = _get_connection()
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (classification, exam_id, ch_code, shift_id, exam_date))
+                conn.commit()
+                return cur.rowcount
+    except Exception as e:
+        logger.error(f"[DB] Error updating camera_links_hls classification (ch_code={ch_code}): {e}")
+        return 0
 
 
 # ============================================================
@@ -100,6 +125,27 @@ def get_rtsp_cameras(exam_id: int) -> list:
     except Exception as e:
         logger.error(f"[DB] Error querying camera_links_rtsp: {e}")
         return []
+
+
+def update_rtsp_classification(exam_id: int, device_id: str, classification: str) -> int:
+    """Update classification in camera_links_rtsp for one camera."""
+    sql = """
+        UPDATE camera_links_rtsp
+        SET classification = %s
+        WHERE exam_id = %s
+          AND device_id = %s
+          AND is_active = 1
+    """
+    try:
+        conn = _get_connection()
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (classification, exam_id, device_id))
+                conn.commit()
+                return cur.rowcount
+    except Exception as e:
+        logger.error(f"[DB] Error updating camera_links_rtsp classification (device_id={device_id}): {e}")
+        return 0
 
 
 # ============================================================

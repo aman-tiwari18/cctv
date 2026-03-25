@@ -1,4315 +1,9 @@
-# import requests
-# import json
-# import hashlib
-# import cv2
-# import time
-# import pandas as pd
-# import urllib.parse
-# import os
-# import sys
-# import shutil
-# from tqdm import tqdm
-# from PIL import Image
-# import subprocess
-# import uuid
-# import logging
-# from datetime import datetime
-# import base64
-# from concurrent.futures import ThreadPoolExecutor, as_completed
-# import threading
-
-# # ============================================================
-# # Logging Setup
-# # ============================================================
-# log_dir = "logs"
-# os.makedirs(log_dir, exist_ok=True)
-# log_filename = os.path.join(log_dir, f"classification_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
-
-# logging.basicConfig(
-#     level=logging.DEBUG,
-#     format='%(asctime)s - %(levelname)s - %(message)s',
-#     handlers=[
-#         logging.FileHandler(log_filename),
-#         logging.StreamHandler()
-#     ]
-# )
-# logger = logging.getLogger(__name__)
-
-# logger.info("="*80)
-# logger.info("Starting Camera Classification Process")
-# logger.info("="*80)
-
-# # ============================================================
-# # Excel Loading
-# # ============================================================
-# # INPUT_EXCEL = "10_feb_2026.xlsx"
-# INPUT_EXCEL = "camera_list/feb_10.xlsx"
-
-# # INPUT_EXCEL = "cctv_classfication/2000+RTSP_links_of_centre_CR_&_NR_MTS-2026.xlsx"
-
-# PREFERRED_SHEET = "RTSP"
-# SCENE_COLUMN_TARGET = "scence classification"
-# SUCCESS_STATUS_CODES = {200, 401}
-
-
-# AUTH_MAX_ATTEMPTS = 3
-
-# # Performance optimization constants
-# RTSP_TIMEOUT_MS = 5000  # 5 seconds timeout for RTSP streams
-# MAX_RETRY_ATTEMPTS = 1  # Only 1 retry attempt
-
-# excel_file = pd.ExcelFile(INPUT_EXCEL)
-# EXCEL_SHEET = None
-# df = None
-
-# for sheet_name in excel_file.sheet_names:
-#     temp_df = excel_file.parse(sheet_name)
-#     temp_df.columns = [col.strip() for col in temp_df.columns]
-#     if any(col.lower() == SCENE_COLUMN_TARGET.lower() for col in temp_df.columns):
-#         df = temp_df
-#         EXCEL_SHEET = sheet_name
-#         break
-
-# if df is None:
-#     fallback_sheet = PREFERRED_SHEET if PREFERRED_SHEET in excel_file.sheet_names else excel_file.sheet_names[0]
-#     df = excel_file.parse(fallback_sheet)
-#     df.columns = [col.strip() for col in df.columns]
-#     EXCEL_SHEET = fallback_sheet
-
-# # df["Device ID"] = df["Device ID"].astype(str).str.strip()
-
-# df["device_id"] = df["device_id"].astype(str).str.strip()
-
-# # Extract Server Address column and standardize format
-# if "Server Address" not in df.columns:
-#     logger.error("'Server Address' column not found in Excel file!")
-#     sys.exit(1)
-
-# df["Server Address"] = df["Server Address"].astype(str).str.strip().str.lower()
-
-# scene_column = next((col for col in df.columns if col.lower() == SCENE_COLUMN_TARGET.lower()), None)
-# if scene_column is None:
-#     scene_column = SCENE_COLUMN_TARGET
-#     df[scene_column] = pd.NA
-
-# SCENE_COLUMN_NAME = scene_column
-
-# # Add Status column if not present
-# if "Status" not in df.columns:
-#     df["Status"] = ""
-# else:
-#     df["Status"] = df["Status"].fillna("")
-
-# # device_ids = df["Device ID"].unique().tolist()
-
-# device_ids = df["device_id"].unique().tolist()
-
-
-# # device_camera_map = {
-# #     device_id: sorted(df[df["Device ID"] == device_id]["Camera No"].tolist())
-# #     for device_id in device_ids
-# # }
-
-# device_camera_map = {
-#     device_id: sorted(df[df["device_id"] == device_id]["no"].tolist())
-#     for device_id in device_ids
-# }
-
-# # Create mapping from (device_id, camera_no) to server address
-# device_camera_server_map = {}
-# for _, row in df.iterrows():
-#     device_id = str(row["device_id"]).strip()
-#     camera_no = row["no"]
-#     server = str(row["Server Address"]).strip().lower()
-#     device_camera_server_map[(device_id, camera_no)] = server
-
-# logger.info(f"Loaded {len(df)} cameras from {len(df['Server Address'].unique())} different servers")
-# for server in df["Server Address"].unique():
-#     count = len(df[df["Server Address"] == server])
-#     logger.info(f"  - {server}: {count} cameras")
-
-
-
-# def parse_json_response(response, context):
-#     logger.info(f"Parsing JSON response for context: {context}")
-#     try:
-#         parsed_data = json.loads(response.content.decode("utf-8"))
-#         logger.debug(f"[{context}] Parsed JSON response: {json.dumps(parsed_data, indent=2)}")
-#         return parsed_data
-#     except Exception as exc:
-#         logger.error(f"Failed to parse JSON for {context}: {exc}")
-#         logger.error(f"Raw response text: {getattr(response, 'text', 'N/A')}")
-#         sys.exit(1)
-
-
-# def extract_rtsp_urls(api_data):
-#     urls = []
-#     for key in ("url", "url2"):
-#         raw = api_data.get(key)
-#         if not raw:
-#             continue
-#         parts = [part.strip() for part in raw.split('|') if part.strip()]
-#         urls.extend(parts)
-#     return urls
-
-# # ============================================================
-# # DSS Authentication
-# # ============================================================
-# def generate_signature(userName, password, realm, randomKey):
-#     temp = hashlib.md5(password.encode()).hexdigest()
-#     temp = hashlib.md5((userName + temp).encode()).hexdigest()
-#     temp = hashlib.md5(temp.encode()).hexdigest()
-#     temp = hashlib.md5((userName + ":" + realm + ":" + temp).encode()).hexdigest()
-#     return hashlib.md5((temp + ":" + randomKey).encode()).hexdigest()
-
-# def make_api_call(url, payload, headers):
-#     try:
-#         logger.info(f"Making API call to: {url}")
-#         logger.debug(f"Request payload: {json.dumps(payload, indent=2)}")
-#         logger.debug(f"Request headers: {json.dumps(headers, indent=2)}")
-        
-#         response = requests.post(url, headers=headers, data=json.dumps(payload), timeout=10)
-        
-#         logger.info(f"Response status code: {response.status_code}")
-#         logger.debug(f"Response headers: {dict(response.headers)}")
-        
-#         if response.status_code in SUCCESS_STATUS_CODES:
-#             logger.info(f"Response status {response.status_code} treated as success")
-#         else:
-#             logger.warning(f"Response status {response.status_code} not in success codes")
-            
-#         try:
-#             logger.debug(f"Response content: {response.text[:1000]}")
-#         except:
-#             logger.debug("Could not log response content")
-            
-#         return response
-#     except Exception as e:
-#         logger.error(f"API request failed: {e}", exc_info=True)
-#         return None
-
-# def authenticate(server, max_attempts=AUTH_MAX_ATTEMPTS):
-#     logger.info(f"Starting authentication process for server: {server}")
-#     auth_url = f"https://{server}/admin/API/accounts/authorize"
-#     headers = {"Content-Type": "application/json"}
-#     payload = {"userName": "system", "ipAddress": "", "clientType": "WINPC_V1"}
-
-#     for attempt in range(1, max_attempts + 1):
-#         logger.info(f"Authentication attempt {attempt}/{max_attempts} for {server}")
-#         res = make_api_call(auth_url, payload, headers)
-
-#         resp_json = parse_json_response(res, "initial authorization")
-#         if resp_json.get("code") not in (None, 1000):
-#             logger.warning(f"Initial authorization returned error code: {resp_json.get('code')}")
-#             logger.debug(f"Full response: {resp_json}")
-#             continue
-
-#         required_fields = ["realm", "randomKey", "publickey"]
-#         missing = [field for field in required_fields if field not in resp_json]
-#         if missing:
-#             logger.warning(f"Missing required fields {missing} in authorization response")
-#             logger.debug(f"Response received: {resp_json}")
-#             continue
-
-#         realm = resp_json["realm"]
-#         randomKey = resp_json["randomKey"]
-#         publicKey = resp_json["publickey"]
-#         cookie = res.headers.get("Set-Cookie", "")
-        
-#         logger.info(f"Received auth parameters - realm: {realm}, randomKey: {randomKey[:20]}...")
-#         logger.debug(f"Cookie received: {cookie[:100]}..." if cookie else "No cookie")
-
-#         sig = generate_signature("system", "Coreiseven@@", realm, randomKey)
-#         logger.debug(f"Generated signature: {sig[:20]}...")
-        
-#         payload2 = {
-#             "mac": "",
-#             "signature": sig,
-#             "userName": "system",
-#             "randomKey": randomKey,
-#             "publicKey": publicKey,
-#             "encryptType": "MD5",
-#             "ipAddress": "",
-#             "clientType": "WINPC_V1",
-#             "userType": "0"
-#         }
-
-
-#         headers2 = {"Content-Type": "application/json", "Cookie": cookie}
-#         logger.info("Sending token exchange request")
-#         res2 = make_api_call(auth_url, payload2, headers2)
-#         if not res2:
-#             logger.warning("No response for signature authorization, retrying…")
-#             continue
-
-#         resp_json2 = parse_json_response(res2, "token exchange")
-#         if resp_json2.get("code") not in (None, 1000):
-#             logger.warning(f"Token exchange returned error code: {resp_json2.get('code')}")
-#             logger.debug(f"Full response: {resp_json2}")
-#             continue
-
-#         token = resp_json2.get("token")
-#         if token:
-#             logger.info(f"Authentication successful for {server}! Token received: {token[:20]}...")
-#             return token
-
-#         logger.warning(f"Token missing in token exchange response for {server}")
-#         logger.debug(f"Response: {resp_json2}")
-
-#     logger.error(f"Authentication failed for {server} after maximum attempts")
-#     sys.exit(1)
-
-
-# # Global token and timestamp tracking (per server)
-# server_tokens = {}  # {server: token}
-# server_token_timestamps = {}  # {server: timestamp}
-# TOKEN_EXPIRY_SECONDS = 90  # Refresh token after 90 seconds (before 2-min expiry)
-# token_lock = threading.Lock()  # Thread-safe token access
-
-# def refresh_token_if_needed(server):
-#     """Check if token needs refresh and refresh if necessary (thread-safe)"""
-#     global server_tokens, server_token_timestamps
-    
-#     with token_lock:
-#         # Initialize token for new server
-#         if server not in server_tokens:
-#             logger.info(f"Initializing authentication for new server: {server}")
-#             server_tokens[server] = authenticate(server)
-#             server_token_timestamps[server] = time.time()
-#             return server_tokens[server]
-        
-#         # Check if existing token needs refresh
-#         elapsed = time.time() - server_token_timestamps[server]
-#         if elapsed > TOKEN_EXPIRY_SECONDS:
-#             logger.warning(f"Token expired for {server} ({elapsed:.0f}s elapsed). Re-authenticating...")
-#             server_tokens[server] = authenticate(server)
-#             server_token_timestamps[server] = time.time()
-#             logger.info(f"Token refreshed successfully for {server}")
-#         return server_tokens[server]
-
-# # ============================================================
-# # RTSP Stream
-# # ============================================================
-# def start_video_stream(device_id, camera_no, server, token):
-#     logger.info(f"Starting video stream for Device ID: {device_id}, Camera No: {camera_no} on server: {server}")
-#     url = f"https://{server}/admin/API/MTS/Video/StartVideo?token={token}"
-#     headers = {"Content-Type": "application/json", "X-Subject-Token": token}
-
-#     payload = {
-#         "clientType": "WINPC_V1",
-#         "project": "PSDK",
-#         "method": "MTS.Video.StartVideo",
-#         "data": {
-#             "streamType": "1",
-#             "optional": f"/admin/API/MTS/Video/StartVideo?token={token}",
-#             "channelId": f"{device_id}$1$0${camera_no}",
-#             "dataType": "2",
-#             "enableRtsps": "0"
-#         }
-#     }
-
-#     res = make_api_call(url, payload, headers)
-#     logger.debug(f"Start video stream response object: {res}")
-    
-#     if not res:
-#         logger.error(f"Failed to start video stream for Device ID {device_id}, Camera No {camera_no}")
-#         logger.error(f"Response status: No response")
-#         return None, None
-    
-#     # Check if token expired (401 error)
-#     if res.status_code == 401:
-#         logger.warning(f"Got 401 Unauthorized - token expired for Device ID {device_id}, Camera No {camera_no}")
-#         return None, None
-    
-#     if res.status_code not in SUCCESS_STATUS_CODES:
-#         logger.error(f"Failed to start video stream for Device ID {device_id}, Camera No {camera_no}")
-#         logger.error(f"Response status: {res.status_code}")
-#         return None, None
-
-#     resp_json = parse_json_response(res, f"start video stream - Device {device_id} Camera {camera_no}")
-#     data = resp_json.get("data")
-#     if not data:
-#         logger.error(f"Missing 'data' in video stream response for Device ID {device_id}, Camera No {camera_no}")
-#         logger.debug(f"Full response: {resp_json}")
-#         return None, None
-
-#     urls = extract_rtsp_urls(data)
-#     if not urls:
-#         logger.error(f"No RTSP URLs returned for Device ID {device_id}, Camera No {camera_no}")
-#         logger.debug(f"Data received: {data}")
-#         return None, None
-
-#     logger.info(f"Extracted {len(urls)} RTSP URL(s) for Device ID {device_id}, Camera No {camera_no}")
-#     for i, url in enumerate(urls, 1):
-#         logger.debug(f"RTSP URL {i}: {url}")
-
-#     stream_token = data.get("token") or token
-#     if not data.get("token"):
-#         logger.warning(f"Stream token missing for Device ID {device_id}, Camera No {camera_no}; using session token")
-#     else:
-#         logger.info(f"Stream token received: {stream_token[:20]}...")
-
-#     return urls, stream_token
-
-# def add_token_to_url(rtsp_url, token):
-#     parsed = urllib.parse.urlparse(rtsp_url)
-#     query = urllib.parse.parse_qs(parsed.query)
-#     query['token'] = [token]
-#     return urllib.parse.urlunparse(parsed._replace(query=urllib.parse.urlencode(query, doseq=True)))
-
-# # ============================================================
-# # Frame Saving + VLM Classification
-# # ============================================================
-# def save_frame(frame, device_id, camera_no):
-#     save_dir = f"frames/{device_id}/{camera_no}"
-#     os.makedirs(save_dir, exist_ok=True)
-
-#     save_path = f"{save_dir}/frame.jpg"
-#     cv2.imwrite(save_path, frame)
-
-#     return save_path
-
-
-# def classify_with_vlm(image_path):
-#     """
-#     Uses Ollama-installed Vision Model (e.g., qwen2-vl or llava) for scene classification.
-#     """
-#     logger.info(f"Starting VLM classification for image: {image_path}")
-
-#     # === CATEGORY DEFINITIONS ===
-#     CATEGORIES = [
-#         "Server Room",
-#         "Outdoor Scene",
-#         "Outside Area",
-#         "Parking Lot",
-#         "Entry",
-#         "Computer Lab"
-#     ]
-
-#     PROMPT = f"""
-#     You are an expert computer vision classifier.
-#     Classify the given image into one of the following categories:
-
-#     {', '.join(CATEGORIES)}.
-
-#     Rules:
-#     - "Server Room": small room with limited visibility with laptop or computers.
-#     - "Computer Lab": large room with many computers, chairs, people or desks.
-#     - "Outdoor Scene": nature, roads, gardens, sky, trees.
-#     - "Outside Area": surroundings of a building, campus, boundary,hallway, outdoor environment.
-#     - "Parking Lot": cars, bikes, open area with marked spaces or vehicles.
-#     - "Entry": building entrances, gates, doors, signboards, or main access points.
-
-#     Return **only** the JSON response with:
-#     {{
-#     "category": "<one of the above categories>",
-#     "reason": "<short explanation>"
-#     }}
-#     """
-
-#     url = "http://localhost:11434/api/generate"
-    
-#     # Read and encode the image to base64
-#     try:
-#         with open(image_path, 'rb') as image_file:
-#             image_data = base64.b64encode(image_file.read()).decode('utf-8')
-#         logger.debug(f"Image successfully encoded to base64 (length: {len(image_data)})")
-#     except Exception as e:
-#         logger.error(f"Failed to read and encode image: {e}", exc_info=True)
-#         return "Uncertain"
-    
-#     payload = {
-#         "model": "qwen3-vl:8b",     # change to your installed model name
-#         "prompt": PROMPT,
-#         "images": [image_data],
-#         "stream": False
-#     }
-
-#     try:
-#         logger.debug(f"Sending VLM request to: {url}")
-#         logger.debug(f"VLM payload model: {payload['model']}, prompt length: {len(PROMPT)}, image data length: {len(image_data)}")
-        
-#         response = requests.post(url, json=payload, timeout=30)  # Reduced from 60s to 30s
-        
-#         logger.info(f"VLM response status: {response.status_code}")
-        
-#         if response.status_code != 200:
-#             logger.error(f"VLM request failed with status {response.status_code}")
-#             logger.debug(f"VLM error response: {response.text}")
-#             return "Uncertain"
-        
-#         response_json = response.json()
-#         logger.debug(f"VLM full response: {json.dumps(response_json, indent=2)}")
-        
-#         result = response_json.get("response", "").strip()
-#         logger.info(f"VLM classification result: {result}")
-        
-#         if not result:
-#             logger.warning("VLM returned empty result")
-#             return "Uncertain"
-        
-#         # Parse JSON response and extract only the category
-#         try:
-#             result_json = json.loads(result)
-#             category = result_json.get("category", "Uncertain")
-#             logger.info(f"Extracted category: {category}")
-#             return category
-#         except json.JSONDecodeError:
-#             logger.warning(f"Could not parse JSON response, returning raw result")
-#             return result
-#     except Exception as e:
-#         logger.error(f"VLM request failed: {e}", exc_info=True)
-#         return "Uncertain"
-
-
-# def capture_frame_with_opencv(rtsp_url, token, device_id, camera_no, timeout_ms=RTSP_TIMEOUT_MS):
-#     logger.info(f"Capturing frame with OpenCV for Device {device_id}, Camera {camera_no}")
-#     tokenized_url = add_token_to_url(rtsp_url, token)
-#     logger.debug(f"Tokenized RTSP URL: {tokenized_url[:100]}...")
-    
-#     cap = cv2.VideoCapture(tokenized_url, cv2.CAP_FFMPEG)
-    
-#     # Set timeout using optimized constant
-#     cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, timeout_ms)
-#     cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, timeout_ms)
-
-#     if not cap.isOpened():
-#         logger.error(f"❌ FRAME CAPTURE FAILED: Failed to open stream for Device ID {device_id}, Camera No {camera_no}")
-#         return None
-
-#     ret, frame = cap.read()
-#     cap.release()
-
-#     if not ret:
-#         logger.error(f"❌ FRAME CAPTURE FAILED: Failed to read frame from Device ID {device_id}, Camera No {camera_no}")
-#         return None
-
-#     save_dir = f"frames/{device_id}/{camera_no}"
-#     os.makedirs(save_dir, exist_ok=True)
-#     img_path = f"{save_dir}/frame_{uuid.uuid4().hex}.jpg"
-#     cv2.imwrite(img_path, frame)
-#     logger.info(f"✅ FRAME CAPTURED SUCCESSFULLY: Frame saved to {img_path}")
-#     return img_path
-
-
-# def capture_frame_with_ffmpeg(rtsp_url, token, device_id, camera_no):
-#     logger.info(f"Attempting FFmpeg frame capture for Device {device_id}, Camera {camera_no}")
-    
-#     if not shutil.which("ffmpeg"):
-#         logger.warning("ffmpeg executable not found on PATH; skipping this URL")
-#         return None  # Don't fall back to OpenCV - just fail fast
-
-#     tokenized_url = add_token_to_url(rtsp_url, token)
-#     save_dir = f"frames/{device_id}/{camera_no}"
-#     os.makedirs(save_dir, exist_ok=True)
-#     img_path = f"{save_dir}/frame_{uuid.uuid4().hex}.jpg"
-
-#     logger.info(f"Using FFmpeg to capture frame from: {tokenized_url[:100]}...")
-#     logger.debug(f"Output path: {img_path}")
-
-#     cmd = [
-#         "ffmpeg",
-#         "-y",
-#         "-rtsp_transport", "tcp",
-#         "-timeout", str(RTSP_TIMEOUT_MS * 1000),  # Convert ms to microseconds for ffmpeg
-#         "-i", tokenized_url,
-#         "-frames:v", "1",
-#         "-loglevel", "error",  # Reduce verbose output
-#         img_path
-#     ]
-
-#     try:
-#         logger.debug(f"Running FFmpeg command: {' '.join(cmd[:8])}...")
-#         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)  # Reduced from 20s to 10s
-        
-#         logger.debug(f"FFmpeg stdout: {result.stdout.decode(errors='ignore')[:500]}")
-#         logger.debug(f"FFmpeg stderr: {result.stderr.decode(errors='ignore')[:500]}")
-        
-#         if result.returncode != 0:
-#             logger.warning(f"FFmpeg exited with code {result.returncode} - URL likely not accessible")
-#             logger.debug(f"FFmpeg stderr: {result.stderr.decode(errors='ignore')[:500]}")
-#             return None  # Don't fall back - fail fast
-#     except FileNotFoundError:
-#         logger.warning("ffmpeg command not found")
-#         return None  # Fail fast - no fallback
-#     except subprocess.TimeoutExpired:
-#         logger.warning(f"FFmpeg timed out after 10 seconds")
-#         return None  # Fail fast
-#     except Exception as e:
-#         logger.error(f"FFmpeg failed: {e}")
-#         return None  # Fail fast
-
-#     if not os.path.exists(img_path):
-#         logger.warning("❌ FRAME CAPTURE FAILED: FFmpeg did not create an output frame")
-#         return None  # Fail fast
-
-#     logger.info(f"✅ FRAME CAPTURED SUCCESSFULLY: Frame saved with FFmpeg to {img_path}")
-#     return img_path
-
-
-# def try_capture_single_url(rtsp_url, token, device_id, camera_no, url_index):
-#     """Try to capture frame from a single URL (used for parallel testing)"""
-#     logger.debug(f"Testing RTSP URL {url_index} for Device {device_id}, Camera {camera_no}")
-#     img_path = capture_frame_with_ffmpeg(rtsp_url, token, device_id, camera_no)
-#     if img_path:
-#         logger.info(f"✅ Successfully captured frame using URL {url_index} for Device {device_id}, Camera {camera_no}")
-#     return img_path
-
-# def try_open_and_classify_rtsp_stream_parallel(rtsp_urls, token, device_id, camera_no):
-#     """Test all RTSP URLs in parallel and use first successful one"""
-#     logger.info(f"Testing {len(rtsp_urls)} RTSP URLs in parallel for Device {device_id}, Camera {camera_no}")
-    
-#     img_path = None
-    
-#     # Test all URLs in parallel using ThreadPoolExecutor
-#     with ThreadPoolExecutor(max_workers=len(rtsp_urls)) as executor:
-#         # Submit all URL tests simultaneously
-#         future_to_url = {
-#             executor.submit(try_capture_single_url, url, token, device_id, camera_no, idx): idx 
-#             for idx, url in enumerate(rtsp_urls, 1)
-#         }
-        
-#         # Get the first successful result
-#         for future in as_completed(future_to_url):
-#             result = future.result()
-#             if result:
-#                 img_path = result
-#                 logger.info(f"First successful capture received for Device {device_id}, Camera {camera_no}")
-#                 # Cancel remaining futures since we got a success
-#                 for f in future_to_url:
-#                     f.cancel()
-#                 break
-    
-#     if not img_path:
-#         logger.error(f"Failed to capture frame from any URL for Device {device_id}, Camera {camera_no}")
-#         return None
-    
-#     label = classify_with_vlm(img_path)
-#     logger.info(f"Classification complete for Device {device_id}, Camera {camera_no}: {label}")
-#     return label
-
-# def try_open_and_classify_rtsp_stream(rtsp_url, token, device_id, camera_no):
-#     """Legacy function - captures from single URL"""
-#     logger.info(f"Attempting to open and classify RTSP stream for Device {device_id}, Camera {camera_no}")
-#     logger.debug(f"RTSP URL: {rtsp_url[:100]}...")
-    
-#     img_path = capture_frame_with_ffmpeg(rtsp_url, token, device_id, camera_no)
-#     if not img_path:
-#         logger.error(f"Failed to capture frame for Device {device_id}, Camera {camera_no}")
-#         return None
-
-#     label = classify_with_vlm(img_path)
-#     logger.info(f"Classification complete for Device {device_id}, Camera {camera_no}: {label}")
-#     return label
-# # ============================================================
-# # Excel Update (Optimized with batching)
-# # ============================================================
-# excel_update_queue = []  # Queue for batched updates
-# excel_lock = threading.Lock()  # Thread-safe Excel updates
-
-# def update_excel_in_memory(device_id, camera_no, label, status="Accessible"):
-#     """Update dataframe in memory without writing to disk (faster)"""
-#     logger.info(f"Queuing Excel update for Device ID {device_id}, Camera No {camera_no} with label: {label}, status: {status}")
-#     global df
-#     with excel_lock:
-#         # mask = (df["Device ID"] == device_id) & (df["Camera No"] == camera_no)
-#         mask = (df["device_id"] == device_id) & (df["no"] == camera_no)
-
-#         if mask.any():
-#             df.loc[mask, SCENE_COLUMN_NAME] = label
-#             df.loc[mask, "Status"] = status
-#             excel_update_queue.append((device_id, camera_no, label, status))
-#             logger.debug(f"In-memory update queued: Device ID {device_id}, Camera No {camera_no}")
-#         else:
-#             logger.warning(f"No match in Excel for Device ID {device_id}, Camera No {camera_no}")
-
-# # def flush_excel_updates():
-# #     """Write all pending updates to Excel file (batch operation)"""
-# #     global df
-# #     if not excel_update_queue:
-# #         logger.info("No pending Excel updates to flush")
-# #         return
-    
-# #     with excel_lock:
-# #         logger.info(f"Flushing {len(excel_update_queue)} Excel updates to disk...")
-# #         try:
-# #             with pd.ExcelWriter(INPUT_EXCEL, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
-# #                 df.to_excel(writer, sheet_name=EXCEL_SHEET, index=False)
-# #             logger.info(f"✅ Successfully flushed {len(excel_update_queue)} updates to Excel")
-# #             excel_update_queue.clear()
-# #         except Exception as e:
-# #             logger.error(f"Failed to flush Excel updates: {e}", exc_info=True)
-
-
-
-
-
-
-
-# def write_excel_once():
-#     logger.info("Writing final Excel output (single write)...")
-#     tmp_file = INPUT_EXCEL.replace(".xlsx", "_tmp.xlsx")
-
-#     with pd.ExcelWriter(tmp_file, engine="openpyxl") as writer:
-#         df.to_excel(writer, sheet_name=EXCEL_SHEET, index=False)
-
-#     os.replace(tmp_file, INPUT_EXCEL)  # atomic replace
-#     logger.info("✅ Excel written safely without corruption")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# def update_excel_sheet(device_id, camera_no, label, status="Accessible"):
-#     """Legacy function - now uses in-memory updates"""
-#     update_excel_in_memory(device_id, camera_no, label, status)
-
-
-# def create_new_sheets(output_dir="."):
-#     """Create 7 new Excel files with renamed columns"""
-#     try:
-#         logger.info("Creating 7 new Excel files with renamed columns...")
-        
-#         # Filter successful classifications only
-#         classified_df = df[
-#             (df[SCENE_COLUMN_NAME] != "") & 
-#             (df[SCENE_COLUMN_NAME].notna()) &
-#             (df[SCENE_COLUMN_NAME] != "Failed to Classify")
-#         ].copy()
-        
-#         # Rename columns
-#         new_df = classified_df[["device_id", "no", SCENE_COLUMN_NAME]].copy()
-#         new_df.columns = ["device_id", "camera_no", "Scene Classification"]
-        
-#         # Split into 7 files
-#         total_rows = len(new_df)
-#         rows_per_file = (total_rows + 6) // 7  # Ceiling division
-        
-#         logger.info(f"Total classified cameras: {total_rows}, distributing across 7 files...")
-        
-#         for i in range(1, 8):
-#             start_idx = (i - 1) * rows_per_file
-#             end_idx = min(i * rows_per_file, total_rows)
-            
-#             file_df = new_df.iloc[start_idx:end_idx]
-#             filename = os.path.join(output_dir, f"new_sheet{i}.xlsx")
-            
-#             file_df.to_excel(filename, index=False, sheet_name="Sheet1")
-#             logger.info(f"✅ Created {filename} with {len(file_df)} rows")
-        
-#         logger.info("✅ All 7 Excel files created successfully")
-        
-#     except Exception as e:
-#         logger.error(f"Error creating new Excel files: {e}", exc_info=True)
-
-# # ============================================================
-# # Per Camera Flow (Optimized with caching)
-# # ============================================================
-# def is_camera_already_classified(device_id, camera_no):
-#     """Check if camera is already classified (skip re-classification)"""
-#     global df
-#     mask = (df["device_id"] == device_id) & (df["no"] == camera_no)
-#     if mask.any():
-#         existing_label = df.loc[mask, SCENE_COLUMN_NAME].values[0]
-#         # Check if already has a valid classification
-#         if pd.notna(existing_label) and existing_label != "" and existing_label != "Failed to Classify":
-#             logger.info(f"✓ Camera {device_id}/{camera_no} already classified as '{existing_label}' - skipping classification")
-#             return True, existing_label
-#     return False, None
-
-# def process_camera(device_id, camera_no):
-#     logger.info("="*60)
-#     logger.info(f"Processing Camera - Device ID: {device_id}, Camera No: {camera_no}")
-#     logger.info("="*60)
-    
-#     # Get server for this camera
-#     server = device_camera_server_map.get((device_id, camera_no))
-#     if not server:
-#         logger.error(f"No server mapping found for Device ID {device_id}, Camera No {camera_no}")
-#         update_excel_sheet(device_id, camera_no, "Failed to Classify", "Server Not Found")
-#         return
-    
-#     # Check if already classified (optimization: skip classification but still capture frame)
-#     already_classified, existing_label = is_camera_already_classified(device_id, camera_no)
-    
-#     max_retries = MAX_RETRY_ATTEMPTS  # Use optimized retry count (1 attempt)
-#     for attempt in range(max_retries):
-#         logger.info(f"Attempt {attempt+1}/{max_retries} for Device: {device_id}, Camera: {camera_no} on {server}")
-
-#         # Refresh token if needed before making API call
-#         current_token = refresh_token_if_needed(server)
-        
-#         urls, token_new = start_video_stream(device_id, camera_no, server, current_token)
-
-#         if not urls or not token_new:
-#             logger.warning(f"Stream URL issue on attempt {attempt+1}. Retrying in 2 seconds...")
-#             time.sleep(2)
-#             continue
-
-#         # NEW: Test all URLs in parallel instead of sequentially
-#         if already_classified:
-#             # Just capture frame to mark as accessible, but skip classification
-#             # Test all URLs in parallel, use first success
-#             with ThreadPoolExecutor(max_workers=len(urls)) as executor:
-#                 future_to_url = {
-#                     executor.submit(capture_frame_with_ffmpeg, url, token_new, device_id, camera_no): idx 
-#                     for idx, url in enumerate(urls, 1)
-#                 }
-                
-#                 img_path = None
-#                 for future in as_completed(future_to_url):
-#                     result = future.result()
-#                     if result:
-#                         img_path = result
-#                         # Cancel remaining futures
-#                         for f in future_to_url:
-#                             f.cancel()
-#                         break
-                
-#                 if img_path:
-#                     update_excel_sheet(device_id, camera_no, existing_label, "Accessible")
-#                     logger.info(f"Successfully verified Device {device_id}, Camera {camera_no} (already classified)")
-#                     return
-#         else:
-#             # Full classification for new cameras - test all URLs in parallel
-#             label = try_open_and_classify_rtsp_stream_parallel(urls, token_new, device_id, camera_no)
-#             if label:
-#                 update_excel_sheet(device_id, camera_no, label, "Accessible")
-#                 logger.info(f"Successfully processed Device {device_id}, Camera {camera_no}")
-#                 return
-
-#         if attempt < max_retries - 1:  # Only delay if there are more attempts
-#             logger.warning(f"Retry delay before next attempt...")
-#             time.sleep(1)  # Reduced from 2s to 1s
-
-#     logger.error(f"Failed to classify Device {device_id}, Camera {camera_no} after {max_retries} attempts")
-#     update_excel_sheet(device_id, camera_no, "Failed to Classify", "Not Accessible")
-
-# # ============================================================
-# # MAIN LOOP (PARALLEL PROCESSING)
-# # ============================================================
-# logger.info("="*80)
-# logger.info(f"Starting main processing loop for {len(device_ids)} devices")
-# total_cameras = sum(len(cameras) for cameras in device_camera_map.values())
-# logger.info(f"Total cameras to process: {total_cameras}")
-# logger.info("="*80)
-
-# # Configuration for parallel processing
-# MAX_WORKERS = 12  # Optimized for H100 GPU + 24 CPU cores (balance between network I/O and VLM processing)
-# BATCH_FLUSH_SIZE = 20  # Flush Excel updates every 20 cameras
-
-# camera_counter = 0
-# accessible_counter = 0
-# not_accessible_counter = 0
-# counter_lock = threading.Lock()
-# progress_update_interval = 20  # Update progress every 20 seconds
-
-# def process_camera_with_progress(device_id, camera_no):
-#     """Wrapper function for parallel processing with progress tracking"""
-#     global camera_counter, accessible_counter, not_accessible_counter
-    
-#     try:
-#         # Check final status before processing
-#         initial_status = None
-#         mask = (df["device_id"] == device_id) & (df["no"] == camera_no)
-#         if mask.any():
-#             initial_status = df.loc[mask, "Status"].values[0] if "Status" in df.columns else None
-        
-#         process_camera(device_id, camera_no)
-        
-#         # Check final status after processing
-#         final_status = None
-#         mask = (df["device_id"] == device_id) & (df["no"] == camera_no)
-#         if mask.any():
-#             final_status = df.loc[mask, "Status"].values[0] if "Status" in df.columns else None
-        
-#         # Update counters (thread-safe)
-#         with counter_lock:
-#             camera_counter += 1
-            
-#             # Update accessibility counters
-#             if final_status == "Accessible":
-#                 accessible_counter += 1
-#             elif final_status == "Not Accessible":
-#                 not_accessible_counter += 1
-            
-#             current_count = camera_counter
-            
-#             # Flush Excel updates periodically
-#             if current_count % BATCH_FLUSH_SIZE == 0:
-#                 write_excel_once()
-
-
-            
-#     except Exception as e:
-#         logger.error(f"Error processing camera {device_id}/{camera_no}: {e}", exc_info=True)
-#         with counter_lock:
-#             camera_counter += 1
-#             not_accessible_counter += 1
-
-# # Build list of all cameras to process
-# all_cameras = []
-# for device_id in device_ids:
-#     cameras = device_camera_map[device_id]
-#     for camera_no in cameras:
-#         all_cameras.append((device_id, camera_no))
-
-# logger.info(f"Starting parallel processing with {MAX_WORKERS} workers...")
-# print(f"\n🚀 Processing {total_cameras} cameras in parallel with {MAX_WORKERS} workers...\n")
-
-# # Progress reporting thread
-# stop_progress_thread = threading.Event()
-# start_time = time.time()
-
-# def progress_reporter():
-#     """Thread function that reports progress every 20 seconds"""
-#     while not stop_progress_thread.is_set():
-#         time.sleep(progress_update_interval)
-        
-#         with counter_lock:
-#             current_count = camera_counter
-#             accessible = accessible_counter
-#             not_accessible = not_accessible_counter
-#             pending = total_cameras - current_count
-        
-#         elapsed_time = time.time() - start_time
-#         progress_percent = (current_count / total_cameras) * 100 if total_cameras > 0 else 0
-        
-#         # Create progress bar
-#         bar_length = 50
-#         filled_length = int(bar_length * current_count // total_cameras) if total_cameras > 0 else 0
-#         bar = '█' * filled_length + '-' * (bar_length - filled_length)
-        
-#         # Format time
-#         elapsed_str = f"{int(elapsed_time // 60)}m {int(elapsed_time % 60)}s"
-        
-#         # Create progress message
-#         progress_msg = (
-#             f"\n{'='*80}\n"
-#             f"PROGRESS UPDATE (Elapsed: {elapsed_str})\n"
-#             f"{'='*80}\n"
-#             f"|{bar}| {progress_percent:.1f}%\n"
-#             f"Completed: {current_count}/{total_cameras} cameras\n"
-#             f"✅ Accessible: {accessible}\n"
-#             f"❌ Not Accessible: {not_accessible}\n"
-#             f"⏳ Pending: {pending}\n"
-#             f"{'='*80}\n"
-#         )
-        
-#         # Print to console
-#         print(progress_msg)
-        
-#         # Log to file
-#         logger.info(f"PROGRESS: {progress_percent:.1f}% ({current_count}/{total_cameras}) | "
-#                    f"Accessible: {accessible} | Not Accessible: {not_accessible} | "
-#                    f"Pending: {pending} | Elapsed: {elapsed_str}")
-
-# # Start progress reporting thread
-# progress_thread = threading.Thread(target=progress_reporter, daemon=True)
-# progress_thread.start()
-
-# # Process cameras in parallel using ThreadPoolExecutor
-# with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-#     # Submit all tasks
-#     futures = [executor.submit(process_camera_with_progress, device_id, camera_no) 
-#                for device_id, camera_no in all_cameras]
-    
-#     # Wait for all tasks to complete
-#     for future in as_completed(futures):
-#         try:
-#             future.result()  # This will raise any exceptions that occurred
-#         except Exception as e:
-#             logger.error(f"Task failed with exception: {e}", exc_info=True)
-
-# # Stop progress reporting thread
-# stop_progress_thread.set()
-# progress_thread.join(timeout=1)
-
-# # Final flush of any remaining updates
-# flush_excel_updates()
-
-# # Calculate final statistics
-# total_elapsed = time.time() - start_time
-# elapsed_str = f"{int(total_elapsed // 60)}m {int(total_elapsed % 60)}s"
-
-# # Print final summary
-# final_summary = (
-#     f"\n{'='*80}\n"
-#     f"FINAL SUMMARY\n"
-#     f"{'='*80}\n"
-#     f"Total Cameras: {total_cameras}\n"
-#     f"✅ Accessible: {accessible_counter}\n"
-#     f"❌ Not Accessible: {not_accessible_counter}\n"
-#     f"⏱️  Total Time: {elapsed_str}\n"
-#     f"📊 Success Rate: {(accessible_counter/total_cameras*100):.1f}%\n"
-#     f"{'='*80}\n"
-# )
-
-# print(final_summary)
-
-# logger.info("="*80)
-# logger.info("All devices processed successfully!")
-# logger.info(f"Log file saved to: {log_filename}")
-# logger.info(f"Total cameras processed: {camera_counter}/{total_cameras}")
-# logger.info(f"Accessible cameras: {accessible_counter}")
-# logger.info(f"Not accessible cameras: {not_accessible_counter}")
-# logger.info(f"Total time: {elapsed_str}")
-# logger.info("="*80)
-
-# # Create 7 new Excel files with renamed columns
-# logger.info("\n" + "="*80)
-# logger.info("Creating 7 new Excel files with renamed columns...")
-# logger.info("="*80)
-# try:
-#     output_dir = "data/sheets"
-#     os.makedirs(output_dir, exist_ok=True)
-#     create_new_sheets(output_dir)
-# except Exception as e:
-#     logger.error(f"Failed to create new Excel files: {e}", exc_info=True)
-
-# print("\nAll devices processed.")
-# print(f"Detailed logs saved to: {log_filename}")
-# print("✅ 7 new Excel files created in data/sheets/: new_sheet1.xlsx to new_sheet7.xlsx")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# excel file update nhi ho rhi
-
-# import requests
-# import json
-# import hashlib
-# import cv2
-# import time
-# import pandas as pd
-# import urllib.parse
-# import os
-# import sys
-# import shutil
-# from tqdm import tqdm
-# from PIL import Image
-# import subprocess
-# import uuid
-# import logging
-# from datetime import datetime
-# import base64
-# from concurrent.futures import ThreadPoolExecutor, as_completed
-# import threading
-
-# # ============================================================
-# # Logging Setup
-# # ============================================================
-# log_dir = "logs"
-# os.makedirs(log_dir, exist_ok=True)
-# log_filename = os.path.join(log_dir, f"classification_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
-
-# logging.basicConfig(
-#     level=logging.DEBUG,
-#     format='%(asctime)s - %(levelname)s - %(message)s',
-#     handlers=[
-#         logging.FileHandler(log_filename),
-#         logging.StreamHandler()
-#     ]
-# )
-# logger = logging.getLogger(__name__)
-
-# logger.info("="*80)
-# logger.info("Starting Camera Classification Process")
-# logger.info("="*80)
-
-# # ============================================================
-# # Excel Loading
-# # ============================================================
-# # INPUT_EXCEL = "10_feb_2026.xlsx"
-# INPUT_EXCEL = os.path.join(
-#     os.path.dirname(__file__),
-#     "camera_list",
-#     "feb_10.xlsx"
-# )
-
-
-# # INPUT_EXCEL = "cctv_classfication/2000+RTSP_links_of_centre_CR_&_NR_MTS-2026.xlsx"
-
-# PREFERRED_SHEET = "RTSP"
-# SCENE_COLUMN_TARGET = "scence classification"
-# SUCCESS_STATUS_CODES = {200, 401}
-
-
-# AUTH_MAX_ATTEMPTS = 3
-
-# # Performance optimization constants
-# RTSP_TIMEOUT_MS = 5000  # 5 seconds timeout for RTSP streams
-# MAX_RETRY_ATTEMPTS = 1  # Only 1 retry attempt
-
-# excel_file = pd.ExcelFile(INPUT_EXCEL)
-# EXCEL_SHEET = None
-# df = None
-
-# for sheet_name in excel_file.sheet_names:
-#     temp_df = excel_file.parse(sheet_name)
-#     temp_df.columns = [col.strip() for col in temp_df.columns]
-#     if any(col.lower() == SCENE_COLUMN_TARGET.lower() for col in temp_df.columns):
-#         df = temp_df
-#         EXCEL_SHEET = sheet_name
-#         break
-
-# if df is None:
-#     fallback_sheet = PREFERRED_SHEET if PREFERRED_SHEET in excel_file.sheet_names else excel_file.sheet_names[0]
-#     df = excel_file.parse(fallback_sheet)
-#     df.columns = [col.strip() for col in df.columns]
-#     EXCEL_SHEET = fallback_sheet
-
-# # df["Device ID"] = df["Device ID"].astype(str).str.strip()
-
-# df["device_id"] = df["device_id"].astype(str).str.strip()
-
-# # Extract Server Address column and standardize format
-# if "Server Address" not in df.columns:
-#     logger.error("'Server Address' column not found in Excel file!")
-#     sys.exit(1)
-
-# df["Server Address"] = df["Server Address"].astype(str).str.strip().str.lower()
-
-# scene_column = next((col for col in df.columns if col.lower() == SCENE_COLUMN_TARGET.lower()), None)
-# if scene_column is None:
-#     scene_column = SCENE_COLUMN_TARGET
-#     df[scene_column] = pd.NA
-
-# SCENE_COLUMN_NAME = scene_column
-
-# # Add Status column if not present
-# if "Status" not in df.columns:
-#     df["Status"] = ""
-# else:
-#     df["Status"] = df["Status"].fillna("")
-
-# # device_ids = df["Device ID"].unique().tolist()
-
-# device_ids = df["device_id"].unique().tolist()
-
-
-# # device_camera_map = {
-# #     device_id: sorted(df[df["Device ID"] == device_id]["Camera No"].tolist())
-# #     for device_id in device_ids
-# # }
-
-# device_camera_map = {
-#     device_id: sorted(df[df["device_id"] == device_id]["no"].tolist())
-#     for device_id in device_ids
-# }
-
-# # Create mapping from (device_id, camera_no) to server address
-# device_camera_server_map = {}
-# for _, row in df.iterrows():
-#     device_id = str(row["device_id"]).strip()
-#     camera_no = row["no"]
-#     server = str(row["Server Address"]).strip().lower()
-#     device_camera_server_map[(device_id, camera_no)] = server
-
-# logger.info(f"Loaded {len(df)} cameras from {len(df['Server Address'].unique())} different servers")
-# for server in df["Server Address"].unique():
-#     count = len(df[df["Server Address"] == server])
-#     logger.info(f"  - {server}: {count} cameras")
-
-
-
-# def parse_json_response(response, context):
-#     logger.info(f"Parsing JSON response for context: {context}")
-#     try:
-#         parsed_data = json.loads(response.content.decode("utf-8"))
-#         logger.debug(f"[{context}] Parsed JSON response: {json.dumps(parsed_data, indent=2)}")
-#         return parsed_data
-#     except Exception as exc:
-#         logger.error(f"Failed to parse JSON for {context}: {exc}")
-#         logger.error(f"Raw response text: {getattr(response, 'text', 'N/A')}")
-#         sys.exit(1)
-
-
-# def extract_rtsp_urls(api_data):
-#     urls = []
-#     for key in ("url", "url2"):
-#         raw = api_data.get(key)
-#         if not raw:
-#             continue
-#         parts = [part.strip() for part in raw.split('|') if part.strip()]
-#         urls.extend(parts)
-#     return urls
-
-# # ============================================================
-# # DSS Authentication
-# # ============================================================
-# def generate_signature(userName, password, realm, randomKey):
-#     temp = hashlib.md5(password.encode()).hexdigest()
-#     temp = hashlib.md5((userName + temp).encode()).hexdigest()
-#     temp = hashlib.md5(temp.encode()).hexdigest()
-#     temp = hashlib.md5((userName + ":" + realm + ":" + temp).encode()).hexdigest()
-#     return hashlib.md5((temp + ":" + randomKey).encode()).hexdigest()
-
-# def make_api_call(url, payload, headers):
-#     try:
-#         logger.info(f"Making API call to: {url}")
-#         logger.debug(f"Request payload: {json.dumps(payload, indent=2)}")
-#         logger.debug(f"Request headers: {json.dumps(headers, indent=2)}")
-        
-#         response = requests.post(url, headers=headers, data=json.dumps(payload), timeout=10)
-        
-#         logger.info(f"Response status code: {response.status_code}")
-#         logger.debug(f"Response headers: {dict(response.headers)}")
-        
-#         if response.status_code in SUCCESS_STATUS_CODES:
-#             logger.info(f"Response status {response.status_code} treated as success")
-#         else:
-#             logger.warning(f"Response status {response.status_code} not in success codes")
-            
-#         try:
-#             logger.debug(f"Response content: {response.text[:1000]}")
-#         except:
-#             logger.debug("Could not log response content")
-            
-#         return response
-#     except Exception as e:
-#         logger.error(f"API request failed: {e}", exc_info=True)
-#         return None
-
-# def authenticate(server, max_attempts=AUTH_MAX_ATTEMPTS):
-#     logger.info(f"Starting authentication process for server: {server}")
-#     auth_url = f"https://{server}/admin/API/accounts/authorize"
-#     headers = {"Content-Type": "application/json"}
-#     payload = {"userName": "system", "ipAddress": "", "clientType": "WINPC_V1"}
-
-#     for attempt in range(1, max_attempts + 1):
-#         logger.info(f"Authentication attempt {attempt}/{max_attempts} for {server}")
-#         res = make_api_call(auth_url, payload, headers)
-
-#         resp_json = parse_json_response(res, "initial authorization")
-#         if resp_json.get("code") not in (None, 1000):
-#             logger.warning(f"Initial authorization returned error code: {resp_json.get('code')}")
-#             logger.debug(f"Full response: {resp_json}")
-#             continue
-
-#         required_fields = ["realm", "randomKey", "publickey"]
-#         missing = [field for field in required_fields if field not in resp_json]
-#         if missing:
-#             logger.warning(f"Missing required fields {missing} in authorization response")
-#             logger.debug(f"Response received: {resp_json}")
-#             continue
-
-#         realm = resp_json["realm"]
-#         randomKey = resp_json["randomKey"]
-#         publicKey = resp_json["publickey"]
-#         cookie = res.headers.get("Set-Cookie", "")
-        
-#         logger.info(f"Received auth parameters - realm: {realm}, randomKey: {randomKey[:20]}...")
-#         logger.debug(f"Cookie received: {cookie[:100]}..." if cookie else "No cookie")
-
-#         sig = generate_signature("system", "Coreiseven@@", realm, randomKey)
-#         logger.debug(f"Generated signature: {sig[:20]}...")
-        
-#         payload2 = {
-#             "mac": "",
-#             "signature": sig,
-#             "userName": "system",
-#             "randomKey": randomKey,
-#             "publicKey": publicKey,
-#             "encryptType": "MD5",
-#             "ipAddress": "",
-#             "clientType": "WINPC_V1",
-#             "userType": "0"
-#         }
-
-
-#         headers2 = {"Content-Type": "application/json", "Cookie": cookie}
-#         logger.info("Sending token exchange request")
-#         res2 = make_api_call(auth_url, payload2, headers2)
-#         if not res2:
-#             logger.warning("No response for signature authorization, retrying…")
-#             continue
-
-#         resp_json2 = parse_json_response(res2, "token exchange")
-#         if resp_json2.get("code") not in (None, 1000):
-#             logger.warning(f"Token exchange returned error code: {resp_json2.get('code')}")
-#             logger.debug(f"Full response: {resp_json2}")
-#             continue
-
-#         token = resp_json2.get("token")
-#         if token:
-#             logger.info(f"Authentication successful for {server}! Token received: {token[:20]}...")
-#             return token
-
-#         logger.warning(f"Token missing in token exchange response for {server}")
-#         logger.debug(f"Response: {resp_json2}")
-
-#     logger.error(f"Authentication failed for {server} after maximum attempts")
-#     sys.exit(1)
-
-
-# # Global token and timestamp tracking (per server)
-# server_tokens = {}  # {server: token}
-# server_token_timestamps = {}  # {server: timestamp}
-# TOKEN_EXPIRY_SECONDS = 90  # Refresh token after 90 seconds (before 2-min expiry)
-# token_lock = threading.Lock()  # Thread-safe token access
-
-# def refresh_token_if_needed(server):
-#     """Check if token needs refresh and refresh if necessary (thread-safe)"""
-#     global server_tokens, server_token_timestamps
-    
-#     with token_lock:
-#         # Initialize token for new server
-#         if server not in server_tokens:
-#             logger.info(f"Initializing authentication for new server: {server}")
-#             server_tokens[server] = authenticate(server)
-#             server_token_timestamps[server] = time.time()
-#             return server_tokens[server]
-        
-#         # Check if existing token needs refresh
-#         elapsed = time.time() - server_token_timestamps[server]
-#         if elapsed > TOKEN_EXPIRY_SECONDS:
-#             logger.warning(f"Token expired for {server} ({elapsed:.0f}s elapsed). Re-authenticating...")
-#             server_tokens[server] = authenticate(server)
-#             server_token_timestamps[server] = time.time()
-#             logger.info(f"Token refreshed successfully for {server}")
-#         return server_tokens[server]
-
-# # ============================================================
-# # RTSP Stream
-# # ============================================================
-# def start_video_stream(device_id, camera_no, server, token):
-#     logger.info(f"Starting video stream for Device ID: {device_id}, Camera No: {camera_no} on server: {server}")
-#     url = f"https://{server}/admin/API/MTS/Video/StartVideo?token={token}"
-#     headers = {"Content-Type": "application/json", "X-Subject-Token": token}
-
-#     payload = {
-#         "clientType": "WINPC_V1",
-#         "project": "PSDK",
-#         "method": "MTS.Video.StartVideo",
-#         "data": {
-#             "streamType": "1",
-#             "optional": f"/admin/API/MTS/Video/StartVideo?token={token}",
-#             "channelId": f"{device_id}$1$0${camera_no}",
-#             "dataType": "2",
-#             "enableRtsps": "0"
-#         }
-#     }
-
-#     res = make_api_call(url, payload, headers)
-#     logger.debug(f"Start video stream response object: {res}")
-    
-#     if not res:
-#         logger.error(f"Failed to start video stream for Device ID {device_id}, Camera No {camera_no}")
-#         logger.error(f"Response status: No response")
-#         return None, None
-    
-#     # Check if token expired (401 error)
-#     if res.status_code == 401:
-#         logger.warning(f"Got 401 Unauthorized - token expired for Device ID {device_id}, Camera No {camera_no}")
-#         return None, None
-    
-#     if res.status_code not in SUCCESS_STATUS_CODES:
-#         logger.error(f"Failed to start video stream for Device ID {device_id}, Camera No {camera_no}")
-#         logger.error(f"Response status: {res.status_code}")
-#         return None, None
-
-#     resp_json = parse_json_response(res, f"start video stream - Device {device_id} Camera {camera_no}")
-#     data = resp_json.get("data")
-#     if not data:
-#         logger.error(f"Missing 'data' in video stream response for Device ID {device_id}, Camera No {camera_no}")
-#         logger.debug(f"Full response: {resp_json}")
-#         return None, None
-
-#     urls = extract_rtsp_urls(data)
-#     if not urls:
-#         logger.error(f"No RTSP URLs returned for Device ID {device_id}, Camera No {camera_no}")
-#         logger.debug(f"Data received: {data}")
-#         return None, None
-
-#     logger.info(f"Extracted {len(urls)} RTSP URL(s) for Device ID {device_id}, Camera No {camera_no}")
-#     for i, url in enumerate(urls, 1):
-#         logger.debug(f"RTSP URL {i}: {url}")
-
-#     stream_token = data.get("token") or token
-#     if not data.get("token"):
-#         logger.warning(f"Stream token missing for Device ID {device_id}, Camera No {camera_no}; using session token")
-#     else:
-#         logger.info(f"Stream token received: {stream_token[:20]}...")
-
-#     return urls, stream_token
-
-# def add_token_to_url(rtsp_url, token):
-#     parsed = urllib.parse.urlparse(rtsp_url)
-#     query = urllib.parse.parse_qs(parsed.query)
-#     query['token'] = [token]
-#     return urllib.parse.urlunparse(parsed._replace(query=urllib.parse.urlencode(query, doseq=True)))
-
-# # ============================================================
-# # Frame Saving + VLM Classification
-# # ============================================================
-# def save_frame(frame, device_id, camera_no):
-#     save_dir = f"frames/{device_id}/{camera_no}"
-#     os.makedirs(save_dir, exist_ok=True)
-
-#     save_path = f"{save_dir}/frame.jpg"
-#     cv2.imwrite(save_path, frame)
-
-#     return save_path
-
-
-# def classify_with_vlm(image_path):
-#     """
-#     Uses Ollama-installed Vision Model (e.g., qwen2-vl or llava) for scene classification.
-#     """
-#     logger.info(f"Starting VLM classification for image: {image_path}")
-
-#     # === CATEGORY DEFINITIONS ===
-#     CATEGORIES = [
-#         "Server Room",
-#         "Outdoor Scene",
-#         "Outside Area",
-#         "Parking Lot",
-#         "Entry",
-#         "Computer Lab"
-#     ]
-
-#     PROMPT = f"""
-#     You are an expert computer vision classifier.
-#     Classify the given image into one of the following categories:
-
-#     {', '.join(CATEGORIES)}.
-
-#     Rules:
-#     - "Server Room": small room with limited visibility with laptop or computers.
-#     - "Computer Lab": large room with many computers, chairs, people or desks.
-#     - "Outdoor Scene": nature, roads, gardens, sky, trees.
-#     - "Outside Area": surroundings of a building, campus, boundary,hallway, outdoor environment.
-#     - "Parking Lot": cars, bikes, open area with marked spaces or vehicles.
-#     - "Entry": building entrances, gates, doors, signboards, or main access points.
-
-#     Return **only** the JSON response with:
-#     {{
-#     "category": "<one of the above categories>",
-#     "reason": "<short explanation>"
-#     }}
-#     """
-
-#     url = "http://localhost:11434/api/generate"
-    
-#     # Read and encode the image to base64
-#     try:
-#         with open(image_path, 'rb') as image_file:
-#             image_data = base64.b64encode(image_file.read()).decode('utf-8')
-#         logger.debug(f"Image successfully encoded to base64 (length: {len(image_data)})")
-#     except Exception as e:
-#         logger.error(f"Failed to read and encode image: {e}", exc_info=True)
-#         return "Uncertain"
-    
-#     payload = {
-#         "model": "llava:7b",     # Using LLaVA vision model for image classification
-#         "prompt": PROMPT,
-#         "images": [image_data],
-#         "stream": False
-#     }
-
-#     try:
-#         logger.debug(f"Sending VLM request to: {url}")
-#         logger.debug(f"VLM payload model: {payload['model']}, prompt length: {len(PROMPT)}, image data length: {len(image_data)}")
-        
-#         response = requests.post(url, json=payload, timeout=30)  # Reduced from 60s to 30s
-        
-#         logger.info(f"VLM response status: {response.status_code}")
-        
-#         if response.status_code != 200:
-#             logger.error(f"VLM request failed with status {response.status_code}")
-#             logger.debug(f"VLM error response: {response.text}")
-#             return "Uncertain"
-        
-#         response_json = response.json()
-#         logger.debug(f"VLM full response: {json.dumps(response_json, indent=2)}")
-        
-#         result = response_json.get("response", "").strip()
-#         logger.info(f"VLM classification result: {result}")
-        
-#         if not result:
-#             logger.warning("VLM returned empty result")
-#             return "Uncertain"
-        
-#         # Parse JSON response and extract only the category
-#         try:
-#             result_json = json.loads(result)
-#             category = result_json.get("category", "Uncertain")
-#             logger.info(f"Extracted category: {category}")
-#             return category
-#         except json.JSONDecodeError:
-#             logger.warning(f"Could not parse JSON response, returning raw result")
-#             return result
-#     except Exception as e:
-#         logger.error(f"VLM request failed: {e}", exc_info=True)
-#         return "Uncertain"
-
-
-# def capture_frame_with_opencv(rtsp_url, token, device_id, camera_no, timeout_ms=RTSP_TIMEOUT_MS):
-#     logger.info(f"Capturing frame with OpenCV for Device {device_id}, Camera {camera_no}")
-#     tokenized_url = add_token_to_url(rtsp_url, token)
-#     logger.debug(f"Tokenized RTSP URL: {tokenized_url[:100]}...")
-    
-#     cap = cv2.VideoCapture(tokenized_url, cv2.CAP_FFMPEG)
-    
-#     # Set timeout using optimized constant
-#     cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, timeout_ms)
-#     cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, timeout_ms)
-
-#     if not cap.isOpened():
-#         logger.error(f"❌ FRAME CAPTURE FAILED: Failed to open stream for Device ID {device_id}, Camera No {camera_no}")
-#         return None
-
-#     ret, frame = cap.read()
-#     cap.release()
-
-#     if not ret:
-#         logger.error(f"❌ FRAME CAPTURE FAILED: Failed to read frame from Device ID {device_id}, Camera No {camera_no}")
-#         return None
-
-#     save_dir = f"frames/{device_id}/{camera_no}"
-#     os.makedirs(save_dir, exist_ok=True)
-#     img_path = f"{save_dir}/frame_{uuid.uuid4().hex}.jpg"
-#     cv2.imwrite(img_path, frame)
-#     logger.info(f"✅ FRAME CAPTURED SUCCESSFULLY: Frame saved to {img_path}")
-#     return img_path
-
-
-# def capture_frame_with_ffmpeg(rtsp_url, token, device_id, camera_no):
-#     logger.info(f"Attempting FFmpeg frame capture for Device {device_id}, Camera {camera_no}")
-    
-#     if not shutil.which("ffmpeg"):
-#         logger.warning("ffmpeg executable not found on PATH; skipping this URL")
-#         return None  # Don't fall back to OpenCV - just fail fast
-
-#     tokenized_url = add_token_to_url(rtsp_url, token)
-#     save_dir = f"frames/{device_id}/{camera_no}"
-#     os.makedirs(save_dir, exist_ok=True)
-#     img_path = f"{save_dir}/frame_{uuid.uuid4().hex}.jpg"
-
-#     logger.info(f"Using FFmpeg to capture frame from: {tokenized_url[:100]}...")
-#     logger.debug(f"Output path: {img_path}")
-
-#     cmd = [
-#         "ffmpeg",
-#         "-y",
-#         "-rtsp_transport", "tcp",
-#         "-timeout", str(RTSP_TIMEOUT_MS * 1000),  # Convert ms to microseconds for ffmpeg
-#         "-i", tokenized_url,
-#         "-frames:v", "1",
-#         "-loglevel", "error",  # Reduce verbose output
-#         img_path
-#     ]
-
-#     try:
-#         logger.debug(f"Running FFmpeg command: {' '.join(cmd[:8])}...")
-#         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)  # Reduced from 20s to 10s
-        
-#         logger.debug(f"FFmpeg stdout: {result.stdout.decode(errors='ignore')[:500]}")
-#         logger.debug(f"FFmpeg stderr: {result.stderr.decode(errors='ignore')[:500]}")
-        
-#         if result.returncode != 0:
-#             logger.warning(f"FFmpeg exited with code {result.returncode} - URL likely not accessible")
-#             logger.debug(f"FFmpeg stderr: {result.stderr.decode(errors='ignore')[:500]}")
-#             return None  # Don't fall back - fail fast
-#     except FileNotFoundError:
-#         logger.warning("ffmpeg command not found")
-#         return None  # Fail fast - no fallback
-#     except subprocess.TimeoutExpired:
-#         logger.warning(f"FFmpeg timed out after 10 seconds")
-#         return None  # Fail fast
-#     except Exception as e:
-#         logger.error(f"FFmpeg failed: {e}")
-#         return None  # Fail fast
-
-#     if not os.path.exists(img_path):
-#         logger.warning("❌ FRAME CAPTURE FAILED: FFmpeg did not create an output frame")
-#         return None  # Fail fast
-
-#     logger.info(f"✅ FRAME CAPTURED SUCCESSFULLY: Frame saved with FFmpeg to {img_path}")
-#     return img_path
-
-
-# def try_capture_single_url(rtsp_url, token, device_id, camera_no, url_index):
-#     """Try to capture frame from a single URL (used for parallel testing)"""
-#     logger.debug(f"Testing RTSP URL {url_index} for Device {device_id}, Camera {camera_no}")
-#     img_path = capture_frame_with_ffmpeg(rtsp_url, token, device_id, camera_no)
-#     if img_path:
-#         logger.info(f"✅ Successfully captured frame using URL {url_index} for Device {device_id}, Camera {camera_no}")
-#     return img_path
-
-# def try_open_and_classify_rtsp_stream_parallel(rtsp_urls, token, device_id, camera_no):
-#     """Test all RTSP URLs in parallel and use first successful one"""
-#     logger.info(f"Testing {len(rtsp_urls)} RTSP URLs in parallel for Device {device_id}, Camera {camera_no}")
-    
-#     img_path = None
-    
-#     # Test all URLs in parallel using ThreadPoolExecutor
-#     with ThreadPoolExecutor(max_workers=len(rtsp_urls)) as executor:
-#         # Submit all URL tests simultaneously
-#         future_to_url = {
-#             executor.submit(try_capture_single_url, url, token, device_id, camera_no, idx): idx 
-#             for idx, url in enumerate(rtsp_urls, 1)
-#         }
-        
-#         # Get the first successful result
-#         for future in as_completed(future_to_url):
-#             result = future.result()
-#             if result:
-#                 img_path = result
-#                 logger.info(f"First successful capture received for Device {device_id}, Camera {camera_no}")
-#                 # Cancel remaining futures since we got a success
-#                 for f in future_to_url:
-#                     f.cancel()
-#                 break
-    
-#     if not img_path:
-#         logger.error(f"Failed to capture frame from any URL for Device {device_id}, Camera {camera_no}")
-#         return None
-    
-#     label = classify_with_vlm(img_path)
-#     logger.info(f"Classification complete for Device {device_id}, Camera {camera_no}: {label}")
-#     return label
-
-# def try_open_and_classify_rtsp_stream(rtsp_url, token, device_id, camera_no):
-#     """Legacy function - captures from single URL"""
-#     logger.info(f"Attempting to open and classify RTSP stream for Device {device_id}, Camera {camera_no}")
-#     logger.debug(f"RTSP URL: {rtsp_url[:100]}...")
-    
-#     img_path = capture_frame_with_ffmpeg(rtsp_url, token, device_id, camera_no)
-#     if not img_path:
-#         logger.error(f"Failed to capture frame for Device {device_id}, Camera {camera_no}")
-#         return None
-
-#     label = classify_with_vlm(img_path)
-#     logger.info(f"Classification complete for Device {device_id}, Camera {camera_no}: {label}")
-#     return label
-# # ============================================================
-# # Excel Update (Optimized with batching)
-# # ============================================================
-# excel_update_queue = []  # Queue for batched updates
-# excel_lock = threading.Lock()  # Thread-safe Excel updates
-
-# def update_excel_in_memory(device_id, camera_no, label, status="Accessible"):
-#     """Update dataframe in memory without writing to disk (faster)"""
-#     logger.info(f"Queuing Excel update for Device ID {device_id}, Camera No {camera_no} with label: {label}, status: {status}")
-#     global df
-#     with excel_lock:
-#         # mask = (df["Device ID"] == device_id) & (df["Camera No"] == camera_no)
-#         mask = (df["device_id"] == device_id) & (df["no"] == camera_no)
-
-#         if mask.any():
-#             df.loc[mask, SCENE_COLUMN_NAME] = label
-#             df.loc[mask, "Status"] = status
-#             excel_update_queue.append((device_id, camera_no, label, status))
-#             logger.debug(f"In-memory update queued: Device ID {device_id}, Camera No {camera_no}")
-#         else:
-#             logger.warning(f"No match in Excel for Device ID {device_id}, Camera No {camera_no}")
-
-# # def flush_excel_updates():
-# #     """Write all pending updates to Excel file (batch operation)"""
-# #     global df
-# #     if not excel_update_queue:
-# #         logger.info("No pending Excel updates to flush")
-# #         return
-    
-# #     with excel_lock:
-# #         logger.info(f"Flushing {len(excel_update_queue)} Excel updates to disk...")
-# #         try:
-# #             with pd.ExcelWriter(INPUT_EXCEL, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
-# #                 df.to_excel(writer, sheet_name=EXCEL_SHEET, index=False)
-# #             logger.info(f"✅ Successfully flushed {len(excel_update_queue)} updates to Excel")
-# #             excel_update_queue.clear()
-# #         except Exception as e:
-# #             logger.error(f"Failed to flush Excel updates: {e}", exc_info=True)
-
-
-
-
-
-
-
-# def write_excel_once():
-#     logger.info("Writing final Excel output (single write)...")
-#     tmp_file = INPUT_EXCEL.replace(".xlsx", "_tmp.xlsx")
-
-#     with pd.ExcelWriter(tmp_file, engine="openpyxl") as writer:
-#         df.to_excel(writer, sheet_name=EXCEL_SHEET, index=False)
-
-#     os.replace(tmp_file, INPUT_EXCEL)  # atomic replace
-#     logger.info("✅ Excel written safely without corruption")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# def update_excel_sheet(device_id, camera_no, label, status="Accessible"):
-#     """Legacy function - now uses in-memory updates"""
-#     update_excel_in_memory(device_id, camera_no, label, status)
-
-
-# def create_new_sheets(output_dir="."):
-#     """Create separate Excel files for each detection type with full original data"""
-#     try:
-#         # Detection types based on scripts in scripts/detection/
-#         detection_types = [
-#             "crowd",
-#             "proximity",
-#             "mobile",
-#             "intruder",
-#             "entry_exit",
-#             "server_room",
-#             "invigilator"
-#         ]
-        
-#         logger.info(f"Creating {len(detection_types)} Excel files for detection types...")
-#         logger.info(f"Detection types: {', '.join(detection_types)}")
-        
-#         # Total classified cameras
-#         total_classified = len(df[
-#             (df[SCENE_COLUMN_NAME] != "") & 
-#             (df[SCENE_COLUMN_NAME].notna()) &
-#             (df[SCENE_COLUMN_NAME] != "Failed to Classify")
-#         ])
-        
-#         logger.info(f"Total classified cameras: {total_classified}")
-        
-#         # Create one Excel file for each detection type with full original sheet
-#         for detection_type in detection_types:
-#             filename = os.path.join(output_dir, f"{detection_type}.xlsx")
-            
-#             # Copy the entire original DataFrame to each file
-#             output_df = df.copy()
-            
-#             # Save to Excel
-#             output_df.to_excel(filename, index=False, sheet_name="Sheet1")
-#             logger.info(f"✅ Created {filename} with {len(output_df)} rows (full original data)")
-        
-#         logger.info(f"✅ All {len(detection_types)} Excel files created successfully")
-        
-#     except Exception as e:
-#         logger.error(f"Error creating new Excel files: {e}", exc_info=True)
-
-# # ============================================================
-# # Per Camera Flow (Optimized with caching)
-# # ============================================================
-# def is_camera_already_classified(device_id, camera_no):
-#     """Check if camera is already classified (skip re-classification)"""
-#     global df
-#     mask = (df["device_id"] == device_id) & (df["no"] == camera_no)
-#     if mask.any():
-#         existing_label = df.loc[mask, SCENE_COLUMN_NAME].values[0]
-#         # Check if already has a valid classification
-#         if pd.notna(existing_label) and existing_label != "" and existing_label != "Failed to Classify":
-#             logger.info(f"✓ Camera {device_id}/{camera_no} already classified as '{existing_label}' - skipping classification")
-#             return True, existing_label
-#     return False, None
-
-# def process_camera(device_id, camera_no):
-#     logger.info("="*60)
-#     logger.info(f"Processing Camera - Device ID: {device_id}, Camera No: {camera_no}")
-#     logger.info("="*60)
-    
-#     # Get server for this camera
-#     server = device_camera_server_map.get((device_id, camera_no))
-#     if not server:
-#         logger.error(f"No server mapping found for Device ID {device_id}, Camera No {camera_no}")
-#         update_excel_sheet(device_id, camera_no, "Failed to Classify", "Server Not Found")
-#         return
-    
-#     # Check if already classified (optimization: skip classification but still capture frame)
-#     already_classified, existing_label = is_camera_already_classified(device_id, camera_no)
-    
-#     max_retries = MAX_RETRY_ATTEMPTS  # Use optimized retry count (1 attempt)
-#     for attempt in range(max_retries):
-#         logger.info(f"Attempt {attempt+1}/{max_retries} for Device: {device_id}, Camera: {camera_no} on {server}")
-
-#         # Refresh token if needed before making API call
-#         current_token = refresh_token_if_needed(server)
-        
-#         urls, token_new = start_video_stream(device_id, camera_no, server, current_token)
-
-#         if not urls or not token_new:
-#             logger.warning(f"Stream URL issue on attempt {attempt+1}. Retrying in 2 seconds...")
-#             time.sleep(2)
-#             continue
-
-#         # NEW: Test all URLs in parallel instead of sequentially
-#         if already_classified:
-#             # Just capture frame to mark as accessible, but skip classification
-#             # Test all URLs in parallel, use first success
-#             with ThreadPoolExecutor(max_workers=len(urls)) as executor:
-#                 future_to_url = {
-#                     executor.submit(capture_frame_with_ffmpeg, url, token_new, device_id, camera_no): idx 
-#                     for idx, url in enumerate(urls, 1)
-#                 }
-                
-#                 img_path = None
-#                 for future in as_completed(future_to_url):
-#                     result = future.result()
-#                     if result:
-#                         img_path = result
-#                         # Cancel remaining futures
-#                         for f in future_to_url:
-#                             f.cancel()
-#                         break
-                
-#                 if img_path:
-#                     update_excel_sheet(device_id, camera_no, existing_label, "Accessible")
-#                     logger.info(f"Successfully verified Device {device_id}, Camera {camera_no} (already classified)")
-#                     return
-#         else:
-#             # Full classification for new cameras - test all URLs in parallel
-#             label = try_open_and_classify_rtsp_stream_parallel(urls, token_new, device_id, camera_no)
-#             if label:
-#                 update_excel_sheet(device_id, camera_no, label, "Accessible")
-#                 logger.info(f"Successfully processed Device {device_id}, Camera {camera_no}")
-#                 return
-
-#         if attempt < max_retries - 1:  # Only delay if there are more attempts
-#             logger.warning(f"Retry delay before next attempt...")
-#             time.sleep(1)  # Reduced from 2s to 1s
-
-#     logger.error(f"Failed to classify Device {device_id}, Camera {camera_no} after {max_retries} attempts")
-#     update_excel_sheet(device_id, camera_no, "Failed to Classify", "Not Accessible")
-
-# # ============================================================
-# # MAIN LOOP (PARALLEL PROCESSING)
-# # ============================================================
-# logger.info("="*80)
-# logger.info(f"Starting main processing loop for {len(device_ids)} devices")
-# total_cameras = sum(len(cameras) for cameras in device_camera_map.values())
-# logger.info(f"Total cameras to process: {total_cameras}")
-# logger.info("="*80)
-
-# # Configuration for parallel processing
-# MAX_WORKERS = 12  # Optimized for H100 GPU + 24 CPU cores (balance between network I/O and VLM processing)
-# BATCH_FLUSH_SIZE = 20  # Flush Excel updates every 20 cameras
-
-# camera_counter = 0
-# accessible_counter = 0
-# not_accessible_counter = 0
-# counter_lock = threading.Lock()
-# progress_update_interval = 20  # Update progress every 20 seconds
-
-# def process_camera_with_progress(device_id, camera_no):
-#     """Wrapper function for parallel processing with progress tracking"""
-#     global camera_counter, accessible_counter, not_accessible_counter
-    
-#     try:
-#         # Check final status before processing
-#         initial_status = None
-#         mask = (df["device_id"] == device_id) & (df["no"] == camera_no)
-#         if mask.any():
-#             initial_status = df.loc[mask, "Status"].values[0] if "Status" in df.columns else None
-        
-#         process_camera(device_id, camera_no)
-        
-#         # Check final status after processing
-#         final_status = None
-#         mask = (df["device_id"] == device_id) & (df["no"] == camera_no)
-#         if mask.any():
-#             final_status = df.loc[mask, "Status"].values[0] if "Status" in df.columns else None
-        
-#         # Update counters (thread-safe)
-#         with counter_lock:
-#             camera_counter += 1
-            
-#             # Update accessibility counters
-#             if final_status == "Accessible":
-#                 accessible_counter += 1
-#             elif final_status == "Not Accessible":
-#                 not_accessible_counter += 1
-            
-#             current_count = camera_counter
-            
-#             # Flush Excel updates periodically
-#             if current_count % BATCH_FLUSH_SIZE == 0:
-#                 write_excel_once()
-
-
-            
-#     except Exception as e:
-#         logger.error(f"Error processing camera {device_id}/{camera_no}: {e}", exc_info=True)
-#         with counter_lock:
-#             camera_counter += 1
-#             not_accessible_counter += 1
-
-# # Build list of all cameras to process
-# all_cameras = []
-# for device_id in device_ids:
-#     cameras = device_camera_map[device_id]
-#     for camera_no in cameras:
-#         all_cameras.append((device_id, camera_no))
-
-# logger.info(f"Starting parallel processing with {MAX_WORKERS} workers...")
-# print(f"\n🚀 Processing {total_cameras} cameras in parallel with {MAX_WORKERS} workers...\n")
-
-# # Progress reporting thread
-# stop_progress_thread = threading.Event()
-# start_time = time.time()
-
-# def progress_reporter():
-#     """Thread function that reports progress every 20 seconds"""
-#     while not stop_progress_thread.is_set():
-#         time.sleep(progress_update_interval)
-        
-#         with counter_lock:
-#             current_count = camera_counter
-#             accessible = accessible_counter
-#             not_accessible = not_accessible_counter
-#             pending = total_cameras - current_count
-        
-#         elapsed_time = time.time() - start_time
-#         progress_percent = (current_count / total_cameras) * 100 if total_cameras > 0 else 0
-        
-#         # Create progress bar
-#         bar_length = 50
-#         filled_length = int(bar_length * current_count // total_cameras) if total_cameras > 0 else 0
-#         bar = '█' * filled_length + '-' * (bar_length - filled_length)
-        
-#         # Format time
-#         elapsed_str = f"{int(elapsed_time // 60)}m {int(elapsed_time % 60)}s"
-        
-#         # Create progress message
-#         progress_msg = (
-#             f"\n{'='*80}\n"
-#             f"PROGRESS UPDATE (Elapsed: {elapsed_str})\n"
-#             f"{'='*80}\n"
-#             f"|{bar}| {progress_percent:.1f}%\n"
-#             f"Completed: {current_count}/{total_cameras} cameras\n"
-#             f"✅ Accessible: {accessible}\n"
-#             f"❌ Not Accessible: {not_accessible}\n"
-#             f"⏳ Pending: {pending}\n"
-#             f"{'='*80}\n"
-#         )
-        
-#         # Print to console
-#         print(progress_msg)
-        
-#         # Log to file
-#         logger.info(f"PROGRESS: {progress_percent:.1f}% ({current_count}/{total_cameras}) | "
-#                    f"Accessible: {accessible} | Not Accessible: {not_accessible} | "
-#                    f"Pending: {pending} | Elapsed: {elapsed_str}")
-
-# # Start progress reporting thread
-# progress_thread = threading.Thread(target=progress_reporter, daemon=True)
-# progress_thread.start()
-
-# # Process cameras in parallel using ThreadPoolExecutor
-# with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-#     # Submit all tasks
-#     futures = [executor.submit(process_camera_with_progress, device_id, camera_no) 
-#                for device_id, camera_no in all_cameras]
-    
-#     # Wait for all tasks to complete
-#     for future in as_completed(futures):
-#         try:
-#             future.result()  # This will raise any exceptions that occurred
-#         except Exception as e:
-#             logger.error(f"Task failed with exception: {e}", exc_info=True)
-
-# # Stop progress reporting thread
-# stop_progress_thread.set()
-# progress_thread.join(timeout=1)
-
-# # Final flush of any remaining updates
-# # flush_excel_updates()
-
-# # Calculate final statistics
-# total_elapsed = time.time() - start_time
-# elapsed_str = f"{int(total_elapsed // 60)}m {int(total_elapsed % 60)}s"
-
-# # Print final summary
-# final_summary = (
-#     f"\n{'='*80}\n"
-#     f"FINAL SUMMARY\n"
-#     f"{'='*80}\n"
-#     f"Total Cameras: {total_cameras}\n"
-#     f"✅ Accessible: {accessible_counter}\n"
-#     f"❌ Not Accessible: {not_accessible_counter}\n"
-#     f"⏱️  Total Time: {elapsed_str}\n"
-#     f"📊 Success Rate: {(accessible_counter/total_cameras*100):.1f}%\n"
-#     f"{'='*80}\n"
-# )
-
-
-
-# print(final_summary)
-
-# logger.info("="*80)
-# logger.info("All devices processed successfully!")
-# logger.info(f"Log file saved to: {log_filename}")
-# logger.info(f"Total cameras processed: {camera_counter}/{total_cameras}")
-# logger.info(f"Accessible cameras: {accessible_counter}")
-# logger.info(f"Not accessible cameras: {not_accessible_counter}")
-# logger.info(f"Total time: {elapsed_str}")
-# logger.info("="*80)
-
-# # Create separate Excel files for each detection type
-# logger.info("\n" + "="*80)
-# logger.info("Creating Excel files for detection types...")
-# logger.info("="*80)
-# try:
-#     output_dir = "data/sheets"
-#     os.makedirs(output_dir, exist_ok=True)
-#     create_new_sheets(output_dir)
-# except Exception as e:
-#     logger.error(f"Failed to create new Excel files: {e}", exc_info=True)
-
-# print("\nAll devices processed.")
-# print(f"Detailed logs saved to: {log_filename}")
-# print("✅ Detection-type Excel files created in data/sheets/: crowd.xlsx, proximity.xlsx, mobile.xlsx, intruder.xlsx, entry_exit.xlsx, server_room.xlsx, invigilator.xlsx")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-#code working properly prr data json mai save ho rha h
-
-# import requests
-# import json
-# import hashlib
-# import cv2
-# import time
-# import pandas as pd
-# import urllib.parse
-# import os
-# import sys
-# import shutil
-# from tqdm import tqdm
-# from PIL import Image
-# import subprocess
-# import uuid
-# import logging
-# from datetime import datetime
-# import base64
-# from concurrent.futures import ThreadPoolExecutor, as_completed
-# import threading
-# import re
-
-# # ============================================================
-# # Logging Setup
-# # ============================================================
-# log_dir = "logs"
-# os.makedirs(log_dir, exist_ok=True)
-# log_filename = os.path.join(log_dir, f"classification_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
-
-# logging.basicConfig(
-#     level=logging.DEBUG,
-#     format='%(asctime)s - %(levelname)s - %(message)s',
-#     handlers=[
-#         logging.FileHandler(log_filename),
-#         logging.StreamHandler()
-#     ]
-# )
-# logger = logging.getLogger(__name__)
-
-# logger.info("="*80)
-# logger.info("Starting Camera Classification Process")
-# logger.info("="*80)
-
-# # ============================================================
-# # Excel Loading
-# # ============================================================
-# # INPUT_EXCEL = "10_feb_2026.xlsx"
-# INPUT_EXCEL = os.path.join(
-#     os.path.dirname(__file__),
-#     "camera_list",
-#     "feb_10.xlsx"
-# )
-
-
-# # INPUT_EXCEL = "cctv_classfication/2000+RTSP_links_of_centre_CR_&_NR_MTS-2026.xlsx"
-
-# PREFERRED_SHEET = "RTSP"
-# SCENE_COLUMN_TARGET = "scence classification"
-# SUCCESS_STATUS_CODES = {200, 401}
-
-
-# AUTH_MAX_ATTEMPTS = 3
-
-# # Performance optimization constants
-# RTSP_TIMEOUT_MS = 5000  # 5 seconds timeout for RTSP streams
-# MAX_RETRY_ATTEMPTS = 1  # Only 1 retry attempt
-
-# excel_file = pd.ExcelFile(INPUT_EXCEL)
-# EXCEL_SHEET = None
-# df = None
-
-# for sheet_name in excel_file.sheet_names:
-#     temp_df = excel_file.parse(sheet_name)
-#     temp_df.columns = [col.strip() for col in temp_df.columns]
-#     if any(col.lower() == SCENE_COLUMN_TARGET.lower() for col in temp_df.columns):
-#         df = temp_df
-#         EXCEL_SHEET = sheet_name
-#         break
-
-# if df is None:
-#     fallback_sheet = PREFERRED_SHEET if PREFERRED_SHEET in excel_file.sheet_names else excel_file.sheet_names[0]
-#     df = excel_file.parse(fallback_sheet)
-#     df.columns = [col.strip() for col in df.columns]
-#     EXCEL_SHEET = fallback_sheet
-
-# # df["Device ID"] = df["Device ID"].astype(str).str.strip()
-
-# df["device_id"] = df["device_id"].astype(str).str.strip()
-
-# # Extract Server Address column and standardize format
-# if "Server Address" not in df.columns:
-#     logger.error("'Server Address' column not found in Excel file!")
-#     sys.exit(1)
-
-# df["Server Address"] = df["Server Address"].astype(str).str.strip().str.lower()
-
-# scene_column = next((col for col in df.columns if col.lower() == SCENE_COLUMN_TARGET.lower()), None)
-# if scene_column is None:
-#     scene_column = SCENE_COLUMN_TARGET
-#     df[scene_column] = pd.NA
-
-# SCENE_COLUMN_NAME = scene_column
-
-# # Add Status column if not present
-# if "Status" not in df.columns:
-#     df["Status"] = ""
-# else:
-#     df["Status"] = df["Status"].fillna("")
-
-# # device_ids = df["Device ID"].unique().tolist()
-
-# device_ids = df["device_id"].unique().tolist()
-
-
-# device_camera_map = {
-#     device_id: sorted(df[df["device_id"] == device_id]["no"].tolist())
-#     for device_id in device_ids
-# }
-
-# # Create mapping from (device_id, camera_no) to server address
-# device_camera_server_map = {}
-# for _, row in df.iterrows():
-#     device_id = str(row["device_id"]).strip()
-#     camera_no = row["no"]
-#     server = str(row["Server Address"]).strip().lower()
-#     device_camera_server_map[(device_id, camera_no)] = server
-
-# logger.info(f"Loaded {len(df)} cameras from {len(df['Server Address'].unique())} different servers")
-# for server in df["Server Address"].unique():
-#     count = len(df[df["Server Address"] == server])
-#     logger.info(f"  - {server}: {count} cameras")
-
-
-
-# def parse_json_response(response, context):
-#     logger.info(f"Parsing JSON response for context: {context}")
-#     try:
-#         parsed_data = json.loads(response.content.decode("utf-8"))
-#         logger.debug(f"[{context}] Parsed JSON response: {json.dumps(parsed_data, indent=2)}")
-#         return parsed_data
-#     except Exception as exc:
-#         logger.error(f"Failed to parse JSON for {context}: {exc}")
-#         logger.error(f"Raw response text: {getattr(response, 'text', 'N/A')}")
-#         sys.exit(1)
-
-
-# def extract_rtsp_urls(api_data):
-#     urls = []
-#     for key in ("url", "url2"):
-#         raw = api_data.get(key)
-#         if not raw:
-#             continue
-#         parts = [part.strip() for part in raw.split('|') if part.strip()]
-#         urls.extend(parts)
-#     return urls
-
-# # ============================================================
-# # DSS Authentication
-# # ============================================================
-# def generate_signature(userName, password, realm, randomKey):
-#     temp = hashlib.md5(password.encode()).hexdigest()
-#     temp = hashlib.md5((userName + temp).encode()).hexdigest()
-#     temp = hashlib.md5(temp.encode()).hexdigest()
-#     temp = hashlib.md5((userName + ":" + realm + ":" + temp).encode()).hexdigest()
-#     return hashlib.md5((temp + ":" + randomKey).encode()).hexdigest()
-
-# def make_api_call(url, payload, headers):
-#     try:
-#         logger.info(f"Making API call to: {url}")
-#         logger.debug(f"Request payload: {json.dumps(payload, indent=2)}")
-#         logger.debug(f"Request headers: {json.dumps(headers, indent=2)}")
-        
-#         response = requests.post(url, headers=headers, data=json.dumps(payload), timeout=10)
-        
-#         logger.info(f"Response status code: {response.status_code}")
-#         logger.debug(f"Response headers: {dict(response.headers)}")
-        
-#         if response.status_code in SUCCESS_STATUS_CODES:
-#             logger.info(f"Response status {response.status_code} treated as success")
-#         else:
-#             logger.warning(f"Response status {response.status_code} not in success codes")
-            
-#         try:
-#             logger.debug(f"Response content: {response.text[:1000]}")
-#         except:
-#             logger.debug("Could not log response content")
-            
-#         return response
-#     except Exception as e:
-#         logger.error(f"API request failed: {e}", exc_info=True)
-#         return None
-
-# def authenticate(server, max_attempts=AUTH_MAX_ATTEMPTS):
-#     logger.info(f"Starting authentication process for server: {server}")
-#     auth_url = f"https://{server}/admin/API/accounts/authorize"
-#     headers = {"Content-Type": "application/json"}
-#     payload = {"userName": "system", "ipAddress": "", "clientType": "WINPC_V1"}
-
-#     for attempt in range(1, max_attempts + 1):
-#         logger.info(f"Authentication attempt {attempt}/{max_attempts} for {server}")
-#         res = make_api_call(auth_url, payload, headers)
-
-#         resp_json = parse_json_response(res, "initial authorization")
-#         if resp_json.get("code") not in (None, 1000):
-#             logger.warning(f"Initial authorization returned error code: {resp_json.get('code')}")
-#             logger.debug(f"Full response: {resp_json}")
-#             continue
-
-#         required_fields = ["realm", "randomKey", "publickey"]
-#         missing = [field for field in required_fields if field not in resp_json]
-#         if missing:
-#             logger.warning(f"Missing required fields {missing} in authorization response")
-#             logger.debug(f"Response received: {resp_json}")
-#             continue
-
-#         realm = resp_json["realm"]
-#         randomKey = resp_json["randomKey"]
-#         publicKey = resp_json["publickey"]
-#         cookie = res.headers.get("Set-Cookie", "")
-        
-#         logger.info(f"Received auth parameters - realm: {realm}, randomKey: {randomKey[:20]}...")
-#         logger.debug(f"Cookie received: {cookie[:100]}..." if cookie else "No cookie")
-
-#         sig = generate_signature("system", "Coreiseven@@", realm, randomKey)
-#         logger.debug(f"Generated signature: {sig[:20]}...")
-        
-#         payload2 = {
-#             "mac": "",
-#             "signature": sig,
-#             "userName": "system",
-#             "randomKey": randomKey,
-#             "publicKey": publicKey,
-#             "encryptType": "MD5",
-#             "ipAddress": "",
-#             "clientType": "WINPC_V1",
-#             "userType": "0"
-#         }
-
-
-#         headers2 = {"Content-Type": "application/json", "Cookie": cookie}
-#         logger.info("Sending token exchange request")
-#         res2 = make_api_call(auth_url, payload2, headers2)
-#         if not res2:
-#             logger.warning("No response for signature authorization, retrying…")
-#             continue
-
-#         resp_json2 = parse_json_response(res2, "token exchange")
-#         if resp_json2.get("code") not in (None, 1000):
-#             logger.warning(f"Token exchange returned error code: {resp_json2.get('code')}")
-#             logger.debug(f"Full response: {resp_json2}")
-#             continue
-
-#         token = resp_json2.get("token")
-#         if token:
-#             logger.info(f"Authentication successful for {server}! Token received: {token[:20]}...")
-#             return token
-
-#         logger.warning(f"Token missing in token exchange response for {server}")
-#         logger.debug(f"Response: {resp_json2}")
-
-#     logger.error(f"Authentication failed for {server} after maximum attempts")
-#     sys.exit(1)
-
-
-# # Global token and timestamp tracking (per server)
-# server_tokens = {}  # {server: token}
-# server_token_timestamps = {}  # {server: timestamp}
-# TOKEN_EXPIRY_SECONDS = 90  # Refresh token after 90 seconds (before 2-min expiry)
-# token_lock = threading.Lock()  # Thread-safe token access
-
-# def refresh_token_if_needed(server):
-#     """Check if token needs refresh and refresh if necessary (thread-safe)"""
-#     global server_tokens, server_token_timestamps
-    
-#     with token_lock:
-#         # Initialize token for new server
-#         if server not in server_tokens:
-#             logger.info(f"Initializing authentication for new server: {server}")
-#             server_tokens[server] = authenticate(server)
-#             server_token_timestamps[server] = time.time()
-#             return server_tokens[server]
-        
-#         # Check if existing token needs refresh
-#         elapsed = time.time() - server_token_timestamps[server]
-#         if elapsed > TOKEN_EXPIRY_SECONDS:
-#             logger.warning(f"Token expired for {server} ({elapsed:.0f}s elapsed). Re-authenticating...")
-#             server_tokens[server] = authenticate(server)
-#             server_token_timestamps[server] = time.time()
-#             logger.info(f"Token refreshed successfully for {server}")
-#         return server_tokens[server]
-
-# # ============================================================
-# # RTSP Stream
-# # ============================================================
-# def start_video_stream(device_id, camera_no, server, token):
-#     logger.info(f"Starting video stream for Device ID: {device_id}, Camera No: {camera_no} on server: {server}")
-#     url = f"https://{server}/admin/API/MTS/Video/StartVideo?token={token}"
-#     headers = {"Content-Type": "application/json", "X-Subject-Token": token}
-
-#     payload = {
-#         "clientType": "WINPC_V1",
-#         "project": "PSDK",
-#         "method": "MTS.Video.StartVideo",
-#         "data": {
-#             "streamType": "1",
-#             "optional": f"/admin/API/MTS/Video/StartVideo?token={token}",
-#             "channelId": f"{device_id}$1$0${camera_no}",
-#             "dataType": "2",
-#             "enableRtsps": "0"
-#         }
-#     }
-
-#     res = make_api_call(url, payload, headers)
-#     logger.debug(f"Start video stream response object: {res}")
-    
-#     if not res:
-#         logger.error(f"Failed to start video stream for Device ID {device_id}, Camera No {camera_no}")
-#         logger.error(f"Response status: No response")
-#         return None, None
-    
-#     # Check if token expired (401 error)
-#     if res.status_code == 401:
-#         logger.warning(f"Got 401 Unauthorized - token expired for Device ID {device_id}, Camera No {camera_no}")
-#         return None, None
-    
-#     if res.status_code not in SUCCESS_STATUS_CODES:
-#         logger.error(f"Failed to start video stream for Device ID {device_id}, Camera No {camera_no}")
-#         logger.error(f"Response status: {res.status_code}")
-#         return None, None
-
-#     resp_json = parse_json_response(res, f"start video stream - Device {device_id} Camera {camera_no}")
-#     data = resp_json.get("data")
-#     if not data:
-#         logger.error(f"Missing 'data' in video stream response for Device ID {device_id}, Camera No {camera_no}")
-#         logger.debug(f"Full response: {resp_json}")
-#         return None, None
-
-#     urls = extract_rtsp_urls(data)
-#     if not urls:
-#         logger.error(f"No RTSP URLs returned for Device ID {device_id}, Camera No {camera_no}")
-#         logger.debug(f"Data received: {data}")
-#         return None, None
-
-#     logger.info(f"Extracted {len(urls)} RTSP URL(s) for Device ID {device_id}, Camera No {camera_no}")
-#     for i, url in enumerate(urls, 1):
-#         logger.debug(f"RTSP URL {i}: {url}")
-
-#     stream_token = data.get("token") or token
-#     if not data.get("token"):
-#         logger.warning(f"Stream token missing for Device ID {device_id}, Camera No {camera_no}; using session token")
-#     else:
-#         logger.info(f"Stream token received: {stream_token[:20]}...")
-
-#     return urls, stream_token
-
-# def add_token_to_url(rtsp_url, token):
-#     parsed = urllib.parse.urlparse(rtsp_url)
-#     query = urllib.parse.parse_qs(parsed.query)
-#     query['token'] = [token]
-#     return urllib.parse.urlunparse(parsed._replace(query=urllib.parse.urlencode(query, doseq=True)))
-
-# # ============================================================
-# # Frame Saving + VLM Classification
-# # ============================================================
-# def save_frame(frame, device_id, camera_no):
-#     save_dir = f"frames/{device_id}/{camera_no}"
-#     os.makedirs(save_dir, exist_ok=True)
-
-#     save_path = f"{save_dir}/frame.jpg"
-#     cv2.imwrite(save_path, frame)
-
-#     return save_path
-
-
-# def classify_with_vlm(image_path):
-#     """
-#     Uses Ollama-installed Vision Model (e.g., qwen2-vl or llava) for scene classification.
-#     """
-#     logger.info(f"Starting VLM classification for image: {image_path}")
-
-#     # === CATEGORY DEFINITIONS ===
-#     CATEGORIES = [
-#         "Server Room",
-#         "Outdoor Scene",
-#         "Outside Area",
-#         "Parking Lot",
-#         "Entry",
-#         "Computer Lab"
-#     ]
-
-#     PROMPT = f"""
-#     You are an expert computer vision classifier.
-#     Classify the given image into one of the following categories:
-
-#     {', '.join(CATEGORIES)}.
-
-#     Rules:
-#     - "Server Room": small room with limited visibility with laptop or computers.
-#     - "Computer Lab": large room with many computers, chairs, people or desks.
-#     - "Outdoor Scene": nature, roads, gardens, sky, trees.
-#     - "Outside Area": surroundings of a building, campus, boundary,hallway, outdoor environment.
-#     - "Parking Lot": cars, bikes, open area with marked spaces or vehicles.
-#     - "Entry": building entrances, gates, doors, signboards, or main access points.
-
-#     Return **only** the JSON response with:
-#     {{
-#     "category": "<one of the above categories>",
-#     "reason": "<short explanation>"
-#     }}
-#     """
-
-#     url = "http://localhost:11434/api/generate"
-    
-#     # Read and encode the image to base64
-#     try:
-#         with open(image_path, 'rb') as image_file:
-#             image_data = base64.b64encode(image_file.read()).decode('utf-8')
-#         logger.debug(f"Image successfully encoded to base64 (length: {len(image_data)})")
-#     except Exception as e:
-#         logger.error(f"Failed to read and encode image: {e}", exc_info=True)
-#         return "Uncertain"
-    
-#     payload = {
-#         "model": "llava:7b",     # Using LLaVA vision model for image classification
-#         "prompt": PROMPT,
-#         "images": [image_data],
-#         "stream": False
-#     }
-
-#     try:
-#         logger.debug(f"Sending VLM request to: {url}")
-#         logger.debug(f"VLM payload model: {payload['model']}, prompt length: {len(PROMPT)}, image data length: {len(image_data)}")
-        
-#         response = requests.post(url, json=payload, timeout=30)  # Reduced from 60s to 30s
-        
-#         logger.info(f"VLM response status: {response.status_code}")
-        
-#         if response.status_code != 200:
-#             logger.error(f"VLM request failed with status {response.status_code}")
-#             logger.debug(f"VLM error response: {response.text}")
-#             return "Uncertain"
-        
-#         response_json = response.json()
-#         logger.debug(f"VLM full response: {json.dumps(response_json, indent=2)}")
-        
-#         result = response_json.get("response", "").strip()
-#         logger.info(f"VLM classification result: {result}")
-        
-#         if not result:
-#             logger.warning("VLM returned empty result")
-#             return "Uncertain"
-        
-#         # Parse JSON response and extract only the category
-#         try:
-#             result_json = json.loads(result)
-#             category = result_json.get("category", "Uncertain")
-#             logger.info(f"Extracted category: {category}")
-#             return category
-#         except json.JSONDecodeError:
-#             logger.warning(f"Could not parse JSON response, returning raw result")
-#             return result
-
-
-#     except Exception as e:
-#         logger.error(f"VLM request failed: {e}", exc_info=True)
-#         return "Uncertain"
-
-
-# def capture_frame_with_opencv(rtsp_url, token, device_id, camera_no, timeout_ms=RTSP_TIMEOUT_MS):
-#     logger.info(f"Capturing frame with OpenCV for Device {device_id}, Camera {camera_no}")
-#     tokenized_url = add_token_to_url(rtsp_url, token)
-#     logger.debug(f"Tokenized RTSP URL: {tokenized_url[:100]}...")
-    
-#     cap = cv2.VideoCapture(tokenized_url, cv2.CAP_FFMPEG)
-    
-#     # Set timeout using optimized constant
-#     cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, timeout_ms)
-#     cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, timeout_ms)
-
-#     if not cap.isOpened():
-#         logger.error(f"❌ FRAME CAPTURE FAILED: Failed to open stream for Device ID {device_id}, Camera No {camera_no}")
-#         return None
-
-#     ret, frame = cap.read()
-#     cap.release()
-
-#     if not ret:
-#         logger.error(f"❌ FRAME CAPTURE FAILED: Failed to read frame from Device ID {device_id}, Camera No {camera_no}")
-#         return None
-
-#     save_dir = f"frames/{device_id}/{camera_no}"
-#     os.makedirs(save_dir, exist_ok=True)
-#     img_path = f"{save_dir}/frame_{uuid.uuid4().hex}.jpg"
-#     cv2.imwrite(img_path, frame)
-#     logger.info(f"✅ FRAME CAPTURED SUCCESSFULLY: Frame saved to {img_path}")
-#     return img_path
-
-
-# def capture_frame_with_ffmpeg(rtsp_url, token, device_id, camera_no):
-#     logger.info(f"Attempting FFmpeg frame capture for Device {device_id}, Camera {camera_no}")
-    
-#     if not shutil.which("ffmpeg"):
-#         logger.warning("ffmpeg executable not found on PATH; skipping this URL")
-#         return None  # Don't fall back to OpenCV - just fail fast
-
-#     tokenized_url = add_token_to_url(rtsp_url, token)
-#     save_dir = f"frames/{device_id}/{camera_no}"
-#     os.makedirs(save_dir, exist_ok=True)
-#     img_path = f"{save_dir}/frame_{uuid.uuid4().hex}.jpg"
-
-#     logger.info(f"Using FFmpeg to capture frame from: {tokenized_url[:100]}...")
-#     logger.debug(f"Output path: {img_path}")
-
-#     cmd = [
-#         "ffmpeg",
-#         "-y",
-#         "-rtsp_transport", "tcp",
-#         "-timeout", str(RTSP_TIMEOUT_MS * 1000),  # Convert ms to microseconds for ffmpeg
-#         "-i", tokenized_url,
-#         "-frames:v", "1",
-#         "-loglevel", "error",  # Reduce verbose output
-#         img_path
-#     ]
-
-#     try:
-#         logger.debug(f"Running FFmpeg command: {' '.join(cmd[:8])}...")
-#         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)  # Reduced from 20s to 10s
-        
-#         logger.debug(f"FFmpeg stdout: {result.stdout.decode(errors='ignore')[:500]}")
-#         logger.debug(f"FFmpeg stderr: {result.stderr.decode(errors='ignore')[:500]}")
-        
-#         if result.returncode != 0:
-#             logger.warning(f"FFmpeg exited with code {result.returncode} - URL likely not accessible")
-#             logger.debug(f"FFmpeg stderr: {result.stderr.decode(errors='ignore')[:500]}")
-#             return None  # Don't fall back - fail fast
-#     except FileNotFoundError:
-#         logger.warning("ffmpeg command not found")
-#         return None  # Fail fast - no fallback
-#     except subprocess.TimeoutExpired:
-#         logger.warning(f"FFmpeg timed out after 10 seconds")
-#         return None  # Fail fast
-#     except Exception as e:
-#         logger.error(f"FFmpeg failed: {e}")
-#         return None  # Fail fast
-
-#     if not os.path.exists(img_path):
-#         logger.warning("❌ FRAME CAPTURE FAILED: FFmpeg did not create an output frame")
-#         return None  # Fail fast
-
-#     logger.info(f"✅ FRAME CAPTURED SUCCESSFULLY: Frame saved with FFmpeg to {img_path}")
-#     return img_path
-
-
-# def try_capture_single_url(rtsp_url, token, device_id, camera_no, url_index):
-#     """Try to capture frame from a single URL (used for parallel testing)"""
-#     logger.debug(f"Testing RTSP URL {url_index} for Device {device_id}, Camera {camera_no}")
-#     img_path = capture_frame_with_ffmpeg(rtsp_url, token, device_id, camera_no)
-#     if img_path:
-#         logger.info(f"✅ Successfully captured frame using URL {url_index} for Device {device_id}, Camera {camera_no}")
-#     return img_path
-
-# def try_open_and_classify_rtsp_stream_parallel(rtsp_urls, token, device_id, camera_no):
-#     """Test all RTSP URLs in parallel and use first successful one"""
-#     logger.info(f"Testing {len(rtsp_urls)} RTSP URLs in parallel for Device {device_id}, Camera {camera_no}")
-    
-#     img_path = None
-    
-#     # Test all URLs in parallel using ThreadPoolExecutor
-#     with ThreadPoolExecutor(max_workers=len(rtsp_urls)) as executor:
-#         # Submit all URL tests simultaneously
-#         future_to_url = {
-#             executor.submit(try_capture_single_url, url, token, device_id, camera_no, idx): idx 
-#             for idx, url in enumerate(rtsp_urls, 1)
-#         }
-        
-#         # Get the first successful result
-#         for future in as_completed(future_to_url):
-#             result = future.result()
-#             if result:
-#                 img_path = result
-#                 logger.info(f"First successful capture received for Device {device_id}, Camera {camera_no}")
-#                 # Cancel remaining futures since we got a success
-#                 for f in future_to_url:
-#                     f.cancel()
-#                 break
-    
-#     if not img_path:
-#         logger.error(f"Failed to capture frame from any URL for Device {device_id}, Camera {camera_no}")
-#         return None
-    
-#     label = classify_with_vlm(img_path)
-#     logger.info(f"Classification complete for Device {device_id}, Camera {camera_no}: {label}")
-#     return label
-
-# def try_open_and_classify_rtsp_stream(rtsp_url, token, device_id, camera_no):
-#     """Legacy function - captures from single URL"""
-#     logger.info(f"Attempting to open and classify RTSP stream for Device {device_id}, Camera {camera_no}")
-#     logger.debug(f"RTSP URL: {rtsp_url[:100]}...")
-    
-#     img_path = capture_frame_with_ffmpeg(rtsp_url, token, device_id, camera_no)
-#     if not img_path:
-#         logger.error(f"Failed to capture frame for Device {device_id}, Camera {camera_no}")
-#         return None
-
-#     label = classify_with_vlm(img_path)
-#     logger.info(f"Classification complete for Device {device_id}, Camera {camera_no}: {label}")
-#     return label
-# # ============================================================
-# # Excel Update (Optimized with batching)
-# # ============================================================
-# excel_update_queue = []  # Queue for batched updates
-# excel_lock = threading.Lock()  # Thread-safe Excel updates
-
-# def update_excel_in_memory(device_id, camera_no, label, status="Accessible"):
-#     """Update dataframe in memory without writing to disk (faster)"""
-#     logger.info(f"Queuing Excel update for Device ID {device_id}, Camera No {camera_no} with label: {label}, status: {status}")
-#     global df
-#     with excel_lock:
-#         # mask = (df["Device ID"] == device_id) & (df["Camera No"] == camera_no)
-#         mask = (df["device_id"] == device_id) & (df["no"] == camera_no)
-
-#         if mask.any():
-#             df.loc[mask, SCENE_COLUMN_NAME] = label
-#             df.loc[mask, "Status"] = status
-#             excel_update_queue.append((device_id, camera_no, label, status))
-#             logger.debug(f"In-memory update queued: Device ID {device_id}, Camera No {camera_no}")
-#         else:
-#             logger.warning(f"No match in Excel for Device ID {device_id}, Camera No {camera_no}")
-
-
-
-# def write_excel_once():
-#     logger.info("Writing final Excel output (single write)...")
-#     tmp_file = INPUT_EXCEL.replace(".xlsx", "_tmp.xlsx")
-
-#     with pd.ExcelWriter(tmp_file, engine="openpyxl") as writer:
-#         df.to_excel(writer, sheet_name=EXCEL_SHEET, index=False)
-
-#     os.replace(tmp_file, INPUT_EXCEL)  # atomic replace
-#     logger.info("✅ Excel written safely without corruption")
-
-
-# def update_excel_sheet(device_id, camera_no, label, status="Accessible"):
-#     """Legacy function - now uses in-memory updates"""
-#     update_excel_in_memory(device_id, camera_no, label, status)
-
-
-# def create_new_sheets(output_dir="."):
-#     """Create separate Excel files for each detection type with full original data"""
-#     try:
-#         # Detection types based on scripts in scripts/detection/
-#         detection_types = [
-#             "crowd",
-#             "proximity",
-#             "mobile",
-#             "intruder",
-#             "entry_exit",
-#             "server_room",
-#             "invigilator"
-#         ]
-        
-#         logger.info(f"Creating {len(detection_types)} Excel files for detection types...")
-#         logger.info(f"Detection types: {', '.join(detection_types)}")
-        
-#         # Total classified cameras
-#         total_classified = len(df[
-#             (df[SCENE_COLUMN_NAME] != "") & 
-#             (df[SCENE_COLUMN_NAME].notna()) &
-#             (df[SCENE_COLUMN_NAME] != "Failed to Classify")
-#         ])
-        
-#         logger.info(f"Total classified cameras: {total_classified}")
-        
-#         # Create one Excel file for each detection type with full original sheet
-#         for detection_type in detection_types:
-#             filename = os.path.join(output_dir, f"{detection_type}.xlsx")
-            
-#             # Copy the entire original DataFrame to each file
-#             output_df = df.copy()
-            
-#             # Save to Excel
-#             output_df.to_excel(filename, index=False, sheet_name="Sheet1")
-#             logger.info(f"✅ Created {filename} with {len(output_df)} rows (full original data)")
-        
-#         logger.info(f"✅ All {len(detection_types)} Excel files created successfully")
-        
-#     except Exception as e:
-#         logger.error(f"Error creating new Excel files: {e}", exc_info=True)
-
-# # ============================================================
-# # Per Camera Flow (Optimized with caching)
-# # ============================================================
-# def is_camera_already_classified(device_id, camera_no):
-#     """Check if camera is already classified (skip re-classification)"""
-#     global df
-#     mask = (df["device_id"] == device_id) & (df["no"] == camera_no)
-#     if mask.any():
-#         existing_label = df.loc[mask, SCENE_COLUMN_NAME].values[0]
-#         # Check if already has a valid classification
-#         if pd.notna(existing_label) and existing_label != "" and existing_label != "Failed to Classify":
-#             logger.info(f"✓ Camera {device_id}/{camera_no} already classified as '{existing_label}' - skipping classification")
-#             return True, existing_label
-#     return False, None
-
-
-
-# def process_camera(device_id, camera_no):
-#     logger.info("="*60)
-#     logger.info(f"Processing Camera - Device ID: {device_id}, Camera No: {camera_no}")
-#     logger.info("="*60)
-    
-#     server = device_camera_server_map.get((device_id, camera_no))
-#     if not server:
-#         logger.error(f"No server mapping found for Device ID {device_id}, Camera No {camera_no}")
-#         update_excel_sheet(device_id, camera_no, "Failed to Classify", "Server Not Found")
-#         return
-    
-#     already_classified, existing_label = is_camera_already_classified(device_id, camera_no)
-    
-#     max_retries = MAX_RETRY_ATTEMPTS
-    
-#     for attempt in range(max_retries):
-#         logger.info(f"Attempt {attempt+1}/{max_retries} for Device: {device_id}, Camera: {camera_no}")
-
-#         current_token = refresh_token_if_needed(server)
-#         urls, token_new = start_video_stream(device_id, camera_no, server, current_token)
-
-#         if not urls or not token_new:
-#             time.sleep(1)
-#             continue
-
-#         img_path = None
-        
-#         # ✅ Sequential URL testing (NO nested threads)
-#         for url in urls:
-#             img_path = capture_frame_with_ffmpeg(url, token_new, device_id, camera_no)
-#             if img_path:
-#                 break
-
-#         if not img_path:
-#             continue
-
-#         if already_classified:
-#             update_excel_sheet(device_id, camera_no, existing_label, "Accessible")
-#             logger.info(f"Verified already classified camera {device_id}/{camera_no}")
-#             return
-#         else:
-#             label = classify_with_vlm(img_path)
-#             if label:
-#                 update_excel_sheet(device_id, camera_no, label, "Accessible")
-#                 logger.info(f"Successfully classified {device_id}/{camera_no}")
-#                 return
-
-#     logger.error(f"Failed to classify Device {device_id}, Camera {camera_no}")
-#     update_excel_sheet(device_id, camera_no, "Failed to Classify", "Not Accessible")
-
-
-
-# # ============================================================
-# # MAIN LOOP (PARALLEL PROCESSING)
-# # ============================================================
-# logger.info("="*80)
-# logger.info(f"Starting main processing loop for {len(device_ids)} devices")
-# total_cameras = sum(len(cameras) for cameras in device_camera_map.values())
-# logger.info(f"Total cameras to process: {total_cameras}")
-# logger.info("="*80)
-
-# # Configuration for parallel processing
-# MAX_WORKERS = 12  # Optimized for H100 GPU + 24 CPU cores (balance between network I/O and VLM processing)
-# BATCH_FLUSH_SIZE = 20  # Flush Excel updates every 20 cameras
-
-# camera_counter = 0
-# accessible_counter = 0
-# not_accessible_counter = 0
-# counter_lock = threading.Lock()
-# progress_update_interval = 20  # Update progress every 20 seconds
-
-# def process_camera_with_progress(device_id, camera_no):
-#     """Wrapper function for parallel processing with progress tracking"""
-#     global camera_counter, accessible_counter, not_accessible_counter
-    
-#     try:
-#         # Check final status before processing
-#         initial_status = None
-#         mask = (df["device_id"] == device_id) & (df["no"] == camera_no)
-#         if mask.any():
-#             initial_status = df.loc[mask, "Status"].values[0] if "Status" in df.columns else None
-        
-#         process_camera(device_id, camera_no)
-        
-#         # Check final status after processing
-#         final_status = None
-#         mask = (df["device_id"] == device_id) & (df["no"] == camera_no)
-#         if mask.any():
-#             final_status = df.loc[mask, "Status"].values[0] if "Status" in df.columns else None
-        
-#         # Update counters (thread-safe)
-#         with counter_lock:
-#             camera_counter += 1
-            
-#             # Update accessibility counters
-#             if final_status == "Accessible":
-#                 accessible_counter += 1
-#             elif final_status == "Not Accessible":
-#                 not_accessible_counter += 1
-            
-#             current_count = camera_counter
-            
-#             # Flush Excel updates periodically
-#             if current_count % BATCH_FLUSH_SIZE == 0:
-#                 write_excel_once()
-
-
-            
-#     except Exception as e:
-#         logger.error(f"Error processing camera {device_id}/{camera_no}: {e}", exc_info=True)
-#         with counter_lock:
-#             camera_counter += 1
-#             not_accessible_counter += 1
-
-# # Build list of all cameras to process
-# all_cameras = []
-# for device_id in device_ids:
-#     cameras = device_camera_map[device_id]
-#     for camera_no in cameras:
-#         all_cameras.append((device_id, camera_no))
-
-# logger.info(f"Starting parallel processing with {MAX_WORKERS} workers...")
-# print(f"\n🚀 Processing {total_cameras} cameras in parallel with {MAX_WORKERS} workers...\n")
-
-# # Progress reporting thread
-# stop_progress_thread = threading.Event()
-# start_time = time.time()
-
-# def progress_reporter():
-#     """Thread function that reports progress every 20 seconds"""
-#     while not stop_progress_thread.is_set():
-#         time.sleep(progress_update_interval)
-        
-#         with counter_lock:
-#             current_count = camera_counter
-#             accessible = accessible_counter
-#             not_accessible = not_accessible_counter
-#             pending = total_cameras - current_count
-        
-#         elapsed_time = time.time() - start_time
-#         progress_percent = (current_count / total_cameras) * 100 if total_cameras > 0 else 0
-        
-#         # Create progress bar
-#         bar_length = 50
-#         filled_length = int(bar_length * current_count // total_cameras) if total_cameras > 0 else 0
-#         bar = '█' * filled_length + '-' * (bar_length - filled_length)
-        
-#         # Format time
-#         elapsed_str = f"{int(elapsed_time // 60)}m {int(elapsed_time % 60)}s"
-        
-#         # Create progress message
-#         progress_msg = (
-#             f"\n{'='*80}\n"
-#             f"PROGRESS UPDATE (Elapsed: {elapsed_str})\n"
-#             f"{'='*80}\n"
-#             f"|{bar}| {progress_percent:.1f}%\n"
-#             f"Completed: {current_count}/{total_cameras} cameras\n"
-#             f"✅ Accessible: {accessible}\n"
-#             f"❌ Not Accessible: {not_accessible}\n"
-#             f"⏳ Pending: {pending}\n"
-#             f"{'='*80}\n"
-#         )
-        
-#         # Print to console
-#         print(progress_msg)
-        
-#         # Log to file
-#         logger.info(f"PROGRESS: {progress_percent:.1f}% ({current_count}/{total_cameras}) | "
-#                    f"Accessible: {accessible} | Not Accessible: {not_accessible} | "
-#                    f"Pending: {pending} | Elapsed: {elapsed_str}")
-
-# # Start progress reporting thread
-# progress_thread = threading.Thread(target=progress_reporter, daemon=True)
-# progress_thread.start()
-
-# # Process cameras in parallel using ThreadPoolExecutor
-# try:
-#     # Process cameras in parallel using ThreadPoolExecutor
-#     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-#         futures = [executor.submit(process_camera_with_progress, device_id, camera_no) 
-#                    for device_id, camera_no in all_cameras]
-        
-#         for future in as_completed(futures):
-#             try:
-#                 future.result()
-#             except Exception as e:
-#                 logger.error(f"Task failed with exception: {e}", exc_info=True)
-
-# except KeyboardInterrupt:
-#     logger.warning("⚠ Interrupted by user! Writing Excel before exit...")
-#     write_excel_once()
-#     sys.exit(0)
-
-
-# # Stop progress reporting thread
-# stop_progress_thread.set()
-# progress_thread.join(timeout=1)
-
-# # Final flush of any remaining updates
-# # flush_excel_updates()
-
-# # Calculate final statistics
-# total_elapsed = time.time() - start_time
-# elapsed_str = f"{int(total_elapsed // 60)}m {int(total_elapsed % 60)}s"
-
-# # Print final summary
-# final_summary = (
-#     f"\n{'='*80}\n"
-#     f"FINAL SUMMARY\n"
-#     f"{'='*80}\n"
-#     f"Total Cameras: {total_cameras}\n"
-#     f"✅ Accessible: {accessible_counter}\n"
-#     f"❌ Not Accessible: {not_accessible_counter}\n"
-#     f"⏱️  Total Time: {elapsed_str}\n"
-#     f"📊 Success Rate: {(accessible_counter/total_cameras*100):.1f}%\n"
-#     f"{'='*80}\n"
-# )
-
-
-# write_excel_once()
-
-
-# print(final_summary)
-
-# logger.info("="*80)
-# logger.info("All devices processed successfully!")
-# logger.info(f"Log file saved to: {log_filename}")
-# logger.info(f"Total cameras processed: {camera_counter}/{total_cameras}")
-# logger.info(f"Accessible cameras: {accessible_counter}")
-# logger.info(f"Not accessible cameras: {not_accessible_counter}")
-# logger.info(f"Total time: {elapsed_str}")
-# logger.info("="*80)
-
-# # Create separate Excel files for each detection type
-# logger.info("\n" + "="*80)
-# logger.info("Creating Excel files for detection types...")
-# logger.info("="*80)
-# try:
-#     output_dir = "data/sheets"
-#     os.makedirs(output_dir, exist_ok=True)
-#     create_new_sheets(output_dir)
-# except Exception as e:
-#     logger.error(f"Failed to create new Excel files: {e}", exc_info=True)
-
-# print("\nAll devices processed.")
-# print(f"Detailed logs saved to: {log_filename}")
-# print("✅ Detection-type Excel files created in data/sheets/: crowd.xlsx, proximity.xlsx, mobile.xlsx, intruder.xlsx, entry_exit.xlsx, server_room.xlsx, invigilator.xlsx")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# #working prr khi khi json de rha
-
-# import requests
-# import json
-# import hashlib
-# import cv2
-# import time
-# import pandas as pd
-# import urllib.parse
-# import os
-# import sys
-# import shutil
-# from tqdm import tqdm
-# from PIL import Image
-# import subprocess
-# import uuid
-# import logging
-# from datetime import datetime
-# import base64
-# from concurrent.futures import ThreadPoolExecutor, as_completed
-# import threading
-# import re
-
-# # ============================================================
-# # Logging Setup
-# # ============================================================
-# log_dir = "logs"
-# os.makedirs(log_dir, exist_ok=True)
-# log_filename = os.path.join(log_dir, f"classification_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
-
-# logging.basicConfig(
-#     level=logging.DEBUG,
-#     format='%(asctime)s - %(levelname)s - %(message)s',
-#     handlers=[
-#         logging.FileHandler(log_filename),
-#         logging.StreamHandler()
-#     ]
-# )
-# logger = logging.getLogger(__name__)
-
-# logger.info("="*80)
-# logger.info("Starting Camera Classification Process")
-# logger.info("="*80)
-
-# # ============================================================
-# # Excel Loading
-# # ============================================================
-# # INPUT_EXCEL = "10_feb_2026.xlsx"
-# INPUT_EXCEL = os.path.join(
-#     os.path.dirname(__file__),
-#     "camera_list",
-#     "master_classified.xlsx"
-# )
-
-
-# # INPUT_EXCEL = "cctv_classfication/2000+RTSP_links_of_centre_CR_&_NR_MTS-2026.xlsx"
-
-# PREFERRED_SHEET = "RTSP"
-# SCENE_COLUMN_TARGET = "scence classification"
-# SUCCESS_STATUS_CODES = {200, 401}
-
-
-# AUTH_MAX_ATTEMPTS = 3
-
-# # Performance optimization constants
-# RTSP_TIMEOUT_MS = 5000  # 5 seconds timeout for RTSP streams
-# MAX_RETRY_ATTEMPTS = 1  # Only 1 retry attempt
-
-# excel_file = pd.ExcelFile(INPUT_EXCEL)
-# EXCEL_SHEET = None
-# df = None
-
-# for sheet_name in excel_file.sheet_names:
-#     temp_df = excel_file.parse(sheet_name)
-#     temp_df.columns = [col.strip() for col in temp_df.columns]
-#     if any(col.lower() == SCENE_COLUMN_TARGET.lower() for col in temp_df.columns):
-#         df = temp_df
-#         EXCEL_SHEET = sheet_name
-#         break
-
-# if df is None:
-#     fallback_sheet = PREFERRED_SHEET if PREFERRED_SHEET in excel_file.sheet_names else excel_file.sheet_names[0]
-#     df = excel_file.parse(fallback_sheet)
-#     df.columns = [col.strip() for col in df.columns]
-#     EXCEL_SHEET = fallback_sheet
-
-# # df["Device ID"] = df["Device ID"].astype(str).str.strip()
-
-# df["device_id"] = df["device_id"].astype(str).str.strip()
-
-# # Extract Server Address column and standardize format
-# if "Server Address" not in df.columns:
-#     logger.error("'Server Address' column not found in Excel file!")
-#     sys.exit(1)
-
-# df["Server Address"] = df["Server Address"].astype(str).str.strip().str.lower()
-
-# scene_column = next((col for col in df.columns if col.lower() == SCENE_COLUMN_TARGET.lower()), None)
-# if scene_column is None:
-#     scene_column = SCENE_COLUMN_TARGET
-#     df[scene_column] = pd.NA
-
-# SCENE_COLUMN_NAME = scene_column
-
-# # Add Status column if not present
-# if "Status" not in df.columns:
-#     df["Status"] = ""
-# else:
-#     df["Status"] = df["Status"].fillna("")
-
-# # device_ids = df["Device ID"].unique().tolist()
-
-# device_ids = df["device_id"].unique().tolist()
-
-
-# device_camera_map = {
-#     device_id: sorted(df[df["device_id"] == device_id]["no"].tolist())
-#     for device_id in device_ids
-# }
-
-# # Create mapping from (device_id, camera_no) to server address
-# device_camera_server_map = {}
-# for _, row in df.iterrows():
-#     device_id = str(row["device_id"]).strip()
-#     camera_no = row["no"]
-#     server = str(row["Server Address"]).strip().lower()
-#     device_camera_server_map[(device_id, camera_no)] = server
-
-# logger.info(f"Loaded {len(df)} cameras from {len(df['Server Address'].unique())} different servers")
-# for server in df["Server Address"].unique():
-#     count = len(df[df["Server Address"] == server])
-#     logger.info(f"  - {server}: {count} cameras")
-
-
-
-# def parse_json_response(response, context):
-#     logger.info(f"Parsing JSON response for context: {context}")
-#     try:
-#         parsed_data = json.loads(response.content.decode("utf-8"))
-#         logger.debug(f"[{context}] Parsed JSON response: {json.dumps(parsed_data, indent=2)}")
-#         return parsed_data
-#     except Exception as exc:
-#         logger.error(f"Failed to parse JSON for {context}: {exc}")
-#         logger.error(f"Raw response text: {getattr(response, 'text', 'N/A')}")
-#         sys.exit(1)
-
-
-# def extract_rtsp_urls(api_data):
-#     urls = []
-#     for key in ("url", "url2"):
-#         raw = api_data.get(key)
-#         if not raw:
-#             continue
-#         parts = [part.strip() for part in raw.split('|') if part.strip()]
-#         urls.extend(parts)
-#     return urls
-
-# # ============================================================
-# # DSS Authentication
-# # ============================================================
-# def generate_signature(userName, password, realm, randomKey):
-#     temp = hashlib.md5(password.encode()).hexdigest()
-#     temp = hashlib.md5((userName + temp).encode()).hexdigest()
-#     temp = hashlib.md5(temp.encode()).hexdigest()
-#     temp = hashlib.md5((userName + ":" + realm + ":" + temp).encode()).hexdigest()
-#     return hashlib.md5((temp + ":" + randomKey).encode()).hexdigest()
-
-# def make_api_call(url, payload, headers):
-#     try:
-#         logger.info(f"Making API call to: {url}")
-#         logger.debug(f"Request payload: {json.dumps(payload, indent=2)}")
-#         logger.debug(f"Request headers: {json.dumps(headers, indent=2)}")
-        
-#         response = requests.post(url, headers=headers, data=json.dumps(payload), timeout=10)
-        
-#         logger.info(f"Response status code: {response.status_code}")
-#         logger.debug(f"Response headers: {dict(response.headers)}")
-        
-#         if response.status_code in SUCCESS_STATUS_CODES:
-#             logger.info(f"Response status {response.status_code} treated as success")
-#         else:
-#             logger.warning(f"Response status {response.status_code} not in success codes")
-            
-#         try:
-#             logger.debug(f"Response content: {response.text[:1000]}")
-#         except:
-#             logger.debug("Could not log response content")
-            
-#         return response
-#     except Exception as e:
-#         logger.error(f"API request failed: {e}", exc_info=True)
-#         return None
-
-# def authenticate(server, max_attempts=AUTH_MAX_ATTEMPTS):
-#     logger.info(f"Starting authentication process for server: {server}")
-#     auth_url = f"https://{server}/admin/API/accounts/authorize"
-#     headers = {"Content-Type": "application/json"}
-#     payload = {"userName": "system", "ipAddress": "", "clientType": "WINPC_V1"}
-
-#     for attempt in range(1, max_attempts + 1):
-#         logger.info(f"Authentication attempt {attempt}/{max_attempts} for {server}")
-#         res = make_api_call(auth_url, payload, headers)
-
-#         resp_json = parse_json_response(res, "initial authorization")
-#         if resp_json.get("code") not in (None, 1000):
-#             logger.warning(f"Initial authorization returned error code: {resp_json.get('code')}")
-#             logger.debug(f"Full response: {resp_json}")
-#             continue
-
-#         required_fields = ["realm", "randomKey", "publickey"]
-#         missing = [field for field in required_fields if field not in resp_json]
-#         if missing:
-#             logger.warning(f"Missing required fields {missing} in authorization response")
-#             logger.debug(f"Response received: {resp_json}")
-#             continue
-
-#         realm = resp_json["realm"]
-#         randomKey = resp_json["randomKey"]
-#         publicKey = resp_json["publickey"]
-#         cookie = res.headers.get("Set-Cookie", "")
-        
-#         logger.info(f"Received auth parameters - realm: {realm}, randomKey: {randomKey[:20]}...")
-#         logger.debug(f"Cookie received: {cookie[:100]}..." if cookie else "No cookie")
-
-#         sig = generate_signature("system", "Coreiseven@@", realm, randomKey)
-#         logger.debug(f"Generated signature: {sig[:20]}...")
-        
-#         payload2 = {
-#             "mac": "",
-#             "signature": sig,
-#             "userName": "system",
-#             "randomKey": randomKey,
-#             "publicKey": publicKey,
-#             "encryptType": "MD5",
-#             "ipAddress": "",
-#             "clientType": "WINPC_V1",
-#             "userType": "0"
-#         }
-
-
-#         headers2 = {"Content-Type": "application/json", "Cookie": cookie}
-#         logger.info("Sending token exchange request")
-#         res2 = make_api_call(auth_url, payload2, headers2)
-#         if not res2:
-#             logger.warning("No response for signature authorization, retrying…")
-#             continue
-
-#         resp_json2 = parse_json_response(res2, "token exchange")
-#         if resp_json2.get("code") not in (None, 1000):
-#             logger.warning(f"Token exchange returned error code: {resp_json2.get('code')}")
-#             logger.debug(f"Full response: {resp_json2}")
-#             continue
-
-#         token = resp_json2.get("token")
-#         if token:
-#             logger.info(f"Authentication successful for {server}! Token received: {token[:20]}...")
-#             return token
-
-#         logger.warning(f"Token missing in token exchange response for {server}")
-#         logger.debug(f"Response: {resp_json2}")
-
-#     logger.error(f"Authentication failed for {server} after maximum attempts")
-#     sys.exit(1)
-
-
-# # Global token and timestamp tracking (per server)
-# server_tokens = {}  # {server: token}
-# server_token_timestamps = {}  # {server: timestamp}
-# TOKEN_EXPIRY_SECONDS = 90  # Refresh token after 90 seconds (before 2-min expiry)
-# token_lock = threading.Lock()  # Thread-safe token access
-
-# def refresh_token_if_needed(server):
-#     """Check if token needs refresh and refresh if necessary (thread-safe)"""
-#     global server_tokens, server_token_timestamps
-    
-#     with token_lock:
-#         # Initialize token for new server
-#         if server not in server_tokens:
-#             logger.info(f"Initializing authentication for new server: {server}")
-#             server_tokens[server] = authenticate(server)
-#             server_token_timestamps[server] = time.time()
-#             return server_tokens[server]
-        
-#         # Check if existing token needs refresh
-#         elapsed = time.time() - server_token_timestamps[server]
-#         if elapsed > TOKEN_EXPIRY_SECONDS:
-#             logger.warning(f"Token expired for {server} ({elapsed:.0f}s elapsed). Re-authenticating...")
-#             server_tokens[server] = authenticate(server)
-#             server_token_timestamps[server] = time.time()
-#             logger.info(f"Token refreshed successfully for {server}")
-#         return server_tokens[server]
-
-# # ============================================================
-# # RTSP Stream
-# # ============================================================
-# def start_video_stream(device_id, camera_no, server, token):
-#     logger.info(f"Starting video stream for Device ID: {device_id}, Camera No: {camera_no} on server: {server}")
-#     url = f"https://{server}/admin/API/MTS/Video/StartVideo?token={token}"
-#     headers = {"Content-Type": "application/json", "X-Subject-Token": token}
-
-#     payload = {
-#         "clientType": "WINPC_V1",
-#         "project": "PSDK",
-#         "method": "MTS.Video.StartVideo",
-#         "data": {
-#             "streamType": "1",
-#             "optional": f"/admin/API/MTS/Video/StartVideo?token={token}",
-#             "channelId": f"{device_id}$1$0${camera_no}",
-#             "dataType": "2",
-#             "enableRtsps": "0"
-#         }
-#     }
-
-#     res = make_api_call(url, payload, headers)
-#     logger.debug(f"Start video stream response object: {res}")
-    
-#     if not res:
-#         logger.error(f"Failed to start video stream for Device ID {device_id}, Camera No {camera_no}")
-#         logger.error(f"Response status: No response")
-#         return None, None
-    
-#     # Check if token expired (401 error)
-#     if res.status_code == 401:
-#         logger.warning(f"Got 401 Unauthorized - token expired for Device ID {device_id}, Camera No {camera_no}")
-#         return None, None
-    
-#     if res.status_code not in SUCCESS_STATUS_CODES:
-#         logger.error(f"Failed to start video stream for Device ID {device_id}, Camera No {camera_no}")
-#         logger.error(f"Response status: {res.status_code}")
-#         return None, None
-
-#     resp_json = parse_json_response(res, f"start video stream - Device {device_id} Camera {camera_no}")
-#     data = resp_json.get("data")
-#     if not data:
-#         logger.error(f"Missing 'data' in video stream response for Device ID {device_id}, Camera No {camera_no}")
-#         logger.debug(f"Full response: {resp_json}")
-#         return None, None
-
-#     urls = extract_rtsp_urls(data)
-#     if not urls:
-#         logger.error(f"No RTSP URLs returned for Device ID {device_id}, Camera No {camera_no}")
-#         logger.debug(f"Data received: {data}")
-#         return None, None
-
-#     logger.info(f"Extracted {len(urls)} RTSP URL(s) for Device ID {device_id}, Camera No {camera_no}")
-#     for i, url in enumerate(urls, 1):
-#         logger.debug(f"RTSP URL {i}: {url}")
-
-#     stream_token = data.get("token") or token
-#     if not data.get("token"):
-#         logger.warning(f"Stream token missing for Device ID {device_id}, Camera No {camera_no}; using session token")
-#     else:
-#         logger.info(f"Stream token received: {stream_token[:20]}...")
-
-#     return urls, stream_token
-
-# def add_token_to_url(rtsp_url, token):
-#     parsed = urllib.parse.urlparse(rtsp_url)
-#     query = urllib.parse.parse_qs(parsed.query)
-#     query['token'] = [token]
-#     return urllib.parse.urlunparse(parsed._replace(query=urllib.parse.urlencode(query, doseq=True)))
-
-# # ============================================================
-# # Frame Saving + VLM Classification
-# # ============================================================
-# def save_frame(frame, device_id, camera_no):
-#     save_dir = f"frames/{device_id}/{camera_no}"
-#     os.makedirs(save_dir, exist_ok=True)
-
-#     save_path = f"{save_dir}/frame.jpg"
-#     cv2.imwrite(save_path, frame)
-
-#     return save_path
-
-
-# def classify_with_vlm(image_path):
-#     """
-#     Uses Ollama-installed Vision Model (e.g., qwen2-vl or llava) for scene classification.
-#     """
-#     logger.info(f"Starting VLM classification for image: {image_path}")
-
-#     # === CATEGORY DEFINITIONS ===
-#     CATEGORIES = [
-#         "Server Room",
-#         "Outdoor Scene",
-#         "Outside Area",
-#         "Parking Lot",
-#         "Entry",
-#         "Computer Lab"
-#     ]
-
-#     PROMPT = f"""
-#     You are an expert computer vision classifier.
-#     Classify the given image into one of the following categories:
-
-#     {', '.join(CATEGORIES)}.
-
-#     Rules:
-#     - "Server Room": small room with limited visibility with laptop or computers.
-#     - "Computer Lab": large room with many computers, chairs, people or desks.
-#     - "Outdoor Scene": nature, roads, gardens, sky, trees.
-#     - "Outside Area": surroundings of a building, campus, boundary,hallway, outdoor environment.
-#     - "Parking Lot": cars, bikes, open area with marked spaces or vehicles.
-#     - "Entry": building entrances, gates, doors, signboards, or main access points.
-
-#     Return **only** the JSON response with:
-#     {{
-#     "category": "<one of the above categories>",
-#     "reason": "<short explanation>"
-#     }}
-#     """
-
-#     url = "http://localhost:11434/api/generate"
-    
-#     # Read and encode the image to base64
-#     try:
-#         with open(image_path, 'rb') as image_file:
-#             image_data = base64.b64encode(image_file.read()).decode('utf-8')
-#         logger.debug(f"Image successfully encoded to base64 (length: {len(image_data)})")
-#     except Exception as e:
-#         logger.error(f"Failed to read and encode image: {e}", exc_info=True)
-#         return "Uncertain"
-    
-#     payload = {
-#         "model": "llava:7b",     # Using LLaVA vision model for image classification
-#         "prompt": PROMPT,
-#         "images": [image_data],
-#         "stream": False
-#     }
-
-#     try:
-#         logger.debug(f"Sending VLM request to: {url}")
-#         logger.debug(f"VLM payload model: {payload['model']}, prompt length: {len(PROMPT)}, image data length: {len(image_data)}")
-        
-#         response = requests.post(url, json=payload, timeout=30)  # Reduced from 60s to 30s
-        
-#         logger.info(f"VLM response status: {response.status_code}")
-        
-#         if response.status_code != 200:
-#             logger.error(f"VLM request failed with status {response.status_code}")
-#             logger.debug(f"VLM error response: {response.text}")
-#             return "Uncertain"
-        
-#         response_json = response.json()
-#         logger.debug(f"VLM full response: {json.dumps(response_json, indent=2)}")
-        
-#         result = response_json.get("response", "").strip()
-#         logger.info(f"VLM classification result: {result}")
-        
-#         if not result:
-#             logger.warning("VLM returned empty result")
-#             return "Uncertain"
-        
-#         # Parse JSON response and extract only the category
-#         try:
-#             result_json = json.loads(result)
-#             category = result_json.get("category", "Uncertain")
-#             logger.info(f"Extracted category: {category}")
-#             return category
-#         except json.JSONDecodeError:
-#             logger.warning(f"Could not parse JSON response, returning raw result")
-#             return result
-
-
-#     except Exception as e:
-#         logger.error(f"VLM request failed: {e}", exc_info=True)
-#         return "Uncertain"
-
-
-# def capture_frame_with_opencv(rtsp_url, token, device_id, camera_no, timeout_ms=RTSP_TIMEOUT_MS):
-#     logger.info(f"Capturing frame with OpenCV for Device {device_id}, Camera {camera_no}")
-#     tokenized_url = add_token_to_url(rtsp_url, token)
-#     logger.debug(f"Tokenized RTSP URL: {tokenized_url[:100]}...")
-    
-#     cap = cv2.VideoCapture(tokenized_url, cv2.CAP_FFMPEG)
-    
-#     # Set timeout using optimized constant
-#     cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, timeout_ms)
-#     cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, timeout_ms)
-
-#     if not cap.isOpened():
-#         logger.error(f"❌ FRAME CAPTURE FAILED: Failed to open stream for Device ID {device_id}, Camera No {camera_no}")
-#         return None
-
-#     ret, frame = cap.read()
-#     cap.release()
-
-#     if not ret:
-#         logger.error(f"❌ FRAME CAPTURE FAILED: Failed to read frame from Device ID {device_id}, Camera No {camera_no}")
-#         return None
-
-#     save_dir = f"frames/{device_id}/{camera_no}"
-#     os.makedirs(save_dir, exist_ok=True)
-#     img_path = f"{save_dir}/frame_{uuid.uuid4().hex}.jpg"
-#     cv2.imwrite(img_path, frame)
-#     logger.info(f"✅ FRAME CAPTURED SUCCESSFULLY: Frame saved to {img_path}")
-#     return img_path
-
-
-# def capture_frame_with_ffmpeg(rtsp_url, token, device_id, camera_no):
-#     logger.info(f"Attempting FFmpeg frame capture for Device {device_id}, Camera {camera_no}")
-    
-#     if not shutil.which("ffmpeg"):
-#         logger.warning("ffmpeg executable not found on PATH; skipping this URL")
-#         return None  # Don't fall back to OpenCV - just fail fast
-
-#     tokenized_url = add_token_to_url(rtsp_url, token)
-#     save_dir = f"frames/{device_id}/{camera_no}"
-#     os.makedirs(save_dir, exist_ok=True)
-#     img_path = f"{save_dir}/frame_{uuid.uuid4().hex}.jpg"
-
-#     logger.info(f"Using FFmpeg to capture frame from: {tokenized_url[:100]}...")
-#     logger.debug(f"Output path: {img_path}")
-
-#     cmd = [
-#         "ffmpeg",
-#         "-y",
-#         "-rtsp_transport", "tcp",
-#         "-timeout", str(RTSP_TIMEOUT_MS * 1000),  # Convert ms to microseconds for ffmpeg
-#         "-i", tokenized_url,
-#         "-frames:v", "1",
-#         "-loglevel", "error",  # Reduce verbose output
-#         img_path
-#     ]
-
-#     try:
-#         logger.debug(f"Running FFmpeg command: {' '.join(cmd[:8])}...")
-#         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)  # Reduced from 20s to 10s
-        
-#         logger.debug(f"FFmpeg stdout: {result.stdout.decode(errors='ignore')[:500]}")
-#         logger.debug(f"FFmpeg stderr: {result.stderr.decode(errors='ignore')[:500]}")
-        
-#         if result.returncode != 0:
-#             logger.warning(f"FFmpeg exited with code {result.returncode} - URL likely not accessible")
-#             logger.debug(f"FFmpeg stderr: {result.stderr.decode(errors='ignore')[:500]}")
-#             return None  # Don't fall back - fail fast
-#     except FileNotFoundError:
-#         logger.warning("ffmpeg command not found")
-#         return None  # Fail fast - no fallback
-#     except subprocess.TimeoutExpired:
-#         logger.warning(f"FFmpeg timed out after 10 seconds")
-#         return None  # Fail fast
-#     except Exception as e:
-#         logger.error(f"FFmpeg failed: {e}")
-#         return None  # Fail fast
-
-#     if not os.path.exists(img_path):
-#         logger.warning("❌ FRAME CAPTURE FAILED: FFmpeg did not create an output frame")
-#         return None  # Fail fast
-
-#     logger.info(f"✅ FRAME CAPTURED SUCCESSFULLY: Frame saved with FFmpeg to {img_path}")
-#     return img_path
-
-
-# def try_capture_single_url(rtsp_url, token, device_id, camera_no, url_index):
-#     """Try to capture frame from a single URL (used for parallel testing)"""
-#     logger.debug(f"Testing RTSP URL {url_index} for Device {device_id}, Camera {camera_no}")
-#     img_path = capture_frame_with_ffmpeg(rtsp_url, token, device_id, camera_no)
-#     if img_path:
-#         logger.info(f"✅ Successfully captured frame using URL {url_index} for Device {device_id}, Camera {camera_no}")
-#     return img_path
-
-# def try_open_and_classify_rtsp_stream_parallel(rtsp_urls, token, device_id, camera_no):
-#     """Test all RTSP URLs in parallel and use first successful one"""
-#     logger.info(f"Testing {len(rtsp_urls)} RTSP URLs in parallel for Device {device_id}, Camera {camera_no}")
-    
-#     img_path = None
-    
-#     # Test all URLs in parallel using ThreadPoolExecutor
-#     with ThreadPoolExecutor(max_workers=len(rtsp_urls)) as executor:
-#         # Submit all URL tests simultaneously
-#         future_to_url = {
-#             executor.submit(try_capture_single_url, url, token, device_id, camera_no, idx): idx 
-#             for idx, url in enumerate(rtsp_urls, 1)
-#         }
-        
-#         # Get the first successful result
-#         for future in as_completed(future_to_url):
-#             result = future.result()
-#             if result:
-#                 img_path = result
-#                 logger.info(f"First successful capture received for Device {device_id}, Camera {camera_no}")
-#                 # Cancel remaining futures since we got a success
-#                 for f in future_to_url:
-#                     f.cancel()
-#                 break
-    
-#     if not img_path:
-#         logger.error(f"Failed to capture frame from any URL for Device {device_id}, Camera {camera_no}")
-#         return None
-    
-#     label = classify_with_vlm(img_path)
-#     logger.info(f"Classification complete for Device {device_id}, Camera {camera_no}: {label}")
-#     return label
-
-# def try_open_and_classify_rtsp_stream(rtsp_url, token, device_id, camera_no):
-#     """Legacy function - captures from single URL"""
-#     logger.info(f"Attempting to open and classify RTSP stream for Device {device_id}, Camera {camera_no}")
-#     logger.debug(f"RTSP URL: {rtsp_url[:100]}...")
-    
-#     img_path = capture_frame_with_ffmpeg(rtsp_url, token, device_id, camera_no)
-#     if not img_path:
-#         logger.error(f"Failed to capture frame for Device {device_id}, Camera {camera_no}")
-#         return None
-
-#     label = classify_with_vlm(img_path)
-#     logger.info(f"Classification complete for Device {device_id}, Camera {camera_no}: {label}")
-#     return label
-# # ============================================================
-# # Excel Update (Optimized with batching)
-# # ============================================================
-# excel_update_queue = []  # Queue for batched updates
-# excel_lock = threading.Lock()  # Thread-safe Excel updates
-
-# def update_excel_in_memory(device_id, camera_no, label, status="Accessible"):
-#     """Update dataframe in memory without writing to disk (faster)"""
-#     logger.info(f"Queuing Excel update for Device ID {device_id}, Camera No {camera_no} with label: {label}, status: {status}")
-#     global df
-#     with excel_lock:
-#         # mask = (df["Device ID"] == device_id) & (df["Camera No"] == camera_no)
-#         mask = (df["device_id"] == device_id) & (df["no"] == camera_no)
-
-#         if mask.any():
-#             df.loc[mask, SCENE_COLUMN_NAME] = label
-#             df.loc[mask, "Status"] = status
-#             excel_update_queue.append((device_id, camera_no, label, status))
-#             logger.debug(f"In-memory update queued: Device ID {device_id}, Camera No {camera_no}")
-#         else:
-#             logger.warning(f"No match in Excel for Device ID {device_id}, Camera No {camera_no}")
-
-
-
-# def write_excel_once():
-#     logger.info("Writing final Excel output (single write)...")
-#     tmp_file = INPUT_EXCEL.replace(".xlsx", "_tmp.xlsx")
-
-#     with pd.ExcelWriter(tmp_file, engine="openpyxl") as writer:
-#         df.to_excel(writer, sheet_name=EXCEL_SHEET, index=False)
-
-#     os.replace(tmp_file, INPUT_EXCEL)  # atomic replace
-#     logger.info("✅ Excel written safely without corruption")
-
-
-# def update_excel_sheet(device_id, camera_no, label, status="Accessible"):
-#     """Legacy function - now uses in-memory updates"""
-#     update_excel_in_memory(device_id, camera_no, label, status)
-
-
-# def create_new_sheets(output_dir="."):
-#     """Create separate Excel files for each detection type with full original data"""
-#     try:
-#         # Detection types based on scripts in scripts/detection/
-#         detection_types = [
-#             "crowd",
-#             "proximity",
-#             "mobile",
-#             "intruder",
-#             "entry_exit",
-#             "server_room",
-#             "invigilator"
-#         ]
-        
-#         logger.info(f"Creating {len(detection_types)} Excel files for detection types...")
-#         logger.info(f"Detection types: {', '.join(detection_types)}")
-        
-#         # Total classified cameras
-#         total_classified = len(df[
-#             (df[SCENE_COLUMN_NAME] != "") & 
-#             (df[SCENE_COLUMN_NAME].notna()) &
-#             (df[SCENE_COLUMN_NAME] != "Failed to Classify")
-#         ])
-        
-#         logger.info(f"Total classified cameras: {total_classified}")
-        
-#         # Create one Excel file for each detection type with full original sheet
-#         for detection_type in detection_types:
-#             filename = os.path.join(output_dir, f"{detection_type}.xlsx")
-            
-#             # Copy the entire original DataFrame to each file
-#             output_df = df.copy()
-            
-#             # Save to Excel
-#             output_df.to_excel(filename, index=False, sheet_name="Sheet1")
-#             logger.info(f"✅ Created {filename} with {len(output_df)} rows (full original data)")
-        
-#         logger.info(f"✅ All {len(detection_types)} Excel files created successfully")
-        
-#     except Exception as e:
-#         logger.error(f"Error creating new Excel files: {e}", exc_info=True)
-
-# # ============================================================
-# # Per Camera Flow (Optimized with caching)
-# # ============================================================
-# def is_camera_already_classified(device_id, camera_no):
-#     """Check if camera is already classified (skip re-classification)"""
-#     global df
-#     mask = (df["device_id"] == device_id) & (df["no"] == camera_no)
-#     if mask.any():
-#         existing_label = df.loc[mask, SCENE_COLUMN_NAME].values[0]
-#         # Check if already has a valid classification
-#         if pd.notna(existing_label) and existing_label != "" and existing_label != "Failed to Classify":
-#             logger.info(f"✓ Camera {device_id}/{camera_no} already classified as '{existing_label}' - skipping classification")
-#             return True, existing_label
-#     return False, None
-
-
-
-# def process_camera(device_id, camera_no):
-#     logger.info("="*60)
-#     logger.info(f"Processing Camera - Device ID: {device_id}, Camera No: {camera_no}")
-#     logger.info("="*60)
-    
-#     server = device_camera_server_map.get((device_id, camera_no))
-#     if not server:
-#         logger.error(f"No server mapping found for Device ID {device_id}, Camera No {camera_no}")
-#         update_excel_sheet(device_id, camera_no, "Failed to Classify", "Server Not Found")
-#         return
-    
-#     already_classified, existing_label = is_camera_already_classified(device_id, camera_no)
-    
-#     max_retries = MAX_RETRY_ATTEMPTS
-    
-#     for attempt in range(max_retries):
-#         logger.info(f"Attempt {attempt+1}/{max_retries} for Device: {device_id}, Camera: {camera_no}")
-
-#         current_token = refresh_token_if_needed(server)
-#         urls, token_new = start_video_stream(device_id, camera_no, server, current_token)
-
-#         if not urls or not token_new:
-#             time.sleep(1)
-#             continue
-
-#         img_path = None
-        
-#         # ✅ Sequential URL testing (NO nested threads)
-#         for url in urls:
-#             img_path = capture_frame_with_ffmpeg(url, token_new, device_id, camera_no)
-#             if img_path:
-#                 break
-
-#         if not img_path:
-#             continue
-
-#         if already_classified:
-#             update_excel_sheet(device_id, camera_no, existing_label, "Accessible")
-#             logger.info(f"Verified already classified camera {device_id}/{camera_no}")
-#             return
-#         else:
-#             label = classify_with_vlm(img_path)
-#             if label:
-#                 update_excel_sheet(device_id, camera_no, label, "Accessible")
-#                 logger.info(f"Successfully classified {device_id}/{camera_no}")
-#                 return
-
-#     logger.error(f"Failed to classify Device {device_id}, Camera {camera_no}")
-#     update_excel_sheet(device_id, camera_no, "Failed to Classify", "Not Accessible")
-
-
-
-# # ============================================================
-# # MAIN LOOP (PARALLEL PROCESSING)
-# # ============================================================
-# logger.info("="*80)
-# logger.info(f"Starting main processing loop for {len(device_ids)} devices")
-# total_cameras = sum(len(cameras) for cameras in device_camera_map.values())
-# logger.info(f"Total cameras to process: {total_cameras}")
-# logger.info("="*80)
-
-# # Configuration for parallel processing
-# MAX_WORKERS = 12  # Optimized for H100 GPU + 24 CPU cores (balance between network I/O and VLM processing)
-# BATCH_FLUSH_SIZE = 20  # Flush Excel updates every 20 cameras
-
-# camera_counter = 0
-# accessible_counter = 0
-# not_accessible_counter = 0
-# counter_lock = threading.Lock()
-# progress_update_interval = 20  # Update progress every 20 seconds
-
-# def process_camera_with_progress(device_id, camera_no):
-#     """Wrapper function for parallel processing with progress tracking"""
-#     global camera_counter, accessible_counter, not_accessible_counter
-    
-#     try:
-#         # Check final status before processing
-#         initial_status = None
-#         mask = (df["device_id"] == device_id) & (df["no"] == camera_no)
-#         if mask.any():
-#             initial_status = df.loc[mask, "Status"].values[0] if "Status" in df.columns else None
-        
-#         process_camera(device_id, camera_no)
-        
-#         # Check final status after processing
-#         final_status = None
-#         mask = (df["device_id"] == device_id) & (df["no"] == camera_no)
-#         if mask.any():
-#             final_status = df.loc[mask, "Status"].values[0] if "Status" in df.columns else None
-        
-#         # Update counters (thread-safe)
-#         with counter_lock:
-#             camera_counter += 1
-            
-#             # Update accessibility counters
-#             if final_status == "Accessible":
-#                 accessible_counter += 1
-#             elif final_status == "Not Accessible":
-#                 not_accessible_counter += 1
-            
-#             current_count = camera_counter
-            
-#             # Flush Excel updates periodically
-#             if current_count % BATCH_FLUSH_SIZE == 0:
-#                 write_excel_once()
-
-
-            
-#     except Exception as e:
-#         logger.error(f"Error processing camera {device_id}/{camera_no}: {e}", exc_info=True)
-#         with counter_lock:
-#             camera_counter += 1
-#             not_accessible_counter += 1
-
-# # Build list of all cameras to process
-# all_cameras = []
-# for device_id in device_ids:
-#     cameras = device_camera_map[device_id]
-#     for camera_no in cameras:
-#         all_cameras.append((device_id, camera_no))
-
-# logger.info(f"Starting parallel processing with {MAX_WORKERS} workers...")
-# print(f"\n🚀 Processing {total_cameras} cameras in parallel with {MAX_WORKERS} workers...\n")
-
-# # Progress reporting thread
-# stop_progress_thread = threading.Event()
-# start_time = time.time()
-
-# def progress_reporter():
-#     """Thread function that reports progress every 20 seconds"""
-#     while not stop_progress_thread.is_set():
-#         time.sleep(progress_update_interval)
-        
-#         with counter_lock:
-#             current_count = camera_counter
-#             accessible = accessible_counter
-#             not_accessible = not_accessible_counter
-#             pending = total_cameras - current_count
-        
-#         elapsed_time = time.time() - start_time
-#         progress_percent = (current_count / total_cameras) * 100 if total_cameras > 0 else 0
-        
-#         # Create progress bar
-#         bar_length = 50
-#         filled_length = int(bar_length * current_count // total_cameras) if total_cameras > 0 else 0
-#         bar = '█' * filled_length + '-' * (bar_length - filled_length)
-        
-#         # Format time
-#         elapsed_str = f"{int(elapsed_time // 60)}m {int(elapsed_time % 60)}s"
-        
-#         # Create progress message
-#         progress_msg = (
-#             f"\n{'='*80}\n"
-#             f"PROGRESS UPDATE (Elapsed: {elapsed_str})\n"
-#             f"{'='*80}\n"
-#             f"|{bar}| {progress_percent:.1f}%\n"
-#             f"Completed: {current_count}/{total_cameras} cameras\n"
-#             f"✅ Accessible: {accessible}\n"
-#             f"❌ Not Accessible: {not_accessible}\n"
-#             f"⏳ Pending: {pending}\n"
-#             f"{'='*80}\n"
-#         )
-        
-#         # Print to console
-#         print(progress_msg)
-        
-#         # Log to file
-#         logger.info(f"PROGRESS: {progress_percent:.1f}% ({current_count}/{total_cameras}) | "
-#                    f"Accessible: {accessible} | Not Accessible: {not_accessible} | "
-#                    f"Pending: {pending} | Elapsed: {elapsed_str}")
-
-# # Start progress reporting thread
-# progress_thread = threading.Thread(target=progress_reporter, daemon=True)
-# progress_thread.start()
-
-# # Process cameras in parallel using ThreadPoolExecutor
-# try:
-#     # Process cameras in parallel using ThreadPoolExecutor
-#     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-#         futures = [executor.submit(process_camera_with_progress, device_id, camera_no) 
-#                    for device_id, camera_no in all_cameras]
-        
-#         for future in as_completed(futures):
-#             try:
-#                 future.result()
-#             except Exception as e:
-#                 logger.error(f"Task failed with exception: {e}", exc_info=True)
-
-# except KeyboardInterrupt:
-#     logger.warning("⚠ Interrupted by user! Writing Excel before exit...")
-#     write_excel_once()
-#     sys.exit(0)
-
-
-# # Stop progress reporting thread
-# stop_progress_thread.set()
-# progress_thread.join(timeout=1)
-
-# # Final flush of any remaining updates
-# # flush_excel_updates()
-
-# # Calculate final statistics
-# total_elapsed = time.time() - start_time
-# elapsed_str = f"{int(total_elapsed // 60)}m {int(total_elapsed % 60)}s"
-
-# # Print final summary
-# final_summary = (
-#     f"\n{'='*80}\n"
-#     f"FINAL SUMMARY\n"
-#     f"{'='*80}\n"
-#     f"Total Cameras: {total_cameras}\n"
-#     f"✅ Accessible: {accessible_counter}\n"
-#     f"❌ Not Accessible: {not_accessible_counter}\n"
-#     f"⏱️  Total Time: {elapsed_str}\n"
-#     f"📊 Success Rate: {(accessible_counter/total_cameras*100):.1f}%\n"
-#     f"{'='*80}\n"
-# )
-
-
-# write_excel_once()
-
-
-# print(final_summary)
-
-# logger.info("="*80)
-# logger.info("All devices processed successfully!")
-# logger.info(f"Log file saved to: {log_filename}")
-# logger.info(f"Total cameras processed: {camera_counter}/{total_cameras}")
-# logger.info(f"Accessible cameras: {accessible_counter}")
-# logger.info(f"Not accessible cameras: {not_accessible_counter}")
-# logger.info(f"Total time: {elapsed_str}")
-# logger.info("="*80)
-
-# # Create separate Excel files for each detection type
-# logger.info("\n" + "="*80)
-# logger.info("Creating Excel files for detection types...")
-# logger.info("="*80)
-# try:
-#     output_dir = "data/sheets"
-#     os.makedirs(output_dir, exist_ok=True)
-#     create_new_sheets(output_dir)
-# except Exception as e:
-#     logger.error(f"Failed to create new Excel files: {e}", exc_info=True)
-
-# print("\nAll devices processed.")
-# print(f"Detailed logs saved to: {log_filename}")
-# print("✅ Detection-type Excel files created in data/sheets/: crowd.xlsx, proximity.xlsx, mobile.xlsx, intruder.xlsx, entry_exit.xlsx, server_room.xlsx, invigilator.xlsx")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-#working
 
 import requests
 import json
-import hashlib
 import cv2
 import time
 import pandas as pd
-import urllib.parse
 import os
 import sys
 import shutil
@@ -4323,13 +17,34 @@ import base64
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 import re
+import queue
+from collections import defaultdict
+import numpy as np
+
+try:
+    from utils.db_client import (
+        get_hls_cameras,
+        get_rtsp_cameras,
+        update_hls_classification,
+        update_rtsp_classification,
+    )
+except Exception:
+    utils_path = os.path.join(os.path.dirname(__file__), "utils")
+    if utils_path not in sys.path:
+        sys.path.append(utils_path)
+    from db_client import (  # type: ignore
+        get_hls_cameras,
+        get_rtsp_cameras,
+        update_hls_classification,
+        update_rtsp_classification,
+    )
 
 # ============================================================
 # Logging Setup
 # ============================================================
 log_dir = "logs"
 os.makedirs(log_dir, exist_ok=True)
-log_filename = os.path.join(log_dir, f"classification_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+log_filename = os.path.join(log_dir, f"tcs_classification_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -4342,345 +57,363 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 logger.info("="*80)
-logger.info("Starting Camera Classification Process")
+logger.info("Starting TCS Camera Classification Process - OPTIMIZED VERSION")
 logger.info("="*80)
 
 # ============================================================
-# Excel Loading
+# Configuration - OPTIMIZED SETTINGS
 # ============================================================
-# INPUT_EXCEL = "10_feb_2026.xlsx"
-INPUT_EXCEL = os.path.join(
-    os.path.dirname(__file__),
-    "sheet",
-    "2000+RTSP_links_of_centre_CR_&_NR_MTS-2026.xlsx"
-)
+# Performance settings
+MAX_WORKERS_NETWORK = 64  # High parallelism for network I/O
+MAX_WORKERS_VLM = int(os.getenv("VISION_MAX_WORKERS_VLM", "1"))  # Ollama VLM is more stable with low concurrency
+CHECKPOINT_INTERVAL = 500  # Save progress every N cameras
 
+# Timeout settings (reduced for speed)
+TIMEOUT_EXTRACT_URL = 3    # Extract HLS URL timeout (seconds)
+TIMEOUT_TEST_STREAM = 3    # Test stream accessibility timeout (seconds)
+TIMEOUT_OPENCV = 3000      # OpenCV timeout (milliseconds)
+TIMEOUT_FFMPEG = 5         # FFmpeg timeout (seconds)
+TIMEOUT_VLM = int(os.getenv("VISION_TIMEOUT_VLM", "180"))  # VLM classification timeout (seconds)
+OLLAMA_URL = os.getenv("VISION_OLLAMA_URL", "http://localhost:11434/api/generate")
+OLLAMA_MODEL = os.getenv("VISION_OLLAMA_MODEL", "qwen3-vl:8b")
 
-# INPUT_EXCEL = "cctv_classfication/2000+RTSP_links_of_centre_CR_&_NR_MTS-2026.xlsx"
+# Processing mode
+TWO_PASS_MODE = True       # Enable two-pass processing for efficiency
+RESUME_FROM_CHECKPOINT = True  # Resume from last checkpoint if exists
+VISION_ASSIGNMENT_PAYLOAD = os.getenv("VISION_ASSIGNMENT_PAYLOAD")
 
-PREFERRED_SHEET = "RTSP"
-SCENE_COLUMN_TARGET = "scence classification"
-SUCCESS_STATUS_CODES = {200, 401}
+# ============================================================
+# Excel Loading - TCS Format
+# ============================================================
+# INPUT_EXCEL = "28 Jan Shift 2 - CDIS.xlsx"
+# INPUT_EXCEL = "/home/suvam/projects/cctv/cctv-analytics-system/cctv_classfication/CCTV Camera Report_CUET (PG) - 2026 06th March 2026 - IITK.xlsx"
+INPUT_EXCEL = "/home/suvam/projects/cctv/cctv-analytics-system/cctv_classfication/CCTV Camera Report_CUET (PG) - 24th March 2026 IITK (1) copy.xlsx"
+SCENE_COLUMN_TARGET = "Scene Classification"
+CHECKPOINT_FILE = "checkpoint_progress.json"
 
-
-AUTH_MAX_ATTEMPTS = 3
-
-# Performance optimization constants
-RTSP_TIMEOUT_MS = 5000  # 5 seconds timeout for RTSP streams
-MAX_RETRY_ATTEMPTS = 1  # Only 1 retry attempt
-
-excel_file = pd.ExcelFile(INPUT_EXCEL)
-EXCEL_SHEET = None
-df = None
-
-for sheet_name in excel_file.sheet_names:
-    temp_df = excel_file.parse(sheet_name)
-    temp_df.columns = [col.strip() for col in temp_df.columns]
-    if any(col.lower() == SCENE_COLUMN_TARGET.lower() for col in temp_df.columns):
-        df = temp_df
-        EXCEL_SHEET = sheet_name
-        break
-
-if df is None:
-    fallback_sheet = PREFERRED_SHEET if PREFERRED_SHEET in excel_file.sheet_names else excel_file.sheet_names[0]
-    df = excel_file.parse(fallback_sheet)
-    df.columns = [col.strip() for col in df.columns]
-    EXCEL_SHEET = fallback_sheet
-
-# df["Device ID"] = df["Device ID"].astype(str).str.strip()
-
-df["device_id"] = df["device_id"].astype(str).str.strip()
-
-# Extract Server Address column and standardize format
-if "Server Address" not in df.columns:
-    logger.error("'Server Address' column not found in Excel file!")
+# Check if input file exists
+if not VISION_ASSIGNMENT_PAYLOAD and not os.path.exists(INPUT_EXCEL):
+    logger.error(f"Input Excel file not found: {INPUT_EXCEL}")
+    logger.error("Please ensure the TCS Excel file is placed at the correct location")
     sys.exit(1)
 
-df["Server Address"] = df["Server Address"].astype(str).str.strip().str.lower()
-
-scene_column = next((col for col in df.columns if col.lower() == SCENE_COLUMN_TARGET.lower()), None)
-if scene_column is None:
-    scene_column = SCENE_COLUMN_TARGET
-    df[scene_column] = pd.NA
-
-SCENE_COLUMN_NAME = scene_column
-
-# Add Status column if not present
-if "Status" not in df.columns:
-    df["Status"] = ""
-else:
-    df["Status"] = df["Status"].fillna("")
-
-# device_ids = df["Device ID"].unique().tolist()
-
-device_ids = df["device_id"].unique().tolist()
-
-
-device_camera_map = {
-    device_id: sorted(df[df["device_id"] == device_id]["no"].tolist())
-    for device_id in device_ids
-}
-
-# Create mapping from (device_id, camera_no) to server address
-device_camera_server_map = {}
-for _, row in df.iterrows():
-    device_id = str(row["device_id"]).strip()
-    camera_no = row["no"]
-    server = str(row["Server Address"]).strip().lower()
-    device_camera_server_map[(device_id, camera_no)] = server
-
-logger.info(f"Loaded {len(df)} cameras from {len(df['Server Address'].unique())} different servers")
-for server in df["Server Address"].unique():
-    count = len(df[df["Server Address"] == server])
-    logger.info(f"  - {server}: {count} cameras")
-
-
-
-def parse_json_response(response, context):
-    logger.info(f"Parsing JSON response for context: {context}")
+# Load Excel file
+df = pd.DataFrame()
+if not VISION_ASSIGNMENT_PAYLOAD:
     try:
-        parsed_data = json.loads(response.content.decode("utf-8"))
-        logger.debug(f"[{context}] Parsed JSON response: {json.dumps(parsed_data, indent=2)}")
-        return parsed_data
-    except Exception as exc:
-        logger.error(f"Failed to parse JSON for {context}: {exc}")
-        logger.error(f"Raw response text: {getattr(response, 'text', 'N/A')}")
+        excel_file = pd.ExcelFile(INPUT_EXCEL)
+        logger.info(f"Loaded Excel file: {INPUT_EXCEL}")
+        logger.info(f"Available sheets: {excel_file.sheet_names}")
+
+        # Use the first sheet
+        EXCEL_SHEET = excel_file.sheet_names[0]
+        df = excel_file.parse(EXCEL_SHEET)
+        df.columns = [col.strip() for col in df.columns]
+
+        print(df.columns)     # columns check karne ke liye
+        print(df.head())      # first rows dekhne ke liye
+
+        logger.info(f"Using sheet: {EXCEL_SHEET}")
+        logger.info(f"Columns found: {list(df.columns)}")
+
+        # Expected columns: CCTV URL, Center Name, Camera Location, etc.
+        # Add Scene Classification and Status columns if not present
+        if SCENE_COLUMN_TARGET not in df.columns:
+            df[SCENE_COLUMN_TARGET] = pd.NA
+
+        if "Status" not in df.columns:
+            df["Status"] = ""
+        else:
+            df["Status"] = df["Status"].fillna("")
+
+        # Add Status Detail column for uncertain/obstructed cameras
+        if "Status Detail" not in df.columns:
+            df["Status Detail"] = ""
+
+        # Add a unique ID column for tracking
+        if "Row_ID" not in df.columns:
+            df["Row_ID"] = range(len(df))
+
+        logger.info(f"Total rows in Excel: {len(df)}")
+        logger.info(f"Optimized settings: {MAX_WORKERS_NETWORK} network workers, {MAX_WORKERS_VLM} VLM workers")
+        logger.info(f"Timeouts: Extract={TIMEOUT_EXTRACT_URL}s, Test={TIMEOUT_TEST_STREAM}s, OpenCV={TIMEOUT_OPENCV}ms, FFmpeg={TIMEOUT_FFMPEG}s")
+
+    except Exception as e:
+        logger.error(f"Failed to load Excel file: {e}", exc_info=True)
         sys.exit(1)
 
-
-def extract_rtsp_urls(api_data):
-    urls = []
-    for key in ("url", "url2"):
-        raw = api_data.get(key)
-        if not raw:
-            continue
-        parts = [part.strip() for part in raw.split('|') if part.strip()]
-        urls.extend(parts)
-    return urls
-
 # ============================================================
-# DSS Authentication
+# HLS Stream URL Processing - OPTIMIZED
 # ============================================================
-def generate_signature(userName, password, realm, randomKey):
-    temp = hashlib.md5(password.encode()).hexdigest()
-    temp = hashlib.md5((userName + temp).encode()).hexdigest()
-    temp = hashlib.md5(temp.encode()).hexdigest()
-    temp = hashlib.md5((userName + ":" + realm + ":" + temp).encode()).hexdigest()
-    return hashlib.md5((temp + ":" + randomKey).encode()).hexdigest()
-
-def make_api_call(url, payload, headers):
+def extract_hls_streaming_url(initial_url, timeout=None):
+    """
+    Extract the actual HLS streaming URL from the initial TCS URL (OPTIMIZED)
+    
+    Args:
+        initial_url: The URL from the Excel file (CCTV URL column)
+        timeout: Request timeout in seconds (uses global TIMEOUT_EXTRACT_URL if None)
+    
+    Returns:
+        The actual HLS streaming URL, or None if extraction fails
+    """
+    if timeout is None:
+        timeout = TIMEOUT_EXTRACT_URL
+    
+    logger.debug(f"Extracting HLS URL: {initial_url[:80]}...")
+    
     try:
-        logger.info(f"Making API call to: {url}")
-        logger.debug(f"Request payload: {json.dumps(payload, indent=2)}")
-        logger.debug(f"Request headers: {json.dumps(headers, indent=2)}")
+        # Make request to the initial URL
+        response = requests.get(initial_url, timeout=timeout, allow_redirects=True)
         
-        response = requests.post(url, headers=headers, data=json.dumps(payload), timeout=10)
+        if response.status_code != 200:
+            logger.debug(f"Initial URL failed with status {response.status_code}")
+            return None
         
-        logger.info(f"Response status code: {response.status_code}")
-        logger.debug(f"Response headers: {dict(response.headers)}")
+        # Method 1: Look for .m3u8 URL in the response text
+        m3u8_pattern = r'https?://[^\s<>"]+?\.m3u8[^\s<>"]*'
+        matches = re.findall(m3u8_pattern, response.text)
         
-        if response.status_code in SUCCESS_STATUS_CODES:
-            logger.info(f"Response status {response.status_code} treated as success")
-        else:
-            logger.warning(f"Response status {response.status_code} not in success codes")
-            
+        if matches:
+            streaming_url = matches[0]
+            logger.debug(f"✅ Found HLS URL: {streaming_url[:80]}...")
+            return streaming_url
+        
+        # Method 2: Look for URL in JSON response
         try:
-            logger.debug(f"Response content: {response.text[:1000]}")
+            json_data = response.json()
+            if isinstance(json_data, dict):
+                for key in ['url', 'stream_url', 'hls_url', 'playback_url', 'streaming_url']:
+                    if key in json_data:
+                        streaming_url = json_data[key]
+                        logger.debug(f"✅ Found HLS URL in JSON: {streaming_url[:80]}...")
+                        return streaming_url
         except:
-            logger.debug("Could not log response content")
-            
-        return response
+            pass
+        
+        # Method 3: Extract quoted .m3u8 URLs
+        if '.m3u8' in response.text:
+            pattern = r'(["\'])(https?://[^"\']+\.m3u8[^"\']*)(["\'])'
+            matches = re.findall(pattern, response.text)
+            if matches:
+                streaming_url = matches[0][1]
+                logger.debug(f"✅ Found HLS URL (quoted): {streaming_url[:80]}...")
+                return streaming_url
+        
+        logger.debug("No HLS URL found in response")
+        return None
+        
+    except requests.exceptions.Timeout:
+        logger.debug(f"Timeout accessing URL after {timeout}s")
+        return None
     except Exception as e:
-        logger.error(f"API request failed: {e}", exc_info=True)
+        logger.debug(f"Failed to extract HLS URL: {e}")
         return None
 
-def authenticate(server, max_attempts=AUTH_MAX_ATTEMPTS):
-    logger.info(f"Starting authentication process for server: {server}")
-    auth_url = f"https://{server}/admin/API/accounts/authorize"
-    headers = {"Content-Type": "application/json"}
-    payload = {"userName": "system", "ipAddress": "", "clientType": "WINPC_V1"}
 
-    for attempt in range(1, max_attempts + 1):
-        logger.info(f"Authentication attempt {attempt}/{max_attempts} for {server}")
-        res = make_api_call(auth_url, payload, headers)
-
-        resp_json = parse_json_response(res, "initial authorization")
-        if resp_json.get("code") not in (None, 1000):
-            logger.warning(f"Initial authorization returned error code: {resp_json.get('code')}")
-            logger.debug(f"Full response: {resp_json}")
-            continue
-
-        required_fields = ["realm", "randomKey", "publickey"]
-        missing = [field for field in required_fields if field not in resp_json]
-        if missing:
-            logger.warning(f"Missing required fields {missing} in authorization response")
-            logger.debug(f"Response received: {resp_json}")
-            continue
-
-        realm = resp_json["realm"]
-        randomKey = resp_json["randomKey"]
-        publicKey = resp_json["publickey"]
-        cookie = res.headers.get("Set-Cookie", "")
+def test_hls_stream(hls_url, timeout=None):
+    """
+    Test if the HLS stream is accessible (OPTIMIZED)
+    
+    Args:
+        hls_url: The HLS streaming URL (.m3u8)
+        timeout: Request timeout in seconds (uses global TIMEOUT_TEST_STREAM if None)
+    
+    Returns:
+        Tuple: (is_accessible, status_code)
+    """
+    if timeout is None:
+        timeout = TIMEOUT_TEST_STREAM
+    
+    logger.debug(f"Testing HLS: {hls_url[:80]}...")
+    
+    try:
+        response = requests.get(hls_url, timeout=timeout, stream=True)
         
-        logger.info(f"Received auth parameters - realm: {realm}, randomKey: {randomKey[:20]}...")
-        logger.debug(f"Cookie received: {cookie[:100]}..." if cookie else "No cookie")
+        if response.status_code == 200:
+            logger.debug("✅ HLS stream accessible")
+            return True, 200
+        else:
+            logger.debug(f"HLS stream status: {response.status_code}")
+            return False, response.status_code
+            
+    except Exception as e:
+        logger.debug(f"HLS stream test failed: {e}")
+        return False, None
 
-        sig = generate_signature("system", "Coreiseven@@", realm, randomKey)
-        logger.debug(f"Generated signature: {sig[:20]}...")
+
+# ============================================================
+# Frame Capture from HLS Stream - OPTIMIZED
+# ============================================================
+def capture_frame_from_hls(hls_url, row_id, skip_ffmpeg=False, timeout_ms=None):
+    """
+    Capture a frame from HLS stream (OPTIMIZED with smart bailout)
+    
+    Args:
+        hls_url: The HLS streaming URL (.m3u8)
+        row_id: Unique identifier for this camera
+        skip_ffmpeg: Skip FFmpeg fallback (for known bad streams)
+        timeout_ms: Timeout in milliseconds (uses global TIMEOUT_OPENCV if None)
+    
+    Returns:
+        Path to saved frame image, or None if capture fails
+    """
+    if timeout_ms is None:
+        timeout_ms = TIMEOUT_OPENCV
+    
+    logger.debug(f"Capturing frame for Row ID {row_id}")
+    
+    # Try with OpenCV first
+    img_path = capture_frame_with_opencv_hls(hls_url, row_id, timeout_ms)
+    
+    if img_path:
+        return img_path
+    
+    # Skip FFmpeg if we know the stream is bad (404, 502, etc.)
+    if skip_ffmpeg:
+        logger.debug("Skipping FFmpeg (stream known bad)")
+        return None
+    
+    # Fallback to FFmpeg
+    logger.debug("OpenCV failed, trying FFmpeg...")
+    img_path = capture_frame_with_ffmpeg_hls(hls_url, row_id)
+    
+    return img_path
+
+
+def capture_frame_with_opencv_hls(hls_url, row_id, timeout_ms):
+    """Capture frame using OpenCV (OPTIMIZED)"""
+    try:
+        cap = cv2.VideoCapture(hls_url)
         
-        payload2 = {
-            "mac": "",
-            "signature": sig,
-            "userName": "system",
-            "randomKey": randomKey,
-            "publicKey": publicKey,
-            "encryptType": "MD5",
-            "ipAddress": "",
-            "clientType": "WINPC_V1",
-            "userType": "0"
-        }
-
-
-        headers2 = {"Content-Type": "application/json", "Cookie": cookie}
-        logger.info("Sending token exchange request")
-        res2 = make_api_call(auth_url, payload2, headers2)
-        if not res2:
-            logger.warning("No response for signature authorization, retrying…")
-            continue
-
-        resp_json2 = parse_json_response(res2, "token exchange")
-        if resp_json2.get("code") not in (None, 1000):
-            logger.warning(f"Token exchange returned error code: {resp_json2.get('code')}")
-            logger.debug(f"Full response: {resp_json2}")
-            continue
-
-        token = resp_json2.get("token")
-        if token:
-            logger.info(f"Authentication successful for {server}! Token received: {token[:20]}...")
-            return token
-
-        logger.warning(f"Token missing in token exchange response for {server}")
-        logger.debug(f"Response: {resp_json2}")
-
-    logger.error(f"Authentication failed for {server} after maximum attempts")
-    sys.exit(1)
-
-
-# Global token and timestamp tracking (per server)
-server_tokens = {}  # {server: token}
-server_token_timestamps = {}  # {server: timestamp}
-TOKEN_EXPIRY_SECONDS = 90  # Refresh token after 90 seconds (before 2-min expiry)
-token_lock = threading.Lock()  # Thread-safe token access
-
-def refresh_token_if_needed(server):
-    """Check if token needs refresh and refresh if necessary (thread-safe)"""
-    global server_tokens, server_token_timestamps
-    
-    with token_lock:
-        # Initialize token for new server
-        if server not in server_tokens:
-            logger.info(f"Initializing authentication for new server: {server}")
-            server_tokens[server] = authenticate(server)
-            server_token_timestamps[server] = time.time()
-            return server_tokens[server]
+        # Set aggressive timeouts
+        cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, timeout_ms)
+        cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, timeout_ms)
         
-        # Check if existing token needs refresh
-        elapsed = time.time() - server_token_timestamps[server]
-        if elapsed > TOKEN_EXPIRY_SECONDS:
-            logger.warning(f"Token expired for {server} ({elapsed:.0f}s elapsed). Re-authenticating...")
-            server_tokens[server] = authenticate(server)
-            server_token_timestamps[server] = time.time()
-            logger.info(f"Token refreshed successfully for {server}")
-        return server_tokens[server]
+        if not cap.isOpened():
+            logger.debug(f"OpenCV failed to open stream for Row ID {row_id}")
+            return None
+        
+        # Read frame
+        ret, frame = cap.read()
+        cap.release()
+        
+        if not ret or frame is None:
+            logger.debug(f"OpenCV failed to read frame for Row ID {row_id}")
+            return None
+        
+        # Save frame
+        save_dir = f"frames/tcs/{row_id}"
+        os.makedirs(save_dir, exist_ok=True)
+        img_path = f"{save_dir}/frame_{uuid.uuid4().hex}.jpg"
+        cv2.imwrite(img_path, frame)
+        
+        logger.debug(f"✅ Frame captured with OpenCV: {img_path}")
+        return img_path
+        
+    except Exception as e:
+        logger.debug(f"OpenCV capture failed: {e}")
+        return None
 
-# ============================================================
-# RTSP Stream
-# ============================================================
-def start_video_stream(device_id, camera_no, server, token):
-    logger.info(f"Starting video stream for Device ID: {device_id}, Camera No: {camera_no} on server: {server}")
-    url = f"https://{server}/admin/API/MTS/Video/StartVideo?token={token}"
-    headers = {"Content-Type": "application/json", "X-Subject-Token": token}
 
-    payload = {
-        "clientType": "WINPC_V1",
-        "project": "PSDK",
-        "method": "MTS.Video.StartVideo",
-        "data": {
-            "streamType": "1",
-            "optional": f"/admin/API/MTS/Video/StartVideo?token={token}",
-            "channelId": f"{device_id}$1$0${camera_no}",
-            "dataType": "2",
-            "enableRtsps": "0"
-        }
-    }
-
-    res = make_api_call(url, payload, headers)
-    logger.debug(f"Start video stream response object: {res}")
+def capture_frame_with_ffmpeg_hls(hls_url, row_id):
+    """Capture frame using FFmpeg (OPTIMIZED)"""
+    if not shutil.which("ffmpeg"):
+        logger.debug("ffmpeg not found")
+        return None
     
-    if not res:
-        logger.error(f"Failed to start video stream for Device ID {device_id}, Camera No {camera_no}")
-        logger.error(f"Response status: No response")
-        return None, None
-    
-    # Check if token expired (401 error)
-    if res.status_code == 401:
-        logger.warning(f"Got 401 Unauthorized - token expired for Device ID {device_id}, Camera No {camera_no}")
-        return None, None
-    
-    if res.status_code not in SUCCESS_STATUS_CODES:
-        logger.error(f"Failed to start video stream for Device ID {device_id}, Camera No {camera_no}")
-        logger.error(f"Response status: {res.status_code}")
-        return None, None
-
-    resp_json = parse_json_response(res, f"start video stream - Device {device_id} Camera {camera_no}")
-    data = resp_json.get("data")
-    if not data:
-        logger.error(f"Missing 'data' in video stream response for Device ID {device_id}, Camera No {camera_no}")
-        logger.debug(f"Full response: {resp_json}")
-        return None, None
-
-    urls = extract_rtsp_urls(data)
-    if not urls:
-        logger.error(f"No RTSP URLs returned for Device ID {device_id}, Camera No {camera_no}")
-        logger.debug(f"Data received: {data}")
-        return None, None
-
-    logger.info(f"Extracted {len(urls)} RTSP URL(s) for Device ID {device_id}, Camera No {camera_no}")
-    for i, url in enumerate(urls, 1):
-        logger.debug(f"RTSP URL {i}: {url}")
-
-    stream_token = data.get("token") or token
-    if not data.get("token"):
-        logger.warning(f"Stream token missing for Device ID {device_id}, Camera No {camera_no}; using session token")
-    else:
-        logger.info(f"Stream token received: {stream_token[:20]}...")
-
-    return urls, stream_token
-
-def add_token_to_url(rtsp_url, token):
-    parsed = urllib.parse.urlparse(rtsp_url)
-    query = urllib.parse.parse_qs(parsed.query)
-    query['token'] = [token]
-    return urllib.parse.urlunparse(parsed._replace(query=urllib.parse.urlencode(query, doseq=True)))
-
-# ============================================================
-# Frame Saving + VLM Classification
-# ============================================================
-def save_frame(frame, device_id, camera_no):
-    save_dir = f"frames/{device_id}/{camera_no}"
+    save_dir = f"frames/tcs/{row_id}"
     os.makedirs(save_dir, exist_ok=True)
+    img_path = f"{save_dir}/frame_{uuid.uuid4().hex}.jpg"
+    
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-timeout", str(TIMEOUT_FFMPEG * 1000000),  # Convert to microseconds
+        "-i", hls_url,
+        "-frames:v", "1",
+        "-loglevel", "error",
+        img_path
+    ]
+    
+    try:
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
+                              timeout=TIMEOUT_FFMPEG)
+        
+        if result.returncode != 0 or not os.path.exists(img_path):
+            logger.debug(f"FFmpeg failed for Row ID {row_id}")
+            return None
+        
+        logger.debug(f"✅ Frame captured with FFmpeg: {img_path}")
+        return img_path
+        
+    except subprocess.TimeoutExpired:
+        logger.debug(f"FFmpeg timed out for Row ID {row_id}")
+        return None
+    except Exception as e:
+        logger.debug(f"FFmpeg error: {e}")
+        return None
 
-    save_path = f"{save_dir}/frame.jpg"
-    cv2.imwrite(save_path, frame)
 
-    return save_path
+# ============================================================
+# VLM Classification - OPTIMIZED with Grey/Obstruction Detection
+# ============================================================
+
+# Global VLM queue for batch processing
+vlm_queue = queue.Queue()
+vlm_results = {}
+vlm_results_lock = threading.Lock()
+
+def is_grey_or_obstructed(image_path):
+    """
+    Quick check if image is grey screen or heavily obstructed
+    Returns: (is_problematic, reason)
+    """
+    try:
+        img = cv2.imread(image_path)
+        if img is None:
+            return True, "Failed to read image"
+        
+        # Convert to grayscale
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        
+        # Check 1: Nearly uniform color (grey screen)
+        std_dev = gray.std()
+        if std_dev < 5:  # Very low variance = uniform grey
+            return True, "Uniform grey screen"
+        
+        # Check 2: Very dark image (camera blocked)
+        mean_brightness = gray.mean()
+        if mean_brightness < 10:
+            return True, "Very dark/blocked camera"
+        
+        # Check 3: Very bright image (overexposed/white)
+        if mean_brightness > 245:
+            return True, "Overexposed/white screen"
+        
+        # Check 4: Low detail (blurry/obstructed)
+        laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+        if laplacian_var < 10:
+            return True, "Low detail/obstructed"
+        
+        return False, None
+        
+    except Exception as e:
+        logger.debug(f"Grey check failed: {e}")
+        return False, None
 
 
 def classify_with_vlm(image_path):
     """
-    Uses Ollama-installed Vision Model (e.g., qwen2-vl or llava) for scene classification.
+    Uses Ollama Vision Model for scene classification (OPTIMIZED)
+    Includes detection for grey/obstructed cameras
     """
-    logger.info(f"Starting VLM classification for image: {image_path}")
+    logger.debug(f"VLM classification: {image_path}")
+    
+    # Quick pre-check for grey/obstructed images
+    is_bad, reason = is_grey_or_obstructed(image_path)
+    if is_bad:
+        logger.debug(f"Image flagged as problematic: {reason}")
+        return "Uncertain/Obstructed", reason
 
     # === CATEGORY DEFINITIONS ===
     CATEGORIES = [
@@ -4692,649 +425,888 @@ def classify_with_vlm(image_path):
         "Computer Lab"
     ]
 
-    PROMPT = f"""
-    You are an expert computer vision classifier.
-    Classify the given image into one of the following categories:
+    PROMPT = f"""You are an expert computer vision classifier.
+Classify the given image into one of the following categories:
 
-    {', '.join(CATEGORIES)}.
+{', '.join(CATEGORIES)}.
 
-    Rules:
-    - "Server Room": small room with limited visibility with laptop or computers.
-    - "Computer Lab": large room with many computers, chairs, people or desks.
-    - "Outdoor Scene": nature, roads, gardens, sky, trees.
-    - "Outside Area": surroundings of a building, campus, boundary,hallway, outdoor environment.
-    - "Parking Lot": cars, bikes, open area with marked spaces or vehicles.
-    - "Entry": building entrances, gates, doors, signboards, or main access points.
+Rules:
+- "Server Room": small room with limited visibility with laptop or computers.
+- "Computer Lab": large room with many computers, chairs, people or desks.
+- "Outdoor Scene": nature, roads, gardens, sky, trees.
+- "Outside Area": surroundings of a building, campus, boundary, hallway, outdoor environment.
+- "Parking Lot": cars, bikes, open area with marked spaces or vehicles.
+- "Entry": building entrances, gates, doors, signboards, or main access points.
 
-    Return **only** the JSON response with:
-    {{
-    "category": "<one of the above categories>",
-    "reason": "<short explanation>"
-    }}
-    """
+If the image is grey, blank, heavily obstructed, or unclear, respond with "Uncertain".
 
-    url = "http://localhost:11434/api/generate"
+Return **only** the JSON response:
+{{"category": "<one of the above categories or Uncertain>", "reason": "<short explanation>"}}"""
+
+    url = OLLAMA_URL
     
     # Read and encode the image to base64
     try:
         with open(image_path, 'rb') as image_file:
             image_data = base64.b64encode(image_file.read()).decode('utf-8')
-        logger.debug(f"Image successfully encoded to base64 (length: {len(image_data)})")
     except Exception as e:
-        logger.error(f"Failed to read and encode image: {e}", exc_info=True)
-        return "Uncertain"
+        logger.debug(f"Failed to encode image: {e}")
+        return "Uncertain", "Failed to read image"
     
     payload = {
-        "model": "llava:7b",     # Using LLaVA vision model for image classification
+        "model": OLLAMA_MODEL,
         "prompt": PROMPT,
         "images": [image_data],
         "stream": False
     }
 
     try:
-        logger.debug(f"Sending VLM request to: {url}")
-        logger.debug(f"VLM payload model: {payload['model']}, prompt length: {len(PROMPT)}, image data length: {len(image_data)}")
-        
-        response = requests.post(url, json=payload, timeout=30)  # Reduced from 60s to 30s
-        
-        logger.info(f"VLM response status: {response.status_code}")
+        response = requests.post(url, json=payload, timeout=TIMEOUT_VLM)
         
         if response.status_code != 200:
-            logger.error(f"VLM request failed with status {response.status_code}")
-            logger.debug(f"VLM error response: {response.text}")
-            return "Uncertain"
+            logger.debug(f"VLM request failed: {response.status_code}")
+            return "Uncertain", "VLM request failed"
         
         response_json = response.json()
-        logger.debug(f"VLM full response: {json.dumps(response_json, indent=2)}")
-        
         result = response_json.get("response", "").strip()
-        logger.info(f"VLM classification result: {result}")
         
         if not result:
-            logger.warning("VLM returned empty result")
-            return "Uncertain"
+            return "Uncertain", "Empty VLM response"
         
-        # Parse JSON response and extract only the category
-        # try:
-        #     result_json = json.loads(result)
-        #     category = result_json.get("category", "Uncertain")
-        #     logger.info(f"Extracted category: {category}")
-        #     return category
-        # except json.JSONDecodeError:
-        #     logger.warning(f"Could not parse JSON response, returning raw result")
-        #     return result
-
+        # Parse JSON response
         try:
-            # Remove markdown code blocks if present
-            cleaned = result.strip()
+            result_json = json.loads(result)
+            category = result_json.get("category", "Uncertain")
+            reason = result_json.get("reason", "")
+            
+            # Check if VLM also detected uncertainty
+            if "uncertain" in category.lower() or "unclear" in category.lower():
+                return "Uncertain/Obstructed", reason
+            
+            return category, reason
+        except json.JSONDecodeError:
+            logger.debug("Could not parse VLM JSON")
+            return "Uncertain", "Invalid VLM response"
+            
+    except requests.exceptions.Timeout:
+        logger.debug("VLM request timed out")
+        return "Uncertain", "VLM timeout"
+    except Exception as e:
+        logger.debug(f"VLM error: {e}")
+        return "Uncertain", str(e)
 
-            # Remove ```json or ``` wrappers
-            cleaned = re.sub(r"^```json\s*", "", cleaned)
-            cleaned = re.sub(r"^```\s*", "", cleaned)
-            cleaned = re.sub(r"\s*```$", "", cleaned)
 
-            # Extract JSON part only
-            json_match = re.search(r"\{.*\}", cleaned, re.DOTALL)
-            if json_match:
-                json_text = json_match.group(0)
-                result_json = json.loads(json_text)
-                category = result_json.get("category", "Uncertain")
-                logger.info(f"Extracted category: {category}")
-                return category
-            else:
-                logger.warning("No valid JSON object found in response")
-                return "Uncertain"
+# ============================================================
+# Excel Update & Checkpoint System (Thread-safe)
+# ============================================================
+excel_lock = threading.Lock()
+checkpoint_counter = 0
 
-        except Exception as e:
-            logger.warning(f"JSON parsing failed: {e}")
-            return "Uncertain"
+def update_excel_in_memory(row_id, label, status, status_detail=""):
+    """Update dataframe in memory (thread-safe) with status detail"""
+    global df, checkpoint_counter
+    with excel_lock:
+        mask = df["Row_ID"] == row_id
+        if mask.any():
+            df.loc[mask, SCENE_COLUMN_TARGET] = label
+            df.loc[mask, "Status"] = status
+            df.loc[mask, "Status Detail"] = status_detail
+            logger.debug(f"Updated Row {row_id}: {status} - {label}")
+            
+            # Increment checkpoint counter
+            checkpoint_counter += 1
+            if checkpoint_counter % CHECKPOINT_INTERVAL == 0:
+                save_checkpoint()
+        else:
+            logger.warning(f"Row ID {row_id} not found")
 
+
+def save_checkpoint():
+    """Save current progress to checkpoint file"""
+    try:
+        checkpoint_data = {
+            'timestamp': datetime.now().isoformat(),
+            'processed_rows': df[df['Status'] != ''].shape[0],
+            'total_rows': len(df),
+            'dataframe': df.to_dict('records')
+        }
+        
+        with open(CHECKPOINT_FILE, 'w') as f:
+            json.dump(checkpoint_data, f)
+        
+        logger.info(f"✅ Checkpoint saved: {checkpoint_data['processed_rows']}/{checkpoint_data['total_rows']}")
+    except Exception as e:
+        logger.error(f"Failed to save checkpoint: {e}")
+
+
+def load_checkpoint():
+    """Load progress from checkpoint file"""
+    global df
+    
+    if not os.path.exists(CHECKPOINT_FILE):
+        return False
+    
+    try:
+        with open(CHECKPOINT_FILE, 'r') as f:
+            checkpoint_data = json.load(f)
+        
+        logger.info(f"Found checkpoint from {checkpoint_data['timestamp']}")
+        logger.info(f"Previously processed: {checkpoint_data['processed_rows']}/{checkpoint_data['total_rows']}")
+        
+        # Restore dataframe
+        df_checkpoint = pd.DataFrame(checkpoint_data['dataframe'])
+        
+        # Merge with current df (in case Excel changed)
+        if len(df_checkpoint) == len(df):
+            df = df_checkpoint
+            logger.info("✅ Checkpoint loaded successfully")
+            return True
+        else:
+            logger.warning("Checkpoint size mismatch, starting fresh")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Failed to load checkpoint: {e}")
+        return False
+
+
+# ============================================================
+# Camera Processing - OPTIMIZED TWO-PASS STRATEGY
+# ============================================================
+
+def quick_accessibility_check(row):
+    """
+    PASS 1: Quick accessibility check (no frame capture, no classification)
+    Just test if we can reach the stream
+    
+    Returns: (row_id, hls_url, is_accessible, error_code)
+    """
+    row_id = row['Row_ID']
+    initial_url = row.get('CCTV URL', '')
+    
+    # Validate URL
+    if pd.isna(initial_url) or not initial_url.strip():
+        return (row_id, None, False, 'No URL')
+    
+    try:
+        # Extract HLS URL
+        hls_url = extract_hls_streaming_url(initial_url)
+        if not hls_url:
+            return (row_id, None, False, 'Extract failed')
+        
+        # Test stream
+        is_accessible, status_code = test_hls_stream(hls_url)
+        
+        # Smart bailout: don't try to capture frames for known bad status codes
+        if status_code in [404, 502, 503, 500]:
+            return (row_id, hls_url, False, f'HTTP {status_code}')
+        
+        if is_accessible:
+            return (row_id, hls_url, True, None)
+        else:
+            return (row_id, hls_url, False, f'Stream test failed')
+            
+    except Exception as e:
+        return (row_id, None, False, str(e))
+
+
+def process_accessible_camera(row, hls_url):
+    """
+    PASS 2: Full processing for accessible cameras (capture + classify)
+    
+    Args:
+        row: Pandas Series with camera data
+        hls_url: Pre-validated HLS streaming URL
+    
+    Returns:
+        Dictionary with processing results
+    """
+    row_id = row['Row_ID']
+    
+    result = {
+        'row_id': row_id,
+        'status': 'Accessible',
+        'label': 'Uncertain',
+        'status_detail': '',
+        'error': None
+    }
+    
+    try:
+        # Capture frame (skip FFmpeg for efficiency if OpenCV fails)
+        img_path = capture_frame_from_hls(hls_url, row_id, skip_ffmpeg=False)
+        
+        if not img_path:
+            result['status'] = 'Not Accessible'
+            result['label'] = 'Failed to Classify'
+            result['error'] = 'Frame capture failed'
+            result['status_detail'] = 'Could not capture frame'
+            return result
+        
+        # Classify the frame
+        label, reason = classify_with_vlm(img_path)
+        
+        if "Uncertain" in label or "Obstructed" in label:
+            # Mark as Accessible but Uncertain/Obstructed (Option A)
+            result['status'] = 'Accessible'
+            result['label'] = 'Uncertain/Obstructed'
+            result['status_detail'] = reason or 'Image unclear or obstructed'
+        else:
+            result['status'] = 'Accessible'
+            result['label'] = label
+            result['status_detail'] = 'Successfully classified'
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error in Pass 2 for Row {row_id}: {e}")
+        result['status'] = 'Accessible'
+        result['label'] = 'Uncertain'
+        result['status_detail'] = f'Error: {str(e)}'
+        result['error'] = str(e)
+        return result
+
+
+def process_single_camera_legacy(row):
+    """
+    LEGACY: Single-pass processing (for backwards compatibility)
+    Used when TWO_PASS_MODE = False
+    """
+    row_id = row['Row_ID']
+    initial_url = row.get('CCTV URL', '')
+    
+    logger.debug("="*60)
+    logger.debug(f"Processing Row ID: {row_id}")
+    logger.debug("="*60)
+    
+    result = {
+        'row_id': row_id,
+        'status': 'Not Accessible',
+        'label': 'Failed to Classify',
+        'status_detail': '',
+        'error': None
+    }
+    
+    # Validate initial URL
+    if pd.isna(initial_url) or not initial_url.strip():
+        result['error'] = 'No URL provided'
+        result['status_detail'] = 'Empty URL'
+        update_excel_in_memory(row_id, result['label'], result['status'], result['status_detail'])
+        return result
+
+    try:
+        # Extract HLS URL
+        hls_url = extract_hls_streaming_url(initial_url)
+        if not hls_url:
+            result['error'] = 'Failed to extract HLS URL'
+            result['status_detail'] = 'URL extraction failed'
+            update_excel_in_memory(row_id, result['label'], result['status'], result['status_detail'])
+            return result
+
+        # Test stream
+        is_accessible, status_code = test_hls_stream(hls_url)
+        skip_ffmpeg = status_code in [404, 502, 503, 500]  # Skip FFmpeg for known bad codes
+
+        if not is_accessible:
+            result['error'] = 'HLS stream not accessible'
+            result['status_detail'] = f'HTTP {status_code}' if status_code else 'Connection failed'
+            update_excel_in_memory(row_id, result['label'], result['status'], result['status_detail'])
+            return result
+
+        # Capture frame
+        img_path = capture_frame_from_hls(hls_url, row_id, skip_ffmpeg=skip_ffmpeg)
+        if not img_path:
+            result['error'] = 'Frame capture failed'
+            result['status_detail'] = 'Could not capture frame'
+            update_excel_in_memory(row_id, result['label'], result['status'], result['status_detail'])
+            return result
+
+        # Classify
+        label, reason = classify_with_vlm(img_path)
+
+        if "Uncertain" in label or "Obstructed" in label:
+            result['status'] = 'Accessible'
+            result['label'] = 'Uncertain/Obstructed'
+            result['status_detail'] = reason or 'Image unclear'
+        else:
+            result['status'] = 'Accessible'
+            result['label'] = label
+            result['status_detail'] = 'Successfully classified'
+
+        update_excel_in_memory(row_id, result['label'], result['status'], result['status_detail'])
+        return result
 
     except Exception as e:
-        logger.error(f"VLM request failed: {e}", exc_info=True)
-        return "Uncertain"
+        logger.error(f"Error processing Row {row_id}: {e}")
+        result['error'] = str(e)
+        result['status_detail'] = 'Processing error'
+        update_excel_in_memory(row_id, result['label'], result['status'], result['status_detail'])
+        return result
 
 
-def capture_frame_with_opencv(rtsp_url, token, device_id, camera_no, timeout_ms=RTSP_TIMEOUT_MS):
-    logger.info(f"Capturing frame with OpenCV for Device {device_id}, Camera {camera_no}")
-    tokenized_url = add_token_to_url(rtsp_url, token)
-    logger.debug(f"Tokenized RTSP URL: {tokenized_url[:100]}...")
-    
-    cap = cv2.VideoCapture(tokenized_url, cv2.CAP_FFMPEG)
-    
-    # Set timeout using optimized constant
-    cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, timeout_ms)
-    cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, timeout_ms)
+def _get_assignment_runtime_config():
+    try:
+        payload = json.loads(VISION_ASSIGNMENT_PAYLOAD or "{}")
+    except Exception as exc:
+        raise ValueError(f"Invalid VISION_ASSIGNMENT_PAYLOAD JSON: {exc}")
 
-    if not cap.isOpened():
-        logger.error(f"❌ FRAME CAPTURE FAILED: Failed to open stream for Device ID {device_id}, Camera No {camera_no}")
-        return None
+    assignment_id = payload.get("assignment_id")
+    exam_id = payload.get("exam_id")
+    shift_id = payload.get("shift_id")
+    assignment_date = payload.get("assignment_date")
+    link_type = str(payload.get("link_type") or "").upper()
 
-    ret, frame = cap.read()
-    cap.release()
+    if assignment_id is None:
+        raise ValueError("VISION_ASSIGNMENT_PAYLOAD must include assignment_id")
+    if exam_id is None:
+        raise ValueError("VISION_ASSIGNMENT_PAYLOAD must include exam_id")
+    if link_type not in {"HLS", "RTSP"}:
+        raise ValueError("VISION_ASSIGNMENT_PAYLOAD must include valid link_type: HLS or RTSP")
+    if link_type == "HLS" and (shift_id is None or assignment_date is None):
+        raise ValueError("For HLS assignments, shift_id and assignment_date are required")
 
-    if not ret:
-        logger.error(f"❌ FRAME CAPTURE FAILED: Failed to read frame from Device ID {device_id}, Camera No {camera_no}")
-        return None
-
-    save_dir = f"frames/{device_id}/{camera_no}"
-    os.makedirs(save_dir, exist_ok=True)
-    img_path = f"{save_dir}/frame_{uuid.uuid4().hex}.jpg"
-    cv2.imwrite(img_path, frame)
-    logger.info(f"✅ FRAME CAPTURED SUCCESSFULLY: Frame saved to {img_path}")
-    return img_path
+    return {
+        "assignment_id": int(assignment_id),
+        "exam_id": int(exam_id),
+        "shift_id": int(shift_id) if shift_id is not None else None,
+        "assignment_date": str(assignment_date) if assignment_date is not None else None,
+        "link_type": link_type,
+    }
 
 
-def capture_frame_with_ffmpeg(rtsp_url, token, device_id, camera_no):
-    logger.info(f"Attempting FFmpeg frame capture for Device {device_id}, Camera {camera_no}")
-    
+def _fetch_assignment_cameras(runtime):
+    if runtime["link_type"] == "HLS":
+        rows = get_hls_cameras(
+            runtime["exam_id"],
+            runtime["shift_id"],
+            runtime["assignment_date"],
+        )
+    else:
+        rows = get_rtsp_cameras(runtime["exam_id"])
+
+    return rows or []
+
+
+def _extract_assignment_camera_id(camera):
+    return str(camera.get("ch_code") or camera.get("device_id") or camera.get("camera_id") or "").strip()
+
+
+def _capture_frame_from_direct_rtsp(rtsp_url, camera_id):
     if not shutil.which("ffmpeg"):
-        logger.warning("ffmpeg executable not found on PATH; skipping this URL")
-        return None  # Don't fall back to OpenCV - just fail fast
+        logger.warning("ffmpeg executable not found on PATH; skipping RTSP classification")
+        return None
 
-    tokenized_url = add_token_to_url(rtsp_url, token)
-    save_dir = f"frames/{device_id}/{camera_no}"
+    save_dir = os.path.join("frames", "assignment", str(camera_id))
     os.makedirs(save_dir, exist_ok=True)
-    img_path = f"{save_dir}/frame_{uuid.uuid4().hex}.jpg"
-
-    logger.info(f"Using FFmpeg to capture frame from: {tokenized_url[:100]}...")
-    logger.debug(f"Output path: {img_path}")
+    img_path = os.path.join(save_dir, f"frame_{uuid.uuid4().hex}.jpg")
 
     cmd = [
         "ffmpeg",
         "-y",
         "-rtsp_transport", "tcp",
-        "-timeout", str(RTSP_TIMEOUT_MS * 1000),  # Convert ms to microseconds for ffmpeg
-        "-i", tokenized_url,
+        "-timeout", str(TIMEOUT_FFMPEG * 1000000),
+        "-i", rtsp_url,
         "-frames:v", "1",
-        "-loglevel", "error",  # Reduce verbose output
-        img_path
+        "-loglevel", "error",
+        img_path,
     ]
 
     try:
-        logger.debug(f"Running FFmpeg command: {' '.join(cmd[:8])}...")
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)  # Reduced from 20s to 10s
-        
-        logger.debug(f"FFmpeg stdout: {result.stdout.decode(errors='ignore')[:500]}")
-        logger.debug(f"FFmpeg stderr: {result.stderr.decode(errors='ignore')[:500]}")
-        
-        if result.returncode != 0:
-            logger.warning(f"FFmpeg exited with code {result.returncode} - URL likely not accessible")
-            logger.debug(f"FFmpeg stderr: {result.stderr.decode(errors='ignore')[:500]}")
-            return None  # Don't fall back - fail fast
-    except FileNotFoundError:
-        logger.warning("ffmpeg command not found")
-        return None  # Fail fast - no fallback
-    except subprocess.TimeoutExpired:
-        logger.warning(f"FFmpeg timed out after 10 seconds")
-        return None  # Fail fast
-    except Exception as e:
-        logger.error(f"FFmpeg failed: {e}")
-        return None  # Fail fast
-
-    if not os.path.exists(img_path):
-        logger.warning("❌ FRAME CAPTURE FAILED: FFmpeg did not create an output frame")
-        return None  # Fail fast
-
-    logger.info(f"✅ FRAME CAPTURED SUCCESSFULLY: Frame saved with FFmpeg to {img_path}")
-    return img_path
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=TIMEOUT_FFMPEG)
+        if result.returncode != 0 or not os.path.exists(img_path):
+            logger.debug(f"RTSP frame capture failed for {camera_id}: {result.stderr.decode(errors='ignore')[:300]}")
+            return None
+        return img_path
+    except Exception as exc:
+        logger.debug(f"RTSP frame capture exception for {camera_id}: {exc}")
+        return None
 
 
-def try_capture_single_url(rtsp_url, token, device_id, camera_no, url_index):
-    """Try to capture frame from a single URL (used for parallel testing)"""
-    logger.debug(f"Testing RTSP URL {url_index} for Device {device_id}, Camera {camera_no}")
-    img_path = capture_frame_with_ffmpeg(rtsp_url, token, device_id, camera_no)
-    if img_path:
-        logger.info(f"✅ Successfully captured frame using URL {url_index} for Device {device_id}, Camera {camera_no}")
-    return img_path
+def _quick_accessibility_check_assignment(camera, link_type):
+    camera_id = _extract_assignment_camera_id(camera)
+    source_url = str(camera.get("cctv_url") or "").strip()
 
-def try_open_and_classify_rtsp_stream_parallel(rtsp_urls, token, device_id, camera_no):
-    """Test all RTSP URLs in parallel and use first successful one"""
-    logger.info(f"Testing {len(rtsp_urls)} RTSP URLs in parallel for Device {device_id}, Camera {camera_no}")
-    
-    img_path = None
-    
-    # Test all URLs in parallel using ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=len(rtsp_urls)) as executor:
-        # Submit all URL tests simultaneously
-        future_to_url = {
-            executor.submit(try_capture_single_url, url, token, device_id, camera_no, idx): idx 
-            for idx, url in enumerate(rtsp_urls, 1)
+    if not source_url:
+        return {
+            "camera_id": camera_id,
+            "accessible": False,
+            "resolved_url": None,
+            "reason": "missing_cctv_url",
+            "camera": camera,
         }
-        
-        # Get the first successful result
-        for future in as_completed(future_to_url):
-            result = future.result()
-            if result:
-                img_path = result
-                logger.info(f"First successful capture received for Device {device_id}, Camera {camera_no}")
-                # Cancel remaining futures since we got a success
-                for f in future_to_url:
-                    f.cancel()
-                break
-    
+
+    if link_type == "HLS":
+        hls_url = extract_hls_streaming_url(source_url) or source_url
+        is_accessible, status_code = test_hls_stream(hls_url)
+        if not is_accessible:
+            reason = f"hls_http_{status_code}" if status_code else "hls_not_accessible"
+            return {
+                "camera_id": camera_id,
+                "accessible": False,
+                "resolved_url": hls_url,
+                "reason": reason,
+                "camera": camera,
+            }
+        return {
+            "camera_id": camera_id,
+            "accessible": True,
+            "resolved_url": hls_url,
+            "reason": "ok",
+            "camera": camera,
+        }
+
+    return {
+        "camera_id": camera_id,
+        "accessible": True,
+        "resolved_url": source_url,
+        "reason": "ok",
+        "camera": camera,
+    }
+
+
+def _process_accessible_assignment_camera(access_result, link_type):
+    camera = access_result["camera"]
+    camera_id = access_result["camera_id"]
+    resolved_url = access_result["resolved_url"]
+
+    if link_type == "HLS":
+        img_path = capture_frame_from_hls(resolved_url, camera_id, skip_ffmpeg=False, timeout_ms=TIMEOUT_OPENCV)
+    else:
+        img_path = _capture_frame_from_direct_rtsp(resolved_url, camera_id)
+
     if not img_path:
-        logger.error(f"Failed to capture frame from any URL for Device {device_id}, Camera {camera_no}")
-        return None
-    
-    label = classify_with_vlm(img_path)
-    logger.info(f"Classification complete for Device {device_id}, Camera {camera_no}: {label}")
-    return label
+        return {
+            "camera_id": camera_id,
+            "camera_name": camera.get("camera_name"),
+            "classification": "Uncertain",
+            "status": "Not Accessible",
+            "status_detail": "frame_capture_failed",
+        }
 
-def try_open_and_classify_rtsp_stream(rtsp_url, token, device_id, camera_no):
-    """Legacy function - captures from single URL"""
-    logger.info(f"Attempting to open and classify RTSP stream for Device {device_id}, Camera {camera_no}")
-    logger.debug(f"RTSP URL: {rtsp_url[:100]}...")
-    
-    img_path = capture_frame_with_ffmpeg(rtsp_url, token, device_id, camera_no)
-    if not img_path:
-        logger.error(f"Failed to capture frame for Device {device_id}, Camera {camera_no}")
-        return None
+    label, reason = classify_with_vlm(img_path)
+    label = (label or "Uncertain").strip()
+    reason = (reason or "").strip()
 
-    label = classify_with_vlm(img_path)
-    logger.info(f"Classification complete for Device {device_id}, Camera {camera_no}: {label}")
-    return label
-# ============================================================
-# Excel Update (Optimized with batching)
-# ============================================================
-excel_update_queue = []  # Queue for batched updates
-excel_lock = threading.Lock()  # Thread-safe Excel updates
-
-def update_excel_in_memory(device_id, camera_no, label, status="Accessible"):
-    """Update dataframe in memory without writing to disk (faster)"""
-    logger.info(f"Queuing Excel update for Device ID {device_id}, Camera No {camera_no} with label: {label}, status: {status}")
-    global df
-    with excel_lock:
-        # mask = (df["Device ID"] == device_id) & (df["Camera No"] == camera_no)
-        mask = (df["device_id"] == device_id) & (df["no"] == camera_no)
-
-        if mask.any():
-            df.loc[mask, SCENE_COLUMN_NAME] = label
-            df.loc[mask, "Status"] = status
-            excel_update_queue.append((device_id, camera_no, label, status))
-            logger.debug(f"In-memory update queued: Device ID {device_id}, Camera No {camera_no}")
-        else:
-            logger.warning(f"No match in Excel for Device ID {device_id}, Camera No {camera_no}")
+    return {
+        "camera_id": camera_id,
+        "camera_name": camera.get("camera_name"),
+        "classification": label,
+        "status": "Accessible",
+        "status_detail": reason or "classified",
+    }
 
 
-
-def write_excel_once():
-    logger.info("Writing final Excel output (single write)...")
-    tmp_file = INPUT_EXCEL.replace(".xlsx", "_tmp.xlsx")
-
-    with pd.ExcelWriter(tmp_file, engine="openpyxl") as writer:
-        df.to_excel(writer, sheet_name=EXCEL_SHEET, index=False)
-
-    os.replace(tmp_file, INPUT_EXCEL)  # atomic replace
-    logger.info("✅ Excel written safely without corruption")
-
-
-def update_excel_sheet(device_id, camera_no, label, status="Accessible"):
-    """Legacy function - now uses in-memory updates"""
-    update_excel_in_memory(device_id, camera_no, label, status)
-
-
-def create_new_sheets(output_dir="."):
-    """Create separate Excel files for each detection type with full original data"""
-    try:
-        # Detection types based on scripts in scripts/detection/
-        detection_types = [
-            "crowd",
-            "proximity",
-            "mobile",
-            "intruder",
-            "entry_exit",
-            "server_room",
-            "invigilator"
-        ]
-        
-        logger.info(f"Creating {len(detection_types)} Excel files for detection types...")
-        logger.info(f"Detection types: {', '.join(detection_types)}")
-        
-        # Total classified cameras
-        total_classified = len(df[
-            (df[SCENE_COLUMN_NAME] != "") & 
-            (df[SCENE_COLUMN_NAME].notna()) &
-            (df[SCENE_COLUMN_NAME] != "Failed to Classify")
-        ])
-        
-        logger.info(f"Total classified cameras: {total_classified}")
-        
-        # Create one Excel file for each detection type with full original sheet
-        for detection_type in detection_types:
-            filename = os.path.join(output_dir, f"{detection_type}.xlsx")
-            
-            # Copy the entire original DataFrame to each file
-            output_df = df.copy()
-            
-            # Save to Excel
-            output_df.to_excel(filename, index=False, sheet_name="Sheet1")
-            logger.info(f"✅ Created {filename} with {len(output_df)} rows (full original data)")
-        
-        logger.info(f"✅ All {len(detection_types)} Excel files created successfully")
-        
-    except Exception as e:
-        logger.error(f"Error creating new Excel files: {e}", exc_info=True)
-
-# ============================================================
-# Per Camera Flow (Optimized with caching)
-# ============================================================
-def is_camera_already_classified(device_id, camera_no):
-    """Check if camera is already classified (skip re-classification)"""
-    global df
-    mask = (df["device_id"] == device_id) & (df["no"] == camera_no)
-    if mask.any():
-        existing_label = df.loc[mask, SCENE_COLUMN_NAME].values[0]
-        # Check if already has a valid classification
-        if pd.notna(existing_label) and existing_label != "" and existing_label != "Failed to Classify":
-            logger.info(f"✓ Camera {device_id}/{camera_no} already classified as '{existing_label}' - skipping classification")
-            return True, existing_label
-    return False, None
-
-
-
-def process_camera(device_id, camera_no):
-    logger.info("="*60)
-    logger.info(f"Processing Camera - Device ID: {device_id}, Camera No: {camera_no}")
-    logger.info("="*60)
-    
-    server = device_camera_server_map.get((device_id, camera_no))
-    if not server:
-        logger.error(f"No server mapping found for Device ID {device_id}, Camera No {camera_no}")
-        update_excel_sheet(device_id, camera_no, "Failed to Classify", "Server Not Found")
-        return
-    
-    already_classified, existing_label = is_camera_already_classified(device_id, camera_no)
-    
-    max_retries = MAX_RETRY_ATTEMPTS
-    
-    for attempt in range(max_retries):
-        logger.info(f"Attempt {attempt+1}/{max_retries} for Device: {device_id}, Camera: {camera_no}")
-
-        current_token = refresh_token_if_needed(server)
-        urls, token_new = start_video_stream(device_id, camera_no, server, current_token)
-
-        if not urls or not token_new:
-            time.sleep(1)
+def _persist_assignment_classifications(runtime, classification_results):
+    updated = 0
+    for item in classification_results:
+        camera_id = str(item.get("camera_id") or "").strip()
+        label = str(item.get("classification") or "").strip()
+        if not camera_id or not label:
             continue
 
-        img_path = None
-        
-        # ✅ Sequential URL testing (NO nested threads)
-        for url in urls:
-            img_path = capture_frame_with_ffmpeg(url, token_new, device_id, camera_no)
-            if img_path:
-                break
-
-        if not img_path:
-            continue
-
-        if already_classified:
-            update_excel_sheet(device_id, camera_no, existing_label, "Accessible")
-            logger.info(f"Verified already classified camera {device_id}/{camera_no}")
-            return
+        if runtime["link_type"] == "HLS":
+            updated += update_hls_classification(
+                runtime["exam_id"],
+                runtime["shift_id"],
+                runtime["assignment_date"],
+                camera_id,
+                label,
+            )
         else:
-            label = classify_with_vlm(img_path)
-            if label:
-                update_excel_sheet(device_id, camera_no, label, "Accessible")
-                logger.info(f"Successfully classified {device_id}/{camera_no}")
-                return
-
-    logger.error(f"Failed to classify Device {device_id}, Camera {camera_no}")
-    update_excel_sheet(device_id, camera_no, "Failed to Classify", "Not Accessible")
+            updated += update_rtsp_classification(runtime["exam_id"], camera_id, label)
+    return updated
 
 
+def run_assignment_mode():
+    runtime = _get_assignment_runtime_config()
+    cameras = _fetch_assignment_cameras(runtime)
 
-# ============================================================
-# MAIN LOOP (PARALLEL PROCESSING)
-# ============================================================
-logger.info("="*80)
-logger.info(f"Starting main processing loop for {len(device_ids)} devices")
-total_cameras = sum(len(cameras) for cameras in device_camera_map.values())
-logger.info(f"Total cameras to process: {total_cameras}")
-logger.info("="*80)
+    logger.info(
+        f"Assignment mode started: assignment_id={runtime['assignment_id']} "
+        f"exam_id={runtime['exam_id']} link_type={runtime['link_type']} cameras={len(cameras)}"
+    )
 
-# Configuration for parallel processing
-MAX_WORKERS = 12  # Optimized for H100 GPU + 24 CPU cores (balance between network I/O and VLM processing)
-BATCH_FLUSH_SIZE = 20  # Flush Excel updates every 20 cameras
+    if not cameras:
+        return {
+            "assignment_id": runtime["assignment_id"],
+            "link_type": runtime["link_type"],
+            "processed": 0,
+            "failed": [],
+            "classifications": [],
+            "persisted_classification_updates": 0,
+        }
 
-camera_counter = 0
-accessible_counter = 0
-not_accessible_counter = 0
-counter_lock = threading.Lock()
-progress_update_interval = 20  # Update progress every 20 seconds
+    pass1_results = []
+    failed = []
 
-def process_camera_with_progress(device_id, camera_no):
-    """Wrapper function for parallel processing with progress tracking"""
-    global camera_counter, accessible_counter, not_accessible_counter
-    
-    try:
-        # Check final status before processing
-        initial_status = None
-        mask = (df["device_id"] == device_id) & (df["no"] == camera_no)
-        if mask.any():
-            initial_status = df.loc[mask, "Status"].values[0] if "Status" in df.columns else None
-        
-        process_camera(device_id, camera_no)
-        
-        # Check final status after processing
-        final_status = None
-        mask = (df["device_id"] == device_id) & (df["no"] == camera_no)
-        if mask.any():
-            final_status = df.loc[mask, "Status"].values[0] if "Status" in df.columns else None
-        
-        # Update counters (thread-safe)
-        with counter_lock:
-            camera_counter += 1
-            
-            # Update accessibility counters
-            if final_status == "Accessible":
-                accessible_counter += 1
-            elif final_status == "Not Accessible":
-                not_accessible_counter += 1
-            
-            current_count = camera_counter
-            
-            # Flush Excel updates periodically
-            if current_count % BATCH_FLUSH_SIZE == 0:
-                write_excel_once()
-
-
-            
-    except Exception as e:
-        logger.error(f"Error processing camera {device_id}/{camera_no}: {e}", exc_info=True)
-        with counter_lock:
-            camera_counter += 1
-            not_accessible_counter += 1
-
-# Build list of all cameras to process
-all_cameras = []
-for device_id in device_ids:
-    cameras = device_camera_map[device_id]
-    for camera_no in cameras:
-        all_cameras.append((device_id, camera_no))
-
-logger.info(f"Starting parallel processing with {MAX_WORKERS} workers...")
-print(f"\n🚀 Processing {total_cameras} cameras in parallel with {MAX_WORKERS} workers...\n")
-
-# Progress reporting thread
-stop_progress_thread = threading.Event()
-start_time = time.time()
-
-def progress_reporter():
-    """Thread function that reports progress every 20 seconds"""
-    while not stop_progress_thread.is_set():
-        time.sleep(progress_update_interval)
-        
-        with counter_lock:
-            current_count = camera_counter
-            accessible = accessible_counter
-            not_accessible = not_accessible_counter
-            pending = total_cameras - current_count
-        
-        elapsed_time = time.time() - start_time
-        progress_percent = (current_count / total_cameras) * 100 if total_cameras > 0 else 0
-        
-        # Create progress bar
-        bar_length = 50
-        filled_length = int(bar_length * current_count // total_cameras) if total_cameras > 0 else 0
-        bar = '█' * filled_length + '-' * (bar_length - filled_length)
-        
-        # Format time
-        elapsed_str = f"{int(elapsed_time // 60)}m {int(elapsed_time % 60)}s"
-        
-        # Create progress message
-        progress_msg = (
-            f"\n{'='*80}\n"
-            f"PROGRESS UPDATE (Elapsed: {elapsed_str})\n"
-            f"{'='*80}\n"
-            f"|{bar}| {progress_percent:.1f}%\n"
-            f"Completed: {current_count}/{total_cameras} cameras\n"
-            f"✅ Accessible: {accessible}\n"
-            f"❌ Not Accessible: {not_accessible}\n"
-            f"⏳ Pending: {pending}\n"
-            f"{'='*80}\n"
-        )
-        
-        # Print to console
-        print(progress_msg)
-        
-        # Log to file
-        logger.info(f"PROGRESS: {progress_percent:.1f}% ({current_count}/{total_cameras}) | "
-                   f"Accessible: {accessible} | Not Accessible: {not_accessible} | "
-                   f"Pending: {pending} | Elapsed: {elapsed_str}")
-
-# Start progress reporting thread
-progress_thread = threading.Thread(target=progress_reporter, daemon=True)
-progress_thread.start()
-
-# Process cameras in parallel using ThreadPoolExecutor
-try:
-    # Process cameras in parallel using ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = [executor.submit(process_camera_with_progress, device_id, camera_no) 
-                   for device_id, camera_no in all_cameras]
-        
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS_NETWORK) as executor:
+        futures = [executor.submit(_quick_accessibility_check_assignment, camera, runtime["link_type"]) for camera in cameras]
         for future in as_completed(futures):
-            try:
-                future.result()
-            except Exception as e:
-                logger.error(f"Task failed with exception: {e}", exc_info=True)
+            result = future.result()
+            if result["accessible"]:
+                pass1_results.append(result)
+            else:
+                failed.append({
+                    "camera_id": result["camera_id"],
+                    "reason": result["reason"],
+                })
 
-except KeyboardInterrupt:
-    logger.warning("⚠ Interrupted by user! Writing Excel before exit...")
-    write_excel_once()
-    sys.exit(0)
+    classification_results = []
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS_VLM) as executor:
+        futures = [
+            executor.submit(_process_accessible_assignment_camera, access_result, runtime["link_type"])
+            for access_result in pass1_results
+        ]
+        for future in as_completed(futures):
+            result = future.result()
+            classification_results.append({
+                "camera_id": result["camera_id"],
+                "camera_name": result.get("camera_name"),
+                "classification": result["classification"],
+            })
+            if result.get("status") != "Accessible":
+                failed.append({
+                    "camera_id": result["camera_id"],
+                    "reason": result.get("status_detail") or "processing_failed",
+                })
+
+    updated_rows = _persist_assignment_classifications(runtime, classification_results)
+
+    return {
+        "assignment_id": runtime["assignment_id"],
+        "link_type": runtime["link_type"],
+        "processed": len(classification_results),
+        "failed": failed,
+        "classifications": classification_results,
+        "persisted_classification_updates": updated_rows,
+    }
+    
+    try:
+        # Extract HLS URL
+        hls_url = extract_hls_streaming_url(initial_url)
+        if not hls_url:
+            result['error'] = 'Failed to extract HLS URL'
+            result['status_detail'] = 'URL extraction failed'
+            update_excel_in_memory(row_id, result['label'], result['status'], result['status_detail'])
+            return result
+        
+        # Test stream
+        is_accessible, status_code = test_hls_stream(hls_url)
+        skip_ffmpeg = status_code in [404, 502, 503, 500]  # Skip FFmpeg for known bad codes
+        
+        if not is_accessible:
+            result['error'] = 'HLS stream not accessible'
+            result['status_detail'] = f'HTTP {status_code}' if status_code else 'Connection failed'
+            update_excel_in_memory(row_id, result['label'], result['status'], result['status_detail'])
+            return result
+        
+        # Capture frame
+        img_path = capture_frame_from_hls(hls_url, row_id, skip_ffmpeg=skip_ffmpeg)
+        if not img_path:
+            result['error'] = 'Frame capture failed'
+            result['status_detail'] = 'Could not capture frame'
+            update_excel_in_memory(row_id, result['label'], result['status'], result['status_detail'])
+            return result
+        
+        # Classify
+        label, reason = classify_with_vlm(img_path)
+        
+        if "Uncertain" in label or "Obstructed" in label:
+            result['status'] = 'Accessible'
+            result['label'] = 'Uncertain/Obstructed'
+            result['status_detail'] = reason or 'Image unclear'
+        else:
+            result['status'] = 'Accessible'
+            result['label'] = label
+            result['status_detail'] = 'Successfully classified'
+        
+        update_excel_in_memory(row_id, result['label'], result['status'], result['status_detail'])
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error processing Row {row_id}: {e}")
+        result['error'] = str(e)
+        result['status_detail'] = 'Processing error'
+        update_excel_in_memory(row_id, result['label'], result['status'], result['status_detail'])
+        return result
 
 
-# Stop progress reporting thread
-stop_progress_thread.set()
-progress_thread.join(timeout=1)
+# ============================================================
+# Main Processing Loop - OPTIMIZED TWO-PASS STRATEGY
+# ============================================================
+def main():
+    global df
+    
+    logger.info("="*80)
+    logger.info("🚀 OPTIMIZED TCS Camera Classification - TWO-PASS MODE")
+    logger.info("="*80)
+    logger.info(f"Total cameras: {len(df)}")
+    logger.info(f"Network workers: {MAX_WORKERS_NETWORK}")
+    logger.info(f"VLM workers: {MAX_WORKERS_VLM}")
+    logger.info(f"Checkpoint interval: {CHECKPOINT_INTERVAL}")
+    logger.info("="*80)
+    
+    # Load checkpoint if exists
+    if RESUME_FROM_CHECKPOINT and load_checkpoint():
+        # Filter to only unprocessed rows
+        unprocessed = df[df['Status'] == '']
+        if len(unprocessed) == 0:
+            logger.info("✅ All cameras already processed!")
+            save_results()
+            return
+        logger.info(f"Resuming: {len(unprocessed)} cameras remaining")
+    
+    start_time = time.time()
+    
+    if TWO_PASS_MODE:
+        # ========== PASS 1: Quick Accessibility Check ==========
+        logger.info("\n" + "="*80)
+        logger.info("PASS 1: Quick Accessibility Check (No frame capture)")
+        logger.info("="*80)
+        
+        accessible_cameras = []
+        pass1_start = time.time()
+        
+        # Get rows to process
+        rows_to_check = df[df['Status'] == ''].copy()
+        
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS_NETWORK) as executor:
+            futures = [executor.submit(quick_accessibility_check, row) 
+                      for _, row in rows_to_check.iterrows()]
+            
+            with tqdm(total=len(futures), desc="Pass 1: Checking accessibility") as pbar:
+                for future in as_completed(futures):
+                    try:
+                        row_id, hls_url, is_accessible, error = future.result()
+                        
+                        if is_accessible and hls_url:
+                            # Store for Pass 2
+                            accessible_cameras.append((row_id, hls_url))
+                        else:
+                            # Mark as not accessible
+                            update_excel_in_memory(
+                                row_id, 
+                                'Failed to Classify', 
+                                'Not Accessible',
+                                error or 'Stream not accessible'
+                            )
+                        
+                        pbar.update(1)
+                        
+                    except Exception as e:
+                        logger.error(f"Pass 1 task failed: {e}")
+                        pbar.update(1)
+        
+        pass1_time = time.time() - pass1_start
+        
+        logger.info(f"\n✅ Pass 1 Complete!")
+        logger.info(f"   Time: {int(pass1_time//60)}m {int(pass1_time%60)}s")
+        logger.info(f"   Accessible: {len(accessible_cameras)}")
+        logger.info(f"   Not Accessible: {len(rows_to_check) - len(accessible_cameras)}")
+        
+        # Save checkpoint after Pass 1
+        save_checkpoint()
+        
+        if len(accessible_cameras) == 0:
+            logger.warning("No accessible cameras found!")
+            save_results()
+            return
+        
+        # ========== PASS 2: Frame Capture & Classification ==========
+        logger.info("\n" + "="*80)
+        logger.info(f"PASS 2: Frame Capture & Classification ({len(accessible_cameras)} cameras)")
+        logger.info("="*80)
+        
+        pass2_start = time.time()
+        classified_count = 0
+        uncertain_count = 0
+        
+        # Process accessible cameras with VLM
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS_VLM) as executor:
+            # Create tasks for accessible cameras
+            tasks = []
+            for row_id, hls_url in accessible_cameras:
+                row = df[df['Row_ID'] == row_id].iloc[0]
+                tasks.append(executor.submit(process_accessible_camera, row, hls_url))
+            
+            with tqdm(total=len(tasks), desc="Pass 2: Classifying") as pbar:
+                for future in as_completed(tasks):
+                    try:
+                        result = future.result()
+                        
+                        # Update dataframe
+                        update_excel_in_memory(
+                            result['row_id'],
+                            result['label'],
+                            result['status'],
+                            result['status_detail']
+                        )
+                        
+                        if 'Uncertain' in result['label']:
+                            uncertain_count += 1
+                        else:
+                            classified_count += 1
+                        
+                        pbar.update(1)
+                        
+                    except Exception as e:
+                        logger.error(f"Pass 2 task failed: {e}")
+                        pbar.update(1)
+        
+        pass2_time = time.time() - pass2_start
+        
+        logger.info(f"\n✅ Pass 2 Complete!")
+        logger.info(f"   Time: {int(pass2_time//60)}m {int(pass2_time%60)}s")
+        logger.info(f"   Classified: {classified_count}")
+        logger.info(f"   Uncertain/Obstructed: {uncertain_count}")
+        
+    else:
+        # ========== LEGACY: Single-Pass Processing ==========
+        logger.info("Using LEGACY single-pass mode")
+        
+        rows_to_process = df[df['Status'] == ''].copy()
+        
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS_NETWORK) as executor:
+            futures = [executor.submit(process_single_camera_legacy, row) 
+                      for _, row in rows_to_process.iterrows()]
+            
+            with tqdm(total=len(futures), desc="Processing cameras") as pbar:
+                for future in as_completed(futures):
+                    try:
+                        future.result()
+                        pbar.update(1)
+                    except Exception as e:
+                        logger.error(f"Task failed: {e}")
+                        pbar.update(1)
+    
+    # ========== Final Summary ==========
+    total_time = time.time() - start_time
+    
+    accessible_total = len(df[df['Status'] == 'Accessible'])
+    not_accessible = len(df[df['Status'] == 'Not Accessible'])
+    uncertain = len(df[df['Status Detail'].str.contains('Uncertain|Obstructed', na=False)])
+    
+    summary = f"""
+{'='*80}
+🎉 FINAL SUMMARY
+{'='*80}
+Total Cameras: {len(df)}
+✅ Accessible (Classified): {accessible_total - uncertain}
+⚠️  Accessible (Uncertain/Obstructed): {uncertain}
+❌ Not Accessible: {not_accessible}
+⏱️  Total Time: {int(total_time//60)}m {int(total_time%60)}s
+📊 Success Rate: {(accessible_total/len(df)*100):.1f}%
+{'='*80}
+"""
+    
+    print(summary)
+    logger.info(summary)
+    
+    # Save final results
+    save_results()
+    
+    # Clean up checkpoint
+    if os.path.exists(CHECKPOINT_FILE):
+        os.remove(CHECKPOINT_FILE)
+        logger.info("✅ Checkpoint file cleaned up")
 
-# Final flush of any remaining updates
-# flush_excel_updates()
 
-# Calculate final statistics
-total_elapsed = time.time() - start_time
-elapsed_str = f"{int(total_elapsed // 60)}m {int(total_elapsed % 60)}s"
-
-# Print final summary
-final_summary = (
-    f"\n{'='*80}\n"
-    f"FINAL SUMMARY\n"
-    f"{'='*80}\n"
-    f"Total Cameras: {total_cameras}\n"
-    f"✅ Accessible: {accessible_counter}\n"
-    f"❌ Not Accessible: {not_accessible_counter}\n"
-    f"⏱️  Total Time: {elapsed_str}\n"
-    f"📊 Success Rate: {(accessible_counter/total_cameras*100):.1f}%\n"
-    f"{'='*80}\n"
-)
-
-
-write_excel_once()
-
-
-print(final_summary)
-
-logger.info("="*80)
-logger.info("All devices processed successfully!")
-logger.info(f"Log file saved to: {log_filename}")
-logger.info(f"Total cameras processed: {camera_counter}/{total_cameras}")
-logger.info(f"Accessible cameras: {accessible_counter}")
-logger.info(f"Not accessible cameras: {not_accessible_counter}")
-logger.info(f"Total time: {elapsed_str}")
-logger.info("="*80)
-
-# Create separate Excel files for each detection type
-logger.info("\n" + "="*80)
-logger.info("Creating Excel files for detection types...")
-logger.info("="*80)
-try:
-    output_dir = "data/sheets"
+def save_results():
+    """
+    Save results to THREE separate Excel files (Option A):
+    1. Accessible cameras (classified successfully)
+    2. Accessible but Uncertain/Obstructed cameras
+    3. Not Accessible cameras
+    """
+    logger.info("="*80)
+    logger.info("Saving results to Excel files")
+    logger.info("="*80)
+    
+    # Create output directory
+    output_dir = "results/tcs_classification"
     os.makedirs(output_dir, exist_ok=True)
-    create_new_sheets(output_dir)
-except Exception as e:
-    logger.error(f"Failed to create new Excel files: {e}", exc_info=True)
+    
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    
+    try:
+        # Split dataframe into three categories
+        accessible_df = df[
+            (df['Status'] == 'Accessible') & 
+            (~df['Status Detail'].str.contains('Uncertain|Obstructed', na=False))
+        ].copy()
+        
+        uncertain_df = df[
+            (df['Status'] == 'Accessible') & 
+            (df['Status Detail'].str.contains('Uncertain|Obstructed', na=False))
+        ].copy()
+        
+        not_accessible_df = df[df['Status'] == 'Not Accessible'].copy()
+        
+        # Remove Row_ID column (internal use only)
+        for dataframe in [accessible_df, uncertain_df, not_accessible_df]:
+            if 'Row_ID' in dataframe.columns:
+                dataframe.drop('Row_ID', axis=1, inplace=True)
+        
+        # Save accessible cameras
+        if len(accessible_df) > 0:
+            accessible_file = os.path.join(output_dir, f"accessible_classified_{timestamp}.xlsx")
+            accessible_df.to_excel(accessible_file, index=False, sheet_name="Classified")
+            logger.info(f"✅ Saved {len(accessible_df)} classified cameras to: {accessible_file}")
+            print(f"   ✅ Classified: {accessible_file}")
+        
+        # Save uncertain/obstructed cameras
+        if len(uncertain_df) > 0:
+            uncertain_file = os.path.join(output_dir, f"accessible_uncertain_{timestamp}.xlsx")
+            uncertain_df.to_excel(uncertain_file, index=False, sheet_name="Uncertain")
+            logger.info(f"⚠️  Saved {len(uncertain_df)} uncertain/obstructed cameras to: {uncertain_file}")
+            print(f"   ⚠️  Uncertain: {uncertain_file}")
+        
+        # Save non-accessible cameras
+        if len(not_accessible_df) > 0:
+            not_accessible_file = os.path.join(output_dir, f"not_accessible_{timestamp}.xlsx")
+            not_accessible_df.to_excel(not_accessible_file, index=False, sheet_name="Not Accessible")
+            logger.info(f"❌ Saved {len(not_accessible_df)} non-accessible cameras to: {not_accessible_file}")
+            print(f"   ❌ Not Accessible: {not_accessible_file}")
+        
+        # Also save complete results in one file
+        complete_file = os.path.join(output_dir, f"complete_results_{timestamp}.xlsx")
+        df_save = df.copy()
+        if 'Row_ID' in df_save.columns:
+            df_save.drop('Row_ID', axis=1, inplace=True)
+        
+        with pd.ExcelWriter(complete_file, engine='openpyxl') as writer:
+            if len(accessible_df) > 0:
+                accessible_df.to_excel(writer, sheet_name="Classified", index=False)
+            if len(uncertain_df) > 0:
+                uncertain_df.to_excel(writer, sheet_name="Uncertain", index=False)
+            if len(not_accessible_df) > 0:
+                not_accessible_df.to_excel(writer, sheet_name="Not Accessible", index=False)
+            df_save.to_excel(writer, sheet_name="All Results", index=False)
+        
+        logger.info(f"📊 Saved complete results to: {complete_file}")
+        print(f"\n📁 Complete Results: {complete_file}")
+        
+    except Exception as e:
+        logger.error(f"Failed to save results: {e}", exc_info=True)
 
-print("\nAll devices processed.")
-print(f"Detailed logs saved to: {log_filename}")
-print("✅ Detection-type Excel files created in data/sheets/: crowd.xlsx, proximity.xlsx, mobile.xlsx, intruder.xlsx, entry_exit.xlsx, server_room.xlsx, invigilator.xlsx")
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+# ============================================================
+# Entry Point
+# ============================================================
+if __name__ == "__main__":
+    try:
+        if VISION_ASSIGNMENT_PAYLOAD:
+            assignment_result = run_assignment_mode()
+            print(json.dumps(assignment_result))
+        else:
+            main()
+        logger.info("="*80)
+        logger.info("Processing completed successfully!")
+        logger.info(f"Log file: {log_filename}")
+        logger.info("="*80)
+    except KeyboardInterrupt:
+        logger.warning("\n\nProcessing interrupted by user")
+        save_results()
+        sys.exit(1)
+    except Exception as e:
+        logger.error(f"Fatal error: {e}", exc_info=True)
+        sys.exit(1)

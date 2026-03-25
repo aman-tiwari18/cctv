@@ -2,7 +2,75 @@ const ShiftScriptAssignment = require("../models/ShiftScriptAssignment");
 const Script = require("../models/Script");
 const ExamShift = require("../models/ExamShift");
 const Exam = require("../models/Exam");
+const { CameraLinkHLS, CameraLinkRTSP } = require("../models");
+const { Op } = require("sequelize");
 
+const persistVisionClassifications = async (assignment, resultData) => {
+    const classifications = Array.isArray(resultData?.classifications)
+        ? resultData.classifications
+        : [];
+
+    if (classifications.length === 0) {
+        return 0;
+    }
+
+    const linkType = String(assignment.shift?.exam?.link_type || "").toUpperCase();
+    const examId = assignment.shift?.exam?.id;
+    const shiftId = assignment.shift_id;
+    const assignmentDate = assignment.assignment_date;
+    let updatedCount = 0;
+
+    for (const item of classifications) {
+        const classification = String(item?.classification || "").trim();
+        const cameraId = String(item?.camera_id || "").trim();
+
+        if (!classification || !cameraId || !examId) {
+            continue;
+        }
+
+        if (linkType === "HLS") {
+            const [affectedRows] = await CameraLinkHLS.update(
+                { classification },
+                {
+                    where: {
+                        exam_id: examId,
+                        ch_code: cameraId,
+                        is_active: true,
+                        [Op.and]: [
+                            {
+                                [Op.or]: [
+                                    { shift_id: shiftId },
+                                    { shift_id: null },
+                                ],
+                            },
+                            {
+                                [Op.or]: [
+                                    { exam_date: assignmentDate },
+                                    { exam_date: null },
+                                ],
+                            },
+                        ],
+                    },
+                }
+            );
+            updatedCount += affectedRows;
+        } else {
+            const [affectedRows] = await CameraLinkRTSP.update(
+                { classification },
+                {
+                    where: {
+                        exam_id: examId,
+                        device_id: cameraId,
+                        is_active: true,
+                    },
+                }
+            );
+            updatedCount += affectedRows;
+        }
+    }
+
+    return updatedCount;
+};
 
 /**
  * Get pending assignments (for script server polling)
@@ -135,7 +203,27 @@ exports.getPending = async (req, res) => {
 exports.updateStatus = async (req, res) => {
     const { status, error_log, result_data } = req.body;
 
-    const assignment = await ShiftScriptAssignment.findByPk(req.params.id);
+    const assignment = await ShiftScriptAssignment.findByPk(req.params.id, {
+        include: [
+            {
+                model: Script,
+                as: "script",
+                attributes: ["id", "script_id", "name"],
+            },
+            {
+                model: ExamShift,
+                as: "shift",
+                attributes: ["id", "exam_id", "shift_name"],
+                include: [
+                    {
+                        model: Exam,
+                        as: "exam",
+                        attributes: ["id", "link_type", "exam_name"],
+                    },
+                ],
+            },
+        ],
+    });
 
     if (!assignment) {
         return res.status(404).json({
@@ -153,7 +241,16 @@ exports.updateStatus = async (req, res) => {
         updates.completed_at = new Date();
     }
     if (error_log) updates.error_log = error_log;
-    if (result_data) updates.result_data = result_data;
+    if (result_data) {
+        const mergedResultData = { ...result_data };
+
+        if (status === "COMPLETED" && assignment.script?.script_id === "vision") {
+            const updatedClassifications = await persistVisionClassifications(assignment, mergedResultData);
+            mergedResultData.persisted_classification_updates = updatedClassifications;
+        }
+
+        updates.result_data = mergedResultData;
+    }
 
     await assignment.update(updates);
 

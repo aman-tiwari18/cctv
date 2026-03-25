@@ -25,7 +25,7 @@ const HLS_EMPTY   = {
 };
 const RTSP_EMPTY  = {
   device_id: '', tc_code: '', camera_name: '', centre_name: '',
-  city: '', state: '', cctv_url: '',
+  city: '', state: '', cctv_url: '', classification: '',
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -38,6 +38,8 @@ const Cameras = () => {
   const [cameras, setCameras]           = useState([]);
   const [examLinkType, setExamLinkType] = useState(null);
   const [loading, setLoading]           = useState(false);
+  const [filterShiftId, setFilterShiftId] = useState('');
+  const [filterExamDate, setFilterExamDate] = useState('');
   
   // Pagination
   const [page, setPage]                 = useState(0);
@@ -70,7 +72,7 @@ const Cameras = () => {
       setCameras([]);
       setTotalCount(0);
     }
-  }, [selectedExam, page, rowsPerPage]);
+  }, [selectedExam, page, rowsPerPage, filterShiftId, filterExamDate]);
 
   const loadExams = async () => {
     try {
@@ -83,17 +85,26 @@ const Cameras = () => {
     if (!selectedExam) return;
     setLoading(true);
     try {
-      const res = await camerasAPI.getByExam(selectedExam, { 
+      const params = {
         is_active: true,
         page: page + 1,
-        limit: rowsPerPage
-      });
+        limit: rowsPerPage,
+      };
+
+      if (filterShiftId) {
+        params.shift_id = filterShiftId;
+      }
+      if (filterExamDate) {
+        params.exam_date = filterExamDate;
+      }
+
+      const res = await camerasAPI.getByExam(selectedExam, params);
       setCameras(res.data.data || []);
       setTotalCount(res.data.totalCount || (res.data.data || []).length);
       setExamLinkType(res.data.linkType);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }, [selectedExam, page, rowsPerPage]);
+  }, [selectedExam, page, rowsPerPage, filterShiftId, filterExamDate]);
 
   // ── Derived ─────────────────────────────────────────────────
   const selectedExamData = exams.find((e) => e.id === Number(selectedExam));
@@ -115,7 +126,8 @@ const Cameras = () => {
           : { device_id: camera.device_id || '', tc_code: camera.tc_code || '',
             camera_name: camera.camera_name || '', city: camera.city || '',
             centre_name: camera.centre_name || camera.tc_name || '',
-            state: camera.state || '', cctv_url: camera.cctv_url || camera.url || '' });
+            state: camera.state || '', cctv_url: camera.cctv_url || camera.url || '',
+            classification: camera.classification || '' });
     } else {
       setEditingCamera(null);
       setFormData(isHLS ? { ...HLS_EMPTY } : { ...RTSP_EMPTY });
@@ -237,17 +249,57 @@ const Cameras = () => {
 
       {/* ── Exam selector ─────────────────────────────────────── */}
       <Paper sx={{ p: 2, mb: 3, borderRadius: 2 }}>
-        <TextField select label="Select Exam" value={selectedExam}
-          onChange={(e) => { setSelectedExam(e.target.value); setPage(0); }} fullWidth size="small">
-          <MenuItem value="">— Select an exam —</MenuItem>
-          {exams.map((exam) => (
-            <MenuItem key={exam.id} value={exam.id}>
-              {exam.exam_name} ({exam.exam_body})
-              <Chip label={exam.link_type} size="small" sx={{ ml: 1, fontSize: '0.65rem' }}
-                color={exam.link_type === 'HLS' ? 'info' : 'secondary'} />
-            </MenuItem>
-          ))}
-        </TextField>
+        <Stack spacing={2}>
+          <TextField select label="Select Exam" value={selectedExam}
+            onChange={(e) => {
+              setSelectedExam(e.target.value);
+              setFilterShiftId('');
+              setFilterExamDate('');
+              setPage(0);
+            }} fullWidth size="small">
+            <MenuItem value="">— Select an exam —</MenuItem>
+            {exams.map((exam) => (
+              <MenuItem key={exam.id} value={exam.id}>
+                {exam.exam_name} ({exam.exam_body})
+                <Chip label={exam.link_type} size="small" sx={{ ml: 1, fontSize: '0.65rem' }}
+                  color={exam.link_type === 'HLS' ? 'info' : 'secondary'} />
+              </MenuItem>
+            ))}
+          </TextField>
+
+          {selectedExam && isHLS && (
+            <Box display="flex" gap={2} flexDirection={{ xs: 'column', md: 'row' }}>
+              <TextField
+                select
+                fullWidth
+                label="Filter by Shift"
+                value={filterShiftId}
+                onChange={(e) => {
+                  setFilterShiftId(e.target.value);
+                  setPage(0);
+                }}
+                size="small"
+              >
+                <MenuItem value="">All shifts</MenuItem>
+                {shifts.map((shift) => (
+                  <MenuItem key={shift.id} value={shift.id}>{shift.shift_name}</MenuItem>
+                ))}
+              </TextField>
+              <TextField
+                fullWidth
+                label="Filter by Exam Date"
+                type="date"
+                value={filterExamDate}
+                onChange={(e) => {
+                  setFilterExamDate(e.target.value);
+                  setPage(0);
+                }}
+                size="small"
+                InputLabelProps={{ shrink: true }}
+              />
+            </Box>
+          )}
+        </Stack>
       </Paper>
 
       {uploadResult && (
@@ -274,6 +326,7 @@ const Cameras = () => {
                       <TableCell><strong>Camera / Lab</strong></TableCell>
                       <TableCell><strong>Ch Code</strong></TableCell>
                       <TableCell><strong>Category</strong></TableCell>
+                      <TableCell><strong>Classification</strong></TableCell>
                       <TableCell><strong>Exam Date</strong></TableCell>
                       <TableCell><strong>Shift</strong></TableCell>
                     </>
@@ -285,6 +338,7 @@ const Cameras = () => {
                       <TableCell><strong>Centre Name</strong></TableCell>
                       <TableCell><strong>City</strong></TableCell>
                       <TableCell><strong>State</strong></TableCell>
+                      <TableCell><strong>Classification</strong></TableCell>
                     </>
                   )}
                   <TableCell><strong>CCTV URL</strong></TableCell>
@@ -309,6 +363,7 @@ const Cameras = () => {
                         <TableCell>
                           <Chip label={cam.camera_category || 'N/A'} size="small" />
                         </TableCell>
+                        <TableCell>{cam.classification || '-'}</TableCell>
                         <TableCell>{cam.exam_date || '-'}</TableCell>
                         <TableCell>
                           {cam.shift_id
@@ -324,6 +379,7 @@ const Cameras = () => {
                         <TableCell>{cam.centre_name || cam.tc_name || '-'}</TableCell>
                         <TableCell>{cam.city || '-'}</TableCell>
                         <TableCell>{cam.state || '-'}</TableCell>
+                        <TableCell>{cam.classification || '-'}</TableCell>
                       </>
                     )}
                     <TableCell sx={{ maxWidth: 220 }}>
@@ -449,6 +505,9 @@ const Cameras = () => {
               <TextField fullWidth label="CCTV URL" name="cctv_url"
                 value={formData.cctv_url || ''} onChange={(e) => setFormData({ ...formData, cctv_url: e.target.value })}
                 margin="dense" size="small" required />
+              <TextField fullWidth label="Classification" name="classification"
+                value={formData.classification || ''} onChange={(e) => setFormData({ ...formData, classification: e.target.value })}
+                margin="dense" size="small" />
             </>
           )}
         </DialogContent>

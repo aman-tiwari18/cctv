@@ -1,7 +1,31 @@
-const { CameraLinkHLS, CameraLinkRTSP, Exam, ExamShift } = require("../models");
+const { CameraLinkHLS, CameraLinkRTSP, Exam, ExamShift, ShiftScriptAssignment, Script } = require("../models");
 const { Op } = require("sequelize");
 const xlsx = require("xlsx");
 const fs = require("fs");
+
+const buildHlsCameraScope = ({ shiftId, examDate }) => {
+    const conditions = [];
+
+    if (shiftId) {
+        conditions.push({
+            [Op.or]: [
+                { shift_id: shiftId },
+                { shift_id: null },
+            ],
+        });
+    }
+
+    if (examDate) {
+        conditions.push({
+            [Op.or]: [
+                { exam_date: examDate },
+                { exam_date: null },
+            ],
+        });
+    }
+
+    return conditions;
+};
 
 /**
  * Helper to get the correct model based on exam link type
@@ -328,8 +352,10 @@ exports.getByExam = async (req, res) => {
     };
 
     if (linkType === "HLS") {
-        if (shift_id)   where.shift_id  = shift_id;
-        if (exam_date)  where.exam_date = exam_date;
+        const hlsScope = buildHlsCameraScope({ shiftId: shift_id, examDate: exam_date });
+        if (hlsScope.length > 0) {
+            where[Op.and] = hlsScope;
+        }
     }
 
     const parsedLimit = parseInt(limit, 10) || 50;
@@ -419,4 +445,74 @@ exports.getByExamAndType = async (req, res) => {
     const { Model, linkType } = await getModelByExam(examId);
     const cameras = await Model.findAll({ where: { exam_id: examId, is_active: true } });
     res.json({ success: true, linkType, count: cameras.length, data: cameras });
+};
+
+exports.getByAssignment = async (req, res) => {
+    const assignment = await ShiftScriptAssignment.findByPk(req.params.id, {
+        include: [
+            {
+                model: ExamShift,
+                as: "shift",
+                attributes: ["id", "exam_id", "shift_name"],
+                include: [
+                    {
+                        model: Exam,
+                        as: "exam",
+                        attributes: ["id", "link_type", "exam_name"],
+                    },
+                ],
+            },
+            {
+                model: Script,
+                as: "script",
+                attributes: ["id", "script_id", "name"],
+            },
+        ],
+    });
+
+    if (!assignment || !assignment.shift?.exam) {
+        return res.status(404).json({
+            success: false,
+            message: "Assignment not found",
+        });
+    }
+
+    const examId = assignment.shift.exam.id;
+    const { Model, linkType } = await getModelByExam(examId);
+    const where = {
+        exam_id: examId,
+        is_active: true,
+    };
+
+    if (linkType === "HLS") {
+        const hlsScope = buildHlsCameraScope({
+            shiftId: assignment.shift_id,
+            examDate: assignment.assignment_date,
+        });
+
+        if (hlsScope.length > 0) {
+            where[Op.and] = hlsScope;
+        }
+    }
+
+    const cameras = await Model.findAll({
+        where,
+        order: [["camera_name", "ASC"], ["created_at", "DESC"]],
+    });
+
+    res.json({
+        success: true,
+        linkType,
+        assignment: {
+            id: assignment.id,
+            assignment_date: assignment.assignment_date,
+            shift_id: assignment.shift_id,
+            exam_id: examId,
+            script_id: assignment.script?.script_id || null,
+            shift_name: assignment.shift?.shift_name || null,
+            exam_name: assignment.shift?.exam?.exam_name || null,
+        },
+        count: cameras.length,
+        data: cameras,
+    });
 };

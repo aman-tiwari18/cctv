@@ -1,10 +1,37 @@
 const Script = require("../models/Script");
+const scriptRegistry = require("../config/scriptRegistry");
+
+const syncBuiltInScripts = async () => {
+    const builtInScripts = Object.entries(scriptRegistry).map(([script_id, config]) => ({
+        script_id,
+        name: config.name,
+        default_frequency_minutes: config.default_frequency || 5,
+        default_duration_minutes: config.default_duration || 1,
+        is_active: true,
+    }));
+
+    if (builtInScripts.length === 0) {
+        return;
+    }
+
+    await Script.bulkCreate(builtInScripts, {
+        updateOnDuplicate: [
+            "name",
+            "default_frequency_minutes",
+            "default_duration_minutes",
+            "is_active",
+            "updated_at",
+        ],
+    });
+};
 
 /**
  * Get all available scripts
  */
 exports.getAll = async (req, res) => {
     const { is_active } = req.query;
+
+    await syncBuiltInScripts();
 
     const where = {};
     if (is_active !== undefined) where.is_active = is_active === "true";

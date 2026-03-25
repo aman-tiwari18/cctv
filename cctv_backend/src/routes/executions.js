@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const ExecutionController = require("../controllers/ExecutionController");
+const CameraController = require("../controllers/CameraController");
 const { asyncHandler } = require("../middleware/errorHandler");
 const { executionValidation } = require("../utils/validators");
 const { authenticate } = require("../middleware/auth");
@@ -45,6 +46,12 @@ router.get(
     "/:id",
     authenticate,
     asyncHandler(ExecutionController.getById)
+);
+
+router.get(
+    "/:id/cameras",
+    authenticate,
+    asyncHandler(CameraController.getByAssignment)
 );
 
 // Update assignment status (called by script server)

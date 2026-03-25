@@ -265,6 +265,15 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
                                                     {assignment.script?.name || 'Unknown Script'}
                                                 </Typography>
 
+                                                {assignment.script?.script_id && (
+                                                    <Chip
+                                                        label={assignment.script.script_id}
+                                                        size="small"
+                                                        color="secondary"
+                                                        variant="outlined"
+                                                    />
+                                                )}
+
                                                 {assignment.assignment_date && (
                                                     <Chip
                                                         label={formatAssignmentDate(assignment.assignment_date)}
@@ -374,6 +383,9 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
                             <MenuItem key={script.id} value={script.id}>
                                 <Box>
                                     <Typography variant="body2">{script.name}</Typography>
+                                    <Typography variant="caption" color="text.secondary">
+                                        Keyword: {script.script_id}
+                                    </Typography>
                                 </Box>
                             </MenuItem>
                         ))}

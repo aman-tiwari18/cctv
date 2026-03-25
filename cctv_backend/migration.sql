@@ -23,4 +23,7 @@ INSERT INTO scripts (script_id, name, default_frequency_minutes, default_duratio
   ('entry_exit',  'Entry Exit Detection',   5, 1, 1),
   ('proximity',   'Proximity Detection',    5, 1, 1),
   ('phone',       'Phone Detection',        5, 1, 1),
-  ('invigilator', 'Invigilator Detection',  5, 1, 1);
+  ('invigilator', 'Invigilator Detection',  5, 1, 1),
+  ('vision',      'Scene Classification',   60, 30, 1),
+  ('inversion',   'Camera Inversion Detection', 5, 1, 1),
+  ('tampering',   'Camera Tampering Detection', 5, 1, 1);

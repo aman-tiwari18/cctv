@@ -81,18 +81,50 @@ class ScriptRunner:
         # execution_id -> asyncio.subprocess.Process
         self._active_processes: dict = {}
 
+    # Canonical script IDs accepted by the scheduler payload.
+    SCRIPT_CODE_ALIASES = {
+        "camera_tampering": "tampering",
+        "tamper": "tampering",
+        "camera_inversion": "inversion",
+        "scene_classification": "vision",
+    }
+
+    def _normalize_script_code(self, raw_script_code) -> str:
+        script_code = str(raw_script_code or "").strip().lower()
+        return self.SCRIPT_CODE_ALIASES.get(script_code, script_code)
+
     async def execute_script(self, execution):
         execution_metadata = execution.get("execution_metadata", {})
-        script_code = execution_metadata.get("script_code", "")
+        raw_script_code = execution_metadata.get("script_code") or execution.get("script_code")
+        script_code = self._normalize_script_code(raw_script_code)
         stream_url  = execution.get("stream_url")
         camera_id   = execution.get("camera_id")
         execution_id = str(execution.get("id"))
 
-        valid_codes = ["server", "crowd", "intruder", "entry_exit", "proximity", "phone", "invigilator"]
-        if script_code not in valid_codes:
-            raise ValueError(f"Unknown script code: {script_code}")
+        pipeline_codes = {
+            "server",
+            "crowd",
+            "intruder",
+            "entry_exit",
+            "proximity",
+            "phone",
+            "invigilator",
+            "inversion",
+            "tampering",
+        }
+        standalone_script_paths = {
+            "vision": self.scripts_dir / "detection/vision_classification.py",
+        }
 
-        full_script_path = self.scripts_dir / "detection/pipeline/master_pipeline.py"
+        if script_code in standalone_script_paths:
+            full_script_path = standalone_script_paths[script_code]
+        elif script_code in pipeline_codes:
+            full_script_path = self.scripts_dir / "detection/pipeline/master_pipeline.py"
+        else:
+            raise ValueError(
+                f"Unknown script code: {raw_script_code!r} (normalized={script_code!r})"
+            )
+
         if not full_script_path.exists():
             raise FileNotFoundError(f"Script not found: {full_script_path}")
 
@@ -124,11 +156,11 @@ class ScriptRunner:
         timeout_s = _compute_timeout(execution)
         if timeout_s:
             named_log.info(f"  Timeout  : {timeout_s:.0f}s ({timeout_s/60:.1f} min)")
-        named_log.info("  Pipeline : detection/pipeline/master_pipeline.py")
+        named_log.info(f"  Pipeline : {full_script_path.relative_to(self.scripts_dir)}")
         named_log.info(f"  Analytics: {script_code}\n")
 
         logger.info(
-            f"Executing pipeline script: {full_script_path} "
+            f"Executing script: {full_script_path} "
             f"for execution {execution_id} with analytics={script_code}"
         )
         logger.info(f"Named log → {log_path}")
@@ -151,6 +183,19 @@ class ScriptRunner:
         env["CAMERA_ID"]    = str(camera_id)    if camera_id    else ""
         env["STREAM_URL"]   = str(stream_url)   if stream_url   else ""
         env["EXECUTION_ID"] = execution_id
+        env["MAIN_BACKEND_URL"] = os.environ.get("MAIN_BACKEND_URL", "http://localhost:3000/cctv_analytics/api")
+        env["API_KEY"] = os.environ.get("API_KEY", "")
+
+        if script_code == "vision":
+            import json as _json
+            meta = execution.get("execution_metadata", {})
+            env["VISION_ASSIGNMENT_PAYLOAD"] = _json.dumps({
+                "assignment_id": execution_id,
+                "exam_id": meta.get("exam_id") or execution.get("exam_id"),
+                "shift_id": meta.get("shift_id") or execution.get("shift_id"),
+                "assignment_date": meta.get("assignment_date") or execution.get("assignment_date"),
+                "link_type": meta.get("link_type") or execution.get("link_type"),
+            })
 
         process = await asyncio.create_subprocess_exec(
             command, str(full_script_path), *args,
@@ -246,12 +291,39 @@ class ScriptRunner:
             log_manager.write_log(execution_id, f"Script FAILED (exit code {process.returncode})", "ERROR")
             raise Exception(f"Script exited with code {process.returncode}: {stderr_result}")
 
+    # Maps script_code values that are handled by vision_classification.py
+    VISION_CODES = {"vision"}
+    # Maps script_code → analytics arg for master_pipeline.py (when key differs from script_code)
+    ANALYTICS_ARG_OVERRIDES = {
+        "tampering": "tamper",  # HLS_WORKER_MAP uses key "tamper"
+    }
+
     def build_script_arguments(self, execution):
         args = []
         execution_metadata = execution.get("execution_metadata", {})
-        script_code = execution_metadata.get("script_code", "")
-        if script_code:
-            args.extend(["--analytics", script_code])
+        raw_script_code = execution_metadata.get("script_code") or execution.get("script_code")
+        script_code = self._normalize_script_code(raw_script_code)
+
+        if script_code in self.VISION_CODES:
+            # vision_classification.py receives assignment metadata as CLI args
+            execution_id = str(execution.get("id", ""))
+            exam_id      = str(execution_metadata.get("exam_id") or execution.get("exam_id") or "")
+            shift_id     = str(execution_metadata.get("shift_id") or execution.get("shift_id") or "")
+            link_type    = str(execution_metadata.get("link_type") or execution.get("link_type") or "HLS")
+            assignment_date = str(execution_metadata.get("assignment_date") or execution.get("assignment_date") or "")
+            args.extend([
+                "--assignment_id", execution_id,
+                "--exam_id",       exam_id,
+                "--shift_id",      shift_id,
+                "--link_type",     link_type,
+                "--assignment_date", assignment_date,
+            ])
+        else:
+            # master_pipeline.py uses --analytics <code>
+            analytics_arg = self.ANALYTICS_ARG_OVERRIDES.get(script_code, script_code)
+            if analytics_arg:
+                args.extend(["--analytics", analytics_arg])
+
         return args
 
     def cancel(self, execution_id: str) -> bool:

@@ -1,7 +1,10 @@
 import axios from 'axios';
 
+const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL || '/cctv_analytics/api';
+const normalizedBaseUrl = configuredBaseUrl.replace(/\/$/, '');
+
 const api = axios.create({
-    baseURL: 'http://161.248.106.78/cctv_analytics/api'
+    baseURL: normalizedBaseUrl
 });
 
 // Request interceptor to add auth token
@@ -22,7 +25,8 @@ api.interceptors.response.use(
     (error) => {
         if (error.response && error.response.status === 401) {
             localStorage.removeItem('token');
-            window.location.href = '/login';
+            const basePath = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
+            window.location.href = `${basePath}/login`;
         }
         return Promise.reject(error);
     }

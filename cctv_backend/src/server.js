@@ -1,6 +1,5 @@
-// require('dotenv').config();
-// require('dotenv').config({ path: './.env' });
-require('dotenv').config({ path: __dirname + '/.env' });
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 const app = require('./app');
 const { testConnection } = require('./config/database');
 const scheduler = require('./services/scheduler');

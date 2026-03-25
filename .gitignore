@@ -76,3 +76,6 @@ script-server/scripts/object_detection.py
 script-server/scripts/test_simple.sh
 script-server/scripts/detection/results/tcs_detections/*
 script-server/scripts/detection/models/*
+script-server/models/*
+script-server/scripts/detection/frames/*
+script-server/scripts/frames/*

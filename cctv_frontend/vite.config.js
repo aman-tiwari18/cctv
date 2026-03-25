@@ -19,6 +19,7 @@ export default defineConfig({
             '/cctv_dev': {
                 target: 'http://localhost:8000',
                 changeOrigin: true,
+                ws: true,
             },
             '/detection-images': {
                 target: 'http://localhost:8000',
