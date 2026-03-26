@@ -148,6 +148,55 @@ def update_rtsp_classification(exam_id: int, device_id: str, classification: str
         return 0
 
 
+def get_hls_camera_by_ch_code(ch_code: str, exam_date: str = None) -> dict:
+    """Fetch one active HLS camera row by ch_code, optionally preferring a specific exam_date."""
+    if not ch_code:
+        return {}
+
+    sql_with_date = """
+        SELECT
+            id, exam_id, shift_id, centre_name, city, state,
+            camera_name, ch_code, tc_code, cctv_url,
+            camera_category, classification, is_active, exam_date
+        FROM camera_links_hls
+        WHERE ch_code = %s
+          AND is_active = 1
+        ORDER BY
+          CASE WHEN exam_date = %s THEN 0 ELSE 1 END,
+          exam_date DESC,
+          id DESC
+        LIMIT 1
+    """
+
+    sql_without_date = """
+        SELECT
+            id, exam_id, shift_id, centre_name, city, state,
+            camera_name, ch_code, tc_code, cctv_url,
+            camera_category, classification, is_active, exam_date
+        FROM camera_links_hls
+        WHERE ch_code = %s
+          AND is_active = 1
+        ORDER BY exam_date DESC, id DESC
+        LIMIT 1
+    """
+
+    try:
+        conn = _get_connection()
+        with conn:
+            with conn.cursor() as cur:
+                if exam_date:
+                    cur.execute(sql_with_date, (ch_code, exam_date))
+                else:
+                    cur.execute(sql_without_date, (ch_code,))
+                row = cur.fetchone()
+                if not row:
+                    return {}
+                return row
+    except Exception as e:
+        logger.error(f"[DB] Error querying camera_links_hls by ch_code ({ch_code}): {e}")
+        return {}
+
+
 # ============================================================
 # 🧪  STANDALONE TEST
 # ============================================================

@@ -71,7 +71,13 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
         }
 
         if (!selectedDate || !dates.includes(selectedDate)) {
-            setSelectedDate(dates[0]);
+            // Try to set to today's date if available, otherwise use first available date
+            const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+            if (dates.includes(today)) {
+                setSelectedDate(today);
+            } else {
+                setSelectedDate(dates[0]);
+            }
         }
     }, [assignments, selectedDate]);
 

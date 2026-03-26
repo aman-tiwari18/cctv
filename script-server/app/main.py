@@ -2,6 +2,7 @@ import asyncio
 import re
 import os
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional, List
 import socketio
@@ -14,6 +15,7 @@ from app.config import HTTP_PORT, MAIN_BACKEND_URL, POLL_INTERVAL_MS, SCRIPTS_DI
 from app.logger import logger
 from app.log_manager import log_manager
 from app.poller import poller_service
+from scripts.detection.utils.db_client import get_hls_camera_by_ch_code
 
 # Import legacy pipeline functionality from the old backend
 from scripts.detection.backend.schemas import (
@@ -26,6 +28,29 @@ from scripts.detection.backend.pipeline_manager import (
 
 DETECTION_SCAN_INTERVAL_SECONDS = 2
 known_detection_files = {}
+
+
+@lru_cache(maxsize=4096)
+def _camera_meta_for_ch(ch_no: str, exam_date_iso: str) -> dict:
+    if not ch_no:
+        return {}
+    return get_hls_camera_by_ch_code(ch_no, exam_date_iso) or {}
+
+
+def _extract_ch_no(camera_id: str) -> str:
+    if not camera_id:
+        return ""
+    # Prefer pattern like phone_ch11365_54703 -> use 54703 as channel code.
+    m = re.search(r"ch\d+_(\d+)", camera_id, flags=re.IGNORECASE)
+    if m:
+        return m.group(1)
+
+    # Supports ids like blind_ch22760, ch22760, 22760
+    m = re.search(r"ch(\d+)", camera_id, flags=re.IGNORECASE)
+    if m:
+        return m.group(1)
+    m = re.search(r"(\d+)", camera_id)
+    return m.group(1) if m else ""
 
 
 def list_detection_files() -> dict:
@@ -56,7 +81,8 @@ async def detection_watch_loop():
             new_files = sorted(current_files - previous_files)
 
             for filename in new_files:
-                payload = parse_detection_filename(filename, type_key)
+                file_path = RESULTS_DIR / DETECTION_FOLDERS[type_key] / filename
+                payload = parse_detection_filename(filename, type_key, file_path, is_new_image=True)
                 await sio.emit("detection:new", payload)
                 logger.info(f"Live detection emitted: {type_key} {filename}")
 
@@ -275,6 +301,9 @@ DETECTION_FOLDERS = {
     "entry_exit": "entry_exit_detection",
     "phone":      "phone_detection",
     "invigilator":"invigilator_detection",
+    "inversion" : "camera_inversion_detection",
+    "tamper" : "camera_tampering_detection",
+
 }
 
 DETECTION_LABELS = {
@@ -285,9 +314,17 @@ DETECTION_LABELS = {
     "entry_exit":  "Entry/Exit",
     "phone":       "Phone Detection",
     "invigilator": "Invigilator Tracking",
+    "tamper" : "Camera Tampering",
+    "inversion" : "Cameara Inversion",
+    
 }
 
-def parse_detection_filename(filename: str, type_key: str) -> dict:
+def parse_detection_filename(
+    filename: str,
+    type_key: str,
+    file_path: Optional[Path] = None,
+    is_new_image: bool = False,
+) -> dict:
     """Parse metadata from a detection image filename."""
     stem = Path(filename).stem  # without extension
     # Pattern: {camera_id}_{date}_{time}_{extra}.jpg
@@ -321,13 +358,52 @@ def parse_detection_filename(filename: str, type_key: str) -> dict:
     count_match = re.search(r'(?:persons|violations)(\d+)', suffix)
     count = int(count_match.group(1)) if count_match else None
 
+    issue_match = re.search(r'([a-zA-Z]+)\d*$', suffix)
+    issue_type = issue_match.group(1).lower() if issue_match else ""
+
+    exam_date_iso = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}" if date_str else ""
+    ch_no = _extract_ch_no(camera_id)
+    cam_meta = _camera_meta_for_ch(ch_no, exam_date_iso)
+
+    camera_name = cam_meta.get("camera_name") or camera_id
+    center_name = cam_meta.get("centre_name") or ""
+    city = cam_meta.get("city") or ""
+    state = cam_meta.get("state") or ""
+    tc_code = cam_meta.get("tc_code")
+    category = cam_meta.get("camera_category") or ""
+    cctv_url = cam_meta.get("cctv_url") or ""
+
+    now_ms = int(datetime.now().timestamp() * 1000)
+    timestamp_iso = datetime.now().isoformat()
+    date_display = ""
+    if date_str:
+        date_display = f"{date_str[6:]}-{date_str[4:6]}-{date_str[:4]}"
+
     return {
         "filename":    filename,
         "type":        type_key,
         "label":       DETECTION_LABELS.get(type_key, type_key),
         "camera_id":   camera_id,
+        "cameraId":    camera_id,
+        "chNo":        int(ch_no) if ch_no else None,
+        "time":        time_str,
+        "rawDate":     date_str,
+        "issueType":   issue_type,
+        "detectionType": type_key,
+        "addedAt":     now_ms,
+        "timestamp":   timestamp_iso,
+        "isNewImage":  is_new_image,
+        "cameraName":  camera_name,
+        "centerName":  center_name,
+        "city":        city,
+        "state":       state,
+        "tcCode":      tc_code,
+        "category":    category,
+        "cctvUrl":     cctv_url,
+        "path":        str(file_path) if file_path else "",
         "detected_at": detected_at,
-        "date":        f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}" if date_str else "",
+        "date":        exam_date_iso,
+        "examDate":    date_display,
         "confidence":  confidence,
         "count":       count,
         # "image_url":   f"/detection-images/{DETECTION_FOLDERS[type_key]}/{filename}",
@@ -352,11 +428,21 @@ def list_detections(
         for f in sorted(folder.iterdir(), reverse=True):
             if f.suffix.lower() not in (".jpg", ".jpeg", ".png"):
                 continue
-            item = parse_detection_filename(f.name, type_key)
+            item = parse_detection_filename(f.name, type_key, f, is_new_image=False)
             if date and not item["date"].startswith(date):
                 continue
-            if search and search.lower() not in item["camera_id"].lower():
-                continue
+            if search:
+                q = search.lower()
+                haystack = " ".join([
+                    str(item.get("camera_id") or ""),
+                    str(item.get("cameraName") or ""),
+                    str(item.get("centerName") or ""),
+                    str(item.get("city") or ""),
+                    str(item.get("state") or ""),
+                    str(item.get("tcCode") or ""),
+                ]).lower()
+                if q not in haystack:
+                    continue
             results.append(item)
 
     # Sort by detected_at descending (filename already has timestamp)

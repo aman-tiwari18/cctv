@@ -4,16 +4,17 @@ import {
   TableHead, TableRow, Typography, Chip, CircularProgress,
   TextField, MenuItem, IconButton, Dialog, DialogTitle,
   DialogContent, DialogActions, Button, Tooltip, Alert,
-  Snackbar, Badge,
+  Snackbar, Badge, FormControl, InputLabel, Select,
 } from '@mui/material';
 import {
   Visibility, Refresh, Stop, FiberManualRecord,
 } from '@mui/icons-material';
 import { format } from 'date-fns';
-import { executionsAPI } from '../services/api';
+import { executionsAPI, shiftScriptsAPI } from '../services/api';
 import axios from 'axios';
 
 const statusColors = {
+  SCHEDULED: 'secondary',
   PENDING:   'warning',
   RUNNING:   'info',
   COMPLETED: 'success',
@@ -44,10 +45,12 @@ function PulsingDot() {
 
 const Executions = () => {
   const [assignments, setAssignments]         = useState([]);
+  const [shiftAssignments, setShiftAssignments] = useState([]); // shift script assignments
   const [loading, setLoading]                 = useState(true);
-  const [filters, setFilters]                 = useState({ status: '' });
+  const [filters, setFilters]                 = useState({ status: 'ALL' });
   const [selectedAssignment, setSelectedAssignment] = useState(null);
   const [openDialog, setOpenDialog]           = useState(false);
+  const [selectedDate, setSelectedDate]       = useState('');
 
   // Cancel confirmation
   const [cancelTarget, setCancelTarget]       = useState(null); // assignment to cancel
@@ -58,25 +61,96 @@ const Executions = () => {
 
   const pollRef = useRef(null);
 
-  // ── Load assignments ────────────────────────────────────────────────────────
+  // ── Get execution date from started_at ──────────────────────────────────────
+  const getExecutionDate = (startedAt) => {
+    if (!startedAt) return null;
+    const date = new Date(startedAt);
+    return date.toISOString().split('T')[0]; // YYYY-MM-DD format
+  };
+
+  // ── Format date for display ────────────────────────────────────────────────
+  const formatExecutionDate = (value) => {
+    if (!value) return 'No date';
+    const parts = String(value).split('-');
+    if (parts.length === 3) {
+      return `${parts[2]}-${parts[1]}-${parts[0]}`;
+    }
+    return value;
+  };
+
+  // ── Load all shift script assignments to get full date range ────────────────
+  const loadShiftAssignments = useCallback(async (executions) => {
+    try {
+      // Get unique shifts from executions
+      const uniqueShiftIds = [
+        ...new Set(executions.map((e) => e.shift?.id).filter(Boolean))
+      ];
+
+      if (uniqueShiftIds.length === 0) {
+        setShiftAssignments([]);
+        return;
+      }
+
+      // Load assignments for each shift
+      const allAssignments = [];
+      for (const shiftId of uniqueShiftIds) {
+        try {
+          const response = await shiftScriptsAPI.getByShift(shiftId);
+          const assignmentList = Array.isArray(response?.data?.data)
+            ? response.data.data
+            : [];
+          allAssignments.push(...assignmentList);
+        } catch (error) {
+          console.error(`Error loading assignments for shift ${shiftId}:`, error);
+        }
+      }
+
+      setShiftAssignments(allAssignments);
+    } catch (error) {
+      console.error('Error loading shift assignments:', error);
+      setShiftAssignments([]);
+    }
+  }, []);
+
   const loadAssignments = useCallback(async () => {
     try {
-      const params = {};
-      if (filters.status) params.status = filters.status;
-      const response = await executionsAPI.getAll(params);
+      const response = await executionsAPI.getAll({});
       setAssignments(response.data.data);
+      // Load shift assignments to get full date range (independent of status filter)
+      if (response.data.data && response.data.data.length > 0) {
+        loadShiftAssignments(response.data.data);
+      }
     } catch (error) {
       console.error('Error loading assignments:', error);
     } finally {
       setLoading(false);
     }
-  }, [filters]);
+  }, [loadShiftAssignments]);
 
   // Initial load + whenever filters change
   useEffect(() => {
     setLoading(true);
     loadAssignments();
   }, [loadAssignments]);
+
+  // ── Set default date to today ──────────────────────────────────────────────
+  useEffect(() => {
+    if (shiftAssignments.length > 0 && !selectedDate) {
+      const availableDates = [
+        ...new Set(shiftAssignments.map((a) => a.assignment_date).filter(Boolean))
+      ].sort();
+
+      if (availableDates.length > 0) {
+        const today = new Date().toISOString().split('T')[0];
+        if (availableDates.includes(today)) {
+          setSelectedDate(today);
+        } else {
+          // If today has no assignments, use the first available date
+          setSelectedDate(availableDates[0]);
+        }
+      }
+    }
+  }, [shiftAssignments, selectedDate]);
 
   // Auto-refresh every 10 s if any assignment is RUNNING
   useEffect(() => {
@@ -88,13 +162,84 @@ const Executions = () => {
     }
     return () => clearInterval(pollRef.current);
   }, [assignments, loadAssignments]);
+  // ── Calculate available dates and filter assignments ────────────────────────
+  const executionDates = [
+    ...new Set(
+      shiftAssignments
+        .map((a) => a.assignment_date)
+        .filter(Boolean)
+    ),
+  ].sort((a, b) => new Date(b) - new Date(a)); // Sort descending (latest first)
 
+  // ── Build display rows for selected date ───────────────────────────────────
+  const getScheduledAndExecutedScripts = useCallback(() => {
+    if (!selectedDate) return [];
+
+    // Get all scheduled scripts for the selected date
+    const scheduledScriptsForDate = shiftAssignments.filter(
+      (a) => a.assignment_date === selectedDate && a.is_active
+    );
+
+    // Use assignment id as the primary key to avoid false pending/scheduled rows.
+    const assignmentMap = new Map();
+    assignments.forEach((item) => {
+      assignmentMap.set(item.id, item);
+    });
+
+    // Get today's date to check if assignment date is in future
+    const today = new Date().toISOString().split('T')[0];
+
+    // Merge using assignment status as source of truth for this date.
+    const merged = scheduledScriptsForDate.map((assignment) => {
+      const source = assignmentMap.get(assignment.id) || assignment;
+      const baseStatus = source.status || assignment.status;
+
+      // For future rows, show PENDING as SCHEDULED.
+      if (baseStatus === 'PENDING' && assignment.assignment_date > today) {
+        return {
+          ...source,
+          status: 'SCHEDULED',
+          assignment_info: assignment,
+        };
+      }
+
+      // For past rows, hide non-run PENDING scripts.
+      if (baseStatus === 'PENDING' && assignment.assignment_date < today) {
+        return null;
+      }
+
+      // Today keeps PENDING; executed/other statuses stay unchanged.
+      return {
+        ...source,
+        assignment_info: assignment,
+      };
+    }).filter(item => item !== null); // Remove null entries
+
+    return merged;
+  }, [selectedDate, shiftAssignments, assignments]);
+
+  const visibleData = getScheduledAndExecutedScripts();
+
+  const filteredAssignments = visibleData.filter((a) => {
+    if (filters.status === 'ALL') return true;
+    // Otherwise, filter by the selected status
+    return a.status === filters.status;
+  });
   // ── Handlers ────────────────────────────────────────────────────────────────
   const handleFilterChange = (e) =>
     setFilters({ ...filters, [e.target.name]: e.target.value });
 
+  const handleDateChange = (e) => setSelectedDate(e.target.value);
+
   const handleViewDetails = async (assignment) => {
     try {
+      // For transformed client-side rows, keep displayed status in details as well.
+      if (assignment.assignment_info && assignment.status === 'SCHEDULED') {
+        setSelectedAssignment(assignment);
+        setOpenDialog(true);
+        return;
+      }
+
       const response = await executionsAPI.getById(assignment.id);
       setSelectedAssignment(response.data.data);
       setOpenDialog(true);
@@ -162,13 +307,31 @@ const Executions = () => {
 
       {/* Filters */}
       <Paper sx={{ p: 2, mb: 3, borderRadius: 2 }}>
-        <Box display="flex" gap={2}>
+        <Box display="flex" gap={2} flexDirection={{ xs: 'column', sm: 'row' }} alignItems={{ xs: 'stretch', sm: 'center' }}>
+          {executionDates.length > 0 && (
+            <FormControl size="small" sx={{ minWidth: 220 }}>
+              <InputLabel id="execution-date-label">Execution Date</InputLabel>
+              <Select
+                labelId="execution-date-label"
+                value={selectedDate}
+                label="Execution Date"
+                onChange={handleDateChange}
+              >
+                {executionDates.map((date) => (
+                  <MenuItem key={date} value={date}>
+                    {formatExecutionDate(date)}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          )}
           <TextField
             select label="Status" name="status"
             value={filters.status} onChange={handleFilterChange}
             size="small" sx={{ minWidth: 160 }}
           >
-            <MenuItem value="">All</MenuItem>
+            <MenuItem value="ALL">All</MenuItem>
+            <MenuItem value="SCHEDULED">Scheduled</MenuItem>
             <MenuItem value="PENDING">Pending</MenuItem>
             <MenuItem value="RUNNING">Running</MenuItem>
             <MenuItem value="COMPLETED">Completed</MenuItem>
@@ -183,7 +346,7 @@ const Executions = () => {
         <Box display="flex" justifyContent="center" py={6}>
           <CircularProgress />
         </Box>
-      ) : assignments.length > 0 ? (
+      ) : filteredAssignments.length > 0 ? (
         <TableContainer component={Paper} sx={{ borderRadius: 2 }}>
           <Table>
             <TableHead sx={{ bgcolor: '#f8fafc' }}>
@@ -198,7 +361,7 @@ const Executions = () => {
               </TableRow>
             </TableHead>
             <TableBody>
-              {assignments.map((assignment) => (
+              {filteredAssignments.map((assignment) => (
                 <TableRow
                   key={assignment.id}
                   sx={{
@@ -267,7 +430,9 @@ const Executions = () => {
       ) : (
         <Paper sx={{ p: 4, textAlign: 'center', borderRadius: 2 }}>
           <Typography variant="body1" color="text.secondary">
-            No script assignments found
+            {assignments.length === 0
+              ? 'No script assignments found'
+              : `No executions found for ${selectedDate ? formatExecutionDate(selectedDate) : ''} with the selected filters`}
           </Typography>
         </Paper>
       )}
@@ -377,9 +542,37 @@ const Executions = () => {
                   </Paper>
                 </Box>
               )}
+              {selectedAssignment.assignment_info && (
+                <>
+                  <Box mb={2}>
+                    <Typography variant="subtitle2" color="text.secondary">Frequency</Typography>
+                    <Typography variant="body1">
+                      Every {selectedAssignment.assignment_info.custom_frequency_minutes ||
+                        selectedAssignment.script?.default_frequency_minutes ||
+                        '?'} minutes
+                    </Typography>
+                  </Box>
+                  {(selectedAssignment.assignment_info.custom_start_time ||
+                    selectedAssignment.assignment_info.custom_end_time) && (
+                    <Box mb={2}>
+                      <Typography variant="subtitle2" color="text.secondary">Custom Time Window</Typography>
+                      <Typography variant="body1">
+                        {selectedAssignment.assignment_info.custom_start_time || 'N/A'} -{' '}
+                        {selectedAssignment.assignment_info.custom_end_time || 'N/A'}
+                      </Typography>
+                    </Box>
+                  )}
+                  {selectedAssignment.assignment_info.notes && (
+                    <Box mb={2}>
+                      <Typography variant="subtitle2" color="text.secondary">Assignment Notes</Typography>
+                      <Typography variant="body1">{selectedAssignment.assignment_info.notes}</Typography>
+                    </Box>
+                  )}
+                </>
+              )}
               {selectedAssignment.notes && (
                 <Box mb={2}>
-                  <Typography variant="subtitle2" color="text.secondary">Notes</Typography>
+                  <Typography variant="subtitle2" color="text.secondary">Execution Notes</Typography>
                   <Typography variant="body1">{selectedAssignment.notes}</Typography>
                 </Box>
               )}
