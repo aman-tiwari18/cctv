@@ -675,6 +675,7 @@ class ProximityDetector:
 # ================= INIT ====================
 print("Initializing Proximity Detector...")
 detector = ProximityDetector(MODEL_PATH)
+proximity_detector = detector  # Alias for worker compatibility
 
 last_save_time = 0
 
@@ -753,3 +754,59 @@ def process_dav_video():
 # ================= MAIN ====================
 if __name__ == "__main__":
     process_dav_video()
+
+# ================= BATCH DETECTION =================
+def _detect_violations(person_boxes, proximity_threshold):
+    """
+    Surgically mirrored logic for batch violation detection.
+    Compatible with the unified GPU batching architecture.
+    """
+    import math
+    violations = []
+    for i in range(len(person_boxes)):
+        for j in range(i + 1, len(person_boxes)):
+            box1, box2 = person_boxes[i][:4], person_boxes[j][:4]
+            # Use bottom-center of each bounding box
+            x1, y1 = (box1[0] + box1[2]) / 2, box1[3]
+            x2, y2 = (box2[0] + box2[2]) / 2, box2[3]
+            distance = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+            if distance < proximity_threshold:
+                violations.append({
+                    'person1': i,
+                    'person2': j,
+                    'distance': distance,
+                    'boxes': (box1, box2),
+                })
+    return violations
+
+def detect_proximity_batch(items):
+    """
+    Truly batched proximity detection.
+    Called by the unified GPU batch worker.
+    """
+    model     = detector.model
+    conf      = detector.confidence_threshold
+    threshold = detector.proximity_threshold
+    
+    frames = [item['frame'] for item in items]
+    results = model(frames, conf=conf, verbose=False)
+    
+    outputs = []
+    for item, result in zip(items, results):
+        frame = item['frame'].copy()
+        
+        person_boxes = []
+        if result.boxes is not None:
+            for box in result.boxes:
+                if int(box.cls[0]) == 0:  # person class
+                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                    conf_score      = box.conf[0].cpu().numpy()
+                    person_boxes.append([x1, y1, x2, y2, conf_score])
+
+        violations = _detect_violations(person_boxes, threshold)
+        violation_detected = len(violations) > 0
+        
+        # Consistent output: (processed_frame, detected_flag, count/violations)
+        outputs.append((frame, violation_detected, len(violations), person_boxes, violations))
+        
+    return outputs

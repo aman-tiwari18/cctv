@@ -684,6 +684,8 @@ import time
 import os
 import logging
 import sys
+import threading
+import torch
 from datetime import datetime
 from ultralytics import YOLO
 
@@ -702,11 +704,7 @@ PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
 
 
 
-if len(sys.argv) < 2:
-    print("❌ Usage: python3 script.py <video_file>")
-    sys.exit(1)
-
-DAV_VIDEO_PATH = sys.argv[1]
+DAV_VIDEO_PATH = sys.argv[1] if len(sys.argv) > 1 else None
 
 
 
@@ -727,6 +725,7 @@ os.makedirs(SAVE_FOLDER, exist_ok=True)
 # ================= YOLO ====================
 print("Loading YOLO model...")
 yolo_model = YOLO(MODEL_PATH)
+_model_lock = threading.Lock()
 
 # ================= STATE ===================
 last_save_times = {}
@@ -804,6 +803,76 @@ def detect_persons_in_frame(frame, device_id="unknown", camera_no="unknown", scr
     person_counts[key] = person_counts.get(key, 0) + person_count
     return frame, server_detected, person_count
 
+
+def get_yolo_model():
+    """Return a shared YOLO model instance for worker batch inference."""
+    global yolo_model
+    if yolo_model is None:
+        with _model_lock:
+            if yolo_model is None:
+                yolo_model = YOLO(MODEL_PATH)
+                if torch.cuda.is_available():
+                    yolo_model.to('cuda')
+    return yolo_model
+
+
+def detect_persons_batch(items):
+    """
+    Run true batch inference for server-room detection.
+    Returns: List[(annotated_frame, server_detected, person_count)]
+    """
+    model = get_yolo_model()
+    frames = [item['frame'] for item in items]
+    results = model(frames, conf=CONF_THRESHOLD, verbose=False)
+
+    outputs = []
+    for item, result in zip(items, results):
+        frame = item['frame'].copy()
+        person_boxes = [
+            box for box in result.boxes
+            if int(box.cls[0]) == 0 and float(box.conf[0]) >= CONF_THRESHOLD
+        ]
+        person_count = len(person_boxes)
+        server_detected = person_count >= MIN_PERSONS
+
+        for box in person_boxes:
+            x1, y1, x2, y2 = map(int, box.xyxy[0])
+            conf = float(box.conf[0])
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+            cv2.putText(
+                frame,
+                f"Person {conf:.2f}",
+                (x1, y1 - 10),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 0, 255),
+                2,
+            )
+
+        ch_no = item.get('ch_no', item.get('camera_id', 'unknown'))
+        cv2.putText(
+            frame,
+            f"Persons: {person_count}",
+            (10, 30),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (0, 255, 0),
+            2,
+        )
+        cv2.putText(
+            frame,
+            f"CH: {ch_no}",
+            (10, 60),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (0, 255, 0),
+            2,
+        )
+
+        outputs.append((frame, server_detected, person_count))
+
+    return outputs
+
 # =====================================================
 # DAV PROCESSOR
 # =====================================================
@@ -857,4 +926,7 @@ def process_dav_video():
 
 # ================= MAIN ====================
 if __name__ == "__main__":
+    if DAV_VIDEO_PATH is None:
+        print("❌ Usage: python3 script.py <video_file>")
+        sys.exit(1)
     process_dav_video()

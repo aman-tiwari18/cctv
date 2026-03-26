@@ -1,4 +1,3 @@
-
 import requests
 import json
 import cv2
@@ -7,20 +6,21 @@ import pandas as pd
 import os
 import sys
 import shutil
-from tqdm import tqdm
-from PIL import Image
 import subprocess
 import uuid
 import logging
-from datetime import datetime
-import base64
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
 import re
 import queue
-from collections import defaultdict
+import threading
 import numpy as np
+from datetime import datetime
+from tqdm import tqdm
+from PIL import Image
+from base64 import b64encode
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections import defaultdict
 
+# Internal Utilities
 try:
     from utils.db_client import (
         get_hls_cameras,
@@ -28,186 +28,127 @@ try:
         update_hls_classification,
         update_rtsp_classification,
     )
-except Exception:
-    utils_path = os.path.join(os.path.dirname(__file__), "utils")
-    if utils_path not in sys.path:
-        sys.path.append(utils_path)
-    from db_client import (  # type: ignore
+except ImportError:
+    # Fallback for different execution contexts
+    sys.path.append(os.path.join(os.path.dirname(__file__), "utils"))
+    from db_client import (
         get_hls_cameras,
         get_rtsp_cameras,
         update_hls_classification,
         update_rtsp_classification,
     )
 
+import tcs_hls_utils
+
 # ============================================================
 # Logging Setup
 # ============================================================
-log_dir = "logs"
-os.makedirs(log_dir, exist_ok=True)
-log_filename = os.path.join(log_dir, f"tcs_classification_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
+LOG_DIR = os.path.join(PROJECT_ROOT, "logs/vision")
+os.makedirs(LOG_DIR, exist_ok=True)
+LOG_FILENAME = os.path.join(LOG_DIR, f"vision_db_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
 
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(log_filename),
+        logging.FileHandler(LOG_FILENAME),
         logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
 
 logger.info("="*80)
-logger.info("Starting TCS Camera Classification Process - OPTIMIZED VERSION")
+logger.info("Starting TCS Camera Classification - Database Mode")
 logger.info("="*80)
 
 # ============================================================
-# Configuration - OPTIMIZED SETTINGS
+# Configuration (DB First)
 # ============================================================
-# Performance settings
-MAX_WORKERS_NETWORK = 64  # High parallelism for network I/O
-MAX_WORKERS_VLM = int(os.getenv("VISION_MAX_WORKERS_VLM", "1"))  # Ollama VLM is more stable with low concurrency
-CHECKPOINT_INTERVAL = 500  # Save progress every N cameras
+MAX_WORKERS_NETWORK = 64
+MAX_WORKERS_VLM = int(os.getenv("VISION_MAX_WORKERS_VLM", "1"))
+CHECKPOINT_INTERVAL = 500
+RESUME_FROM_CHECKPOINT = True
+TWO_PASS_MODE = True
 
-# Timeout settings (reduced for speed)
-TIMEOUT_EXTRACT_URL = 3    # Extract HLS URL timeout (seconds)
-TIMEOUT_TEST_STREAM = 3    # Test stream accessibility timeout (seconds)
-TIMEOUT_OPENCV = 3000      # OpenCV timeout (milliseconds)
-TIMEOUT_FFMPEG = 5         # FFmpeg timeout (seconds)
-TIMEOUT_VLM = int(os.getenv("VISION_TIMEOUT_VLM", "180"))  # VLM classification timeout (seconds)
+# VLM Settings
 OLLAMA_URL = os.getenv("VISION_OLLAMA_URL", "http://localhost:11434/api/generate")
 OLLAMA_MODEL = os.getenv("VISION_OLLAMA_MODEL", "qwen3-vl:8b")
+TIMEOUT_VLM = int(os.getenv("VISION_TIMEOUT_VLM", "180"))
 
-# Processing mode
-TWO_PASS_MODE = True       # Enable two-pass processing for efficiency
-RESUME_FROM_CHECKPOINT = True  # Resume from last checkpoint if exists
+# Timeouts
+TIMEOUT_EXTRACT_URL = 3
+TIMEOUT_TEST_STREAM = 3
+TIMEOUT_OPENCV = 3000
+TIMEOUT_FFMPEG = 5
+
+# Default DB Filter (overridden by VISION_ASSIGNMENT_PAYLOAD)
+DEFAULT_SHIFT_ID = 7
+DEFAULT_EXAM_ID = 2
+DEFAULT_EXAM_DATE = datetime.now().strftime('%Y-%m-%d')
+
 VISION_ASSIGNMENT_PAYLOAD = os.getenv("VISION_ASSIGNMENT_PAYLOAD")
+SAVE_FOLDER = os.path.join(PROJECT_ROOT, "results/tcs_classification")
+os.makedirs(SAVE_FOLDER, exist_ok=True)
 
 # ============================================================
-# Excel Loading - TCS Format
-# ============================================================
-# INPUT_EXCEL = "28 Jan Shift 2 - CDIS.xlsx"
-# INPUT_EXCEL = "/home/suvam/projects/cctv/cctv-analytics-system/cctv_classfication/CCTV Camera Report_CUET (PG) - 2026 06th March 2026 - IITK.xlsx"
-INPUT_EXCEL = "/home/suvam/projects/cctv/cctv-analytics-system/cctv_classfication/CCTV Camera Report_CUET (PG) - 24th March 2026 IITK (1) copy.xlsx"
+# Data Ingestion
+# Data Ingestion
 SCENE_COLUMN_TARGET = "Scene Classification"
 CHECKPOINT_FILE = "checkpoint_progress.json"
 
-# Check if input file exists
-if not VISION_ASSIGNMENT_PAYLOAD and not os.path.exists(INPUT_EXCEL):
-    logger.error(f"Input Excel file not found: {INPUT_EXCEL}")
-    logger.error("Please ensure the TCS Excel file is placed at the correct location")
-    sys.exit(1)
+def load_camera_data():
+    """Fetches cameras from DB and returns a DataFrame for processing."""
+    payload = {}
+    if VISION_ASSIGNMENT_PAYLOAD:
+        try:
+            payload = json.loads(VISION_ASSIGNMENT_PAYLOAD)
+        except Exception as e:
+            logger.error(f"Failed to parse VISION_ASSIGNMENT_PAYLOAD: {e}")
 
-# Load Excel file
-df = pd.DataFrame()
-if not VISION_ASSIGNMENT_PAYLOAD:
-    try:
-        excel_file = pd.ExcelFile(INPUT_EXCEL)
-        logger.info(f"Loaded Excel file: {INPUT_EXCEL}")
-        logger.info(f"Available sheets: {excel_file.sheet_names}")
+    exam_id = payload.get("exam_id", DEFAULT_EXAM_ID)
+    shift_id = payload.get("shift_id", DEFAULT_SHIFT_ID)
+    exam_date = payload.get("assignment_date", DEFAULT_EXAM_DATE)
+    
+    logger.info(f"Fetching HLS cameras for Exam {exam_id}, Shift {shift_id}, Date {exam_date}")
+    cameras = get_hls_cameras(exam_id, shift_id, exam_date)
+    
+    if not cameras:
+        logger.warning("No cameras found in DB for the given filters.")
+        return pd.DataFrame(columns=['Row_ID', 'CCTV URL', SCENE_COLUMN_TARGET, 'Status', 'Status Detail'])
 
-        # Use the first sheet
-        EXCEL_SHEET = excel_file.sheet_names[0]
-        df = excel_file.parse(EXCEL_SHEET)
-        df.columns = [col.strip() for col in df.columns]
+    df_db = pd.DataFrame(cameras)
+    if 'cctv_url' in df_db.columns:
+        df_db['CCTV URL'] = df_db['cctv_url']
+    if 'classification' in df_db.columns:
+        df_db[SCENE_COLUMN_TARGET] = df_db['classification']
 
-        print(df.columns)     # columns check karne ke liye
-        print(df.head())      # first rows dekhne ke liye
+    df_db['Status'] = ""
+    df_db['Status Detail'] = ""
+    df_db['Row_ID'] = range(len(df_db))
+    return df_db
 
-        logger.info(f"Using sheet: {EXCEL_SHEET}")
-        logger.info(f"Columns found: {list(df.columns)}")
+df = load_camera_data()
 
-        # Expected columns: CCTV URL, Center Name, Camera Location, etc.
-        # Add Scene Classification and Status columns if not present
-        if SCENE_COLUMN_TARGET not in df.columns:
-            df[SCENE_COLUMN_TARGET] = pd.NA
 
-        if "Status" not in df.columns:
-            df["Status"] = ""
-        else:
-            df["Status"] = df["Status"].fillna("")
-
-        # Add Status Detail column for uncertain/obstructed cameras
-        if "Status Detail" not in df.columns:
-            df["Status Detail"] = ""
-
-        # Add a unique ID column for tracking
-        if "Row_ID" not in df.columns:
-            df["Row_ID"] = range(len(df))
-
-        logger.info(f"Total rows in Excel: {len(df)}")
-        logger.info(f"Optimized settings: {MAX_WORKERS_NETWORK} network workers, {MAX_WORKERS_VLM} VLM workers")
-        logger.info(f"Timeouts: Extract={TIMEOUT_EXTRACT_URL}s, Test={TIMEOUT_TEST_STREAM}s, OpenCV={TIMEOUT_OPENCV}ms, FFmpeg={TIMEOUT_FFMPEG}s")
-
-    except Exception as e:
-        logger.error(f"Failed to load Excel file: {e}", exc_info=True)
-        sys.exit(1)
+# Ensure everything is filled
+df = df.fillna("")
 
 # ============================================================
-# HLS Stream URL Processing - OPTIMIZED
+# HLS Stream URL Processing (Using tcs_hls_utils)
 # ============================================================
 def extract_hls_streaming_url(initial_url, timeout=None):
-    """
-    Extract the actual HLS streaming URL from the initial TCS URL (OPTIMIZED)
-    
-    Args:
-        initial_url: The URL from the Excel file (CCTV URL column)
-        timeout: Request timeout in seconds (uses global TIMEOUT_EXTRACT_URL if None)
-    
-    Returns:
-        The actual HLS streaming URL, or None if extraction fails
-    """
-    if timeout is None:
-        timeout = TIMEOUT_EXTRACT_URL
-    
-    logger.debug(f"Extracting HLS URL: {initial_url[:80]}...")
-    
-    try:
-        # Make request to the initial URL
-        response = requests.get(initial_url, timeout=timeout, allow_redirects=True)
-        
-        if response.status_code != 200:
-            logger.debug(f"Initial URL failed with status {response.status_code}")
-            return None
-        
-        # Method 1: Look for .m3u8 URL in the response text
-        m3u8_pattern = r'https?://[^\s<>"]+?\.m3u8[^\s<>"]*'
-        matches = re.findall(m3u8_pattern, response.text)
-        
-        if matches:
-            streaming_url = matches[0]
-            logger.debug(f"✅ Found HLS URL: {streaming_url[:80]}...")
-            return streaming_url
-        
-        # Method 2: Look for URL in JSON response
-        try:
-            json_data = response.json()
-            if isinstance(json_data, dict):
-                for key in ['url', 'stream_url', 'hls_url', 'playback_url', 'streaming_url']:
-                    if key in json_data:
-                        streaming_url = json_data[key]
-                        logger.debug(f"✅ Found HLS URL in JSON: {streaming_url[:80]}...")
-                        return streaming_url
-        except:
-            pass
-        
-        # Method 3: Extract quoted .m3u8 URLs
-        if '.m3u8' in response.text:
-            pattern = r'(["\'])(https?://[^"\']+\.m3u8[^"\']*)(["\'])'
-            matches = re.findall(pattern, response.text)
-            if matches:
-                streaming_url = matches[0][1]
-                logger.debug(f"✅ Found HLS URL (quoted): {streaming_url[:80]}...")
-                return streaming_url
-        
-        logger.debug("No HLS URL found in response")
+    """Bridge to tcs_hls_utils"""
+    if not initial_url:
         return None
-        
-    except requests.exceptions.Timeout:
-        logger.debug(f"Timeout accessing URL after {timeout}s")
-        return None
-    except Exception as e:
-        logger.debug(f"Failed to extract HLS URL: {e}")
-        return None
+    return tcs_hls_utils.extract_hls_streaming_url(initial_url)
+
+def test_hls_stream(hls_url, timeout=None):
+    """Bridge to tcs_hls_utils. Returns (is_accessible, status_code)"""
+    if not hls_url:
+        return False, None
+    is_ok = tcs_hls_utils.test_hls_stream(hls_url)
+    return is_ok, (200 if is_ok else 404)
 
 
 def test_hls_stream(hls_url, timeout=None):
@@ -442,13 +383,15 @@ If the image is grey, blank, heavily obstructed, or unclear, respond with "Uncer
 
 Return **only** the JSON response:
 {{"category": "<one of the above categories or Uncertain>", "reason": "<short explanation>"}}"""
+    
+    print("🤖 CALLING OLLAMA NOW")   # ✅ YAHAN ADD KAR
 
     url = OLLAMA_URL
     
     # Read and encode the image to base64
     try:
         with open(image_path, 'rb') as image_file:
-            image_data = base64.b64encode(image_file.read()).decode('utf-8')
+            image_data = b64encode(image_file.read()).decode('utf-8')
     except Exception as e:
         logger.debug(f"Failed to encode image: {e}")
         return "Uncertain", "Failed to read image"
@@ -475,7 +418,13 @@ Return **only** the JSON response:
         
         # Parse JSON response
         try:
-            result_json = json.loads(result)
+            try:
+                start = result.find("{")
+                end = result.rfind("}") + 1
+                clean_json = result[start:end]
+                result_json = json.loads(clean_json)
+            except Exception:
+                return "Uncertain", "Invalid JSON from VLM"
             category = result_json.get("category", "Uncertain")
             reason = result_json.get("reason", "")
             
@@ -502,23 +451,48 @@ Return **only** the JSON response:
 excel_lock = threading.Lock()
 checkpoint_counter = 0
 
-def update_excel_in_memory(row_id, label, status, status_detail=""):
-    """Update dataframe in memory (thread-safe) with status detail"""
+def update_excel_in_memory(row_id, label, status, status_detail):
+    """Updates both the local DataFrame and the production database."""
     global df, checkpoint_counter
-    with excel_lock:
-        mask = df["Row_ID"] == row_id
-        if mask.any():
-            df.loc[mask, SCENE_COLUMN_TARGET] = label
-            df.loc[mask, "Status"] = status
-            df.loc[mask, "Status Detail"] = status_detail
-            logger.debug(f"Updated Row {row_id}: {status} - {label}")
+    try:
+        with excel_lock:
+            # Update DataFrame
+            mask = df["Row_ID"] == row_id
+            if mask.any():
+                df.loc[mask, SCENE_COLUMN_TARGET] = label
+                df.loc[mask, "Status"] = status
+                df.loc[mask, "Status Detail"] = status_detail
+                logger.debug(f"Updated Row {row_id}: {status} - {label}")
+                
+                # Increment checkpoint counter
+                checkpoint_counter += 1
+                if checkpoint_counter % CHECKPOINT_INTERVAL == 0:
+                    save_checkpoint()
+
+        # Update Database (Async or Sync)
+        payload = {}
+        if VISION_ASSIGNMENT_PAYLOAD:
+            try:
+                payload = json.loads(VISION_ASSIGNMENT_PAYLOAD)
+            except:
+                pass
+        
+        exam_id = payload.get("exam_id", DEFAULT_EXAM_ID)
+        shift_id = payload.get("shift_id", DEFAULT_SHIFT_ID)
+        exam_date = payload.get("assignment_date", DEFAULT_EXAM_DATE)
+        
+        # Find the device/channel identifier
+        row = df[df['Row_ID'] == row_id].iloc[0]
+        cam_id = row.get('ch_code') or row.get('device_id') or row.get('camera_id')
+        
+        if cam_id and label:
+            update_hls_classification(
+                exam_id, shift_id, exam_date, str(cam_id), label
+            )
+            logger.info(f"DB Sync: {cam_id} -> {label}")
             
-            # Increment checkpoint counter
-            checkpoint_counter += 1
-            if checkpoint_counter % CHECKPOINT_INTERVAL == 0:
-                save_checkpoint()
-        else:
-            logger.warning(f"Row ID {row_id} not found")
+    except Exception as e:
+        logger.error(f"Failed to persist result for Row {row_id}: {e}")
 
 
 def save_checkpoint():
@@ -583,7 +557,8 @@ def quick_accessibility_check(row):
     """
     row_id = row['Row_ID']
     initial_url = row.get('CCTV URL', '')
-    
+    print(f"🔍 PASS 1 → Checking URL: {initial_url}")
+
     # Validate URL
     if pd.isna(initial_url) or not initial_url.strip():
         return (row_id, None, False, 'No URL')
@@ -605,6 +580,8 @@ def quick_accessibility_check(row):
             return (row_id, hls_url, True, None)
         else:
             return (row_id, hls_url, False, f'Stream test failed')
+        
+        print(f"✅ PASS 1 DONE → Row {row_id} | Accessible: {is_accessible}")
             
     except Exception as e:
         return (row_id, None, False, str(e))
@@ -980,64 +957,21 @@ def run_assignment_mode():
         "persisted_classification_updates": updated_rows,
     }
     
-    try:
-        # Extract HLS URL
-        hls_url = extract_hls_streaming_url(initial_url)
-        if not hls_url:
-            result['error'] = 'Failed to extract HLS URL'
-            result['status_detail'] = 'URL extraction failed'
-            update_excel_in_memory(row_id, result['label'], result['status'], result['status_detail'])
-            return result
-        
-        # Test stream
-        is_accessible, status_code = test_hls_stream(hls_url)
-        skip_ffmpeg = status_code in [404, 502, 503, 500]  # Skip FFmpeg for known bad codes
-        
-        if not is_accessible:
-            result['error'] = 'HLS stream not accessible'
-            result['status_detail'] = f'HTTP {status_code}' if status_code else 'Connection failed'
-            update_excel_in_memory(row_id, result['label'], result['status'], result['status_detail'])
-            return result
-        
-        # Capture frame
-        img_path = capture_frame_from_hls(hls_url, row_id, skip_ffmpeg=skip_ffmpeg)
-        if not img_path:
-            result['error'] = 'Frame capture failed'
-            result['status_detail'] = 'Could not capture frame'
-            update_excel_in_memory(row_id, result['label'], result['status'], result['status_detail'])
-            return result
-        
-        # Classify
-        label, reason = classify_with_vlm(img_path)
-        
-        if "Uncertain" in label or "Obstructed" in label:
-            result['status'] = 'Accessible'
-            result['label'] = 'Uncertain/Obstructed'
-            result['status_detail'] = reason or 'Image unclear'
-        else:
-            result['status'] = 'Accessible'
-            result['label'] = label
-            result['status_detail'] = 'Successfully classified'
-        
-        update_excel_in_memory(row_id, result['label'], result['status'], result['status_detail'])
-        return result
-        
-    except Exception as e:
-        logger.error(f"Error processing Row {row_id}: {e}")
-        result['error'] = str(e)
-        result['status_detail'] = 'Processing error'
-        update_excel_in_memory(row_id, result['label'], result['status'], result['status_detail'])
-        return result
-
 
 # ============================================================
 # Main Processing Loop - OPTIMIZED TWO-PASS STRATEGY
 # ============================================================
 def main():
+    """Main loop: Fetch from DB and process."""
     global df
+    df = load_camera_data()
     
+    if df.empty:
+        logger.warning("No cameras to process. Exiting.")
+        return
+
     logger.info("="*80)
-    logger.info("🚀 OPTIMIZED TCS Camera Classification - TWO-PASS MODE")
+    logger.info("🚀 Database-Driven Vision Classification")
     logger.info("="*80)
     logger.info(f"Total cameras: {len(df)}")
     logger.info(f"Network workers: {MAX_WORKERS_NETWORK}")
@@ -1131,17 +1065,17 @@ def main():
             with tqdm(total=len(tasks), desc="Pass 2: Classifying") as pbar:
                 for future in as_completed(tasks):
                     try:
-                        result = future.result()
+                        vlm_result = future.result()
                         
-                        # Update dataframe
+                        # Update dataframe and database
                         update_excel_in_memory(
-                            result['row_id'],
-                            result['label'],
-                            result['status'],
-                            result['status_detail']
+                            vlm_result['row_id'],
+                            vlm_result['label'],
+                            vlm_result['status'],
+                            vlm_result['status_detail']
                         )
                         
-                        if 'Uncertain' in result['label']:
+                        if 'Uncertain' in vlm_result['label']:
                             uncertain_count += 1
                         else:
                             classified_count += 1
@@ -1301,7 +1235,7 @@ if __name__ == "__main__":
             main()
         logger.info("="*80)
         logger.info("Processing completed successfully!")
-        logger.info(f"Log file: {log_filename}")
+        logger.info(f"Log file: {LOG_FILENAME}")
         logger.info("="*80)
     except KeyboardInterrupt:
         logger.warning("\n\nProcessing interrupted by user")

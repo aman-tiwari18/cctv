@@ -1388,34 +1388,79 @@ def _run_hls_camera(camera_id: str, hls_url: str, camera_name: str = "", max_fra
     return True
 
 
-def intruder_worker_hls(camera_config: dict, max_frames: int | None = None):
+def intruder_worker_hls(camera_configs, stop_event=None):
     """
-    HLS worker entry point — used when master_pipeline detects an HLS camera.
+    HLS worker entry point — accepts a LIST of camera configs from camera_loader.
 
-    camera_config = {
-        'camera_id':   str,   # unique label
-        'stream_url':  str,   # raw URL from Excel (may be page URL or direct m3u8)
-    }
+    Supports batch (list of dicts) or single dict for backward compatibility.
+    
+    Each camera_config dict should contain:
+        camera_id, cctv_url, classification, script_code, camera_name
     """
+    # Handle single config (backward compat)
+    if isinstance(camera_configs, dict):
+        camera_configs = [camera_configs]
+
+    if stop_event is None:
+        stop_event = _STOP_EVENT
+    
+    # 🔥 SCENE FILTER (case-insensitive) - Intruders are outdoor threats
+    valid_scenes = ['outdoor', 'outside', 'exterior', 'intruder']
+    filtered_configs = []
+    for cfg in camera_configs:
+        if not cfg.get('cctv_url'):
+            continue
+        cls_val = str(cfg.get('classification', '')).lower()
+        if any(scene in cls_val for scene in valid_scenes):
+            filtered_configs.append(cfg)
+    
+    if not filtered_configs:
+        logger.warning(f"[IntruderWorker][HLS] No cameras matched Intruder (outdoor) scenes. Skipping.")
+        return
+    
+    camera_configs = filtered_configs
+
+    logger.info(f"[IntruderWorker][HLS] Processing {len(camera_configs)} outdoor cameras")
+
     from tcs_hls_utils import extract_hls_streaming_url, test_hls_stream
-
-    camera_id   = camera_config.get("camera_id", "unknown")
-    initial_url = camera_config.get("stream_url", "")
-
-    # Resolve to actual m3u8 if it's a TCS page URL
-    hls_url = extract_hls_streaming_url(initial_url)
-    if not hls_url:
-        logger.error(f"[IntruderWorker][HLS] ❌ Could not resolve HLS URL for {camera_id}")
+    
+    threads = []
+    for cfg in camera_configs:
+        camera_id   = cfg.get('camera_id', 'unknown')
+        initial_url = cfg.get('cctv_url', '')
+        camera_name = cfg.get('camera_name', '')
+        
+        hls_url = extract_hls_streaming_url(initial_url)
+        if not hls_url:
+            logger.error(f"[IntruderWorker][HLS] ❌ Could not resolve HLS URL for {camera_id}")
+            continue
+        
+        if not test_hls_stream(hls_url):
+            logger.error(f"[IntruderWorker][HLS] ❌ Stream test failed for {camera_id}")
+            continue
+        
+        t = threading.Thread(
+            target=_run_hls_camera,
+            args=(camera_id, hls_url, camera_name),
+            name=f"IntruderHLS-{camera_id}",
+            daemon=True
+        )
+        t.start()
+        threads.append(t)
+        time.sleep(0.1)  # stagger thread starts
+    
+    if not threads:
+        logger.warning("[IntruderWorker][HLS] No valid cameras to start")
         return
-
-    # Quick health check before starting the read loop
-    if not test_hls_stream(hls_url):
-        logger.error(f"[IntruderWorker][HLS] ❌ Stream test failed for {camera_id}: {hls_url}")
-        return
-
-    camera_name = camera_config.get("camera_name", "")
-    logger.info(f"[IntruderWorker][HLS] ▶ Starting → {camera_id}  ({camera_name})  URL: {hls_url}")
-    _run_hls_camera(camera_id, hls_url, camera_name=camera_name, max_frames=max_frames)
+    
+    try:
+        for t in threads:
+            t.join()
+    except KeyboardInterrupt:
+        stop_event.set()
+    finally:
+        stop_event.set()
+        logger.info("[IntruderWorker][HLS] ✅ All intruder detection cameras completed")
 
 
 

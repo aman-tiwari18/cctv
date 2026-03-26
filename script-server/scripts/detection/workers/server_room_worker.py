@@ -985,79 +985,104 @@ from tcs_scheduler import frame_should_process
 from detection_rate_limiter import get_rate_limiter
 
 # ── GPU Queue Config ─────────────────────────────────
-GPU_BATCH_SIZE = 8
-GPU_QUEUE_SIZE = 32
-THREAD_DELAY   = 0.2
+GPU_BATCH_SIZE      = 96     # true batch size — all hit GPU in one forward pass
+GPU_QUEUE_SIZE      = 384    # queue depth (4× batch)
+BATCH_WAIT_TIMEOUT  = 0.05   # seconds to wait for batch to fill before flushing
+THREAD_DELAY        = 0.05   # stagger between camera thread starts
 
 _gpu_queue = queue.Queue(maxsize=GPU_QUEUE_SIZE)
 
 
 def _hls_gpu_worker(stop_event, save_folder, cooldown_time=60):
     """
-    GPU batch worker — pulls frames from _gpu_queue in batches,
-    runs server_core.detect_persons_in_frame() on each.
-    Handles its own save logic with rate limiting.
+    GPU batch worker — TRUE batch inference.
+
+    Pulls up to GPU_BATCH_SIZE frames from _gpu_queue within
+    BATCH_WAIT_TIMEOUT seconds, then calls detect_persons_batch()
+    once — all frames hit the GPU in a single YOLO forward pass.
     """
-    logger.info("🚀 [ServerRoom][HLS] GPU worker started")
+    import torch
+    logger.info("🚀 [ServerRoom][HLS] GPU worker started (true batch mode)")
+
+    # Warm up model + pre-allocate GPU memory
+    server_core.get_yolo_model()
 
     rate_limiter = get_rate_limiter('server_room', max_per_minute=25)
+    log_counter  = 0
 
     while not stop_event.is_set():
-        batch = []
 
+        # ── Step 1: Wait for at least one frame ──────────────
+        batch = []
         try:
             batch.append(_gpu_queue.get(timeout=0.1))
         except queue.Empty:
             continue
 
-        # Fill batch up to GPU_BATCH_SIZE
-        while len(batch) < GPU_BATCH_SIZE:
+        # ── Step 2: Fill batch within BATCH_WAIT_TIMEOUT ─────
+        deadline = time.time() + BATCH_WAIT_TIMEOUT
+        while len(batch) < GPU_BATCH_SIZE and time.time() < deadline:
             try:
                 batch.append(_gpu_queue.get_nowait())
             except queue.Empty:
-                break
+                time.sleep(0.002)
 
-        for item in batch:
-            frame       = item['frame']
+        # ── Step 3: Build inference_items list ────────────────
+        inference_items = [
+            {
+                'frame':     item['frame'],
+                'ch_no':     item['ch_no'],
+                'camera_id': item['camera_id'],
+                'state':     item.get('state', {}),
+            }
+            for item in batch
+        ]
+
+        # ── Step 4: TRUE BATCH inference ─────────────────────
+        try:
+            batch_results = server_core.detect_persons_batch(inference_items)
+        except Exception as e:
+            logger.error(f"[ServerRoom][HLS] Batch inference error: {e}")
+            continue
+
+        # ── Step 5: GPU memory logging (every 30s) ────────────
+        log_counter += 1
+        if torch.cuda.is_available() and log_counter % 50 == 0:
+            allocated = torch.cuda.memory_allocated() / 1e9
+            reserved  = torch.cuda.memory_reserved()  / 1e9
+            logger.info(
+                f"[ServerRoom][GPU] batch={len(batch)} | "
+                f"allocated={allocated:.2f}GB | reserved={reserved:.2f}GB"
+            )
+
+        # ── Step 6: Process results per frame ────────────────
+        for item, (annotated_frame, detected, person_count) in zip(batch, batch_results):
             camera_id   = item['camera_id']
             ch_no       = item['ch_no']
             script_name = item.get('script_name', 'server')
             state       = item.get('state', {})
 
-            try:
-                # Set save folder on server_core
-                server_core.SAVE_FOLDER = save_folder
+            if not detected:
+                continue
 
-                _, detected, person_count = server_core.detect_persons_in_frame(
-                    frame,
-                    device_id=camera_id,
-                    camera_no=ch_no,
-                    script_name=script_name
-                )
+            now = time.time()
+            if now - state.get("last_save", 0) < cooldown_time:
+                continue
 
-                logger.debug(f"[HLS-GPU] {camera_id} → persons={person_count}, detected={detected}")
+            should_save, _, _ = rate_limiter.should_save_detection(camera_id)
+            if not should_save:
+                continue
 
-                if not detected:
-                    continue
-
-                now = time.time()
-                if now - state.get("last_save", 0) < cooldown_time:
-                    continue
-
-                should_save, _, _ = rate_limiter.should_save_detection(camera_id)
-
-                if should_save:
-                    state["last_save"] = now
-                    timestamp = time.strftime("%Y%m%d_%H%M%S")
-                    filename = os.path.join(
-                        save_folder,
-                        f"{script_name}_ch{ch_no}_{timestamp}.jpg"
-                    )
-                    cv2.imwrite(filename, frame)
-                    logger.warning(f"[HLS-GPU] 🚨 SAVED {filename}")
-
-            except Exception as e:
-                logger.error(f"[HLS-GPU ERROR] {camera_id} → {e}")
+            state["last_save"] = now
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            filename  = os.path.join(
+                save_folder,
+                f"{script_name}_ch{ch_no}_{timestamp}.jpg"
+            )
+            cv2.imwrite(filename, annotated_frame)
+            logger.warning(
+                f"[ServerRoom][HLS] 🚨 SAVED persons={person_count} → {filename}"
+            )
 
     logger.info("🔴 [ServerRoom][HLS] GPU worker stopped")
 
@@ -1138,6 +1163,21 @@ def server_room_worker_hls(camera_configs, stop_event=None):
 
     if stop_event is None:
         stop_event = _STOP_EVENT
+
+    # ── Scene Classification Filter ──────────────────────
+    valid_configs = []
+    for cfg in camera_configs:
+        cls_val = str(cfg.get('classification', '')).lower()
+        if 'server room' in cls_val or 'computer lab' in cls_val:
+            valid_configs.append(cfg)
+        else:
+            logger.info(f"[ServerRoom] 🚫 Skipping {cfg.get('camera_id', 'unknown')} (Scene: {cls_val})")
+            
+    if not valid_configs:
+        logger.warning("[ServerRoom][HLS] ❌ No valid cameras found after Scene Classification filter. Exiting.")
+        return
+        
+    camera_configs = valid_configs
 
     # Override save folder on server_core
     server_core.SAVE_FOLDER = HLS_SAVE_FOLDER

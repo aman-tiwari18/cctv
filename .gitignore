@@ -79,3 +79,6 @@ script-server/scripts/detection/models/*
 script-server/models/*
 script-server/scripts/detection/frames/*
 script-server/scripts/frames/*
+script-server/results/*
+script-server/scripts/models/*
+script-server/scripts/yolo11n.pt

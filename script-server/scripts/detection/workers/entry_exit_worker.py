@@ -705,110 +705,119 @@ from tcs_scheduler import frame_should_process
 from detection_rate_limiter import get_rate_limiter
 
 # ── GPU Queue Config ─────────────────────────────────
-GPU_BATCH_SIZE = 8
-GPU_QUEUE_SIZE = 32
-THREAD_DELAY   = 0.2
+GPU_BATCH_SIZE     = int(os.environ.get("GPU_BATCH_SIZE", "96"))
+GPU_QUEUE_MAX_SIZE = int(os.environ.get("GPU_QUEUE_MAX_SIZE", "1024"))
+THREAD_START_DELAY = float(os.environ.get("THREAD_START_DELAY_MS", "200")) / 1000.0
+ENTRY_SAMPLE_EVERY = 20  # 🔥 1/20 sampling as per user snippet
 
-_gpu_queue = queue.Queue(maxsize=GPU_QUEUE_SIZE)
+_gpu_queue = queue.Queue(maxsize=GPU_QUEUE_MAX_SIZE)
 _last_save_time = {}
+_HLS_GPU_WORKER = None
+_HLS_GPU_LOCK = threading.Lock()
 
 
-def _hls_gpu_worker(stop_event, save_folder, cooldown_time=120):
+def _ensure_shared_hls_gpu_worker(save_folder):
+    """Start one shared HLS GPU worker per process (if not already running)."""
+    global _HLS_GPU_WORKER
+    with _HLS_GPU_LOCK:
+        if _HLS_GPU_WORKER is None or not _HLS_GPU_WORKER.is_alive():
+            _HLS_GPU_WORKER = threading.Thread(
+                target=_hls_gpu_batch_worker,
+                args=(_STOP_EVENT, save_folder),
+                daemon=True,
+                name="entry_exit_hls_gpu_worker",
+            )
+            _HLS_GPU_WORKER.start()
+
+
+
+def _hls_gpu_batch_worker(stop_event, save_folder, cooldown_time=120):
     """
     GPU batch worker — pulls frames from _gpu_queue in batches,
-    runs entry_core.detect_persons_in_frame() with save=False,
-    handles save externally with cooldown + rate limiting.
+    runs entry_core.detect_persons_batch() for high performance.
     """
-    logger.info("🚀 [EntryExitWorker][HLS] GPU worker started")
-
-    rate_limiter = get_rate_limiter('entry_exit', max_per_minute=25)
+    logger.info("🚀 [EntryExitWorker][HLS] GPU batch worker started (TRUE BATCH)")
+    entry_core.get_yolo_model()
 
     while not stop_event.is_set():
-        batch = []
+        batch_items = []
 
+        # Pull first item (blocking with timeout)
         try:
-            batch.append(_gpu_queue.get(timeout=0.1))
+            batch_items.append(_gpu_queue.get(timeout=0.1))
         except queue.Empty:
             continue
 
-        # Fill batch up to GPU_BATCH_SIZE
-        while len(batch) < GPU_BATCH_SIZE:
+        # Fill batch until limit or timeout
+        deadline = time.time() + 0.2
+        while len(batch_items) < GPU_BATCH_SIZE and time.time() < deadline:
             try:
-                batch.append(_gpu_queue.get_nowait())
+                batch_items.append(_gpu_queue.get_nowait())
             except queue.Empty:
-                break
+                time.sleep(0.002)
 
-        for item in batch:
-            frame       = item['frame']
-            camera_id   = item['camera_id']
-            ch_no       = item['ch_no']
-            script_name = item.get('script_name', 'entry_exit')
+        if not batch_items:
+            continue
 
-            try:
-                # Set save folder on entry_core
-                entry_core.SAVE_FOLDER = save_folder
+        logger.debug(f"[BATCH] Processing batch of {len(batch_items)} frames")
 
-                processed_frame, detected, person_count = entry_core.detect_persons_in_frame(
-                    frame,
-                    device_id=camera_id,
-                    camera_no=camera_id,
-                    script_name=script_name,
-                    save=False   # 🔥 Save handled here
-                )
-
-                logger.debug(f"[HLS-GPU] {camera_id} → persons={person_count}, detected={detected}")
+        try:
+            # 🔥 TRUE GPU BATCHING
+            batch_results = entry_core.detect_persons_batch(batch_items)
+            
+            for item, (processed_frame, detected, person_count) in zip(batch_items, batch_results):
+                camera_id = item['camera_id']
+                ch_no = item['ch_no']
 
                 if not detected:
                     continue
 
-                # 🔥 External cooldown
                 now = time.time()
                 last_time = _last_save_time.get(camera_id, 0)
+
                 if now - last_time < cooldown_time:
                     continue
 
-                should_save, _, _ = rate_limiter.should_save_detection(camera_id)
+                _last_save_time[camera_id] = now
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = os.path.join(
+                    save_folder,
+                    f"EntryExit_ch{ch_no}_{timestamp}.jpg"
+                )
 
-                if should_save:
-                    _last_save_time[camera_id] = now
-                    timestamp = time.strftime("%Y%m%d_%H%M%S")
-                    filename = os.path.join(
-                        save_folder,
-                        f"EntryExit_ch{ch_no}_{timestamp}.jpg"
-                    )
-                    cv2.imwrite(filename, processed_frame)
-                    logger.warning(f"[HLS-GPU] 🚪 SAVED {filename}")
+                cv2.imwrite(filename, processed_frame)
+                logger.info(f"[SAVE] 🚪 {filename} (Persons: {person_count})")
 
-            except Exception as e:
-                logger.error(f"[HLS-GPU ERROR] {camera_id} → {e}")
+        except Exception as e:
+            logger.error(f"[BATCH ERROR][Entry/Exit] {e}")
 
-    logger.info("🔴 [EntryExitWorker][HLS] GPU worker stopped")
+    logger.info("🔴 [EntryExitWorker][HLS] GPU batch worker stopped")
+
 
 
 def _hls_camera_thread(cfg, stop_event):
     """
     Camera reader thread — opens HLS stream, reads frames,
-    pushes to gpu_queue for batch processing.
+    applies motion filtering + sampling, pushes to gpu_queue.
     """
     from tcs_hls_utils import extract_hls_streaming_url, test_hls_stream, open_hls_stream
+    from motion_detector import get_motion_detector
 
     camera_id   = cfg['camera_id']
-    script_name = cfg.get('script_code', 'entry_exit')
-    ch_no       = cfg.get('camera_id', 'unknown')  # ch_code for HLS
-    initial_url = cfg.get('cctv_url') or cfg.get('stream_url', '')
+    ch_no       = cfg.get('ch_no') or cfg.get('camera_no') or cfg.get('camera_id', 'unknown')
+    initial_url = cfg.get('cctv_url') or cfg.get('stream_url') or cfg.get('url', '')
 
     hls = extract_hls_streaming_url(initial_url)
     if not hls or not test_hls_stream(hls):
-        logger.error(f"[EntryExitWorker][HLS] ❌ Stream failed for {camera_id}")
+        logger.error(f"[{camera_id}] Stream failed or invalid URL")
         return
 
     cap = open_hls_stream(hls)
-    if cap is None:
-        logger.error(f"[EntryExitWorker][HLS] ❌ Could not open stream for {camera_id}")
+    if not cap or not cap.isOpened():
+        logger.error(f"[{camera_id}] Could not open stream")
         return
 
-    logger.info(f"[EntryExitWorker][HLS] 🟢 Camera thread started → {camera_id}")
-
+    motion_detector = get_motion_detector(camera_id, motion_threshold=800)
     frame_count = 0
 
     while not stop_event.is_set():
@@ -818,17 +827,22 @@ def _hls_camera_thread(cfg, stop_event):
             break
 
         frame_count += 1
+        
+        # 🔥 1/20 sampling
+        if not frame_should_process(frame_count, ENTRY_SAMPLE_EVERY):
+            continue
 
-        if not frame_should_process(frame_count, HLS_SAMPLE_EVERY):
+        # 🔥 CPU Motion Detection Pre-filtering
+        if not motion_detector.has_motion(frame):
             continue
 
         try:
-            _gpu_queue.put_nowait({
-                "frame":       frame,
-                "camera_id":   camera_id,
-                "ch_no":       ch_no,
-                "script_name": script_name,
-            })
+            _gpu_queue.put({
+                "frame": frame.copy(),
+                "camera_id": camera_id,
+                "ch_no": ch_no,
+                "script_code": "entry_exit"
+            }, timeout=0.1)
         except queue.Full:
             continue
 
@@ -851,31 +865,62 @@ def entry_exit_worker_hls(camera_configs, stop_event=None):
     if isinstance(camera_configs, dict):
         camera_configs = [camera_configs]
 
+    # In master_pipeline HLS flow this function is called per camera.
+    # Keep one shared GPU worker alive across calls (server-like behavior).
+    persistent_mode = stop_event is None
     if stop_event is None:
         stop_event = _STOP_EVENT
 
     # Override save folder on entry_core
     entry_core.SAVE_FOLDER = HLS_SAVE_FOLDER
 
-    # Start GPU worker thread
-    gpu_t = threading.Thread(
-        target=_hls_gpu_worker,
-        args=(stop_event, HLS_SAVE_FOLDER),
-        daemon=True
-    )
-    gpu_t.start()
-
-    # Start camera threads
-    threads = []
+    # 🔥 SCENE FILTER (case-insensitive)
+    valid_scenes = ['entry', 'outside', 'exit', 'outdoor', 'outside area', 'outside scene']
+    filtered_configs = []
     for cfg in camera_configs:
-        t = threading.Thread(
-            target=_hls_camera_thread,
-            args=(cfg, stop_event),
+        stream_url = cfg.get('cctv_url') or cfg.get('stream_url') or cfg.get('url')
+        if not stream_url:
+            continue
+        cls_raw = (
+            cfg.get('classification')
+            or cfg.get('scene_classification')
+            or cfg.get('Scene Classification')
+            or ''
+        )
+        cls_val = str(cls_raw).strip().lower()
+
+        # If classification is missing/unknown, allow instead of dropping all cameras.
+        if cls_val in ('', 'nan', 'none', 'null'):
+            filtered_configs.append(cfg)
+            continue
+
+        if any(scene in cls_val for scene in valid_scenes):
+            filtered_configs.append(cfg)
+
+    if not filtered_configs:
+        logger.warning(f"[EntryExitWorker][HLS] No cameras matched Entry/Exit scenes. Skipping.")
+        return
+
+
+    # Start GPU worker thread
+    if persistent_mode:
+        _ensure_shared_hls_gpu_worker(HLS_SAVE_FOLDER)
+    else:
+        gpu_t = threading.Thread(
+            target=_hls_gpu_batch_worker,
+            args=(stop_event, HLS_SAVE_FOLDER),
             daemon=True
         )
+        gpu_t.start()
+
+    # Start Camera Threads
+    threads = []
+    for cfg in filtered_configs:
+        t = threading.Thread(target=_hls_camera_thread, args=(cfg, stop_event), daemon=True)
         t.start()
         threads.append(t)
-        time.sleep(THREAD_DELAY)
+        time.sleep(THREAD_START_DELAY)
+
 
     logger.info(f"[EntryExitWorker][HLS] Started {len(threads)} camera threads + 1 GPU worker")
 
@@ -886,7 +931,11 @@ def entry_exit_worker_hls(camera_configs, stop_event=None):
     except KeyboardInterrupt:
         stop_event.set()
 
-    # Signal GPU worker to stop
+    if persistent_mode:
+        logger.info("[EntryExitWorker][HLS] ✅ Camera threads completed (shared GPU worker still running)")
+        return
+
+    # Signal dedicated GPU worker to stop (non-persistent mode only)
     stop_event.set()
 
     if torch.cuda.is_available():

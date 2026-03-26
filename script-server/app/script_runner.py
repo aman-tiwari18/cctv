@@ -87,23 +87,32 @@ class ScriptRunner:
         "tamper": "tampering",
         "camera_inversion": "inversion",
         "scene_classification": "vision",
+        "blindspot": "blind_spot",
+        "blind-spot": "blind_spot",
+        "crowd_zero_det": "crowd_zero",
+        "zero_person": "crowd_zero",
+        "zero-person": "crowd_zero",
+        "crowd_five_det": "crowd_five",
+        "less_than_5": "crowd_five",
+        "crowd_less_than_5": "crowd_five",
     }
 
     def _normalize_script_code(self, raw_script_code) -> str:
         script_code = str(raw_script_code or "").strip().lower()
         return self.SCRIPT_CODE_ALIASES.get(script_code, script_code)
-
     async def execute_script(self, execution):
         execution_metadata = execution.get("execution_metadata", {})
         raw_script_code = execution_metadata.get("script_code") or execution.get("script_code")
         script_code = self._normalize_script_code(raw_script_code)
-        stream_url  = execution.get("stream_url")
-        camera_id   = execution.get("camera_id")
+        stream_url  = execution.get("stream_url") or execution_metadata.get("stream_url")
+        camera_id   = execution.get("camera_id") or execution_metadata.get("camera_id")
         execution_id = str(execution.get("id"))
 
         pipeline_codes = {
             "server",
             "crowd",
+            "crowd_five",
+            "crowd_zero",
             "intruder",
             "entry_exit",
             "proximity",
@@ -111,6 +120,7 @@ class ScriptRunner:
             "invigilator",
             "inversion",
             "tampering",
+            "blind_spot",
         }
         standalone_script_paths = {
             "vision": self.scripts_dir / "detection/vision_classification.py",
@@ -186,9 +196,16 @@ class ScriptRunner:
         env["MAIN_BACKEND_URL"] = os.environ.get("MAIN_BACKEND_URL", "http://localhost:3000/cctv_analytics/api")
         env["API_KEY"] = os.environ.get("API_KEY", "")
 
+        meta = execution_metadata
+        env["EXAM_ID"] = str(meta.get("exam_id") or execution.get("exam_id") or "")
+        env["SHIFT_ID"] = str(meta.get("shift_id") or execution.get("shift_id") or "")
+        env["ASSIGNMENT_DATE"] = str(meta.get("assignment_date") or execution.get("assignment_date") or "")
+        env["LINK_TYPE"] = str(meta.get("link_type") or execution.get("link_type") or "")
+        env["CAMERA_NAME"] = str(meta.get("camera_name") or execution.get("camera_name") or "")
+        env["CAMERA_CLASSIFICATION"] = str(meta.get("classification") or execution.get("classification") or "")
+
         if script_code == "vision":
             import json as _json
-            meta = execution.get("execution_metadata", {})
             env["VISION_ASSIGNMENT_PAYLOAD"] = _json.dumps({
                 "assignment_id": execution_id,
                 "exam_id": meta.get("exam_id") or execution.get("exam_id"),

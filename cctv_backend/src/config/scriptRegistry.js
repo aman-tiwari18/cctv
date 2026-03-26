@@ -18,6 +18,20 @@ module.exports = {
         default_frequency: 5,
         default_duration: 1,
     },
+    crowd_zero: {
+        name: 'Zero Person Detection',
+        description: 'Detects zero/low occupancy in configured HLS camera feeds.',
+        script_path: 'scripts/detection/pipeline/master_pipeline.py',
+        default_frequency: 5,
+        default_duration: 1,
+    },
+    crowd_five: {
+        name: 'Low Person Count Detection (<5)',
+        description: 'Detects low occupancy (fewer than 5 persons) in configured HLS camera feeds.',
+        script_path: 'scripts/detection/pipeline/master_pipeline.py',
+        default_frequency: 5,
+        default_duration: 1,
+    },
     intruder: {
         name: 'Intruder Detection',
         description: 'Detects unauthorized people in protected areas.',
@@ -70,6 +84,13 @@ module.exports = {
     tampering: {
         name: 'Camera Tampering Detection',
         description: 'Detects blur, blockage, or tampering in HLS camera feeds.',
+        script_path: 'scripts/detection/pipeline/master_pipeline.py',
+        default_frequency: 5,
+        default_duration: 1,
+    },
+    blind_spot: {
+        name: 'Blind Spot Detection',
+        description: 'Detects blind spots, partial visibility, and static camera issues in HLS feeds.',
         script_path: 'scripts/detection/pipeline/master_pipeline.py',
         default_frequency: 5,
         default_duration: 1,

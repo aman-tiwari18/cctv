@@ -1,22 +1,24 @@
-# workers/camera_tampering_worker.py
+# workers/camera_inversion_worker.py
 """
-Camera Tampering Worker — HLS only (CPU-only detection).
-
-Detects camera tampering via OpenCV blur/brightness/edge checks.
-No GPU needed — pure CV operations.
-
-Based on: tcs_camera_tampering_detection.py
+Camera Inversion Worker — GPU Batch Optimized
+=============================================
+Detects camera rotation using YOLOv11 + Places365.
+Truly batched: N frames -> 4*N rotations -> Single inference pass.
 """
 
 import os
 import sys
 import time
 import cv2
+import queue
 import logging
 import threading
 import signal
+import torch
 import numpy as np
 from datetime import datetime
+from PIL import Image
+from torchvision import models, transforms
 
 # ================= GRACEFUL STOP FLAG =================
 _STOP_EVENT = threading.Event()
@@ -24,259 +26,278 @@ _STOP_EVENT = threading.Event()
 def _handle_stop(sig, frame):
     _STOP_EVENT.set()
 
-signal.signal(signal.SIGINT,  _handle_stop)
-signal.signal(signal.SIGTERM, _handle_stop)
+if threading.current_thread() is threading.main_thread():
+    signal.signal(signal.SIGINT,  _handle_stop)
+    signal.signal(signal.SIGTERM, _handle_stop)
 
 # ================= LOGGING =================
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 # ================= PATH SETUP =================
 _DETECTION_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if _DETECTION_ROOT not in sys.path:
-    sys.path.insert(0, _DETECTION_ROOT)
-
 _PROJECT_ROOT = os.path.abspath(os.path.join(_DETECTION_ROOT, "../.."))
-if _PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, _PROJECT_ROOT)
 
 # ================= CONFIG ==================
-HLS_SAVE_FOLDER = os.path.join(
-    _PROJECT_ROOT,
-    "results/camera_tampering_detection_results"
-)
+HLS_SAVE_FOLDER = os.path.join(_PROJECT_ROOT, "results/tcs_detections/camera_inversion_detection")
 os.makedirs(HLS_SAVE_FOLDER, exist_ok=True)
 
-# ================= IMPORTS =================
-from detection_rate_limiter import get_rate_limiter
-from tcs_scheduler import (
-    camera_slot,
-    frame_should_process,
-    get_sample_every,
-    get_max_concurrency,
-    get_max_frames_per_run,
-    get_bool,
-    get_positive_float,
-    CameraWorkerPool,
-)
+GPU_BATCH_SIZE     = int(os.environ.get("GPU_BATCH_SIZE", "64"))
+GPU_QUEUE_MAX_SIZE = int(os.environ.get("GPU_QUEUE_MAX_SIZE", "1024"))
+THREAD_START_DELAY = float(os.environ.get("THREAD_START_DELAY_MS", "10")) / 1000.0
+INVERSION_COOLDOWN = 120
+SAMPLE_EVERY       = 3  # 🔥 High frequency for rotation checks
 
-# ================= DETECTION CONFIG =================
-SAMPLE_EVERY       = get_sample_every("TCS_TAMPER_SAMPLE_EVERY", 5)
-MAX_CONCURRENCY    = get_max_concurrency("TCS_TAMPER_MAX_CONCURRENCY", None)
-MAX_FRAMES_PER_RUN = get_max_frames_per_run("TCS_TAMPER_MAX_FRAMES_PER_RUN", None)
-USE_POOL           = get_bool("TCS_USE_WORKER_POOL", False)
-POOL_WORKERS       = get_max_concurrency("TCS_WORKER_COUNT", 8)
-POOL_COOLDOWN      = get_positive_float("TCS_POOL_COOLDOWN_SEC", 0.5)
+# ================= DEVICE =================
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-_rate_limiter = get_rate_limiter('camera_tamper', max_per_minute=50)
+# ================= MODELS (lazy load) =================
+_yolo_model = None
+_places_model = None
+_classes = []
+_transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    transforms.Normalize([0.485, 0.456, 0.406],
+                         [0.229, 0.224, 0.225])
+])
 
-THREAD_START_DELAY = float(os.environ.get("THREAD_START_DELAY_MS", "200")) / 1000.0
+def _load_models():
+    global _yolo_model, _places_model, _classes
+    if _yolo_model is not None: return
+
+    from ultralytics import YOLO
+    
+    # YOLOv11
+    yolo_path = os.path.join(_PROJECT_ROOT, "models/yolo11n.pt")
+    _yolo_model = YOLO(yolo_path if os.path.exists(yolo_path) else "yolo11n.pt")
+    _yolo_model.to(DEVICE)
+
+    # Places365
+    _places_model = models.resnet50(num_classes=365)
+    ckpt_path = os.path.join(_DETECTION_ROOT, "resnet50_places365.pth.tar")
+    if os.path.exists(ckpt_path):
+        checkpoint = torch.load(ckpt_path, map_location=DEVICE)
+        state_dict = {k.replace("module.", ""): v for k, v in checkpoint["state_dict"].items()}
+        _places_model.load_state_dict(state_dict)
+    _places_model = _places_model.to(DEVICE)
+    _places_model.eval()
+
+    # Categories
+    cats_path = os.path.join(_DETECTION_ROOT, "categories_places365.txt")
+    if os.path.exists(cats_path):
+        with open(cats_path) as f:
+            for line in f:
+                _classes.append(line.strip().split(" ")[0][3:])
+
+# ================= SHARED STATE ============
+_gpu_queue = queue.Queue(maxsize=GPU_QUEUE_MAX_SIZE)
+_last_save_time = {}
+
+# ================= BATCH DETECTION =================
+def _detect_orientation_batch(frames):
+    _load_models()
+    if not frames: return []
+
+    all_rotations = []
+    meta = []
+
+    for idx, frame in enumerate(frames):
+        rot_v = [
+            ("original", frame),
+            ("90", cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)),
+            ("180", cv2.rotate(frame, cv2.ROTATE_180)),
+            ("270", cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)),
+        ]
+        for name, img in rot_v:
+            all_rotations.append(img)
+            meta.append((idx, name, img))
+
+    # 🔥 YOLO BATCH
+    results = _yolo_model(all_rotations, conf=0.35, verbose=False)
+    yolo_outs = []
+    for r in results:
+        boxes = r.boxes
+        count = len(boxes)
+        confs = [float(b.conf) for b in boxes]
+        avg_conf = sum(confs)/len(confs) if confs else 0
+        yolo_outs.append((count, avg_conf))
+
+    # 🔥 PLACES365 BATCH
+    tensors = [ _transform(Image.fromarray(cv2.cvtColor(f, cv2.COLOR_BGR2RGB))) for f in all_rotations ]
+    batch_tensor = torch.stack(tensors).to(DEVICE)
+    with torch.no_grad():
+        out = _places_model(batch_tensor)
+        probs = torch.nn.functional.softmax(out, dim=1)
+        scene_scores, _ = probs.topk(1)
+        scene_scores = scene_scores.squeeze(1).tolist()
+
+    index_map = {}
+    for (idx, name, img), (obj_count, obj_conf), scene_conf in zip(meta, yolo_outs, scene_scores):
+        score = obj_count * obj_conf + scene_conf
+        if idx not in index_map or score > index_map[idx][0]:
+            index_map[idx] = (score, img, name)
+
+    outputs = []
+    for i in range(len(frames)):
+        outputs.append((index_map[i][1], index_map[i][2]))
+    return outputs
+
+# ================= GPU WORKER =================
+def _hls_gpu_batch_worker(stop_event, save_folder):
+    logger.info("🚀 [InversionWorker] GPU Batch Worker started")
+    
+    while not stop_event.is_set():
+        batch_items = []
+        try:
+            batch_items.append(_gpu_queue.get(timeout=0.1))
+        except queue.Empty:
+            continue
+
+        deadline = time.time() + 0.2
+        while len(batch_items) < (GPU_BATCH_SIZE // 4) and time.time() < deadline:
+            try:
+                batch_items.append(_gpu_queue.get_nowait())
+            except queue.Empty:
+                time.sleep(0.002)
+
+        if not batch_items: continue
+
+        try:
+            frames = [ item['frame'] for item in batch_items ]
+            results = _detect_orientation_batch(frames)
+
+            for item, (corrected, orientation) in zip(batch_items, results):
+                cam_id = item['camera_id']
+                ch_no = item['ch_no']
+
+                if orientation != "original":
+                    now = time.time()
+                    if now - _last_save_time.get(cam_id, 0) < INVERSION_COOLDOWN:
+                        continue
+                    
+                    _last_save_time[cam_id] = now
+                    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    filename = os.path.join(save_folder, f"Inversion_ch{ch_no}_{ts}.jpg")
+                    cv2.imwrite(filename, corrected)
+                    logger.warning(f"[INVERSION] 🔄 {cam_id} ({orientation}) saved to {filename}")
+
+        except Exception as e:
+            logger.error(f"[BATCH ERROR] {e}")
+
+    logger.info("🔴 [InversionWorker] GPU Batch Worker stopped")
 
 
-# =====================================================
-# 📐 HELPERS
-# =====================================================
-def _safe_name(s: str) -> str:
-    """Strip characters that would create subdirectories or break filenames."""
-    return s.replace('/', '_').replace('\\', '_').replace(' ', '_').replace(':', '_')
-
-
-# =====================================================
-# 🔍 CORE DETECTION (CPU-only, no GPU)
-# =====================================================
-def detect_camera_tampering(frame):
-    """
-    Returns (status, brightness, blur_score, edge_density).
-    status: "Normal" | "Camera Blocked" | "Camera Blurred" | "Camera Covered"
-    """
-    frame_resized = cv2.resize(frame, (320, 240))
-
-    brightness   = np.mean(frame_resized)
-    gray         = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2GRAY)
-    blur_score   = cv2.Laplacian(gray, cv2.CV_64F).var()
-
-    edges        = cv2.Canny(gray, 50, 150)
-    edge_pixels  = np.sum(edges > 0)
-    edge_density = edge_pixels / (320 * 240)
-
-    status = "Normal"
-
-    if brightness < 80:
-        status = "Camera Blocked"
-    elif blur_score < 500:
-        status = "Camera Blurred"
-    elif edge_density < 0.055:
-        status = "Camera Covered"
-
-    return status, brightness, blur_score, edge_density
-
-
-# =====================================================
-# 📡  HLS STREAM PROCESSING
-# =====================================================
-def _process_hls_stream(hls_url, camera_id, script_name,
-                        ch_no="unknown", stop_event=None,
-                        max_frames=None):
-    """
-    Process a single HLS stream for camera tampering.
-    CPU-only — no GPU needed.
-    """
-    from tcs_hls_utils import open_hls_stream
-
-    if stop_event is None:
-        stop_event = _STOP_EVENT
-
-    cap = open_hls_stream(hls_url)
-    if cap is None or not cap.isOpened():
-        logger.error(f"[{camera_id}] Failed to open HLS stream")
-        return False
-
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    if fps <= 0 or fps > 60:
-        fps = 25.0
-
-    logger.info(f"[{camera_id}] Stream opened @ {fps:.1f} FPS | ch_no={ch_no}")
-
-    frame_count        = 0
-    detection_count    = 0
-    skipped_rate_limit = 0
-    start_time         = time.time()
-
-    try:
-        while not stop_event.is_set():
-            ret, frame = cap.read()
-            if not ret:
-                break
-
-            frame_count += 1
-
-            if frame_should_process(frame_count, SAMPLE_EVERY):
-                status, brightness, blur_score, edge_density = detect_camera_tampering(frame)
-
-                if status != "Normal":
-                    should_save, current_rate, _ = _rate_limiter.should_save_detection(camera_id)
-
-                    if should_save:
-                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        # Image naming: {script_name}_ch{ch_no}_{timestamp}_{status}.jpg
-                        filename = os.path.join(
-                            HLS_SAVE_FOLDER,
-                            f"{script_name}_ch{ch_no}_{timestamp}_{status.replace(' ', '_')}.jpg"
-                        )
-                        success = cv2.imwrite(filename, frame)
-                        if success:
-                            detection_count += 1
-                            logger.warning(
-                                f"[{camera_id}] ALERT: {status} "
-                                f"| B:{brightness:.1f} | Blur:{blur_score:.1f} "
-                                f"| Edge:{edge_density:.3f} "
-                                f"({current_rate}/50/min) → {filename}"
-                            )
-                    else:
-                        skipped_rate_limit += 1
-
-            if max_frames and frame_count >= max_frames:
-                break
-
-    except Exception as e:
-        logger.error(f"[{camera_id}] Error: {e}")
-    finally:
-        cap.release()
-        elapsed = time.time() - start_time
-        logger.info(
-            f"[{camera_id}] Done: {frame_count} frames in {elapsed:.1f}s | "
-            f"Saved: {detection_count} | Rate-limited: {skipped_rate_limit}"
-        )
-
-    return True
-
-
-# =====================================================
-# 📡  HLS CAMERA THREAD
-# =====================================================
+# ================= CAMERA THREAD =================
 def _hls_camera_thread(cfg, stop_event):
-    """Per-camera HLS thread — resolves URL then processes."""
-    from tcs_hls_utils import extract_hls_streaming_url, test_hls_stream
+    from tcs_hls_utils import extract_hls_streaming_url, test_hls_stream, open_hls_stream
+    from tcs_scheduler import frame_should_process
 
-    camera_id   = cfg['camera_id']
-    script_name = cfg.get('script_code', 'tamper')
-    ch_no       = cfg.get('ch_no', cfg.get('camera_id', 'unknown'))
-    initial_url = cfg.get('cctv_url') or cfg.get('initial_url') or cfg.get('stream_url', '')
+    cam_id = cfg['camera_id']
+    initial_url = cfg.get('cctv_url') or cfg.get('stream_url') or cfg.get('url', '')
 
-    try:
-        with camera_slot("tampering", MAX_CONCURRENCY):
-            hls_url = extract_hls_streaming_url(initial_url)
-            if not hls_url or not test_hls_stream(hls_url):
-                logger.error(f"[{camera_id}] Failed to resolve HLS stream")
-                return
+    hls = extract_hls_streaming_url(initial_url)
+    if not hls or not test_hls_stream(hls):
+        return
 
-            _process_hls_stream(
-                hls_url,
-                camera_id,
-                script_name,
-                ch_no=ch_no,
-                stop_event=stop_event,
-                max_frames=MAX_FRAMES_PER_RUN,
+    cap = open_hls_stream(hls)
+    if not cap or not cap.isOpened():
+        return
+
+    frame_count = 0
+    while not stop_event.is_set():
+        ret, frame = cap.read()
+        if not ret: break
+
+        frame_count += 1
+        if not frame_should_process(frame_count, SAMPLE_EVERY):
+            continue
+
+        try:
+            _gpu_queue.put({
+                "frame": frame.copy(),
+                "camera_id": cam_id,
+                "ch_no": cfg.get('ch_no') or cfg.get('camera_no') or cfg.get('camera_id', 'unknown')
+            }, timeout=0.1)
+        except queue.Full:
+            continue
+    cap.release()
+
+# ================= PERSISTENT GPU WORKER STATE =================
+_HLS_GPU_WORKER = None
+_HLS_GPU_LOCK = threading.Lock()
+
+
+def _ensure_shared_hls_gpu_worker():
+    global _HLS_GPU_WORKER
+    with _HLS_GPU_LOCK:
+        if _HLS_GPU_WORKER is None or not _HLS_GPU_WORKER.is_alive():
+            _HLS_GPU_WORKER = threading.Thread(
+                target=_hls_gpu_batch_worker,
+                args=(_STOP_EVENT, HLS_SAVE_FOLDER),
+                daemon=True,
+                name="inversion_hls_gpu_worker",
             )
-    except Exception as e:
-        logger.error(f"[{camera_id}] Error: {e}")
+            _HLS_GPU_WORKER.start()
+            logger.info("[InversionWorker] 🚀 Shared GPU worker started")
 
 
-# =====================================================
-# 📡  HLS WORKER ENTRY POINT
-# =====================================================
-def camera_tampering_worker_hls(camera_configs, stop_event=None):
-    """
-    HLS worker entry point for camera tampering detection.
-
-    Accepts a LIST of camera configs (from camera_loader).
-    CPU-only — no GPU queue needed.
-
-    Can also accept a single dict for backward compatibility.
-    """
+# ================= ENTRY POINT =================
+def camera_inversion_worker_hls(camera_configs, stop_event=None):
     if isinstance(camera_configs, dict):
         camera_configs = [camera_configs]
 
+    persistent_mode = stop_event is None
     if stop_event is None:
         stop_event = _STOP_EVENT
 
-    if USE_POOL:
-        pool = CameraWorkerPool(worker_count=POOL_WORKERS, cooldown_sec=POOL_COOLDOWN)
-        pool.start()
-        for cfg in camera_configs:
-            pool.submit(_hls_camera_thread, cfg, stop_event)
-        try:
-            pool.wait_forever()
-        finally:
-            pool.stop()
+    # 🔥 URL filter — inversion can occur in any scene; just require a valid URL
+    filtered_configs = []
+    for cfg in camera_configs:
+        stream_url = cfg.get('cctv_url') or cfg.get('stream_url') or cfg.get('url')
+        if not stream_url:
+            continue
+        filtered_configs.append(cfg)
+
+    if not filtered_configs:
+        logger.warning("[CameraInversion][HLS] No cameras with valid URLs. Skipping.")
+        return
+
+    camera_configs = filtered_configs
+
+    if persistent_mode:
+        _ensure_shared_hls_gpu_worker()
     else:
-        threads = []
-        total = len(camera_configs)
-        for i, cfg in enumerate(camera_configs):
-            t = threading.Thread(
-                target=_hls_camera_thread,
-                args=(cfg, stop_event),
-                name=f"Tamper-{cfg.get('camera_id', i)}",
-                daemon=True
-            )
-            t.start()
-            threads.append(t)
-            time.sleep(THREAD_START_DELAY)
+        gpu_t = threading.Thread(
+            target=_hls_gpu_batch_worker,
+            args=(stop_event, HLS_SAVE_FOLDER),
+            daemon=True
+        )
+        gpu_t.start()
 
-            if (i + 1) % 100 == 0:
-                logger.info(f"  {i + 1}/{total} tampering camera threads started...")
+    threads = []
+    for cfg in camera_configs:
+        t = threading.Thread(
+            target=_hls_camera_thread,
+            args=(cfg, stop_event),
+            daemon=True
+        )
+        t.start()
+        threads.append(t)
+        time.sleep(THREAD_START_DELAY)
 
-        logger.info(f"[TamperWorker][HLS] All {total} cameras started")
+    logger.info(f"[InversionWorker][HLS] Started {len(threads)} camera threads + 1 GPU worker")
 
-        try:
-            for t in threads:
-                t.join()
-        except KeyboardInterrupt:
-            stop_event.set()
-
+    try:
+        for t in threads:
+            t.join()
+    except KeyboardInterrupt:
         stop_event.set()
 
-    logger.info("[TamperWorker][HLS] ✅ All cameras completed")
+    if persistent_mode:
+        logger.info("[InversionWorker][HLS] ✅ Camera threads completed (shared GPU worker still running)")
+        return
+
+    stop_event.set()
+
+    logger.info("[InversionWorker][HLS] ✅ All cameras completed")

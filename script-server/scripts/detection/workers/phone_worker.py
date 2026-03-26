@@ -728,62 +728,102 @@ from tcs_scheduler import frame_should_process
 from detection_rate_limiter import get_rate_limiter
 
 # ── GPU Queue Config ─────────────────────────────────
-GPU_BATCH_SIZE = 8
-GPU_QUEUE_SIZE = 32
-THREAD_DELAY   = 0.2
-PHONE_SAMPLE_EVERY = 10  # phone samples every 10 frames (per TCS file)
+GPU_BATCH_SIZE      = 112    # true batch size — all frames in one GPU pass
+GPU_QUEUE_SIZE      = 1024   # large queue for 921 camera threads
+BATCH_WAIT_TIMEOUT  = 0.2    # seconds to wait for batch to fill
+THREAD_DELAY        = 0.05   # stagger thread starts
+PHONE_SAMPLE_EVERY  = 10     # phone detection every 10 frames
 
 _gpu_queue = queue.Queue(maxsize=GPU_QUEUE_SIZE)
 
 
-def _hls_gpu_worker(stop_event, save_folder):
+def _hls_gpu_worker(stop_event, save_folder, cooldown_time=480):
     """
-    GPU batch worker — pulls frames from _gpu_queue in batches,
-    runs phone_core.detect_phones_in_frame() on each.
+    GPU batch worker — TRUE batch inference.
+
+    Fills up to GPU_BATCH_SIZE frames within BATCH_WAIT_TIMEOUT seconds,
+    then calls phone_core.detect_phones_batch() once — single GPU forward pass.
     """
-    logger.info("🚀 [PhoneWorker][HLS] GPU worker started")
+    import torch
+    logger.info("🚀 [PhoneWorker][HLS] GPU worker started (true batch mode)")
+
+    # Warm up model
+    phone_core.get_yolo_model()
 
     rate_limiter = get_rate_limiter('phone', max_per_minute=25)
+    # Per-camera save state: camera_id → last_save timestamp
+    cam_state    = {}
+    log_counter  = 0
 
     while not stop_event.is_set():
-        batch = []
 
+        # ── Step 1: Wait for first frame ──────────────────
+        batch = []
         try:
             batch.append(_gpu_queue.get(timeout=0.1))
         except queue.Empty:
             continue
 
-        while len(batch) < GPU_BATCH_SIZE:
+        # ── Step 2: Fill batch within deadline ────────────
+        deadline = time.time() + BATCH_WAIT_TIMEOUT
+        while len(batch) < GPU_BATCH_SIZE and time.time() < deadline:
             try:
                 batch.append(_gpu_queue.get_nowait())
             except queue.Empty:
-                break
+                time.sleep(0.002)
 
-        for item in batch:
-            frame       = item['frame']
+        # ── Step 3: Build inference items ─────────────────
+        inference_items = [
+            {
+                'frame':     item['frame'],
+                'camera_id': item['camera_id'],
+                'ch_no':     item['ch_no'],
+            }
+            for item in batch
+        ]
+
+        # ── Step 4: TRUE BATCH inference ────────────────────
+        try:
+            batch_results = phone_core.detect_phones_batch(inference_items)
+        except Exception as e:
+            logger.error(f"[PhoneWorker][HLS] Batch error: {e}")
+            continue
+
+        # ── Step 5: GPU memory logging (every 50 batches) ──
+        log_counter += 1
+        if torch.cuda.is_available() and log_counter % 50 == 0:
+            mem = torch.cuda.memory_allocated() / 1e9
+            logger.info(
+                f"[PhoneWorker][GPU] batch={len(batch)} | mem={mem:.2f}GB"
+            )
+
+        # ── Step 6: Handle results per frame ───────────────
+        for item, (annotated_frame, detected, phone_count) in zip(batch, batch_results):
+            if not detected:
+                continue
+
             camera_id   = item['camera_id']
             ch_no       = item['ch_no']
             script_name = item.get('script_name', 'phone')
 
-            try:
-                phone_core.SAVE_FOLDER = save_folder
+            now = time.time()
+            if now - cam_state.get(camera_id, 0) < cooldown_time:
+                continue
 
-                processed_frame, detected, count = phone_core.detect_phones_in_frame(
-                    frame,
-                    device_id=camera_id,
-                    camera_no=camera_id,
-                    ch_no=ch_no,
-                    script_name=script_name,
-                    save=False
-                )
+            should_save, _, _ = rate_limiter.should_save_detection(camera_id)
+            if not should_save:
+                continue
 
-                if detected:
-                    should_save, _, _ = rate_limiter.should_save_detection(camera_id)
-                    if should_save:
-                        logger.info(f"[HLS-GPU] 📱 SAVE-TRIGGER {camera_id} → {count} phones")
-
-            except Exception as e:
-                logger.error(f"[HLS-GPU ERROR] {camera_id} → {e}")
+            cam_state[camera_id] = now
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            filename  = os.path.join(
+                save_folder,
+                f"{script_name}_ch{ch_no}_{timestamp}.jpg"
+            )
+            cv2.imwrite(filename, annotated_frame)
+            logger.warning(
+                f"[PhoneWorker][HLS] 📱 SAVED phones={phone_count} → {filename}"
+            )
 
     logger.info("🔴 [PhoneWorker][HLS] GPU worker stopped")
 
@@ -854,6 +894,21 @@ def phone_worker_hls(camera_configs, stop_event=None):
 
     if stop_event is None:
         stop_event = _STOP_EVENT
+
+    # ── Scene Classification Filter ──────────────────────
+    valid_configs = []
+    for cfg in camera_configs:
+        cls_val = str(cfg.get('classification', '')).lower()
+        if 'server room' in cls_val or 'computer lab' in cls_val:
+            valid_configs.append(cfg)
+        else:
+            logger.info(f"[PhoneWorker] 🚫 Skipping {cfg.get('camera_id', 'unknown')} (Scene: {cls_val})")
+            
+    if not valid_configs:
+        logger.warning("[PhoneWorker][HLS] ❌ No valid cameras found after Scene Classification filter. Exiting.")
+        return
+        
+    camera_configs = valid_configs
 
     phone_core.SAVE_FOLDER = HLS_SAVE_FOLDER
 

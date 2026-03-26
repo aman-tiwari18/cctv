@@ -1064,6 +1064,56 @@ def main():
     cv2.destroyAllWindows()
     logging.info("Invigilator tracking completed")
 
+
+# ================= GPU BATCH INFERENCE =================
+def detect_invigilators_batch(items, model=None, conf_threshold=0.5, min_height=250):
+    """
+    True GPU Batch Inference for Invigilator Tracking.
+    
+    Args:
+        items: List of dicts, each containing:
+            'frame': The image to process
+            'camera_id': Identifier for the camera
+            'result_cb': Callback function to handle detections: cb(detections, frame)
+        model: Pre-loaded YOLO model (optional)
+        conf_threshold: Confidence threshold for person detection
+        min_height: Minimum height for a person to be tracked
+    """
+    if not items:
+        return
+
+    if model is None:
+        # Lazy load if not provided
+        from ultralytics import YOLO
+        model = YOLO(MODEL_PATH)
+
+    frames = [item['frame'] for item in items]
+    
+    try:
+        # Single forward pass for the entire batch
+        results = model(frames, conf=conf_threshold, verbose=False)
+    except Exception as e:
+        print(f"[GPU ERROR][Invigilator] {e}")
+        return
+
+    for item, result in zip(items, results):
+        detections = []
+        if result.boxes:
+            boxes = result.boxes.data.tolist()
+            for r in boxes:
+                x1, y1, x2, y2, score, class_id = r
+                if score >= conf_threshold and int(class_id) == 0:
+                    h = int(y2 - y1)
+                    if h >= min_height:
+                        detections.append([int(x1), int(y1), int(x2), int(y2), score, h])
+        
+        # Trigger the callback for this specific camera/frame
+        try:
+            item['result_cb'](detections, item['frame'])
+        except Exception as e:
+            print(f"[CALLBACK ERROR][Invigilator] {item.get('camera_id')}: {e}")
+
 if __name__ == "__main__":
     main()
+
 

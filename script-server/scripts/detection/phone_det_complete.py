@@ -711,10 +711,12 @@
 # added by samarth
 
 
+
 import cv2
 import time
 import os
 import logging
+import threading
 import torch
 import torchvision.transforms as transforms
 import sys
@@ -893,6 +895,76 @@ def process_dav_video():
     cap.release()
     cv2.destroyAllWindows()
     logging.info("Phone detection completed")
+
+# ================= BATCH INFERENCE =================
+_model = None
+_model_lock = threading.Lock()
+
+def get_yolo_model():
+    """True batch GPU warmup / loading"""
+    global _model
+    if _model is None:
+        with _model_lock:
+            if _model is None:
+                logging.info("Loading YOLO model for Batch Inference...")
+                device = 'cuda' if torch.cuda.is_available() else 'cpu'
+                _model = YOLO(MODEL_PATH)
+                _model.to(device)
+                
+                # GPU warmup
+                if torch.cuda.is_available():
+                    dummy = [np.zeros((640, 640, 3), dtype=np.uint8)] * 4
+                    _model(dummy, verbose=False)
+                    torch.cuda.synchronize()
+    return _model
+
+def detect_phones_batch(items):
+    """
+    True batch inference for phones.
+    Also runs Places365 scene classification per frame.
+    """
+    model = get_yolo_model()
+    frames = [item['frame'] for item in items]
+    
+    # 1. Run YOLO batch
+    results = model(frames, conf=CONF_THRESHOLD, verbose=False)
+
+    outputs = []
+
+    for item, result in zip(items, results):
+        frame = item['frame'].copy()
+        ch_no = item['ch_no']
+        
+        # 2. Add Scene Classification
+        scene_labels = classify_scene(frame)
+        
+        names = result.names
+        phone_count = 0
+        phone_detected = False
+
+        for box in result.boxes:
+            cls_id = int(box.cls[0])
+            if names[cls_id] == "cell phone":
+                phone_detected = True
+                phone_count += 1
+                
+                x1, y1, x2, y2 = map(int, box.xyxy[0])
+                cv2.rectangle(frame, (x1,y1), (x2,y2), (0,0,255), 2)
+                conf = float(box.conf[0])
+                cv2.putText(frame, f"Phone {conf:.2f}", (x1, y1-10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,0,255), 2)
+
+        # 3. Add Overlays
+        cv2.putText(frame, f"Scene: {', '.join(scene_labels[:2])}", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        cv2.putText(frame, f"Phones: {phone_count}", (10, 60),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        cv2.putText(frame, f"CH: {ch_no}", (10, 90),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+        outputs.append((frame, phone_detected, phone_count))
+
+    return outputs
 
 # ================= MAIN ====================
 if __name__ == "__main__":
