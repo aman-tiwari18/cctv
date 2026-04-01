@@ -356,8 +356,7 @@ exports.updateAssignment = async (req, res) => {
  * Delete shift-script assignment (soft delete)
  */
 exports.deleteAssignment = async (req, res) => {
-    await ShiftScriptAssignment.update(
-        { is_active: false },
+    await ShiftScriptAssignment.destroy(
         { where: { id: req.params.id } }
     );
 

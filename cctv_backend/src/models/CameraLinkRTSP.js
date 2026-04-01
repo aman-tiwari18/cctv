@@ -12,8 +12,7 @@ const CameraLinkRTSP = sequelize.define(
         device_id: {
             type: DataTypes.STRING,
             allowNull: false,
-            unique: true,
-            comment: "Unique device identifier",
+            comment: "Device identifier",
         },
         exam_id: {
             type: DataTypes.INTEGER,
@@ -31,6 +30,11 @@ const CameraLinkRTSP = sequelize.define(
         camera_name: {
             type: DataTypes.STRING,
             allowNull: true,
+        },
+        camera_no: {
+            type: DataTypes.STRING,
+            allowNull: true,
+            comment: "Camera number from Excel",
         },
         city: {
             type: DataTypes.STRING,

@@ -194,9 +194,10 @@ exports.uploadCameras = async (req, res) => {
                     "Deive Id"
                 );
                 const camera_name = pick(row, "Camera Name", "camera_name");
+                const camera_no = pick(row, "Camera No", "camera_no", "CameraNo", "Camera Number", "camera_number");
                 const cctv_url = pick(row, "Server Address", "CCTV URL", "cctv_url", "url", "URL", "Link");
 
-                if (!device_id || !camera_name || !cctv_url) continue;
+                if (!device_id || !cctv_url) continue;
 
                 validRecords.push({
                     exam_id: examId,
@@ -204,6 +205,7 @@ exports.uploadCameras = async (req, res) => {
                     centre_name: pick(row, "Centre Name", "Center Name", "center_name", "centre_name", "TC Name", "TC NAME", "Tc_name"),
                     tc_code: pick(row, "TC Code", "tc_code", "TC_CODE", "TC code"),
                     camera_name,
+                    camera_no: camera_no || null,
                     city: pick(row, "City", "city", "CITY"),
                     state: pick(row, "State", "state", "STATE"),
                     cctv_url,
@@ -216,7 +218,7 @@ exports.uploadCameras = async (req, res) => {
             const detectedHeaders = Object.keys(data[0] || {});
             const missingColumnsMessage =
                 linkType === "RTSP"
-                    ? `No valid records found. Required RTSP columns: Device ID (or Deive ID), TC Code, Camera Name, Centre/Center Name, City, State, Server Address (or CCTV URL). Detected headers: ${detectedHeaders.join(", ")}`
+                    ? `No valid records found. Required RTSP columns: Device ID, Server Address (or CCTV URL). Optional: Camera No, TC Code, Camera Name, Centre/Center Name, City, State. Detected headers: ${detectedHeaders.join(", ")}`
                     : "No valid records found. Make sure the Excel contains a 'CCTV URL' column.";
 
             return res.status(400).json({
@@ -225,49 +227,7 @@ exports.uploadCameras = async (req, res) => {
             });
         }
 
-        let recordsToInsert = validRecords;
-        let skippedExisting = 0;
-        let skippedInFileDuplicates = 0;
-
-        if (linkType === "RTSP") {
-            // Remove duplicate device IDs inside same file to avoid unique constraint failures.
-            const seenInFile = new Set();
-            recordsToInsert = validRecords.filter((record) => {
-                const key = String(record.device_id || "").trim();
-                if (!key) return false;
-                if (seenInFile.has(key)) {
-                    skippedInFileDuplicates += 1;
-                    return false;
-                }
-                seenInFile.add(key);
-                return true;
-            });
-
-            // Skip records whose device_id already exists in DB.
-            const deviceIds = recordsToInsert.map((record) => record.device_id);
-            if (deviceIds.length > 0) {
-                const existing = await Model.findAll({
-                    attributes: ["device_id"],
-                    where: { device_id: { [Op.in]: deviceIds } },
-                    raw: true,
-                });
-                const existingSet = new Set(existing.map((row) => row.device_id));
-                recordsToInsert = recordsToInsert.filter((record) => {
-                    if (existingSet.has(record.device_id)) {
-                        skippedExisting += 1;
-                        return false;
-                    }
-                    return true;
-                });
-            }
-
-            if (recordsToInsert.length === 0) {
-                return res.status(400).json({
-                    success: false,
-                    message: `No new RTSP records to insert. Skipped ${skippedExisting} existing device_id entries and ${skippedInFileDuplicates} duplicate entries in file.`,
-                });
-            }
-        }
+        const recordsToInsert = validRecords;
 
         await Model.bulkCreate(recordsToInsert);
         // Cleanup temp file
@@ -275,10 +235,7 @@ exports.uploadCameras = async (req, res) => {
 
         res.status(200).json({
             success: true,
-            message:
-                linkType === "RTSP"
-                    ? `Successfully uploaded ${recordsToInsert.length} cameras. Skipped ${skippedExisting} existing device_id entries and ${skippedInFileDuplicates} duplicate entries in file.`
-                    : `Successfully uploaded ${recordsToInsert.length} cameras.`,
+            message: `Successfully uploaded ${recordsToInsert.length} cameras.`,
         });
     } catch (error) {
         if (error?.name && error.name.includes("Sequelize")) {
@@ -301,7 +258,7 @@ exports.downloadTemplate = async (req, res) => {
 
     const headers = isHLS
         ? [["S.No.", "TC Code", "Centre Name", "City", "State", "LIS IF/IDZ", "LAN and Lab Name", "Camera Name", "CCTV URL", "ch_no", "Camera Category"]]
-        : [["Device ID", "TC Code", "Camera Name", "Centre Name", "City", "State", "CCTV URL"]];
+        : [["Device ID", "Camera No", "TC Code", "Camera Name", "Centre Name", "City", "State", "CCTV URL"]];
 
     const wb = xlsx.utils.book_new();
     const ws = xlsx.utils.aoa_to_sheet(headers);

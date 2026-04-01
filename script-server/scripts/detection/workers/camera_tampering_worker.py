@@ -49,13 +49,13 @@ if _PROJECT_ROOT not in sys.path:
 
 # ================= CONFIG ==================
 HLS_SAVE_FOLDER = os.path.join(
-    _PROJECT_ROOT, "results/tcs_detections/camera_tampering_detection"
+    _DETECTION_ROOT, "results/tcs_detections/camera_tampering_detection"
 )
 os.makedirs(HLS_SAVE_FOLDER, exist_ok=True)
 
 THREAD_DELAY  = float(os.environ.get("THREAD_START_DELAY_MS", "200")) / 1000.0
-COOLDOWN_TIME = int(os.environ.get("TAMPER_COOLDOWN_SEC", "120"))
-SAMPLE_EVERY  = int(os.environ.get("TAMPER_SAMPLE_EVERY", "20"))
+COOLDOWN_TIME = int(os.environ.get("TAMPER_COOLDOWN_SEC", "45"))
+SAMPLE_EVERY  = int(os.environ.get("TAMPER_SAMPLE_EVERY", "5"))
 
 # ================= IMPORTS =================
 from tcs_hls_utils import extract_hls_streaming_url, test_hls_stream, open_hls_stream
@@ -145,6 +145,60 @@ def _hls_camera_thread(cfg, stop_event):
 
     cap.release()
     logger.info(f"[TamperingWorker] 🔴 Camera thread stopped → {camera_id}")
+
+
+# =====================================================
+# 📡 RTSP WORKER (queue-based, receives frames from producer)
+# =====================================================
+RTSP_SAVE_FOLDER = os.path.join(
+    _DETECTION_ROOT, "results/camera_tampering_detection"
+)
+os.makedirs(RTSP_SAVE_FOLDER, exist_ok=True)
+
+
+def camera_tampering_worker(frame_queue):
+    """
+    Queue-based worker — receives (frame, device_id, camera_no) tuples
+    from the RTSP producer.
+    """
+    logger.info("🟢 [TamperingWorker] RTSP worker started")
+
+    while True:
+        data = frame_queue.get()
+        if data is None:
+            logger.info("🔴 [TamperingWorker] RTSP worker stopping")
+            break
+
+        if isinstance(data, dict):
+            frame = data.get("frame")
+            device_id = str(data.get("device_id", "unknown"))
+            camera_no = str(data.get("camera_no", "0"))
+        elif len(data) == 4:
+            frame, device_id, camera_no, _ = data
+        else:
+            frame, device_id, camera_no = data
+
+        try:
+            status, brightness, blur_score, edge_density = _detect_camera_tampering(frame.copy())
+
+            if status != "Normal":
+                key = f"{device_id}_{camera_no}"
+                now = time.time()
+                with _state_lock:
+                    if now - _last_save_time.get(key, 0) < COOLDOWN_TIME:
+                        continue
+                    _last_save_time[key] = now
+
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = os.path.join(RTSP_SAVE_FOLDER, f"Tampering_{key}_{ts}.jpg")
+                cv2.imwrite(filename, frame)
+                logger.warning(
+                    f"[TamperingWorker] ⚠️ {status} | {key} "
+                    f"bright={brightness:.1f} blur={blur_score:.1f} "
+                    f"edge={edge_density:.3f} → {filename}"
+                )
+        except Exception as e:
+            logger.error(f"[TamperingWorker] RTSP error for {device_id}_{camera_no}: {e}")
 
 
 # =====================================================

@@ -11,6 +11,7 @@ import {
   AccessTime, Warning, Person, FilterList, Refresh, Event, LocationCity,
   Groups, Dns, DirectionsWalk, MeetingRoom, Smartphone, Visibility,
   WarningAmber, Insights, ImageNotSupported, FlipCameraAndroid, SecurityUpdateWarning,
+  VisibilityOff, PersonOff,
 } from '@mui/icons-material';
 import axios from 'axios';
 import { io } from 'socket.io-client';
@@ -20,10 +21,13 @@ import { API_BASE_1, IMG_BASE, SOCKET_URL, SOCKET_PATH } from '../constants/data
 const TYPE_META = {
   proximity:   { label: 'Close Proximity',   color: '#f59e0b', bg: '#fef3c7', iconKey: 'proximity' },
   crowd:       { label: 'Crowd Detection',    color: '#3b82f6', bg: '#dbeafe', iconKey: 'crowd' },
+  crowd_five:  { label: 'Crowd < 5',          color: '#2563eb', bg: '#dbeafe', iconKey: 'crowd_five' },
+  crowd_zero:  { label: 'Zero Person',        color: '#0f766e', bg: '#ccfbf1', iconKey: 'crowd_zero' },
   server:      { label: 'Server Room',        color: '#ef4444', bg: '#fee2e2', iconKey: 'server' },
   intruder:    { label: 'Intruder',           color: '#8b5cf6', bg: '#ede9fe', iconKey: 'intruder' },
   entry_exit:  { label: 'Entry/Exit',         color: '#10b981', bg: '#d1fae5', iconKey: 'entry_exit' },
   phone:       { label: 'Phone',              color: '#6366f1', bg: '#e0e7ff', iconKey: 'phone' },
+  blind_spot:  { label: 'Blind Spot',         color: '#7c3aed', bg: '#ede9fe', iconKey: 'blind_spot' },
   invigilator: { label: 'Invigilator',        color: '#ec4899', bg: '#fce7f3', iconKey: 'invigilator' },
   inversion:   { label: 'Camera Inversion',   color: '#0ea5e9', bg: '#e0f2fe', iconKey: 'inversion' },
   tamper:      { label: 'Camera Tampering',   color: '#dc2626', bg: '#fef2f2', iconKey: 'tamper' },
@@ -32,10 +36,13 @@ const TYPE_META = {
 const TYPE_ICONS = {
   proximity:   WarningAmber,
   crowd:       Groups,
+  crowd_five:  Groups,
+  crowd_zero:  PersonOff,
   server:      Dns,
   intruder:    DirectionsWalk,
   entry_exit:  MeetingRoom,
   phone:       Smartphone,
+  blind_spot:  VisibilityOff,
   invigilator: Visibility,
   inversion:   FlipCameraAndroid,
   tamper:      SecurityUpdateWarning,
@@ -81,6 +88,9 @@ function DetectionCard({ item, onClick }) {
   const centerName = item.centerName || item.centre_name || '-';
   const city = item.city || '-';
   const examDate = item.examDate || (item.date ? item.date.split('-').reverse().join('-') : '-');
+  const invigilatorEventLabel = item.type === 'invigilator'
+    ? (item.issueLabel || (item.issueType ? String(item.issueType).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : ''))
+    : '';
 
   return (
     <Card
@@ -118,6 +128,17 @@ function DetectionCard({ item, onClick }) {
             fontWeight: 700, fontSize: '0.65rem',
           }}
         />
+        {invigilatorEventLabel && (
+          <Chip
+            label={invigilatorEventLabel}
+            size="small"
+            sx={{
+              position: 'absolute', bottom: 8, right: 8,
+              bgcolor: 'rgba(15, 23, 42, 0.72)', color: '#fff',
+              fontWeight: 700, fontSize: '0.65rem',
+            }}
+          />
+        )}
         {item.count != null && (
           <Chip
             icon={<Warning sx={{ fontSize: 12, color: '#fff !important' }} />}
@@ -178,6 +199,9 @@ function DetectionCard({ item, onClick }) {
 function Lightbox({ item, onClose }) {
   if (!item) return null;
   const meta = TYPE_META[item.type] || {};
+  const invigilatorEventLabel = item.type === 'invigilator'
+    ? (item.issueLabel || (item.issueType ? String(item.issueType).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : ''))
+    : '';
   return (
     <Dialog open onClose={onClose} maxWidth="lg" fullWidth>
       <DialogContent sx={{ p: 0, bgcolor: '#0f172a', position: 'relative' }}>
@@ -192,6 +216,9 @@ function Lightbox({ item, onClose }) {
         <Box sx={{ p: 2, color: '#fff' }}>
           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
             <Chip label={meta.label} size="small" sx={{ bgcolor: meta.color, color: '#fff', fontWeight: 700 }} />
+            {invigilatorEventLabel && (
+              <Chip label={invigilatorEventLabel} size="small" sx={{ bgcolor: '#334155', color: '#fff' }} />
+            )}
             {item.count != null && <Chip label={`Count: ${item.count}`} size="small" sx={{ bgcolor: '#334155', color: '#fff' }} />}
             {item.confidence != null && (
               <Chip label={`Confidence: ${(item.confidence * 100).toFixed(1)}%`} size="small" sx={{ bgcolor: '#334155', color: '#fff' }} />
@@ -459,6 +486,9 @@ export default function Detections() {
             const centerName = item.centerName || item.centre_name || '-';
             const city = item.city || '-';
             const examDate = item.examDate || (item.date ? item.date.split('-').reverse().join('-') : '-');
+            const invigilatorEventLabel = item.type === 'invigilator'
+              ? (item.issueLabel || (item.issueType ? String(item.issueType).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : ''))
+              : '';
 
             return (
               <Card
@@ -497,6 +527,10 @@ export default function Detections() {
                     size="small"
                     sx={{ bgcolor: meta.color, color: '#fff', fontWeight: 700, fontSize: '0.65rem' }}
                   />
+
+                  {invigilatorEventLabel && (
+                    <Chip label={invigilatorEventLabel} size="small" sx={{ bgcolor: '#e2e8f0', color: '#0f172a', fontWeight: 700, fontSize: '0.65rem' }} />
+                  )}
 
                   {item.count != null && (
                     <Chip icon={<Person sx={{ fontSize: 12 }} />} label={item.count} size="small" variant="outlined" />
@@ -546,7 +580,7 @@ export default function Detections() {
           }}
         >
           {liveAlert
-            ? `New ${TYPE_META[liveAlert.type]?.label || liveAlert.type} alert from ${liveAlert.cameraName || liveAlert.camera_id}`
+            ? `New ${TYPE_META[liveAlert.type]?.label || liveAlert.type}${liveAlert.issueLabel ? ` (${liveAlert.issueLabel})` : ''} alert from ${liveAlert.cameraName || liveAlert.camera_id}`
             : ''}
         </Alert>
       </Snackbar>

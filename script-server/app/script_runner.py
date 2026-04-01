@@ -3,6 +3,7 @@ import re
 import json
 import asyncio
 import logging
+import signal
 import sys
 from pathlib import Path
 from datetime import datetime
@@ -219,7 +220,8 @@ class ScriptRunner:
             cwd=str(self.scripts_dir),
             env=env,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            stderr=asyncio.subprocess.PIPE,
+            start_new_session=True
         )
 
         # Register so cancel() can reach this process
@@ -269,9 +271,14 @@ class ScriptRunner:
 
         except asyncio.TimeoutError:
             try:
-                process.terminate()
+                os.killpg(os.getpgid(process.pid), signal.SIGTERM)
             except ProcessLookupError:
                 pass
+            except Exception:
+                try:
+                    process.terminate()
+                except ProcessLookupError:
+                    pass
             msg = (
                 f"Script ran until end_at {end_at_str} — marking COMPLETED"
                 if end_at_str else
@@ -352,10 +359,17 @@ class ScriptRunner:
         if process is None:
             return False
         try:
-            process.terminate()   # SIGTERM — graceful
-            logger.info(f"⏹ Cancelled script {execution_id} (SIGTERM sent)")
+            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+            logger.info(f"⏹ Cancelled script {execution_id} (SIGTERM sent to process group)")
         except ProcessLookupError:
             pass   # already dead
+        except Exception as e:
+            logger.warning(f"Could not kill process group for {execution_id}: {e}")
+            try:
+                process.terminate()
+                logger.info(f"⏹ Cancelled script {execution_id} (SIGTERM sent to main process)")
+            except ProcessLookupError:
+                pass
         return True
 
     def list_running(self) -> list[str]:

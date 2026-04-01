@@ -280,14 +280,14 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
                                                     />
                                                 )}
 
-                                                {assignment.assignment_date && (
+                                                {/* {assignment.assignment_date && (
                                                     <Chip
                                                         label={formatAssignmentDate(assignment.assignment_date)}
                                                         size="small"
                                                         variant="outlined"
                                                     />
-                                                )}
-
+                                                )} */}
+{/* 
                                                 <Chip
                                                     label={`Every ${assignment.custom_frequency_minutes ||
                                                         assignment.script?.default_frequency_minutes ||
@@ -296,7 +296,7 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
                                                     size="small"
                                                     color="primary"
                                                     variant="outlined"
-                                                />
+                                                /> */}
                                             </Box>
                                         }
                                         secondary={

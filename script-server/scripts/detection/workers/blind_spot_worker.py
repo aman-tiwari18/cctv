@@ -39,7 +39,7 @@ from tcs_scheduler import frame_should_process
 from detection_rate_limiter import get_rate_limiter
 from utils.db_client import get_hls_cameras, get_rtsp_cameras
 
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, PROJECT_ROOT)
 
 # Import YOLO
@@ -82,11 +82,11 @@ CONFIDENCE_THRESHOLD = 0.4          # YOLO confidence threshold
 TARGET_SCENES = ["Computer Lab"]
 
 # ─────────────────────────── queue / batching ─────────────────────────────────
-SAMPLE_EVERY = int(os.environ.get("TCS_BLINDSPOT_SAMPLE_EVERY", 3))
+SAMPLE_EVERY = int(os.environ.get("TCS_BLINDSPOT_SAMPLE_EVERY", 2))
 GPU_BATCH_SIZE = int(os.environ.get("TCS_BLINDSPOT_BATCH_SIZE", 32))
 GPU_QUEUE_SIZE = int(os.environ.get("TCS_BLINDSPOT_QUEUE_SIZE", 512))
 THREAD_DELAY = float(os.environ.get("TCS_BLINDSPOT_THREAD_DELAY", 0.05))
-COOLDOWN_TIME = int(os.environ.get("TCS_BLINDSPOT_COOLDOWN_SEC", 600))  # 10 min
+COOLDOWN_TIME = int(os.environ.get("TCS_BLINDSPOT_COOLDOWN_SEC", 180))
 
 # ─────────────────────────── globals ──────────────────────────────────────────
 gpu_queue: queue.Queue = queue.Queue(maxsize=GPU_QUEUE_SIZE)
@@ -353,9 +353,6 @@ class BlindSpotDetector:
             return None
 
         total_persons = issues.get("partial_persons", {}).get("total_count", 0)
-        if total_persons == 0:
-            return None  # skip empty lab
-
         issue_tags = []
         if issues.get("edge_obstruction", {}).get("detected"):   issue_tags.append("edge_obst")
         if issues.get("partial_persons", {}).get("detected"):    issue_tags.append("partial")
@@ -363,6 +360,10 @@ class BlindSpotDetector:
         if issues.get("obstruction_patterns", {}).get("detected"):issue_tags.append("obstructed")
 
         if not issue_tags:
+            return None
+
+        # Save obstruction-only blind spots even when no person is currently visible.
+        if total_persons == 0 and not any(tag in issue_tags for tag in ("edge_obst", "static", "obstructed")):
             return None
 
         ts       = datetime.now().strftime("%Y%m%d_%H%M%S")

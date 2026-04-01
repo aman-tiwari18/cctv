@@ -39,7 +39,7 @@ _DETECTION_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 _PROJECT_ROOT = os.path.abspath(os.path.join(_DETECTION_ROOT, "../.."))
 
 # ================= CONFIG ==================
-HLS_SAVE_FOLDER = os.path.join(_PROJECT_ROOT, "results/tcs_detections/camera_inversion_detection")
+HLS_SAVE_FOLDER = os.path.join(_DETECTION_ROOT, "results/tcs_detections/camera_inversion_detection")
 os.makedirs(HLS_SAVE_FOLDER, exist_ok=True)
 
 GPU_BATCH_SIZE     = int(os.environ.get("GPU_BATCH_SIZE", "64"))
@@ -240,6 +240,66 @@ def _ensure_shared_hls_gpu_worker():
             )
             _HLS_GPU_WORKER.start()
             logger.info("[InversionWorker] 🚀 Shared GPU worker started")
+
+
+# =====================================================
+# 📡 RTSP WORKER (queue-based, receives frames from producer)
+# =====================================================
+RTSP_SAVE_FOLDER = os.path.join(_DETECTION_ROOT, "results/camera_inversion_detection")
+os.makedirs(RTSP_SAVE_FOLDER, exist_ok=True)
+
+_inversion_last_save = {}
+
+
+def camera_inversion_worker(frame_queue):
+    """
+    Queue-based worker — receives (frame, device_id, camera_no) tuples
+    from the RTSP producer.
+    """
+    _load_models()
+    logger.info("🟢 [InversionWorker] RTSP worker started")
+
+    while True:
+        data = frame_queue.get()
+        if data is None:
+            logger.info("🔴 [InversionWorker] RTSP worker stopping")
+            break
+
+        if isinstance(data, dict):
+            frame = data.get("frame")
+            device_id = str(data.get("device_id", "unknown"))
+            camera_no = str(data.get("camera_no", "0"))
+        elif len(data) == 4:
+            frame, device_id, camera_no, _ = data
+        else:
+            frame, device_id, camera_no = data
+
+        try:
+            results = _detect_orientation_batch([frame.copy()])
+            if not results:
+                continue
+
+            corrected, orientation = results[0]
+
+            if orientation != "original":
+                key = f"{device_id}_{camera_no}"
+                now = time.time()
+                if now - _inversion_last_save.get(key, 0) < INVERSION_COOLDOWN:
+                    continue
+                _inversion_last_save[key] = now
+
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = os.path.join(
+                    RTSP_SAVE_FOLDER,
+                    f"Inversion_{key}_{orientation}_{ts}.jpg"
+                )
+                cv2.imwrite(filename, corrected)
+                logger.warning(
+                    f"[InversionWorker] ⚠️ Camera rotated: {orientation} | "
+                    f"{key} → {filename}"
+                )
+        except Exception as e:
+            logger.error(f"[InversionWorker] RTSP error for {device_id}_{camera_no}: {e}")
 
 
 # ================= ENTRY POINT =================

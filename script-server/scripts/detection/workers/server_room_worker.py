@@ -45,7 +45,7 @@ os.makedirs(HLS_SAVE_FOLDER,  exist_ok=True)
 
 MIN_PERSONS    = 1      # server room = 1 person enough
 CONF_THRESHOLD = 0.45
-COOLDOWN_TIME  = 90     # seconds between saves per camera
+COOLDOWN_TIME  = 45     # seconds between saves per camera
 
 HLS_SAMPLE_EVERY = 5
 HLS_FAIL_LIMIT   = 3
@@ -312,8 +312,8 @@ def _hls_camera_thread(cfg, stop_event):
 
     camera_id   = cfg['camera_id']
     script_name = cfg.get('script_code', 'server')
-    ch_no       = cfg.get('camera_id', 'unknown')  # ch_code for HLS
-    initial_url = cfg.get('cctv_url') or cfg.get('stream_url', '')
+    ch_no       = cfg.get('ch_no') or cfg.get('camera_no') or cfg.get('camera_id', 'unknown')
+    initial_url = cfg.get('cctv_url') or cfg.get('stream_url') or cfg.get('url', '')
 
     hls = extract_hls_streaming_url(initial_url)
     if not hls or not test_hls_stream(hls):
@@ -380,11 +380,14 @@ def server_room_worker_hls(camera_configs, stop_event=None):
     if stop_event is None:
         stop_event = _STOP_EVENT
 
-    # ── Scene Classification Filter ──────────────────────
+    # Keep unclassified cameras and common exam/lab/server scenes.
     valid_configs = []
     for cfg in camera_configs:
         cls_val = str(cfg.get('classification', '')).lower()
-        if 'server room' in cls_val or 'computer lab' in cls_val:
+        stream_url = cfg.get('cctv_url') or cfg.get('stream_url') or cfg.get('url')
+        if not stream_url:
+            continue
+        if not cls_val or any(scene in cls_val for scene in ('server room', 'computer lab', 'classroom', 'exam', 'lab')):
             valid_configs.append(cfg)
         else:
             logger.info(f"[ServerRoom] 🚫 Skipping {cfg.get('camera_id', 'unknown')} (Scene: {cls_val})")

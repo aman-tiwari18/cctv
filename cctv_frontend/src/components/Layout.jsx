@@ -33,6 +33,17 @@ import { useAuth } from '../contexts/AuthContext';
 
 const drawerWidth = 260;
 
+const sidebarPalette = {
+  bg: '#ffffff',
+  border: 'rgba(71, 85, 105, 0.18)',
+  itemText: '#0f172a',
+  itemIcon: '#64748b',
+  itemHoverBg: '#f1f5f9',
+  itemHoverText: '#0f172a',
+  itemActiveBg: '#dbeafe',
+  itemActiveText: '#1e3a8a',
+};
+
 const menuItems = [
   { text: 'Dashboard', icon: <Dashboard />, path: '/' },
   { text: 'Exams', icon: <School />, path: '/exams' },
@@ -73,19 +84,20 @@ const Layout = () => {
   };
 
   const drawer = (
-    <Box>
+    <Box sx={{ height: '100%', bgcolor: sidebarPalette.bg, color: sidebarPalette.itemText }}>
       <Toolbar
         sx={{
-          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-          color: 'white',
+          background: '#ffffff',
+          color: '#0f172a',
+          borderBottom: `1px solid ${sidebarPalette.border}`,
         }}
       >
-        <Videocam sx={{ mr: 1 }} />
-        <Typography variant="h6" noWrap component="div">
+        <Videocam sx={{ mr: 1, color: '#2563eb' }} />
+        <Typography variant="h6" fontWeight={700} noWrap component="div">
           CCTV Monitor
         </Typography>
       </Toolbar>
-      <Divider />
+      <Divider sx={{ borderColor: sidebarPalette.border }} />
       <List>
         {menuItems.map((item) => (
           <ListItem key={item.text} disablePadding>
@@ -93,20 +105,43 @@ const Layout = () => {
               selected={location.pathname === item.path}
               onClick={() => handleMenuClick(item.path)}
               sx={{
+                mx: 1,
+                my: 0.5,
+                borderRadius: 1.5,
+                color: sidebarPalette.itemText,
+                transition: 'all 0.18s ease',
+                '& .MuiListItemText-primary': {
+                  fontWeight: 500,
+                },
+                '& .MuiListItemIcon-root': {
+                  color: sidebarPalette.itemIcon,
+                  minWidth: 40,
+                },
+                '&:hover': {
+                  backgroundColor: sidebarPalette.itemHoverBg,
+                  color: sidebarPalette.itemHoverText,
+                  '& .MuiListItemIcon-root': {
+                    color: sidebarPalette.itemHoverText,
+                  },
+                },
                 '&.Mui-selected': {
-                  backgroundColor: 'primary.light',
-                  color: 'primary.main',
+                  background: sidebarPalette.itemActiveBg,
+                  color: sidebarPalette.itemActiveText,
+                  boxShadow: 'inset 0 0 0 1px rgba(37, 99, 235, 0.22)',
+                  '& .MuiListItemIcon-root': {
+                    color: sidebarPalette.itemActiveText,
+                  },
                   '&:hover': {
-                    backgroundColor: 'primary.light',
+                    background: sidebarPalette.itemActiveBg,
+                    color: '#1e3a8a',
+                    '& .MuiListItemIcon-root': {
+                      color: '#1e3a8a',
+                    },
                   },
                 },
               }}
             >
-              <ListItemIcon
-                sx={{
-                  color: location.pathname === item.path ? 'primary.main' : 'inherit',
-                }}
-              >
+              <ListItemIcon>
                 {item.icon}
               </ListItemIcon>
               <ListItemText primary={item.text} />
@@ -124,9 +159,10 @@ const Layout = () => {
         sx={{
           width: { sm: `calc(100% - ${drawerWidth}px)` },
           ml: { sm: `${drawerWidth}px` },
-          background: 'white',
-          color: 'text.primary',
-          boxShadow: 1,
+          color: '#0f172a',
+          bgcolor: '#ffffff',
+          borderBottom: '1px solid rgba(71, 85, 105, 0.18)',
+          boxShadow: 'none',
         }}
       >
         <Toolbar>
@@ -146,7 +182,7 @@ const Layout = () => {
               {user?.username}
             </Typography>
             <IconButton onClick={handleProfileMenuOpen}>
-              <Avatar sx={{ width: 32, height: 32, bgcolor: 'primary.main' }}>
+              <Avatar sx={{ width: 32, height: 32, bgcolor: 'primary.main', color: '#ffffff' }}>
                 {user?.username?.charAt(0).toUpperCase()}
               </Avatar>
             </IconButton>
@@ -158,6 +194,13 @@ const Layout = () => {
         anchorEl={anchorEl}
         open={Boolean(anchorEl)}
         onClose={handleProfileMenuClose}
+        PaperProps={{
+          sx: {
+            bgcolor: '#ffffff',
+            color: '#0f172a',
+            border: '1px solid rgba(71, 85, 105, 0.18)',
+          },
+        }}
       >
         <MenuItem disabled>
           <AccountCircle sx={{ mr: 1 }} />
@@ -183,7 +226,12 @@ const Layout = () => {
           }}
           sx={{
             display: { xs: 'block', sm: 'none' },
-            '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth },
+            '& .MuiDrawer-paper': {
+              boxSizing: 'border-box',
+              width: drawerWidth,
+              borderRight: `1px solid ${sidebarPalette.border}`,
+              backgroundColor: sidebarPalette.bg,
+            },
           }}
         >
           {drawer}
@@ -192,7 +240,12 @@ const Layout = () => {
           variant="permanent"
           sx={{
             display: { xs: 'none', sm: 'block' },
-            '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth },
+            '& .MuiDrawer-paper': {
+              boxSizing: 'border-box',
+              width: drawerWidth,
+              borderRight: `1px solid ${sidebarPalette.border}`,
+              backgroundColor: sidebarPalette.bg,
+            },
           }}
           open
         >
@@ -207,7 +260,7 @@ const Layout = () => {
           p: 3,
           width: { sm: `calc(100% - ${drawerWidth}px)` },
           mt: 8,
-          backgroundColor: '#f5f5f5',
+          backgroundColor: '#f4f7fb',
           minHeight: '100vh',
         }}
       >

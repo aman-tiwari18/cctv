@@ -1,5 +1,7 @@
 const Exam = require("../models/Exam");
 const ExamShift = require("../models/ExamShift");
+const CameraLinkHLS = require("../models/CameraLinkHLS");
+const CameraLinkRTSP = require("../models/CameraLinkRTSP");
 const { sequelize } = require("../config/db");
 
 
@@ -68,10 +70,51 @@ exports.getAllExams = async (req, res) => {
         order: [["created_at", "DESC"]],
     });
 
+    const examIds = exams.map((exam) => exam.id);
+
+    let hlsCountMap = new Map();
+    let rtspCountMap = new Map();
+
+    if (examIds.length > 0) {
+        const [hlsCounts, rtspCounts] = await Promise.all([
+            CameraLinkHLS.count({
+                where: { exam_id: examIds },
+                group: ["exam_id"],
+            }),
+            CameraLinkRTSP.count({
+                where: { exam_id: examIds },
+                group: ["exam_id"],
+            }),
+        ]);
+
+        hlsCountMap = new Map(
+            hlsCounts.map((row) => [Number(row.exam_id), Number(row.count)])
+        );
+
+        rtspCountMap = new Map(
+            rtspCounts.map((row) => [Number(row.exam_id), Number(row.count)])
+        );
+    }
+
+    const examsWithCameraCount = exams.map((exam) => {
+        const plainExam = exam.toJSON();
+        const linkType = (plainExam.link_type || "").toUpperCase();
+
+        if (linkType === "HLS") {
+            plainExam.camera_count = hlsCountMap.get(plainExam.id) || 0;
+        } else if (linkType === "RTSP") {
+            plainExam.camera_count = rtspCountMap.get(plainExam.id) || 0;
+        } else {
+            plainExam.camera_count = 0;
+        }
+
+        return plainExam;
+    });
+
     res.json({
         success: true,
         count: exams.length,
-        data: exams,
+        data: examsWithCameraCount,
     });
 };
 

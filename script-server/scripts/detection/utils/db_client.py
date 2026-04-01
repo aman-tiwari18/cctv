@@ -105,7 +105,7 @@ def get_rtsp_cameras(exam_id: int) -> list:
     sql = """
         SELECT
             id, device_id, exam_id, centre_name, tc_code,
-            camera_name, city, state, cctv_url,
+            camera_name, camera_no, city, state, cctv_url,
             is_active, classification
         FROM camera_links_rtsp
         WHERE exam_id  = %s

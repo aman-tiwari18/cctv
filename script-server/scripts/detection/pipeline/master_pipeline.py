@@ -497,7 +497,7 @@ from utils.stream_utils import detect_stream_type, extract_hls_streaming_url
 # ================= CONFIG =================
 EXCEL_PATH = os.path.join(
     PROJECT_ROOT,
-    "sheet", "complete_results_20260313_160604.xlsx"
+    "sheet", "complete_results_20260327_135752.xlsx"
 )
 
 QUEUE_SIZE      = 5
@@ -1151,10 +1151,10 @@ def main():
     os._exit(0)
 
 
-# ================= ENTRY =================
-if __name__ == "__main__":
-    mp.set_start_method("spawn", force=True)
-    main()
+# ================= OLD ENTRY (disabled — new entry at bottom) =================
+# if __name__ == "__main__":
+#     mp.set_start_method("spawn", force=True)
+#     main()
 
 
 
@@ -1918,12 +1918,12 @@ from workers.close_proximity_worker  import close_proximity_worker, close_proxim
 from workers.phone_worker            import phone_worker, phone_worker_hls
 from workers.invigilator_worker      import invigilator_worker, invigilator_worker_hls
 
-# New HLS-only workers
-from workers.camera_tampering_worker import camera_tampering_worker_hls
-from workers.camera_inversion_worker import camera_inversion_worker_hls
+# New workers (both HLS and RTSP)
+from workers.camera_tampering_worker import camera_tampering_worker_hls, camera_tampering_worker
+from workers.camera_inversion_worker import camera_inversion_worker_hls, camera_inversion_worker
 
 # ================= NEW LOADERS =================
-from utils.camera_loader import load_all_pending_cameras
+from utils.camera_loader import load_all_pending_cameras, load_cameras_for_execution
 
 # ================= CONFIG =================
 QUEUE_SIZE      = 5
@@ -1941,6 +1941,8 @@ RTSP_WORKER_MAP = {
     "proximity":   close_proximity_worker,
     "phone":       phone_worker,
     "invigilator": invigilator_worker,
+    "tamper":      camera_tampering_worker,
+    "inversion":   camera_inversion_worker,
 }
 
 HLS_WORKER_MAP = {
@@ -2135,38 +2137,48 @@ def rtsp_producer(cam_configs, queues):
     """
     RTSP producer for a single DSS camera_no (grouping multiple analytics if triggered).
     """
+    # Safety: accept both a single dict (old flow) and a list (new flow)
+    if isinstance(cam_configs, dict):
+        cam_configs = [cam_configs]
     first     = cam_configs[0]
-    device_id = first["camera_id"]
-    camera_no = first.get("ch_no", "1")   # Usually 1 or handled differently for RTSP?
-    server    = first.get("server_ip", "") # Provided via DB later if needed
+    device_id = first.get("camera_id") or first.get("device_id", "")
+    camera_no = first.get("ch_no") or first.get("camera_no", "1")
+    server    = first.get("server_ip", "")
+    direct_url = first.get("cctv_url") or first.get("stream_url", "")
     label     = f"{device_id}_{camera_no}"
-    
-    # We need a server_ip. If not in DB, can't stream via DSS.
-    if not server:
-        logger.warning(f"⚠️ No server_ip for DSS camera {label}. Cannot start.")
-        return
+
+    use_dss = bool(server)
 
     while not STOP:
-        token = authenticate_and_get_token(server)
-        if not token:
-            logger.error(f"❌ Auth failed for {label}, retrying in 10s")
-            time.sleep(10)
-            continue
+        if use_dss:
+            # DSS auth flow
+            token = authenticate_and_get_token(server)
+            if not token:
+                logger.error(f"❌ Auth failed for {label}, retrying in 10s")
+                time.sleep(10)
+                continue
 
-        result = get_rtsp_from_dss(device_id, camera_no, token, server)
-        if not result:
-            logger.warning(f"⚠️ No RTSP result for {label}, retrying in 10s")
-            time.sleep(10)
-            continue
+            result = get_rtsp_from_dss(device_id, camera_no, token, server)
+            if not result:
+                logger.warning(f"⚠️ No RTSP result for {label}, retrying in 10s")
+                time.sleep(10)
+                continue
 
-        urls, stream_token = result
-        ordered = order_urls(urls)
-        if not ordered:
-            logger.warning(f"⚠️ Empty URL list for {label}")
-            time.sleep(10)
-            continue
+            urls, stream_token = result
+            ordered = order_urls(urls)
+            if not ordered:
+                logger.warning(f"⚠️ Empty URL list for {label}")
+                time.sleep(10)
+                continue
 
-        rtsp_url = add_token_to_url(ordered[0], stream_token)
+            rtsp_url = add_token_to_url(ordered[0], stream_token)
+        else:
+            # Direct URL flow (no DSS auth needed)
+            if not direct_url:
+                logger.warning(f"⚠️ No server_ip or cctv_url for camera {label}. Cannot start.")
+                return
+            rtsp_url = direct_url
+
         logger.info(f"🔥 Connecting → {label}  URL: {rtsp_url}")
 
         pipe       = start_ffmpeg_stream(rtsp_url)
@@ -2186,13 +2198,7 @@ def rtsp_producer(cam_configs, queues):
 
             fail_count = 0
             
-            packet = {
-                "frame": frame,
-                "device_id": device_id,
-                "camera_no": camera_no,
-                # Pass configs to worker to know script_name, classification etc
-                "configs": cam_configs
-            }
+            packet = (frame, device_id, camera_no)
             
             for q in queues:
                 if not q.full():
@@ -2226,7 +2232,7 @@ def run_rtsp_pipeline(camera_group, max_concurrent=MAX_CONCURRENT):
     # Group by label
     grouped = {}
     for c in camera_group:
-        label = f"{c['camera_id']}_{c.get('ch_no', '1')}"
+        label = f"{c['camera_id']}_{c.get('ch_no') or c.get('camera_no', '1')}"
         if label not in grouped:
             grouped[label] = []
         grouped[label].append(c)
@@ -2336,11 +2342,50 @@ def run_hls_pipeline(camera_group):
 # 🚀 MAIN
 # ============================================================
 def main():
-    logger.info("🔄 Fetching pending executions from API...")
-    results = load_all_pending_cameras()
+    # When launched by script-server the assignment is already marked RUNNING,
+    # so /executions/pending returns 0 results.  Use the env vars that
+    # script_runner.py injects instead, falling back to the API only when
+    # running standalone (e.g. for testing).
+    exam_id   = os.environ.get("EXAM_ID",  "").strip()
+    shift_id  = os.environ.get("SHIFT_ID", "").strip()
+    link_type = os.environ.get("LINK_TYPE", "").strip().upper()
+
+    if exam_id and shift_id and link_type:
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--analytics", nargs="+", default=[])
+        args, _ = parser.parse_known_args()
+        script_codes = args.analytics
+
+        if not script_codes:
+            logger.error("❌ --analytics argument missing. Cannot determine which script to run.")
+            os._exit(1)
+
+        logger.info(
+            f"🔄 Loading cameras from DB (exam_id={exam_id}, shift_id={shift_id}, "
+            f"link_type={link_type}, analytics={script_codes})..."
+        )
+        results = []
+        for script_code in script_codes:
+            execution = {
+                "exam_id":     exam_id,
+                "shift_id":    shift_id,
+                "link_type":   link_type,
+                "script_code": script_code,
+            }
+            cameras = load_cameras_for_execution(execution)
+            if cameras:
+                results.append((execution, cameras))
+            else:
+                logger.warning(
+                    f"⚠️ No cameras found for script='{script_code}' "
+                    f"(exam_id={exam_id}, shift_id={shift_id}, link_type={link_type})"
+                )
+    else:
+        logger.info("🔄 Fetching pending executions from API...")
+        results = load_all_pending_cameras()
 
     if not results:
-        logger.info("✅ No pending executions. Exiting.")
+        logger.info("✅ No cameras to process. Exiting.")
         os._exit(0)
 
     # Flatten the camera configs

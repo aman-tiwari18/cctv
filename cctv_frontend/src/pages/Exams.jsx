@@ -372,12 +372,12 @@ const Exams = () => {
                         {exam.examShifts?.length || 0} shifts
                       </Typography>
                     </Box>
-                    <Box display="flex" alignItems="center" gap={0.5}>
+                    {/* <Box display="flex" alignItems="center" gap={0.5}>
                       <Analytics fontSize="small" color="action" />
                       <Typography variant="caption">
                         {exam.analytics_task_count || 0} tasks
                       </Typography>
-                    </Box>
+                    </Box> */}
                   </Box>
                 </CardContent>
                 <CardActions>

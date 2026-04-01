@@ -64,6 +64,7 @@ def load_cameras_for_execution(execution: dict) -> list:
             cameras.append({
                 "cctv_url":       row["cctv_url"],
                 "camera_id":      device_id,
+                "camera_no":      str(row.get("camera_no", "")).strip() or device_id,
                 "classification": str(row.get("classification", "")).strip(),
                 "link_type":      "RTSP",
                 "script_code":    script_code,

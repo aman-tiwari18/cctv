@@ -4,6 +4,7 @@ import os
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import quote
 from typing import Optional, List
 import socketio
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -40,6 +41,11 @@ def _camera_meta_for_ch(ch_no: str, exam_date_iso: str) -> dict:
 def _extract_ch_no(camera_id: str) -> str:
     if not camera_id:
         return ""
+    # Supports invigilator ids like 11365_54703_* where second segment is ch code.
+    m = re.search(r"^\d+_(\d+)", camera_id)
+    if m:
+        return m.group(1)
+
     # Prefer pattern like phone_ch11365_54703 -> use 54703 as channel code.
     m = re.search(r"ch\d+_(\d+)", camera_id, flags=re.IGNORECASE)
     if m:
@@ -53,6 +59,26 @@ def _extract_ch_no(camera_id: str) -> str:
     return m.group(1) if m else ""
 
 
+def _iter_detection_files(type_key: str, folder: Path):
+    """Yield image files for one detection type.
+
+    Uses recursive discovery so nested folders (for example invigilator camera
+    subfolders) are included in API listing and live Socket.IO notifications.
+    """
+    if not folder.exists():
+        return
+
+    for f in folder.rglob("*"):
+        if not f.is_file() or f.suffix.lower() not in (".jpg", ".jpeg", ".png"):
+            continue
+
+        # Invigilator keeps periodic snapshots in /annotated; show event images only.
+        if type_key == "invigilator" and "annotated" in {p.lower() for p in f.parts}:
+            continue
+
+        yield f
+
+
 def list_detection_files() -> dict:
     snapshot = {}
     for type_key, folder_name in DETECTION_FOLDERS.items():
@@ -62,9 +88,8 @@ def list_detection_files() -> dict:
             continue
 
         snapshot[type_key] = {
-            f.name
-            for f in folder.iterdir()
-            if f.is_file() and f.suffix.lower() in (".jpg", ".jpeg", ".png")
+            str(f.relative_to(folder).as_posix())
+            for f in _iter_detection_files(type_key, folder)
         }
     return snapshot
 
@@ -80,11 +105,11 @@ async def detection_watch_loop():
             previous_files = known_detection_files.get(type_key, set())
             new_files = sorted(current_files - previous_files)
 
-            for filename in new_files:
-                file_path = RESULTS_DIR / DETECTION_FOLDERS[type_key] / filename
-                payload = parse_detection_filename(filename, type_key, file_path, is_new_image=True)
+            for relative_path in new_files:
+                file_path = RESULTS_DIR / DETECTION_FOLDERS[type_key] / relative_path
+                payload = parse_detection_filename(relative_path, type_key, file_path, is_new_image=True)
                 await sio.emit("detection:new", payload)
-                logger.info(f"Live detection emitted: {type_key} {filename}")
+                logger.info(f"Live detection emitted: {type_key} {relative_path}")
 
         known_detection_files = current_snapshot
 
@@ -296,10 +321,13 @@ def status_analytics_route():
 DETECTION_FOLDERS = {
     "proximity":  "proximity_detection",
     "crowd":      "crowd_detection",
+    "crowd_five": "crowd_detection_threshold",
+    "crowd_zero": "zero_person_detection",
     "server":     "server_room_detection",
     "intruder":   "intruder_detection",
     "entry_exit": "entry_exit_detection",
     "phone":      "phone_detection",
+    "blind_spot": "blind_spot_detection",
     "invigilator":"invigilator_detection",
     "inversion" : "camera_inversion_detection",
     "tamper" : "camera_tampering_detection",
@@ -309,13 +337,16 @@ DETECTION_FOLDERS = {
 DETECTION_LABELS = {
     "proximity":   "Close Proximity",
     "crowd":       "Crowd Detection",
+    "crowd_five":  "Crowd < 5",
+    "crowd_zero":  "Zero Person",
     "server":      "Server Room",
     "intruder":    "Intruder Detection",
     "entry_exit":  "Entry/Exit",
     "phone":       "Phone Detection",
+    "blind_spot":  "Blind Spot",
     "invigilator": "Invigilator Tracking",
     "tamper" : "Camera Tampering",
-    "inversion" : "Cameara Inversion",
+    "inversion" : "Camera Inversion",
     
 }
 
@@ -326,7 +357,9 @@ def parse_detection_filename(
     is_new_image: bool = False,
 ) -> dict:
     """Parse metadata from a detection image filename."""
-    stem = Path(filename).stem  # without extension
+    file_obj = Path(filename)
+    basename = file_obj.name
+    stem = file_obj.stem  # without extension
     # Pattern: {camera_id}_{date}_{time}_{extra}.jpg
     # e.g. 11365_ENTRY_S39__20260318_161308_violations1
     #      11365_ENTRY_S39__20260318_161308_persons2_conf0.83
@@ -360,6 +393,18 @@ def parse_detection_filename(
 
     issue_match = re.search(r'([a-zA-Z]+)\d*$', suffix)
     issue_type = issue_match.group(1).lower() if issue_match else ""
+    if type_key == "invigilator":
+        inv_parts = {p.lower() for p in file_obj.parts}
+        if "no_targets" in inv_parts:
+            issue_type = "no_targets"
+        elif "static_person" in inv_parts:
+            issue_type = "static_person"
+        elif not issue_type:
+            stem_l = stem.lower()
+            if "static_person" in stem_l:
+                issue_type = "static_person"
+            elif "no_targets" in stem_l:
+                issue_type = "no_targets"
 
     exam_date_iso = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}" if date_str else ""
     ch_no = _extract_ch_no(camera_id)
@@ -379,8 +424,15 @@ def parse_detection_filename(
     if date_str:
         date_display = f"{date_str[6:]}-{date_str[4:6]}-{date_str[:4]}"
 
+    image_rel = quote(str(file_obj.as_posix()), safe="/")
+    issue_label_map = {
+        "no_targets": "No Targets",
+        "static_person": "Static Person",
+    }
+
     return {
-        "filename":    filename,
+        "filename":    basename,
+        "relativePath": str(file_obj.as_posix()),
         "type":        type_key,
         "label":       DETECTION_LABELS.get(type_key, type_key),
         "camera_id":   camera_id,
@@ -389,6 +441,7 @@ def parse_detection_filename(
         "time":        time_str,
         "rawDate":     date_str,
         "issueType":   issue_type,
+        "issueLabel":  issue_label_map.get(issue_type, issue_type.replace("_", " ").title() if issue_type else ""),
         "detectionType": type_key,
         "addedAt":     now_ms,
         "timestamp":   timestamp_iso,
@@ -406,8 +459,7 @@ def parse_detection_filename(
         "examDate":    date_display,
         "confidence":  confidence,
         "count":       count,
-        # "image_url":   f"/detection-images/{DETECTION_FOLDERS[type_key]}/{filename}",
-        "image_url": f"/cctv_dev/detection-images/{DETECTION_FOLDERS[type_key]}/{filename}",
+        "image_url": f"/cctv_dev/detection-images/{DETECTION_FOLDERS[type_key]}/{image_rel}",
     }
 
 @app.get("/detections")
@@ -418,19 +470,20 @@ def list_detections(
     page: int = 1,
     limit: int = 50,
 ):
-    results = []
+    rows = []
     folders = {type: DETECTION_FOLDERS[type]} if type and type in DETECTION_FOLDERS else DETECTION_FOLDERS
 
     for type_key, folder_name in folders.items():
         folder = RESULTS_DIR / folder_name
         if not folder.exists():
             continue
-        for f in sorted(folder.iterdir(), reverse=True):
-            if f.suffix.lower() not in (".jpg", ".jpeg", ".png"):
-                continue
-            item = parse_detection_filename(f.name, type_key, f, is_new_image=False)
+        for f in _iter_detection_files(type_key, folder):
+            relative_path = str(f.relative_to(folder).as_posix())
+            item = parse_detection_filename(relative_path, type_key, f, is_new_image=False)
+
             if date and not item["date"].startswith(date):
                 continue
+
             if search:
                 q = search.lower()
                 haystack = " ".join([
@@ -443,10 +496,12 @@ def list_detections(
                 ]).lower()
                 if q not in haystack:
                     continue
-            results.append(item)
 
-    # Sort by detected_at descending (filename already has timestamp)
-    results.sort(key=lambda x: x["filename"], reverse=True)
+            rows.append((f.stat().st_mtime, item))
+
+    # Sort by file write time descending (newest first).
+    rows.sort(key=lambda x: x[0], reverse=True)
+    results = [item for _, item in rows]
 
     total = len(results)
     start = (page - 1) * limit

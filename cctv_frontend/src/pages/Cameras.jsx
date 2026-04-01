@@ -333,6 +333,7 @@ const Cameras = () => {
                   ) : (
                     <>
                       <TableCell><strong>Device ID</strong></TableCell>
+                      <TableCell><strong>Camera No</strong></TableCell>
                       <TableCell><strong>TC Code</strong></TableCell>
                       <TableCell><strong>Camera Name</strong></TableCell>
                       <TableCell><strong>Centre Name</strong></TableCell>
@@ -374,6 +375,7 @@ const Cameras = () => {
                     ) : (
                       <>
                         <TableCell>{cam.device_id || '-'}</TableCell>
+                        <TableCell>{cam.camera_no ?? '-'}</TableCell>
                         <TableCell>{cam.tc_code || '-'}</TableCell>
                         <TableCell>{cam.camera_name || '-'}</TableCell>
                         <TableCell>{cam.centre_name || cam.tc_name || '-'}</TableCell>

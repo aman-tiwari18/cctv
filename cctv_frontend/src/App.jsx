@@ -18,21 +18,45 @@ import Detections from './pages/Detections';
 const theme = createTheme({
   palette: {
     primary: {
-      main: '#667eea',
+      main: '#2563eb',
+      light: '#dbeafe',
+      dark: '#1d4ed8',
+      contrastText: '#ffffff',
     },
     secondary: {
-      main: '#764ba2',
+      main: '#64748b',
+      light: '#e2e8f0',
+      dark: '#475569',
+      contrastText: '#ffffff',
     },
+    background: {
+      default: '#f4f7fb',
+      paper: '#ffffff',
+    },
+    text: {
+      primary: '#0f172a',
+      secondary: '#475569',
+    },
+    divider: 'rgba(71, 85, 105, 0.2)',
   },
   typography: {
-    fontFamily: 'Roboto, Arial, sans-serif',
+    fontFamily: '"Plus Jakarta Sans", "Segoe UI", Arial, sans-serif',
   },
   components: {
+    MuiCssBaseline: {
+      styleOverrides: {
+        body: {
+          background: '#f4f7fb',
+          color: '#0f172a',
+        },
+      },
+    },
     MuiButton: {
       styleOverrides: {
         root: {
           textTransform: 'none',
-          borderRadius: 8,
+          borderRadius: 10,
+          fontWeight: 600,
         },
       },
     },
@@ -40,6 +64,9 @@ const theme = createTheme({
       styleOverrides: {
         root: {
           borderRadius: 12,
+          backgroundColor: '#ffffff',
+          border: '1px solid rgba(71, 85, 105, 0.14)',
+          boxShadow: '0 6px 18px rgba(15, 23, 42, 0.06)',
         },
       },
     },
@@ -47,6 +74,16 @@ const theme = createTheme({
       styleOverrides: {
         root: {
           borderRadius: 8,
+          backgroundImage: 'none',
+        },
+      },
+    },
+    MuiAppBar: {
+      styleOverrides: {
+        root: {
+          backgroundColor: 'rgba(255, 255, 255, 0.96)',
+          backdropFilter: 'blur(8px)',
+          borderBottom: '1px solid rgba(71, 85, 105, 0.18)',
         },
       },
     },

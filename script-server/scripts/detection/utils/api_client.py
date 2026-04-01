@@ -12,7 +12,8 @@ logger = logging.getLogger(__name__)
 
 # ================= API CONFIG =================
 API_BASE_URL = os.environ.get(
-    "CCTV_API_URL", "http://localhost:3001/cctv/api"
+    "CCTV_API_URL",
+    os.environ.get("MAIN_BACKEND_URL", "http://localhost:3000/cctv_analytics/api")
 )
 API_TOKEN = os.environ.get("CCTV_API_TOKEN", "")
 
