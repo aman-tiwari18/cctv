@@ -46,7 +46,6 @@ except ImportError:
     YOLO_AVAILABLE = False
     logging.warning("YOLO not available — install ultralytics.")
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 _STOP_EVENT = threading.Event()
@@ -65,12 +64,13 @@ TCS_ZERO_SAVE_FOLDER = os.path.join(
     PROJECT_ROOT, "results/tcs_detections/zero_person_detection"
 )
 
-os.makedirs(TCS_ZERO_SAVE_FOLDER, exist_ok=True)
-
 RTSP_SAVE_FOLDER = os.path.join(PROJECT_ROOT, "results/crowd_detection_threshold")
-os.makedirs(RTSP_SAVE_FOLDER, exist_ok=True)
 
-logger.info(f"TCS Zero-person detections will be saved to: {TCS_ZERO_SAVE_FOLDER}")
+
+def ensure_save_paths():
+    os.makedirs(TCS_ZERO_SAVE_FOLDER, exist_ok=True)
+    os.makedirs(RTSP_SAVE_FOLDER, exist_ok=True)
+    logger.info(f"TCS Zero-person detections will be saved to: {TCS_ZERO_SAVE_FOLDER}")
 
 MODEL_PATH = os.path.join(PROJECT_ROOT, "models/yolov10m.pt")
 
@@ -102,6 +102,7 @@ _HLS_GPU_LOCK = threading.Lock()
 
 def get_yolo_model():
     global _yolo_model
+    ensure_save_paths()
     if _yolo_model is None and YOLO_AVAILABLE:
         logger.info("Loading YOLO model...")
         _yolo_model = YOLO(MODEL_PATH)
