@@ -47,11 +47,13 @@ def load_cameras_for_execution(execution: dict) -> list:
             cameras.append({
                 "cctv_url":       row["cctv_url"],
                 "camera_id":      ch_code,
+                "camera_id_pk":   str(row.get("id", "")),   # DB primary key — always unique
                 "classification": str(row.get("classification", "")).strip(),
                 "link_type":      "HLS",
                 "script_code":    script_code,
                 "camera_name":    str(row.get("camera_name", "")).strip(),
                 "centre_name":    str(row.get("centre_name", "")).strip(),
+                "tc_code":        str(row.get("tc_code", "")).strip(),
             })
 
     elif link_type == "RTSP":
@@ -61,15 +63,21 @@ def load_cameras_for_execution(execution: dict) -> list:
             if not device_id or not row.get("cctv_url"):
                 continue
 
+            # id is PRIMARY KEY — guaranteed unique per row
+            db_id     = str(row.get("id", "")).strip()
+            camera_no = str(row.get("camera_no", "")).strip() or device_id
+
             cameras.append({
                 "cctv_url":       row["cctv_url"],
                 "camera_id":      device_id,
-                "camera_no":      str(row.get("camera_no", "")).strip() or device_id,
+                "camera_id_pk":   db_id,           # ← PRIMARY KEY (unique) — use for file naming
+                "camera_no":      camera_no,
                 "classification": str(row.get("classification", "")).strip(),
                 "link_type":      "RTSP",
                 "script_code":    script_code,
                 "camera_name":    str(row.get("camera_name", "")).strip(),
                 "centre_name":    str(row.get("centre_name", "")).strip(),
+                "tc_code":        str(row.get("tc_code", "")).strip(),
             })
     else:
         logger.error(f"[CameraLoader] Unknown link_type: {link_type}")

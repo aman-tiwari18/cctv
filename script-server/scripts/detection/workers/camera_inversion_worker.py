@@ -269,10 +269,12 @@ def camera_inversion_worker(frame_queue):
             frame = data.get("frame")
             device_id = str(data.get("device_id", "unknown"))
             camera_no = str(data.get("camera_no", "0"))
+            camera_id_pk = str(data.get("camera_id_pk", ""))
         elif len(data) == 4:
-            frame, device_id, camera_no, _ = data
+            frame, device_id, camera_no, camera_id_pk = data
         else:
             frame, device_id, camera_no = data
+            camera_id_pk = ""
 
         try:
             results = _detect_orientation_batch([frame.copy()])
@@ -282,21 +284,23 @@ def camera_inversion_worker(frame_queue):
             corrected, orientation = results[0]
 
             if orientation != "original":
-                key = f"{device_id}_{camera_no}"
+                key = camera_id_pk if camera_id_pk else f"{device_id}_{camera_no}"
+                log_key = f"{device_id}_{camera_no}"
                 now = time.time()
                 if now - _inversion_last_save.get(key, 0) < INVERSION_COOLDOWN:
                     continue
                 _inversion_last_save[key] = now
 
                 ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = os.path.join(
-                    RTSP_SAVE_FOLDER,
-                    f"Inversion_{key}_{orientation}_{ts}.jpg"
-                )
+                if camera_id_pk:
+                    fname = f"inversion_{camera_id_pk}_{camera_no}_{orientation}_{ts}.jpg"
+                else:
+                    fname = f"inversion_{key}_{orientation}_{ts}.jpg"
+                filename = os.path.join(RTSP_SAVE_FOLDER, fname)
                 cv2.imwrite(filename, corrected)
                 logger.warning(
                     f"[InversionWorker] ⚠️ Camera rotated: {orientation} | "
-                    f"{key} → {filename}"
+                    f"pk={camera_id_pk} {log_key} → {filename}"
                 )
         except Exception as e:
             logger.error(f"[InversionWorker] RTSP error for {device_id}_{camera_no}: {e}")

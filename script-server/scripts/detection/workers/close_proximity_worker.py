@@ -7,7 +7,6 @@ import gc
 import time
 import queue
 import threading
-import pandas as pd
 import logging
 import numpy as np
 import torch
@@ -29,6 +28,8 @@ from tcs_scheduler import (
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, PROJECT_ROOT)
+
+from scripts.detection.utils.db_client import get_hls_cameras, get_rtsp_cameras
 from scripts.detection import close_proximity as proximity_core
 
 # === Save folder override ===
@@ -44,7 +45,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 # === Configuration ===
-EXCEL_FILE        = os.path.join(PROJECT_ROOT, "results/tcs_classification/accessible_cameras_proximity.xlsx")
+# 🔥 SCENE FILTER (case-insensitive)
+TARGET_SCENES = ['classroom', 'computer lab', 'exam', 'lab']
 SAMPLE_EVERY      = get_sample_every("PROXIMITY_SAMPLE_EVERY", 5)
 
 # Startup stagger — stagger between each thread launch
@@ -73,26 +75,27 @@ os.makedirs(RTSP_SAVE_FOLDER, exist_ok=True)
 os.makedirs(HLS_SAVE_FOLDER, exist_ok=True)
 
 def _extract_rtsp_packet(packet, default_script_name="proximity"):
+    """
+    Unpack RTSP producer packet.
+    Returns: (frame, device_id, camera_no, camera_id_pk)
+    camera_id_pk = DB primary key (unique) — use for file naming.
+    """
     if isinstance(packet, dict):
-        configs = packet.get("configs") or []
-        script_name = packet.get("script_name", default_script_name)
-        if configs and isinstance(configs, list):
-            script_name = configs[0].get("script_code", script_name)
-
         return (
             packet.get("frame"),
             str(packet.get("device_id", "unknown")),
             str(packet.get("camera_no") or packet.get("ch_no") or "0"),
-            script_name,
+            str(packet.get("camera_id_pk", "")),
         )
 
     if len(packet) == 4:
-        frame, device_id, camera_no, script_name = packet
+        # New 4-tuple: (frame, device_id, camera_no, camera_id_pk)
+        frame, device_id, camera_no, camera_id_pk = packet
     else:
         frame, device_id, camera_no = packet
-        script_name = default_script_name
+        camera_id_pk = ""
 
-    return frame, str(device_id), str(camera_no), script_name
+    return frame, str(device_id), str(camera_no), str(camera_id_pk)
 
 
 def _annotate_proximity_frame(frame, person_boxes, violations):
@@ -153,13 +156,16 @@ def _add_status_overlay(frame, violations, person_count, device_id, camera_no):
     return frame
 
 
-def _save_violation_frame(frame, violations, device_id, camera_no, save_folder):
+def _save_violation_frame(frame, violations, device_id, camera_no, save_folder, camera_id_pk=""):
     if not violations:
         return None
 
     proximity_core.proximity_detector.frame_count += 1
     timestamp = time.strftime("%Y%m%d_%H%M%S")
-    filename = f"violation_{device_id}_{camera_no}_{timestamp}_{proximity_core.proximity_detector.frame_count:06d}.jpg"
+    if camera_id_pk:
+        filename = f"proximity_{camera_id_pk}_{camera_no}_{timestamp}.jpg"
+    else:
+        filename = f"proximity_{device_id}_{camera_no}_{timestamp}.jpg"
     filepath = os.path.join(save_folder, filename)
     cv2.imwrite(filepath, frame)
     return filepath
@@ -174,7 +180,8 @@ def close_proximity_worker(frame_queue):
             logger.info("🔴 [CloseProximityWorker] RTSP worker stopping")
             break
 
-        frame, device_id, camera_no, _script_name = _extract_rtsp_packet(packet)
+        # 4th element is now camera_id_pk, not script_name
+        frame, device_id, camera_no, camera_id_pk = _extract_rtsp_packet(packet)
         if frame is None:
             continue
 
@@ -205,6 +212,7 @@ def close_proximity_worker(frame_queue):
                 device_id,
                 camera_no,
                 RTSP_SAVE_FOLDER,
+                camera_id_pk=str(camera_id_pk),
             )
             logger.critical(
                 f"[CloseProximityWorker][RTSP] 🚨 {device_id}:{camera_no} violations={violation_count} saved={saved_path}"
@@ -273,78 +281,54 @@ def close_proximity_worker_hls(camera_configs, stop_event=None):
         logger.info("[CloseProximityWorker][HLS] ✅ All cameras completed")
 
 # ─────────────────────────────────────────────
-# 1. Excel config loader
+# 1. DB config loader
 # ─────────────────────────────────────────────
 def load_camera_config():
+    """Load camera configs from DB tables using assignment context env vars."""
+    exam_id = str(os.environ.get("EXAM_ID", "")).strip()
+    shift_id = str(os.environ.get("SHIFT_ID", "")).strip()
+    assignment_date = str(os.environ.get("ASSIGNMENT_DATE", "")).strip() or time.strftime("%Y-%m-%d")
+    link_type = str(os.environ.get("LINK_TYPE", "HLS")).strip().upper()
+
+    if not exam_id:
+        logger.error("EXAM_ID is required for DB camera loading")
+        return []
+
     try:
-        df = pd.read_excel(EXCEL_FILE)
-        logger.info(f"Loaded Excel: {EXCEL_FILE}  ({len(df)} rows)")
-
-        col_map = {col.strip().upper(): col for col in df.columns}
-
-        # center
-        center_column = None
-        for key in ['CENTRE NAME', 'CENTER NAME', 'TC NAME']:
-            if key in col_map:
-                center_column = col_map[key]
-                break
-
-        # camera
-        location_column = None
-        for key in ['CAMERA NAME', 'CAMERA LOCATION']:
-            if key in col_map:
-                location_column = col_map[key]
-                break
-
-        # ch_no
-        ch_column = None
-        for col in df.columns:
-            if "CH" in col.upper():
-                ch_column = col
-                break
-
-        if not ch_column:
-            # Fallback if CH not found
-            ch_column = location_column 
-
-        # filter for Computer Lab
-        if 'Scene Classification' in df.columns:
-            filtered_df = df[df['Scene Classification'].isin(['Computer Lab'])].copy()
+        exam_id_int = int(exam_id)
+        if link_type == "RTSP":
+            rows = get_rtsp_cameras(exam_id_int)
         else:
-            filtered_df = df.copy()
+            shift_id_int = int(shift_id) if shift_id else -1
+            rows = get_hls_cameras(exam_id_int, shift_id_int, assignment_date)
 
-        filtered_df = filtered_df.dropna(subset=['CCTV URL'])
+        logger.info(f"Loaded {len(rows)} cameras from DB (link_type={link_type})")
+        
+        configs = []
+        for row in rows:
+            url = str(row.get("cctv_url") or "").strip()
+            if not url:
+                continue
 
-        camera_configs = []
-        for index, row in filtered_df.iterrows():
-            center_name = str(row.get(center_column, 'Unknown')).strip()
-            camera_location = str(row.get(location_column, 'Unknown')).strip()
-            camera_id = f"{center_name}_{camera_location}".replace(" ", "_")
-            
-            ch_no = row.get(ch_column, "0")
-            if pd.isna(ch_no):
-                ch_no = "0"
-            else:
-                try:
-                    ch_no = str(int(float(ch_no)))
-                except:
-                    ch_no = str(ch_no)
+            scene = str(row.get("classification") or "").lower()
+            if scene and not any(target in scene for target in TARGET_SCENES):
+                continue
 
-            camera_configs.append({
-                'initial_url': row['CCTV URL'],
-                'center_name': center_name,
-                'camera_location': camera_location,
-                'camera_id': camera_id,
-                'ch_no': ch_no,
-                'index': index
-            })
+            configs.append(row)
+        return configs
+    except Exception as exc:
+        logger.error(f"Cannot read cameras from DB: {exc}")
+        return []
 
-        logger.info(f"[LOAD] Proximity cameras: {len(camera_configs)}")
-        return camera_configs, df
 
-    except Exception as e:
-        logger.error(f"Error loading config: {e}")
-        return [], None
+def main():
+    configs = load_camera_config()
+    if not configs:
+        logger.warning("No cameras found in DB for Proximity detection")
+        return
+    
+    # close_proximity_worker_hls handles the thread orchestration
+    close_proximity_worker_hls(configs)
 
 # ─────────────────────────────────────────────
 # 2. GPU batch worker — high performance

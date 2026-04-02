@@ -62,7 +62,7 @@ person_counts = {}
 # =====================================================
 # SAME FUNCTION LOGIC (UNCHANGED)
 # =====================================================
-def detect_persons_in_frame(frame, device_id="unknown", camera_no="unknown", script_name="crowd"):
+def detect_persons_in_frame(frame, device_id="unknown", camera_no="unknown", script_name="crowd", camera_id_pk=""):
     results = yolo_model(frame, conf=CONF_THRESHOLD, verbose=False)[0]
 
     person_detections = [
@@ -96,7 +96,8 @@ def detect_persons_in_frame(frame, device_id="unknown", camera_no="unknown", scr
         (0, 255, 0), 2
     )
 
-    key = f"{device_id}_{camera_no}"
+    # Use DB primary key if available
+    key = camera_id_pk if camera_id_pk else f"{device_id}_{camera_no}"
     now = time.time()
     time_elapsed = now - last_save_times.get(key, 0)
 
@@ -104,14 +105,17 @@ def detect_persons_in_frame(frame, device_id="unknown", camera_no="unknown", scr
 
     if crowd_detected and time_elapsed >= COOLDOWN_TIME:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        # New naming: {script_name}_{camera_id}_{timestamp}.jpg
-        filename = (
-            f"{SAVE_FOLDER}/{script_name}_{camera_no}_{timestamp}.jpg"
-        )
+        # Format: {script_name}_{camera_id_pk}_{camera_no}_{timestamp}.jpg
+        if camera_id_pk:
+            fname = f"{script_name}_{camera_id_pk}_{camera_no}_{timestamp}.jpg"
+        else:
+            fname = f"{script_name}_{device_id}_{camera_no}_{timestamp}.jpg"
+            
+        filename = f"{SAVE_FOLDER}/{fname}"
         cv2.imwrite(filename, frame)
         last_save_times[key] = now
         logging.info(
-            f"[{device_id} - {camera_no}] 💾 Crowd detected & saved: {filename}"
+            f"[pk={camera_id_pk} {device_id} - {camera_no}] 💾 Crowd detected & saved: {filename}"
         )
     elif crowd_detected:
         remaining = int(COOLDOWN_TIME - time_elapsed)

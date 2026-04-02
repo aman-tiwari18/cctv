@@ -42,7 +42,6 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
     const [editingAssignment, setEditingAssignment] = useState(null);
     const [formData, setFormData] = useState({
         script_id: '',
-        custom_frequency_minutes: '',
         custom_start_time: '',
         custom_end_time: '',
         notes: ''
@@ -137,7 +136,6 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
             setEditingAssignment(assignment);
             setFormData({
                 script_id: assignment.script_id,
-                custom_frequency_minutes: assignment.custom_frequency_minutes || '',
                 custom_start_time: assignment.custom_start_time || '',
                 custom_end_time: assignment.custom_end_time || '',
                 notes: assignment.notes || ''
@@ -146,7 +144,6 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
             setEditingAssignment(null);
             setFormData({
                 script_id: '',
-                custom_frequency_minutes: '',
                 custom_start_time: '',
                 custom_end_time: '',
                 notes: ''
@@ -170,6 +167,11 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
     };
 
     const handleSubmit = async () => {
+        if (!formData.custom_start_time || !formData.custom_end_time) {
+            setError('Custom start and end time are required');
+            return;
+        }
+
         try {
             if (editingAssignment) {
                 await shiftScriptsAPI.update(editingAssignment.id, formData);
@@ -287,16 +289,6 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
                                                         variant="outlined"
                                                     />
                                                 )} */}
-{/* 
-                                                <Chip
-                                                    label={`Every ${assignment.custom_frequency_minutes ||
-                                                        assignment.script?.default_frequency_minutes ||
-                                                        '?'
-                                                        } min`}
-                                                    size="small"
-                                                    color="primary"
-                                                    variant="outlined"
-                                                /> */}
                                             </Box>
                                         }
                                         secondary={
@@ -396,16 +388,6 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
                             </MenuItem>
                         ))}
                     </TextField>
-                    <TextField
-                        fullWidth
-                        type="number"
-                        label="Custom Frequency (minutes)"
-                        name="custom_frequency_minutes"
-                        value={formData.custom_frequency_minutes}
-                        onChange={handleChange}
-                        margin="normal"
-                        helperText="Leave empty to use script's default frequency"
-                    />
                     <Box display="flex" gap={2}>
                         <TextField
                             type="time"
@@ -416,6 +398,7 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
                             margin="normal"
                             InputLabelProps={{ shrink: true }}
                             fullWidth
+                            required
                             helperText="Override start time for this shift"
                         />
                         <TextField
@@ -427,6 +410,7 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
                             margin="normal"
                             InputLabelProps={{ shrink: true }}
                             fullWidth
+                            required
                             helperText="Override end time for this shift"
                         />
                     </Box>
@@ -443,7 +427,11 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
                 </DialogContent>
                 <DialogActions>
                     <Button onClick={handleCloseDialog}>Cancel</Button>
-                    <Button onClick={handleSubmit} variant="contained" disabled={!formData.script_id}>
+                    <Button
+                        onClick={handleSubmit}
+                        variant="contained"
+                        disabled={!formData.script_id || !formData.custom_start_time || !formData.custom_end_time}
+                    >
                         {editingAssignment ? 'Update' : 'Assign'}
                     </Button>
                 </DialogActions>

@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 MODEL_PATH   = os.path.join(PROJECT_ROOT, "models/yolov10m.pt")
 
-RTSP_SAVE_FOLDER = os.path.join(PROJECT_ROOT, "results/server_room_detection_results")
+RTSP_SAVE_FOLDER = os.path.join(PROJECT_ROOT, "results/server_room_detection")
 HLS_SAVE_FOLDER  = os.path.join(PROJECT_ROOT, "results/tcs_detections/server_room_detection")
 
 os.makedirs(RTSP_SAVE_FOLDER, exist_ok=True)
@@ -64,7 +64,8 @@ logger.info("✅ [ServerRoomWorker] YOLO model loaded")
 # =====================================================
 # 🔍 CORE DETECTION  (shared by RTSP + HLS paths)
 # =====================================================
-def detect_persons_in_frame(frame, device_id: str, camera_no: str, save_folder: str, script_name: str = "server"):
+def detect_persons_in_frame(frame, device_id: str, camera_no: str, save_folder: str,
+                             script_name: str = "server", camera_id_pk: str = ""):
     """
     Detect persons in server room frame.
     Save if >= MIN_PERSONS detected and cooldown passed.
@@ -105,7 +106,8 @@ def detect_persons_in_frame(frame, device_id: str, camera_no: str, save_folder: 
                 (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
     # ── Save logic ───────────────────────────────────────
-    key = f"{device_id}_{camera_no}"
+    # key uses camera_id_pk (unique DB primary key) if available, else device_id+camera_no
+    key = camera_id_pk if camera_id_pk else f"{device_id}_{camera_no}"
     now = time.time()
 
     with _state_lock:
@@ -114,17 +116,20 @@ def detect_persons_in_frame(frame, device_id: str, camera_no: str, save_folder: 
 
         if server_violation and elapsed >= COOLDOWN_TIME:
             ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
-            # New naming: {script_name}_{camera_id}_{timestamp}.jpg
-            path = os.path.join(
-                save_folder,
-                f"{script_name}_{camera_no}_{ts}.jpg" if camera_no
-                else f"{script_name}_{device_id}_{ts}.jpg"
-            )
+            # Filename format: {script_name}_{camera_id_pk}_{camera_no}_{ts}.jpg
+            # camera_id_pk is the DB primary key — unique across all cameras
+            if camera_id_pk:
+                fname = f"{script_name}_{camera_id_pk}_{camera_no}_{ts}.jpg"
+            elif camera_no:
+                fname = f"{script_name}_{camera_no}_{ts}.jpg"
+            else:
+                fname = f"{script_name}_{device_id}_{ts}.jpg"
+            path = os.path.join(save_folder, fname)
             cv2.imwrite(path, frame)
             last_save_times[key] = now
             logger.warning(
                 f"[ServerRoom] 🚨 Person detected! "
-                f"cam={key} count={person_count} "
+                f"pk={camera_id_pk} cam={device_id}_{camera_no} count={person_count} "
                 f"💾 Saved → {path}"
             )
         elif server_violation:
@@ -144,8 +149,9 @@ def detect_persons_in_frame(frame, device_id: str, camera_no: str, save_folder: 
 # =====================================================
 def server_room_worker(frame_queue):
     """
-    Queue-based worker — receives (frame, device_id, camera_no)
-    packets from the RTSP producer.
+    Queue-based worker — receives (frame, device_id, camera_no) or
+    (frame, device_id, camera_no, camera_id_pk) packets from the RTSP producer.
+    camera_id_pk = DB primary key (unique) — used for file naming.
     """
     logger.info("🟢 Server Room Worker started")
 
@@ -155,19 +161,19 @@ def server_room_worker(frame_queue):
             logger.info("🔴 Server Room Worker stopping")
             break
 
-        # Unpack: (frame, device_id, camera_no) or (frame, device_id, camera_no, script_name)
         if len(packet) == 4:
-            frame, device_id, camera_no, script_name = packet
+            frame, device_id, camera_no, camera_id_pk = packet
         else:
             frame, device_id, camera_no = packet
-            script_name = "server"
+            camera_id_pk = ""
 
         detect_persons_in_frame(
             frame.copy(),
             str(device_id),
             str(camera_no),
             save_folder=RTSP_SAVE_FOLDER,
-            script_name=script_name
+            script_name="server",
+            camera_id_pk=str(camera_id_pk),
         )
 
 

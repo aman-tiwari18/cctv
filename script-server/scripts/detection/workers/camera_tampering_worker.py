@@ -173,16 +173,19 @@ def camera_tampering_worker(frame_queue):
             frame = data.get("frame")
             device_id = str(data.get("device_id", "unknown"))
             camera_no = str(data.get("camera_no", "0"))
+            camera_id_pk = str(data.get("camera_id_pk", ""))
         elif len(data) == 4:
-            frame, device_id, camera_no, _ = data
+            frame, device_id, camera_no, camera_id_pk = data
         else:
             frame, device_id, camera_no = data
+            camera_id_pk = ""
 
         try:
             status, brightness, blur_score, edge_density = _detect_camera_tampering(frame.copy())
 
             if status != "Normal":
-                key = f"{device_id}_{camera_no}"
+                key = camera_id_pk if camera_id_pk else f"{device_id}_{camera_no}"
+                log_key = f"{device_id}_{camera_no}"
                 now = time.time()
                 with _state_lock:
                     if now - _last_save_time.get(key, 0) < COOLDOWN_TIME:
@@ -190,10 +193,14 @@ def camera_tampering_worker(frame_queue):
                     _last_save_time[key] = now
 
                 ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = os.path.join(RTSP_SAVE_FOLDER, f"Tampering_{key}_{ts}.jpg")
+                if camera_id_pk:
+                    fname = f"tamper_{camera_id_pk}_{camera_no}_{ts}.jpg"
+                else:
+                    fname = f"tamper_{key}_{ts}.jpg"
+                filename = os.path.join(RTSP_SAVE_FOLDER, fname)
                 cv2.imwrite(filename, frame)
                 logger.warning(
-                    f"[TamperingWorker] ⚠️ {status} | {key} "
+                    f"[TamperingWorker] ⚠️ {status} | pk={camera_id_pk} {log_key} "
                     f"bright={brightness:.1f} blur={blur_score:.1f} "
                     f"edge={edge_density:.3f} → {filename}"
                 )

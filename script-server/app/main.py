@@ -16,7 +16,7 @@ from app.config import HTTP_PORT, MAIN_BACKEND_URL, POLL_INTERVAL_MS, SCRIPTS_DI
 from app.logger import logger
 from app.log_manager import log_manager
 from app.poller import poller_service
-from scripts.detection.utils.db_client import get_hls_camera_by_ch_code
+from scripts.detection.utils.db_client import get_hls_camera_by_ch_code, get_rtsp_camera_by_id
 
 # Import legacy pipeline functionality from the old backend
 from scripts.detection.backend.schemas import (
@@ -36,6 +36,42 @@ def _camera_meta_for_ch(ch_no: str, exam_date_iso: str) -> dict:
     if not ch_no:
         return {}
     return get_hls_camera_by_ch_code(ch_no, exam_date_iso) or {}
+
+
+@lru_cache(maxsize=4096)
+def _camera_meta_for_rtsp_pk(camera_id_pk: int) -> dict:
+    """Fetch RTSP camera metadata by primary key."""
+    if not camera_id_pk:
+        return {}
+    return get_rtsp_camera_by_id(camera_id_pk) or {}
+
+
+# RTSP filenames follow: {script}_{camera_id_pk}_{camera_no}_{date}_{time}_{extra}.jpg
+# The prefix (script name like server, phone, crowd, etc.) comes before the pk.
+_RTSP_SCRIPT_PREFIXES = {
+    "server", "crowd", "intruder", "entry", "phone", "proximity",
+    "invigilator", "tamper", "inversion", "blind", "zero", "five",
+    "tampering", "violation", "entry_exit", "server_room", "blind_spot",
+    "inversion", "tamper", "zero_person", "detection"
+}
+
+
+def _is_rtsp_filename(stem: str) -> bool:
+    """Check if filename matches RTSP naming: {prefix}_{pk}_{cam_no}_{date}_{time}..."""
+    parts = stem.split("_")
+    if len(parts) >= 3:
+        prefix = parts[0].lower()
+        if prefix in _RTSP_SCRIPT_PREFIXES and parts[1].isdigit():
+            return True
+    return False
+
+
+def _extract_rtsp_pk(stem: str) -> int:
+    """Extract the camera_id_pk (second segment) from an RTSP filename."""
+    parts = stem.split("_")
+    if len(parts) >= 2 and parts[1].isdigit():
+        return int(parts[1])
+    return 0
 
 
 def _extract_ch_no(camera_id: str) -> str:
@@ -80,17 +116,25 @@ def _iter_detection_files(type_key: str, folder: Path):
 
 
 def list_detection_files() -> dict:
+    """Scan both HLS (tcs_detections/) and RTSP (results/) directories."""
     snapshot = {}
     for type_key, folder_name in DETECTION_FOLDERS.items():
-        folder = RESULTS_DIR / folder_name
-        if not folder.exists():
-            snapshot[type_key] = set()
-            continue
+        files = set()
 
-        snapshot[type_key] = {
-            str(f.relative_to(folder).as_posix())
-            for f in _iter_detection_files(type_key, folder)
-        }
+        # HLS directory
+        hls_folder = RESULTS_DIR / folder_name
+        if hls_folder.exists():
+            for f in _iter_detection_files(type_key, hls_folder):
+                # prefix with hls: so we know the origin
+                files.add("hls:" + str(f.relative_to(hls_folder).as_posix()))
+
+        # RTSP directory
+        rtsp_folder = RTSP_RESULTS_DIR / folder_name
+        if rtsp_folder.exists():
+            for f in _iter_detection_files(type_key, rtsp_folder):
+                files.add("rtsp:" + str(f.relative_to(rtsp_folder).as_posix()))
+
+        snapshot[type_key] = files
     return snapshot
 
 
@@ -105,11 +149,20 @@ async def detection_watch_loop():
             previous_files = known_detection_files.get(type_key, set())
             new_files = sorted(current_files - previous_files)
 
-            for relative_path in new_files:
-                file_path = RESULTS_DIR / DETECTION_FOLDERS[type_key] / relative_path
-                payload = parse_detection_filename(relative_path, type_key, file_path, is_new_image=True)
+            for tagged_path in new_files:
+                # tagged_path is "hls:relative" or "rtsp:relative"
+                origin, relative_path = tagged_path.split(":", 1)
+                if origin == "rtsp":
+                    base_dir = RTSP_RESULTS_DIR
+                else:
+                    base_dir = RESULTS_DIR
+                file_path = base_dir / DETECTION_FOLDERS[type_key] / relative_path
+                payload = parse_detection_filename(
+                    relative_path, type_key, file_path,
+                    is_new_image=True, source=origin,
+                )
                 await sio.emit("detection:new", payload)
-                logger.info(f"Live detection emitted: {type_key} {relative_path}")
+                logger.info(f"Live detection emitted ({origin}): {type_key} {relative_path}")
 
         known_detection_files = current_snapshot
 
@@ -160,8 +213,11 @@ app = FastAPI(
 
 # ── Static file serving for detection images ──────────────────
 RESULTS_DIR = Path(SCRIPTS_DIR).resolve() / "detection" / "results" / "tcs_detections"
+RTSP_RESULTS_DIR = Path(SCRIPTS_DIR).resolve() / "detection" / "results"
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+RTSP_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/detection-images", StaticFiles(directory=str(RESULTS_DIR)), name="detection-images")
+app.mount("/rtsp-detection-images", StaticFiles(directory=str(RTSP_RESULTS_DIR)), name="rtsp-detection-images")
 
 app.add_middleware(
     CORSMiddleware,
@@ -211,7 +267,7 @@ async def cancel_execution(execution_id: str):
     """
     from app.script_runner import script_runner
 
-    killed = script_runner.cancel(execution_id)
+    killed = await script_runner.cancel(execution_id)
 
     if not killed:
         # Not in active processes — check if it's tracked by poller at all
@@ -319,19 +375,18 @@ def status_analytics_route():
 # ==========================================
 
 DETECTION_FOLDERS = {
-    "proximity":  "proximity_detection",
-    "crowd":      "crowd_detection",
+    "proximity":  "close_proximity_results",
+    "crowd":      "crowd_detection_results",
     "crowd_five": "crowd_detection_threshold",
     "crowd_zero": "zero_person_detection",
-    "server":     "server_room_detection",
+    "server":     "server_room_results",
     "intruder":   "intruder_detection",
-    "entry_exit": "entry_exit_detection",
+    "entry_exit": "entry_exit_results",
     "phone":      "phone_detection",
     "blind_spot": "blind_spot_detection",
     "invigilator":"invigilator_detection",
     "inversion" : "camera_inversion_detection",
     "tamper" : "camera_tampering_detection",
-
 }
 
 DETECTION_LABELS = {
@@ -355,24 +410,46 @@ def parse_detection_filename(
     type_key: str,
     file_path: Optional[Path] = None,
     is_new_image: bool = False,
+    source: str = "hls",
 ) -> dict:
-    """Parse metadata from a detection image filename."""
+    """Parse metadata from a detection image filename.
+
+    For RTSP files the naming convention is:
+        {script}_{camera_id_pk}_{camera_no}_{date}_{time}_{extra}.jpg
+    For HLS files the naming convention is:
+        {camera_id}_{date}_{time}_{extra}.jpg
+    """
     file_obj = Path(filename)
     basename = file_obj.name
     stem = file_obj.stem  # without extension
-    # Pattern: {camera_id}_{date}_{time}_{extra}.jpg
-    # e.g. 11365_ENTRY_S39__20260318_161308_violations1
-    #      11365_ENTRY_S39__20260318_161308_persons2_conf0.83
+
     date_str, time_str = "", ""
-    dt_match = re.search(r'(\d{8})_(\d{6})', stem)
-    if dt_match:
-        date_str = dt_match.group(1)  # 20260318
-        time_str = dt_match.group(2)  # 161308
-        camera_id = stem[:dt_match.start()].strip('_')
-        suffix = stem[dt_match.end():].strip('_')
+    camera_id = ""
+    suffix = ""
+    rtsp_pk = 0
+
+    # ── Try RTSP naming pattern: {prefix}_{pk}_{camNo}_{date}_{time}... ──
+    # Now agnostic to the source directory to handle complex samarth-style paths
+    if _is_rtsp_filename(stem):
+        rtsp_pk = _extract_rtsp_pk(stem)
+        dt_match = re.search(r'(\d{8})_(\d{6})', stem)
+        if dt_match:
+            date_str = dt_match.group(1)
+            time_str = dt_match.group(2)
+            camera_id = stem[:dt_match.start()].strip('_')
+            suffix = stem[dt_match.end():].strip('_')
+        else:
+            camera_id = stem
     else:
-        camera_id = stem
-        suffix = ""
+        # ── HLS / legacy naming ──
+        dt_match = re.search(r'(\d{8})_(\d{6})', stem)
+        if dt_match:
+            date_str = dt_match.group(1)
+            time_str = dt_match.group(2)
+            camera_id = stem[:dt_match.start()].strip('_')
+            suffix = stem[dt_match.end():].strip('_')
+        else:
+            camera_id = stem
 
     # Format datetime
     detected_at = ""
@@ -407,15 +484,21 @@ def parse_detection_filename(
                 issue_type = "no_targets"
 
     exam_date_iso = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}" if date_str else ""
-    ch_no = _extract_ch_no(camera_id)
-    cam_meta = _camera_meta_for_ch(ch_no, exam_date_iso)
 
+    # ── Metadata lookup: RTSP uses pk, HLS uses ch_code ──
+    if source == "rtsp" and rtsp_pk:
+        cam_meta = _camera_meta_for_rtsp_pk(rtsp_pk)
+    else:
+        ch_no = _extract_ch_no(camera_id)
+        cam_meta = _camera_meta_for_ch(ch_no, exam_date_iso)
+
+    ch_no_display = str(cam_meta.get("camera_no") or cam_meta.get("ch_code") or _extract_ch_no(camera_id))
     camera_name = cam_meta.get("camera_name") or camera_id
     center_name = cam_meta.get("centre_name") or ""
     city = cam_meta.get("city") or ""
     state = cam_meta.get("state") or ""
     tc_code = cam_meta.get("tc_code")
-    category = cam_meta.get("camera_category") or ""
+    category = cam_meta.get("camera_category") or cam_meta.get("classification") or ""
     cctv_url = cam_meta.get("cctv_url") or ""
 
     now_ms = int(datetime.now().timestamp() * 1000)
@@ -430,6 +513,12 @@ def parse_detection_filename(
         "static_person": "Static Person",
     }
 
+    # ── Image URL: different mount point for RTSP vs HLS ──
+    if source == "rtsp":
+        image_url = f"/cctv_dev/rtsp-detection-images/{DETECTION_FOLDERS[type_key]}/{image_rel}"
+    else:
+        image_url = f"/cctv_dev/detection-images/{DETECTION_FOLDERS[type_key]}/{image_rel}"
+
     return {
         "filename":    basename,
         "relativePath": str(file_obj.as_posix()),
@@ -437,7 +526,7 @@ def parse_detection_filename(
         "label":       DETECTION_LABELS.get(type_key, type_key),
         "camera_id":   camera_id,
         "cameraId":    camera_id,
-        "chNo":        int(ch_no) if ch_no else None,
+        "chNo":        int(ch_no_display) if ch_no_display and ch_no_display.isdigit() else None,
         "time":        time_str,
         "rawDate":     date_str,
         "issueType":   issue_type,
@@ -446,6 +535,7 @@ def parse_detection_filename(
         "addedAt":     now_ms,
         "timestamp":   timestamp_iso,
         "isNewImage":  is_new_image,
+        "source":      source,
         "cameraName":  camera_name,
         "centerName":  center_name,
         "city":        city,
@@ -459,7 +549,7 @@ def parse_detection_filename(
         "examDate":    date_display,
         "confidence":  confidence,
         "count":       count,
-        "image_url": f"/cctv_dev/detection-images/{DETECTION_FOLDERS[type_key]}/{image_rel}",
+        "image_url":   image_url,
     }
 
 @app.get("/detections")
@@ -467,37 +557,48 @@ def list_detections(
     type: Optional[str] = None,
     date: Optional[str] = None,
     search: Optional[str] = None,
+    source: Optional[str] = None,
     page: int = 1,
     limit: int = 50,
 ):
     rows = []
     folders = {type: DETECTION_FOLDERS[type]} if type and type in DETECTION_FOLDERS else DETECTION_FOLDERS
 
-    for type_key, folder_name in folders.items():
-        folder = RESULTS_DIR / folder_name
-        if not folder.exists():
-            continue
-        for f in _iter_detection_files(type_key, folder):
-            relative_path = str(f.relative_to(folder).as_posix())
-            item = parse_detection_filename(relative_path, type_key, f, is_new_image=False)
-
-            if date and not item["date"].startswith(date):
+    def _scan_dir(base_dir: Path, origin: str):
+        for type_key, folder_name in folders.items():
+            folder = base_dir / folder_name
+            if not folder.exists():
                 continue
+            for f in _iter_detection_files(type_key, folder):
+                relative_path = str(f.relative_to(folder).as_posix())
+                item = parse_detection_filename(
+                    relative_path, type_key, f,
+                    is_new_image=False, source=origin,
+                )
 
-            if search:
-                q = search.lower()
-                haystack = " ".join([
-                    str(item.get("camera_id") or ""),
-                    str(item.get("cameraName") or ""),
-                    str(item.get("centerName") or ""),
-                    str(item.get("city") or ""),
-                    str(item.get("state") or ""),
-                    str(item.get("tcCode") or ""),
-                ]).lower()
-                if q not in haystack:
+                if date and not item["date"].startswith(date):
                     continue
 
-            rows.append((f.stat().st_mtime, item))
+                if search:
+                    q = search.lower()
+                    haystack = " ".join([
+                        str(item.get("camera_id") or ""),
+                        str(item.get("cameraName") or ""),
+                        str(item.get("centerName") or ""),
+                        str(item.get("city") or ""),
+                        str(item.get("state") or ""),
+                        str(item.get("tcCode") or ""),
+                    ]).lower()
+                    if q not in haystack:
+                        continue
+
+                rows.append((f.stat().st_mtime, item))
+
+    # Scan based on source filter or both
+    if source != "rtsp":
+        _scan_dir(RESULTS_DIR, "hls")
+    if source != "hls":
+        _scan_dir(RTSP_RESULTS_DIR, "rtsp")
 
     # Sort by file write time descending (newest first).
     rows.sort(key=lambda x: x[0], reverse=True)

@@ -54,6 +54,9 @@ SAVE_FOLDER = os.path.join(
 )
 os.makedirs(SAVE_FOLDER, exist_ok=True)
 
+RTSP_SAVE_FOLDER = os.path.join(PROJECT_ROOT, "results/crowd_detection_threshold")
+os.makedirs(RTSP_SAVE_FOLDER, exist_ok=True)
+
 # Thresholds
 MIN_PERSONS   = int(os.getenv("TCS_CROWD_FIVE_THRESHOLD", "5"))
 COOLDOWN_TIME = int(os.getenv("TCS_CROWD_FIVE_COOLDOWN", "240"))
@@ -122,6 +125,80 @@ def get_yolo_model():
         logger.info("Loading YOLO model for crowd_five worker...")
         _yolo_model = YOLO(model_path)
     return _yolo_model
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  RTSP Worker  — standalone process entry point
+# ══════════════════════════════════════════════════════════════════════════════
+_rtsp_last_save = {}
+_rtsp_rate_limiter = get_rate_limiter("crowd_five_rtsp", max_per_minute=RATE_LIMIT_PER_MIN)
+
+def detect_five_crowd(frame, device_id: str, camera_no: str, save_folder: str, camera_id_pk: str = ""):
+    model = get_yolo_model()
+    if model is None:
+        return
+
+    results = model(frame, conf=CONFIDENCE, verbose=False)[0]
+    person_boxes = [b for b in results.boxes if int(b.cls[0]) == 0]
+    person_count = len(person_boxes)
+
+    if person_count < MIN_PERSONS:
+        key = camera_id_pk if camera_id_pk else f"{device_id}_{camera_no}"
+        log_key = f"{device_id}_{camera_no}"
+        now = time.time()
+        
+        if now - _rtsp_last_save.get(key, 0) >= COOLDOWN_TIME:
+            should_save, current_rate, _ = _rtsp_rate_limiter.should_save_detection(key)
+            if not should_save:
+                return
+
+            _rtsp_last_save[key] = now
+            ts = time.strftime("%Y%m%d_%H%M%S")
+            if camera_id_pk:
+                fname = f"lessthan5_{camera_id_pk}_{camera_no}_{ts}.jpg"
+            else:
+                fname = f"lessthan5_{key}_{ts}.jpg"
+            
+            filename = os.path.join(save_folder, fname)
+            
+            # draw boxes
+            for b in person_boxes:
+                x1, y1, x2, y2 = map(int, b.xyxy[0])
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+            
+            cv2.imwrite(filename, frame)
+            logger.warning(
+                f"[CrowdFiveWorker] CROWD SAVED: pk={camera_id_pk} {log_key} "
+                f"({person_count} persons) saved → {fname}"
+            )
+
+def crowd_five_worker(frame_queue):
+    logger.info("🟢 [CrowdFiveWorker] RTSP worker started")
+    get_yolo_model()
+
+    while True:
+        data = frame_queue.get()
+        if data is None:
+            logger.info("🔴 [CrowdFiveWorker] RTSP worker stopping")
+            break
+
+        if isinstance(data, dict):
+            frame = data.get("frame")
+            device_id = str(data.get("device_id", "unknown"))
+            camera_no = str(data.get("camera_no", "0"))
+            camera_id_pk = str(data.get("camera_id_pk", ""))
+        elif len(data) == 4:
+            frame, device_id, camera_no, camera_id_pk = data
+        else:
+            frame, device_id, camera_no = data
+            camera_id_pk = ""
+
+        detect_five_crowd(
+            frame.copy(),
+            str(device_id),
+            str(camera_no),
+            save_folder=RTSP_SAVE_FOLDER,
+            camera_id_pk=str(camera_id_pk)
+        )
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  EXCEL LOADER

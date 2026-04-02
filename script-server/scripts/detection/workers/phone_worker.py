@@ -571,7 +571,7 @@ logger = logging.getLogger(__name__)
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 MODEL_PATH   = os.path.join(PROJECT_ROOT, "models/yolov10m.pt")
 
-RTSP_SAVE_FOLDER = os.path.join(PROJECT_ROOT, "results/phone_detection_results")
+RTSP_SAVE_FOLDER = os.path.join(PROJECT_ROOT, "results/phone_detection")
 HLS_SAVE_FOLDER  = os.path.join(PROJECT_ROOT, "results/tcs_detections/phone_detection")
 
 os.makedirs(RTSP_SAVE_FOLDER, exist_ok=True)
@@ -597,9 +597,10 @@ logger.info("✅ [PhoneWorker] YOLO model loaded")
 # =====================================================
 # 🔍 CORE DETECTION  (shared by RTSP + HLS paths)
 # =====================================================
-def detect_phone(frame, device_id: str, camera_no: str, save_folder: str, script_name: str = "phone"):
+def detect_phone(frame, device_id: str, camera_no: str, save_folder: str, script_name: str = "phone", camera_id_pk: str = ""):
     """
     Run YOLO, detect cell phones, save if found and cooldown passed.
+    camera_id_pk is the DB primary key, used for unique file naming.
 
     Returns:
         phone_count (int)
@@ -632,7 +633,8 @@ def detect_phone(frame, device_id: str, camera_no: str, save_folder: str, script
                 (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
     # ── Save logic ───────────────────────────────────────
-    key = f"{device_id}_{camera_no}"
+    # Use DB primary key if available
+    key = camera_id_pk if camera_id_pk else f"{device_id}_{camera_no}"
     now = time.time()
 
     with _state_lock:
@@ -640,17 +642,20 @@ def detect_phone(frame, device_id: str, camera_no: str, save_folder: str, script
 
         if phone_boxes and elapsed >= COOLDOWN_TIME:
             ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
-            # New naming: {script_name}_{camera_id}_{timestamp}.jpg
-            path = os.path.join(
-                save_folder,
-                f"{script_name}_{camera_no}_{ts}.jpg" if camera_no
-                else f"{script_name}_{device_id}_{ts}.jpg"
-            )
+            # Format: {script_name}_{camera_id_pk}_{camera_no}_{ts}.jpg
+            if camera_id_pk:
+                fname = f"{script_name}_{camera_id_pk}_{camera_no}_{ts}.jpg"
+            elif camera_no:
+                fname = f"{script_name}_{camera_no}_{ts}.jpg"
+            else:
+                fname = f"{script_name}_{device_id}_{ts}.jpg"
+            
+            path = os.path.join(save_folder, fname)
             cv2.imwrite(path, frame)
             last_save_times[key] = now
             logger.warning(
                 f"[PhoneWorker] 📱 Phone detected! "
-                f"Device={device_id} Cam={camera_no} "
+                f"pk={camera_id_pk} Device={device_id} Cam={camera_no} "
                 f"Count={phone_count} "
                 f"💾 Saved → {path}"
             )
@@ -682,19 +687,20 @@ def phone_worker(frame_queue):
             logger.info("🔴 Phone Worker stopping")
             break
 
-        # Unpack: (frame, device_id, camera_no) or (frame, device_id, camera_no, script_name)
+        # Unpack: (frame, device_id, camera_no) or (frame, device_id, camera_no, camera_id_pk)
         if len(data) == 4:
-            frame, device_id, camera_no, script_name = data
+            frame, device_id, camera_no, camera_id_pk = data
         else:
             frame, device_id, camera_no = data
-            script_name = "phone"
+            camera_id_pk = ""
 
         detect_phone(
             frame.copy(),
             str(device_id),
             str(camera_no),
             save_folder=RTSP_SAVE_FOLDER,
-            script_name=script_name
+            script_name="phone",
+            camera_id_pk=str(camera_id_pk)
         )
 
 

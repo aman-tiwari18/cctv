@@ -350,26 +350,60 @@ class ScriptRunner:
 
         return args
 
-    def cancel(self, execution_id: str) -> bool:
+    async def cancel(self, execution_id: str) -> bool:
         """
         Terminate a running script process by execution_id.
-        Returns True if the process was found and killed, False if not found.
+        Returns True if the process was found and kill was attempted, False if not found.
         """
         process = self._active_processes.get(str(execution_id))
         if process is None:
             return False
+
+        # First attempt graceful termination of the whole process group.
         try:
             os.killpg(os.getpgid(process.pid), signal.SIGTERM)
             logger.info(f"⏹ Cancelled script {execution_id} (SIGTERM sent to process group)")
         except ProcessLookupError:
-            pass   # already dead
+            logger.info(f"Script {execution_id} already terminated")
+            return False
         except Exception as e:
             logger.warning(f"Could not kill process group for {execution_id}: {e}")
             try:
                 process.terminate()
                 logger.info(f"⏹ Cancelled script {execution_id} (SIGTERM sent to main process)")
             except ProcessLookupError:
-                pass
+                logger.info(f"Script {execution_id} already terminated")
+                return False
+            except Exception as e2:
+                logger.warning(f"Could not terminate main process for {execution_id}: {e2}")
+
+        # Wait for the process to exit after SIGTERM.
+        try:
+            await asyncio.wait_for(process.wait(), timeout=5.0)
+            return True
+        except asyncio.TimeoutError:
+            logger.warning(f"Script {execution_id} did not exit after SIGTERM; escalating to SIGKILL")
+
+        # Escalate to SIGKILL if it is still running.
+        try:
+            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            logger.info(f"⏹ Cancelled script {execution_id} (SIGKILL sent to process group)")
+        except ProcessLookupError:
+            return True
+        except Exception as e:
+            logger.warning(f"Could not kill process group for {execution_id} with SIGKILL: {e}")
+            try:
+                process.kill()
+                logger.info(f"⏹ Cancelled script {execution_id} (SIGKILL sent to main process)")
+            except ProcessLookupError:
+                return True
+            except Exception as e2:
+                logger.warning(f"Could not kill main process for {execution_id}: {e2}")
+
+        try:
+            await asyncio.wait_for(process.wait(), timeout=5.0)
+        except asyncio.TimeoutError:
+            logger.error(f"Script {execution_id} did not terminate after SIGKILL")
         return True
 
     def list_running(self) -> list[str]:

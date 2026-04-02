@@ -126,6 +126,31 @@ def get_rtsp_cameras(exam_id: int) -> list:
         logger.error(f"[DB] Error querying camera_links_rtsp: {e}")
         return []
 
+def get_rtsp_camera_by_id(camera_id_pk: int) -> dict:
+    """Fetch one active RTSP camera row by its primary key ID."""
+    if not camera_id_pk:
+        return {}
+
+    sql = """
+        SELECT
+            id, device_id, exam_id, centre_name, tc_code,
+            camera_name, camera_no, city, state, cctv_url,
+            is_active, classification
+        FROM camera_links_rtsp
+        WHERE id = %s
+          AND is_active = 1
+        LIMIT 1
+    """
+    try:
+        conn = _get_connection()
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (camera_id_pk,))
+                row = cur.fetchone()
+                return row or {}
+    except Exception as e:
+        logger.error(f"[DB] Error fetching camera_links_rtsp by ID ({camera_id_pk}): {e}")
+        return {}
 
 def update_rtsp_classification(exam_id: int, device_id: str, classification: str) -> int:
     """Update classification in camera_links_rtsp for one camera."""

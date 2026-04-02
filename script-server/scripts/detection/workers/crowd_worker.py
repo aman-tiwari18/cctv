@@ -16,17 +16,15 @@ torch.set_num_threads(1)
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 
-from tcs_hls_utils import extract_hls_streaming_url, test_hls_stream, open_hls_stream
-from tcs_scheduler import frame_should_process
-from detection_rate_limiter import get_rate_limiter
-
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, PROJECT_ROOT)
 
+from scripts.detection.utils.db_client import get_hls_cameras, get_rtsp_cameras
 from scripts.detection import Crowd_det_complete as crowd_core
 
 # ================= CONFIG =================
-EXCEL_FILE = os.path.join(PROJECT_ROOT, "results/tcs_classification/accessible_cameras_crowd.xlsx")
+# 🔥 SCENE FILTER (case-insensitive) - crowds can be in any public/exam area
+TARGET_SCENES = ['classroom', 'computer lab', 'exam', 'crowd', 'lab', 'centre', 'entry', 'exit', 'outdoor', 'outside area']
 
 SAVE_FOLDER = os.path.join(PROJECT_ROOT, "results/tcs_detections/crowd_detection")
 os.makedirs(SAVE_FOLDER, exist_ok=True)
@@ -42,6 +40,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 gpu_queue = queue.Queue(maxsize=GPU_QUEUE_SIZE)
+
+from tcs_hls_utils import extract_hls_streaming_url, test_hls_stream, open_hls_stream
+from tcs_scheduler import frame_should_process
+from detection_rate_limiter import get_rate_limiter
+
 rate_limiter = get_rate_limiter('crowd', max_per_minute=25)
 _STOP_EVENT = threading.Event()
 
@@ -50,10 +53,41 @@ HLS_SAVE_FOLDER = SAVE_FOLDER
 os.makedirs(RTSP_SAVE_FOLDER, exist_ok=True)
 
 def load_camera_config():
-    if not os.path.exists(EXCEL_FILE):
+    """Load camera list from DB tables using assignment context env vars."""
+    exam_id = str(os.environ.get("EXAM_ID", "")).strip()
+    shift_id = str(os.environ.get("SHIFT_ID", "")).strip()
+    assignment_date = str(os.environ.get("ASSIGNMENT_DATE", "")).strip() or time.strftime("%Y-%m-%d")
+    link_type = str(os.environ.get("LINK_TYPE", "HLS")).strip().upper()
+
+    if not exam_id:
+        logger.error("EXAM_ID is required for DB camera loading")
         return []
-    df = pd.read_excel(EXCEL_FILE)
-    return df.to_dict('records')
+
+    try:
+        exam_id_int = int(exam_id)
+        if link_type == "RTSP":
+            rows = get_rtsp_cameras(exam_id_int)
+        else:
+            shift_id_int = int(shift_id) if shift_id else -1
+            rows = get_hls_cameras(exam_id_int, shift_id_int, assignment_date)
+
+        logger.info(f"Loaded {len(rows)} cameras from DB (link_type={link_type})")
+        
+        configs = []
+        for row in rows:
+            url = str(row.get("cctv_url") or "").strip()
+            if not url:
+                continue
+
+            scene = str(row.get("classification") or "").lower()
+            if scene and not any(target in scene for target in TARGET_SCENES):
+                continue
+
+            configs.append(row)
+        return configs
+    except Exception as exc:
+        logger.error(f"Cannot read cameras from DB: {exc}")
+        return []
 
 
 def crowd_worker(frame_queue):
@@ -68,16 +102,17 @@ def crowd_worker(frame_queue):
 
         if isinstance(packet, dict):
             frame = packet.get("frame")
-            device_id = str(packet.get("device_id", "unknown"))
-            camera_no = str(packet.get("camera_no") or packet.get("ch_no") or "0")
-            configs = packet.get("configs") or []
-            script_name = packet.get("script_name", "crowd")
-            if configs and isinstance(configs, list):
-                script_name = configs[0].get("script_code", script_name)
+            device_id    = str(packet.get("device_id", "unknown"))
+            camera_no    = str(packet.get("camera_no") or packet.get("ch_no") or "0")
+            camera_id_pk = str(packet.get("camera_id_pk", ""))
+            script_name  = "crowd"
         elif len(packet) == 4:
-            frame, device_id, camera_no, script_name = packet
+            # 4-tuple from rtsp_producer: (frame, device_id, camera_no, camera_id_pk)
+            frame, device_id, camera_no, camera_id_pk = packet
+            script_name = "crowd"
         else:
             frame, device_id, camera_no = packet
+            camera_id_pk = ""
             script_name = "crowd"
 
         try:
@@ -86,9 +121,10 @@ def crowd_worker(frame_queue):
                 device_id=str(device_id),
                 camera_no=str(camera_no),
                 script_name=script_name,
+                camera_id_pk=camera_id_pk,
             )
             logger.debug(
-                f"[CrowdWorker][RTSP] {device_id}:{camera_no} -> detected={is_detected}, count={count}"
+                f"[CrowdWorker][RTSP] pk={camera_id_pk} {device_id}:{camera_no} -> detected={is_detected}, count={count}"
             )
         except Exception as exc:
             logger.error(f"[CrowdWorker][RTSP] Error processing frame: {exc}")
@@ -224,9 +260,11 @@ def camera_thread(cfg, stop_event):
 
 def main():
     configs = load_camera_config()
-    # Filter by classification if needed
-    allowed = ['Outdoor Scene', 'Outside area', 'Parking Lot', 'Entry', 'Outside', 'Entry/Exit']
-    filtered = [c for c in configs if str(c.get('classification', '')) in allowed]
+    if not configs:
+        logger.warning("No cameras found in DB for Crowd detection")
+        return
+    
+    filtered = configs # load_camera_config already filters by TARGET_SCENES
 
     stop_event = _STOP_EVENT
     t_gpu = threading.Thread(target=gpu_worker, args=(stop_event,), daemon=True)

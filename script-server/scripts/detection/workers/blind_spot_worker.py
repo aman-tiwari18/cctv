@@ -67,8 +67,13 @@ if threading.current_thread() is threading.main_thread():
 BLIND_SPOT_SAVE_FOLDER = os.path.join(
     PROJECT_ROOT, "results/tcs_detections/blind_spot_detection"
 )
+RTSP_SAVE_FOLDER = os.path.join(
+    PROJECT_ROOT, "results/blind_spot_detection"
+)
 os.makedirs(BLIND_SPOT_SAVE_FOLDER, exist_ok=True)
-logger.info(f"Blind spot detections will be saved to: {BLIND_SPOT_SAVE_FOLDER}")
+os.makedirs(RTSP_SAVE_FOLDER, exist_ok=True)
+logger.info(f"HLS blind spot: {BLIND_SPOT_SAVE_FOLDER}")
+logger.info(f"RTSP blind spot: {RTSP_SAVE_FOLDER}")
 
 MODEL_PATH = os.path.join(PROJECT_ROOT, "models/yolov10m.pt")
 
@@ -120,9 +125,10 @@ class BlindSpotDetector:
     in the GPU worker thread and are CPU-only.
     """
 
-    def __init__(self, camera_id: str, ch_no: str = "unknown"):
+    def __init__(self, camera_id: str, ch_no: str = "unknown", camera_id_pk: str = ""):
         self.camera_id = camera_id
         self.ch_no = ch_no
+        self.camera_id_pk = camera_id_pk
         self.movement_history: deque = deque(maxlen=MOVEMENT_HISTORY_FRAMES)
         self.static_frame_count = 0
         self.previous_frame_gray: np.ndarray | None = None
@@ -346,8 +352,11 @@ class BlindSpotDetector:
 
     # ── save helper ───────────────────────────────────────────────────────────
 
-    def save_detection(self, frame: np.ndarray, issues: dict) -> str | None:
+    def save_detection(self, frame: np.ndarray, issues: dict, save_folder: str = None) -> str | None:
         """Persist annotated frame if issues found and cooldown elapsed."""
+        if save_folder is None:
+            save_folder = BLIND_SPOT_SAVE_FOLDER
+            
         now = time.time()
         if now - self.last_save_time < COOLDOWN_TIME:
             return None
@@ -368,14 +377,17 @@ class BlindSpotDetector:
 
         ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
         tag_str  = "_".join(issue_tags)
-        filepath = os.path.join(
-            BLIND_SPOT_SAVE_FOLDER,
-            f"blind_ch{self.ch_no}_{tag_str}_{ts}.jpg",
-        )
+        
+        if self.camera_id_pk:
+            fname = f"blind_{self.camera_id_pk}_{self.ch_no}_{tag_str}_{ts}.jpg"
+        else:
+            fname = f"blind_ch{self.ch_no}_{tag_str}_{ts}.jpg"
+            
+        filepath = os.path.join(save_folder, fname)
         cv2.imwrite(filepath, frame)
         self.last_save_time = now
         logger.warning(
-            f"[{self.camera_id}] Blind spot detected ({total_persons} persons) — saved: {filepath}"
+            f"[{self.camera_id}] Blind spot detected ({total_persons} persons) pk={self.camera_id_pk} — saved: {filepath}"
         )
         return filepath
 
@@ -593,6 +605,61 @@ def camera_thread(cfg: dict, stop_event: threading.Event):
         f"obstructed={detector.issue_counts['obstruction_detected']}"
     )
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  RTSP WORKER  — Queue-based execution
+# ══════════════════════════════════════════════════════════════════════════════
+_rtsp_detectors = {}
+_rtsp_lock = threading.Lock()
+
+def blind_spot_worker(frame_queue):
+    logger.info("🟢 [BlindSpotWorker] RTSP worker started")
+    model = get_yolo_model()
+
+    while True:
+        data = frame_queue.get()
+        if data is None:
+            logger.info("🔴 [BlindSpotWorker] RTSP worker stopping")
+            break
+
+        if isinstance(data, dict):
+            frame = data.get("frame")
+            device_id = str(data.get("device_id", "unknown"))
+            camera_no = str(data.get("camera_no", "0"))
+            camera_id_pk = str(data.get("camera_id_pk", ""))
+        elif len(data) == 4:
+            frame, device_id, camera_no, camera_id_pk = data
+        else:
+            frame, device_id, camera_no = data
+            camera_id_pk = ""
+
+        key = camera_id_pk if camera_id_pk else f"{device_id}_{camera_no}"
+        log_key = f"{device_id}_{camera_no}"
+
+        with _rtsp_lock:
+            if key not in _rtsp_detectors:
+                _rtsp_detectors[key] = BlindSpotDetector(
+                    camera_id=log_key, 
+                    ch_no=camera_no,
+                    camera_id_pk=camera_id_pk
+                )
+            detector = _rtsp_detectors[key]
+
+        try:
+            results = model(frame, conf=CONFIDENCE_THRESHOLD, verbose=False)[0]
+            person_boxes = [b for b in results.boxes if int(b.cls[0]) == 0]
+
+            # True for is_inside_lab because RTSP streams are primarily lab cameras, 
+            # or could be extracted from a DB check in reality. Defaults to True for safety checks.
+            annotated, issues = detector.analyze_frame(frame.copy(), person_boxes, is_inside_lab=True)
+            
+            should_save, _, _ = rate_limiter.should_save_detection(key)
+            if should_save:
+                saved = detector.save_detection(annotated, issues, save_folder=RTSP_SAVE_FOLDER)
+                if saved:
+                    logger.info(f"[BlindSpotWorker] Saved RTSP: {saved}")
+        except Exception as e:
+            logger.error(f"[BlindSpotWorker] RTSP Error for {log_key}: {e}")
 
 def blind_spot_worker_hls(camera_configs, stop_event=None):
     """

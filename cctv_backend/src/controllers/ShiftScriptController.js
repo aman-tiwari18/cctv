@@ -60,7 +60,6 @@ exports.assignScript = async (req, res) => {
         script_id,
         custom_start_time,
         custom_end_time,
-        custom_frequency_minutes,
         notes,
     } = req.body;
     const shift_id = req.params.shiftId;
@@ -119,7 +118,6 @@ exports.assignScript = async (req, res) => {
             assignment_date: date,
             custom_start_time: custom_start_time || null,
             custom_end_time: custom_end_time || null,
-            custom_frequency_minutes: custom_frequency_minutes || null,
             notes: notes || null,
         }));
 
@@ -228,7 +226,6 @@ exports.bulkAssign = async (req, res) => {
                 assignment_date: date,
                 custom_start_time: s.custom_start_time || null,
                 custom_end_time: s.custom_end_time || null,
-                custom_frequency_minutes: s.custom_frequency_minutes || null,
                 notes: s.notes || null,
             });
         }

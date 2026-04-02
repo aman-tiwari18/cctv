@@ -40,7 +40,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 MODEL_PATH   = os.path.join(PROJECT_ROOT, "models/yolov10m.pt")
 
 # RTSP saves go here (same structure as original invigilator_worker)
-RTSP_BASE_DIR = os.path.join(PROJECT_ROOT, "results/invigilator_tracking")
+RTSP_BASE_DIR = os.path.join(PROJECT_ROOT, "results/invigilator_detection")
 # HLS saves go here
 HLS_BASE_DIR  = os.path.join(PROJECT_ROOT, "results/tcs_detections/invigilator_detection")
 
@@ -180,7 +180,12 @@ class SimplifiedTracker(Tracker):
         os.makedirs(directory, exist_ok=True)
         ts  = datetime.now().strftime("%Y%m%d_%H%M%S")
         sfx = "_annotated" if annotated else ""
-        path = os.path.join(directory, f"{self.cam_name}_{prefix}{sfx}_{ts}.jpg")
+        
+        # Check if cam_name looks like a PK (for RTSP standardization)
+        if hasattr(self, 'cam_name') and self.cam_name.isdigit():
+             path = os.path.join(directory, f"invigilator_{self.cam_name}_{prefix}{sfx}_{ts}.jpg")
+        else:
+             path = os.path.join(directory, f"{self.cam_name}_{prefix}{sfx}_{ts}.jpg")
         success = cv2.imwrite(path, frame)
         if not success:
             raise Exception(f"cv2.imwrite failed for {path}")
@@ -318,14 +323,16 @@ def _get_tracker(camera_id: str, base_dir: str) -> SimplifiedTracker:
     return trackers[camera_id]
 
 
-def track_invigilator(frame, device_id: str, camera_no: str, base_dir: str):
+def track_invigilator(frame, device_id: str, camera_no: str, base_dir: str, camera_id_pk: str = ""):
     """
     Run YOLO, update tracker, save static/no-target/annotated frames.
+    camera_id_pk is the DB primary key, used for unique file naming.
 
     Returns:
         (static_detected: bool, person_count: int)
     """
-    cam_key = f"{device_id}_{camera_no}" if camera_no else device_id
+    # Use DB primary key if available
+    cam_key = camera_id_pk if camera_id_pk else (f"{device_id}_{camera_no}" if camera_no else device_id)
     tracker = _get_tracker(cam_key, base_dir)
 
     results      = yolo_model(frame, conf=DETECTION_THRESHOLD, verbose=False)
@@ -394,18 +401,19 @@ def invigilator_worker(frame_queue):
             logger.info("🔴 [InvigilatorWorker] RTSP worker stopping")
             break
 
-        # Unpack: (frame, device_id, camera_no) or (frame, device_id, camera_no, script_name)
+        # Unpack: (frame, device_id, camera_no) or (frame, device_id, camera_no, camera_id_pk)
         if len(data) == 4:
-            frame, device_id, camera_no, script_name = data
+            frame, device_id, camera_no, camera_id_pk = data
         else:
             frame, device_id, camera_no = data
-            script_name = "invigilator"
+            camera_id_pk = ""
 
         track_invigilator(
             frame.copy(),
             str(device_id),
             str(camera_no),
-            base_dir=RTSP_BASE_DIR
+            base_dir=RTSP_BASE_DIR,
+            camera_id_pk=str(camera_id_pk)
         )
 
 

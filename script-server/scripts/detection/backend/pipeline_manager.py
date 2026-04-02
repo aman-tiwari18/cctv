@@ -17,6 +17,11 @@ ALL_ANALYTICS = [
     "proximity",
     "phone",
     "invigilator",
+    "tamper",
+    "inversion",
+    "crowd_zero",
+    "crowd_five",
+    "blind_spot",
 ]
 
 def start_all():

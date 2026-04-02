@@ -1,10 +1,17 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import legacy from '@vitejs/plugin-legacy'
 
 export default defineConfig({
     base: '/cctv_analytics/',   // 🔥 REQUIRED for production
 
-    plugins: [react()],
+    plugins: [
+        react(),
+        legacy({
+            targets: ['defaults', 'not IE 11'],
+            additionalLegacyPolyfills: ['regenerator-runtime/runtime']
+        })
+    ],
 
     server: {
         port: 5173,

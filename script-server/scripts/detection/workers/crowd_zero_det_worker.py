@@ -64,7 +64,12 @@ if threading.current_thread() is threading.main_thread():
 TCS_ZERO_SAVE_FOLDER = os.path.join(
     PROJECT_ROOT, "results/tcs_detections/zero_person_detection"
 )
+
 os.makedirs(TCS_ZERO_SAVE_FOLDER, exist_ok=True)
+
+RTSP_SAVE_FOLDER = os.path.join(PROJECT_ROOT, "results/crowd_detection_threshold")
+os.makedirs(RTSP_SAVE_FOLDER, exist_ok=True)
+
 logger.info(f"TCS Zero-person detections will be saved to: {TCS_ZERO_SAVE_FOLDER}")
 
 MODEL_PATH = os.path.join(PROJECT_ROOT, "models/yolov10m.pt")
@@ -102,6 +107,75 @@ def get_yolo_model():
         _yolo_model = YOLO(MODEL_PATH)
         logger.info("YOLO model loaded successfully")
     return _yolo_model
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  RTSP Worker  — standalone process entry point
+# ══════════════════════════════════════════════════════════════════════════════
+_rtsp_last_save = {}
+
+def detect_zero_crowd(frame, device_id: str, camera_no: str, save_folder: str, camera_id_pk: str = ""):
+    model = get_yolo_model()
+    if model is None:
+        return
+
+    results = model(frame, conf=CONFIDENCE, verbose=False)[0]
+    person_boxes = [b for b in results.boxes if int(b.cls[0]) == 0]
+    person_count = len(person_boxes)
+
+    if person_count < LOW_PERSON_THRESHOLD:
+        key = camera_id_pk if camera_id_pk else f"{device_id}_{camera_no}"
+        log_key = f"{device_id}_{camera_no}"
+        now = time.time()
+        
+        if now - _rtsp_last_save.get(key, 0) >= COOLDOWN_TIME:
+            _rtsp_last_save[key] = now
+            ts = time.strftime("%Y%m%d_%H%M%S")
+            if camera_id_pk:
+                fname = f"zero_{camera_id_pk}_{camera_no}_{ts}_persons{person_count}.jpg"
+            else:
+                fname = f"zero_{key}_{ts}_persons{person_count}.jpg"
+            
+            filename = os.path.join(save_folder, fname)
+            
+            # draw boxes
+            for b in person_boxes:
+                x1, y1, x2, y2 = map(int, b.xyxy[0])
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+            
+            cv2.imwrite(filename, frame)
+            logger.warning(
+                f"[CrowdZeroWorker] ZERO/LOW PERSON: pk={camera_id_pk} {log_key} "
+                f"({person_count} persons) saved → {filename}"
+            )
+
+def crowd_zero_worker(frame_queue):
+    logger.info("🟢 [CrowdZeroWorker] RTSP worker started")
+    get_yolo_model()
+
+    while True:
+        data = frame_queue.get()
+        if data is None:
+            logger.info("🔴 [CrowdZeroWorker] RTSP worker stopping")
+            break
+
+        if isinstance(data, dict):
+            frame = data.get("frame")
+            device_id = str(data.get("device_id", "unknown"))
+            camera_no = str(data.get("camera_no", "0"))
+            camera_id_pk = str(data.get("camera_id_pk", ""))
+        elif len(data) == 4:
+            frame, device_id, camera_no, camera_id_pk = data
+        else:
+            frame, device_id, camera_no = data
+            camera_id_pk = ""
+
+        detect_zero_crowd(
+            frame.copy(),
+            str(device_id),
+            str(camera_no),
+            save_folder=RTSP_SAVE_FOLDER,
+            camera_id_pk=str(camera_id_pk)
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════════════

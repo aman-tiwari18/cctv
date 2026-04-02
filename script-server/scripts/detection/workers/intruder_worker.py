@@ -1163,7 +1163,7 @@ PROJECT_ROOT    = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 MODEL_PATH      = os.path.join(PROJECT_ROOT, "models/yolov10m.pt")
 
 # Separate save folders for RTSP and HLS results
-RTSP_SAVE_FOLDER = os.path.join(PROJECT_ROOT, "results/intruder_results")
+RTSP_SAVE_FOLDER = os.path.join(PROJECT_ROOT, "results/intruder_detection")
 HLS_SAVE_FOLDER  = os.path.join(PROJECT_ROOT, "results/tcs_detections/intruder_detection")
 
 os.makedirs(RTSP_SAVE_FOLDER, exist_ok=True)
@@ -1191,9 +1191,10 @@ logger.info("✅ [IntruderWorker] YOLO model loaded")
 # =====================================================
 # 🔍 CORE DETECTION  (shared by RTSP + HLS paths)
 # =====================================================
-def detect_intruder(frame, device_id: str, camera_no: str, save_folder: str):
+def detect_intruder(frame, device_id: str, camera_no: str, save_folder: str, camera_id_pk: str = ""):
     """
     Run YOLO on *frame*, draw boxes, save if intruder found.
+    camera_id_pk is the DB primary key, used for unique file naming.
 
     Returns:
         (intruder_detected: bool, person_count: int)
@@ -1226,7 +1227,8 @@ def detect_intruder(frame, device_id: str, camera_no: str, save_folder: str):
                 (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
     # ── Save logic ───────────────────────────────────────────
-    key     = f"{device_id}_{camera_no}"
+    # Use DB primary key if available
+    key     = camera_id_pk if camera_id_pk else f"{device_id}_{camera_no}"
     now     = time.time()
 
     with _state_lock:
@@ -1235,15 +1237,20 @@ def detect_intruder(frame, device_id: str, camera_no: str, save_folder: str):
 
         if intruder_detected and elapsed >= COOLDOWN_TIME:
             ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
-            path = os.path.join(
-                save_folder,
-                f"{key}_{ts}_persons{person_count}_conf{max_conf:.2f}.jpg"
-            )
+            # Format: intruder_{camera_id_pk}_{camera_no}_{ts}_persons...
+            if camera_id_pk:
+                fname = f"intruder_{camera_id_pk}_{camera_no}_{ts}_persons{person_count}_conf{max_conf:.2f}.jpg"
+            elif camera_no:
+                fname = f"intruder_{camera_no}_{ts}_persons{person_count}_conf{max_conf:.2f}.jpg"
+            else:
+                fname = f"intruder_{device_id}_{ts}_persons{person_count}_conf{max_conf:.2f}.jpg"
+            
+            path = os.path.join(save_folder, fname)
             cv2.imwrite(path, frame)
             last_save_times[key] = now
             logger.warning(
                 f"[IntruderWorker] 🚨 Intruder! "
-                f"Device={device_id} Cam={camera_no} "
+                f"pk={camera_id_pk} Device={device_id} Cam={camera_no} "
                 f"Count={person_count} Conf={max_conf:.2f} "
                 f"💾 Saved → {path}"
             )
@@ -1278,12 +1285,19 @@ def intruder_worker(frame_queue):
             logger.info("🔴 [IntruderWorker] RTSP worker stopping")
             break
 
-        frame, device_id, camera_no = data
+        # Unpack: (frame, device_id, camera_no) or (frame, device_id, camera_no, camera_id_pk)
+        if len(data) == 4:
+            frame, device_id, camera_no, camera_id_pk = data
+        else:
+            frame, device_id, camera_no = data
+            camera_id_pk = ""
+
         detect_intruder(
             frame.copy(),
             str(device_id),
             str(camera_no),
-            save_folder=RTSP_SAVE_FOLDER
+            save_folder=RTSP_SAVE_FOLDER,
+            camera_id_pk=str(camera_id_pk)
         )
 
 
