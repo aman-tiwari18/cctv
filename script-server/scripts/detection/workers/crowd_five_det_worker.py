@@ -153,10 +153,8 @@ def detect_five_crowd(frame, device_id: str, camera_no: str, save_folder: str, c
 
             _rtsp_last_save[key] = now
             ts = time.strftime("%Y%m%d_%H%M%S")
-            if camera_id_pk:
-                fname = f"lessthan5_{camera_id_pk}_{camera_no}_{ts}.jpg"
-            else:
-                fname = f"lessthan5_{key}_{ts}.jpg"
+            # Standard format: crowd_five_{device_id}_{camera_no}_{ts}.jpg
+            fname = f"crowd_five_{device_id}_{camera_no}_{ts}.jpg"
             
             filename = os.path.join(save_folder, fname)
             

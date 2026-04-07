@@ -375,13 +375,9 @@ class BlindSpotDetector:
         if total_persons == 0 and not any(tag in issue_tags for tag in ("edge_obst", "static", "obstructed")):
             return None
 
-        ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
-        tag_str  = "_".join(issue_tags)
-        
-        if self.camera_id_pk:
-            fname = f"blind_{self.camera_id_pk}_{self.ch_no}_{tag_str}_{ts}.jpg"
-        else:
-            fname = f"blind_ch{self.ch_no}_{tag_str}_{ts}.jpg"
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # Standard format: blindspot_{device_id}_{camera_no}_{ts}.jpg
+        fname = f"blindspot_{self.camera_id}_{self.ch_no}_{ts}.jpg"
             
         filepath = os.path.join(save_folder, fname)
         cv2.imwrite(filepath, frame)

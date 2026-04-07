@@ -301,10 +301,16 @@ def rtsp_producer(cam_configs, queues):
     device_id     = first.get("camera_id") or first.get("device_id", "")
     camera_no     = first.get("ch_no")     or first.get("camera_no", "1")
     camera_id_pk  = first.get("camera_id_pk", "")   # DB primary key — guaranteed unique
-    server        = first.get("server_ip", "")
+    server        = first.get("server_ip") or first.get("cctv_url", "")
+    # Cleanup server: if it's a full URL, extract the host (e.g. D16.camview.io)
+    if "://" in str(server):
+        from urllib.parse import urlparse
+        server = urlparse(str(server)).netloc
+
     direct_url    = first.get("cctv_url")  or first.get("stream_url", "")
-    label         = f"{camera_id_pk}_{device_id}_{camera_no}" if camera_id_pk else f"{device_id}_{camera_no}"
-    use_dss       = bool(server)
+    label         = f"{device_id}_{camera_no}"
+    # Use DSS if server is provided and doesn't look like a direct RTSP URL
+    use_dss       = bool(server and not str(direct_url).startswith("rtsp://"))
 
     while not STOP:
         # ── resolve RTSP URL ──────────────────────────────────

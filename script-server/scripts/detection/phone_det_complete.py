@@ -850,8 +850,8 @@ def detect_phones_in_frame(frame, device_id="unknown", camera_no="unknown",
     now = time.time()
     if phone_detected and (now - last_save_time) >= COOLDOWN_TIME and save:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        # New naming: {script_name}_ch{ch_no}_{timestamp}.jpg
-        path = f"{SAVE_FOLDER}/{script_name}_ch{ch_no}_{ts}.jpg"
+        # Standard format: {script_name}_{device_id}_{camera_no}_{ts}.jpg
+        path = f"{SAVE_FOLDER}/{script_name}_{device_id}_{camera_no}_{ts}.jpg"
         cv2.imwrite(path, frame)
         last_save_time = now
         logging.info(f"📱 Phone detected & saved: {path}")

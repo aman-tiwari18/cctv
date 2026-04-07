@@ -181,11 +181,9 @@ class SimplifiedTracker(Tracker):
         ts  = datetime.now().strftime("%Y%m%d_%H%M%S")
         sfx = "_annotated" if annotated else ""
         
-        # Check if cam_name looks like a PK (for RTSP standardization)
-        if hasattr(self, 'cam_name') and self.cam_name.isdigit():
-             path = os.path.join(directory, f"invigilator_{self.cam_name}_{prefix}{sfx}_{ts}.jpg")
-        else:
-             path = os.path.join(directory, f"{self.cam_name}_{prefix}{sfx}_{ts}.jpg")
+        # Standard format for RTSP: invigilator_{device_id}_{camera_no}_{ts}.jpg
+        # self.cam_name is set to {device_id}_{camera_no} in RTSP flow
+        path = os.path.join(directory, f"invigilator_{self.cam_name}_{ts}{sfx}.jpg")
         success = cv2.imwrite(path, frame)
         if not success:
             raise Exception(f"cv2.imwrite failed for {path}")
@@ -331,8 +329,8 @@ def track_invigilator(frame, device_id: str, camera_no: str, base_dir: str, came
     Returns:
         (static_detected: bool, person_count: int)
     """
-    # Use DB primary key if available
-    cam_key = camera_id_pk if camera_id_pk else (f"{device_id}_{camera_no}" if camera_no else device_id)
+    # RTSP: cam_key should be device_id_camera_no
+    cam_key = f"{device_id}_{camera_no}" if camera_no else device_id
     tracker = _get_tracker(cam_key, base_dir)
 
     results      = yolo_model(frame, conf=DETECTION_THRESHOLD, verbose=False)

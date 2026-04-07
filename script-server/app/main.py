@@ -2,6 +2,7 @@
 import asyncio
 import re
 import os
+import shutil
 import openpyxl
 from openpyxl.styles import Font
 from pydantic import BaseModel
@@ -20,7 +21,7 @@ from app.config import HTTP_PORT, MAIN_BACKEND_URL, POLL_INTERVAL_MS, SCRIPTS_DI
 from app.logger import logger
 from app.log_manager import log_manager
 from app.poller import poller_service
-from scripts.detection.utils.db_client import get_hls_camera_by_ch_code, get_rtsp_camera_by_id, get_hls_cameras, get_rtsp_cameras
+from scripts.detection.utils.db_client import get_hls_camera_by_ch_code, get_rtsp_camera_by_id, get_hls_cameras, get_rtsp_cameras, get_rtsp_camera_by_device_and_ch
 
 # Import legacy pipeline functionality from the old backend
 from scripts.detection.backend.schemas import (
@@ -56,7 +57,8 @@ _RTSP_SCRIPT_PREFIXES = {
     "server", "crowd", "intruder", "entry", "phone", "proximity",
     "invigilator", "tamper", "inversion", "blind", "zero", "five",
     "tampering", "violation", "entry_exit", "server_room", "blind_spot",
-    "inversion", "tamper", "zero_person", "detection"
+    "inversion", "tamper", "zero_person", "detection", "crowd_zero", "crowd_five",
+    "blindspot"
 }
 
 
@@ -218,10 +220,13 @@ app = FastAPI(
 # ── Static file serving for detection images ──────────────────
 RESULTS_DIR = Path(SCRIPTS_DIR).resolve() / "detection" / "results" / "tcs_detections"
 RTSP_RESULTS_DIR = Path(SCRIPTS_DIR).resolve() / "detection" / "results"
+CLIENT_SELECTED_DIR = Path(SCRIPTS_DIR).resolve() / "detection" / "results" / "client_selected_images"
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 RTSP_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+CLIENT_SELECTED_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/detection-images", StaticFiles(directory=str(RESULTS_DIR)), name="detection-images")
 app.mount("/rtsp-detection-images", StaticFiles(directory=str(RTSP_RESULTS_DIR)), name="rtsp-detection-images")
+app.mount("/client-detection-images", StaticFiles(directory=str(CLIENT_SELECTED_DIR)), name="client-detection-images")
 
 app.add_middleware(
     CORSMiddleware,
@@ -435,12 +440,15 @@ def parse_detection_filename(
     # ── Try RTSP naming pattern: {prefix}_{pk}_{camNo}_{date}_{time}... ──
     # Now agnostic to the source directory to handle complex samarth-style paths
     if _is_rtsp_filename(stem):
-        rtsp_pk = _extract_rtsp_pk(stem)
+        # rtsp_pk = _extract_rtsp_pk(stem)
+        parts = stem.split("_")
+        rtsp_device_id = parts[1]
+        rtsp_camera_no = parts[2]
         dt_match = re.search(r'(\d{8})_(\d{6})', stem)
         if dt_match:
             date_str = dt_match.group(1)
             time_str = dt_match.group(2)
-            camera_id = stem[:dt_match.start()].strip('_')
+            camera_id = f"{rtsp_device_id}_{rtsp_camera_no}"
             suffix = stem[dt_match.end():].strip('_')
         else:
             camera_id = stem
@@ -490,8 +498,13 @@ def parse_detection_filename(
     exam_date_iso = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}" if date_str else ""
 
     # ── Metadata lookup: RTSP uses pk, HLS uses ch_code ──
-    if source == "rtsp" and rtsp_pk:
-        cam_meta = _camera_meta_for_rtsp_pk(rtsp_pk)
+    # if source == "rtsp" and rtsp_pk:
+    #     cam_meta = _camera_meta_for_rtsp_pk(rtsp_pk)
+    if source == "rtsp" and _is_rtsp_filename(stem):
+        parts = stem.split("_")
+        dev_id = parts[1]
+        cam_no_part = parts[2]
+        cam_meta = get_rtsp_camera_by_device_and_ch(dev_id, cam_no_part)
     else:
         ch_no = _extract_ch_no(camera_id)
         cam_meta = _camera_meta_for_ch(ch_no, exam_date_iso)
@@ -624,6 +637,137 @@ def list_detections(
         "limit":   limit,
         "counts":  counts,
         "data":    paginated,
+    }
+
+
+def _validate_relative_path(path_str: str) -> Path:
+    candidate = Path(path_str)
+    if candidate.is_absolute() or ".." in candidate.parts:
+        raise HTTPException(status_code=400, detail="Invalid relative path")
+    return candidate
+
+
+def _resolve_detection_source_path(source: str, type_key: str, relative_path: str) -> Path:
+    if source not in {"hls", "rtsp"}:
+        raise HTTPException(status_code=400, detail="Invalid source")
+    if type_key not in DETECTION_FOLDERS:
+        raise HTTPException(status_code=400, detail="Invalid detection type")
+
+    folder_name = DETECTION_FOLDERS[type_key]
+    base_dir = RESULTS_DIR if source == "hls" else RTSP_RESULTS_DIR
+    safe_rel = _validate_relative_path(relative_path)
+    abs_path = (base_dir / folder_name / safe_rel).resolve()
+
+    if not str(abs_path).startswith(str((base_dir / folder_name).resolve())):
+        raise HTTPException(status_code=400, detail="Invalid relative path")
+    if not abs_path.exists() or not abs_path.is_file():
+        raise HTTPException(status_code=404, detail=f"Source file not found: {relative_path}")
+
+    return abs_path
+
+
+class ClientDetectionCopyItem(BaseModel):
+    source: str
+    type: str
+    relativePath: str
+
+
+class ClientDetectionCopyRequest(BaseModel):
+    items: list[ClientDetectionCopyItem]
+
+
+@app.post("/client-detections/copy")
+def copy_client_detections(payload: ClientDetectionCopyRequest):
+    copied = []
+
+    for item in payload.items:
+        src_path = _resolve_detection_source_path(item.source, item.type, item.relativePath)
+        dest_path = CLIENT_SELECTED_DIR / item.source / DETECTION_FOLDERS[item.type] / item.relativePath
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src_path, dest_path)
+
+        copied_item = parse_detection_filename(
+            item.relativePath,
+            item.type,
+            dest_path,
+            is_new_image=False,
+            source=item.source,
+        )
+        copied_item.update({
+            "source": item.source,
+            "type": item.type,
+            "relativePath": item.relativePath,
+            "image_url": f"/cctv_dev/client-detection-images/{item.source}/{DETECTION_FOLDERS[item.type]}/{item.relativePath}",
+        })
+        copied.append(copied_item)
+
+        try:
+            asyncio.create_task(sio.emit("client-detection:new", copied_item))
+        except RuntimeError:
+            logger.warning("Unable to schedule client detection socket emit")
+
+    return {"success": True, "copied": copied}
+
+
+@app.get("/client-detections")
+def list_client_detections(page: int = 1, limit: int = 100, source: Optional[str] = None, type: Optional[str] = None):
+    rows = []
+
+    for root, _, files in os.walk(CLIENT_SELECTED_DIR):
+        for filename in files:
+            if not filename.lower().endswith((".jpg", ".jpeg", ".png", ".bmp", ".webp")):
+                continue
+
+            file_path = Path(root) / filename
+            rel = file_path.relative_to(CLIENT_SELECTED_DIR).as_posix()
+            parts = rel.split("/")
+            if len(parts) < 3:
+                continue
+
+            source_part = parts[0]
+            folder_name = parts[1]
+            relative_path = "/".join(parts[2:])
+            type_key = next((k for k, v in DETECTION_FOLDERS.items() if v == folder_name), folder_name)
+
+            if source and source != source_part:
+                continue
+            if type and type != type_key:
+                continue
+
+            item = parse_detection_filename(
+                relative_path,
+                type_key,
+                file_path,
+                is_new_image=False,
+                source=source_part,
+            )
+            item.update({
+                "source": source_part,
+                "type": type_key,
+                "filename": filename,
+                "relativePath": relative_path,
+                "image_url": f"/cctv_dev/client-detection-images/{rel}",
+                "_mtime": file_path.stat().st_mtime,
+            })
+            rows.append(item)
+
+    rows.sort(key=lambda item: item.get("_mtime", 0), reverse=True)
+
+    total = len(rows)
+    start = (page - 1) * limit
+    paginated = rows[start: start + limit]
+
+    counts = {k: 0 for k in DETECTION_FOLDERS}
+    for row in rows:
+        counts[row["type"]] = counts.get(row["type"], 0) + 1
+
+    return {
+        "success": True,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "counts": counts,
+        "data": paginated,
     }
 
 

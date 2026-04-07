@@ -292,10 +292,8 @@ def camera_inversion_worker(frame_queue):
                 _inversion_last_save[key] = now
 
                 ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                if camera_id_pk:
-                    fname = f"inversion_{camera_id_pk}_{camera_no}_{orientation}_{ts}.jpg"
-                else:
-                    fname = f"inversion_{key}_{orientation}_{ts}.jpg"
+                # Standard format: inversion_{device_id}_{camera_no}_{ts}.jpg
+                fname = f"inversion_{device_id}_{camera_no}_{ts}.jpg"
                 filename = os.path.join(RTSP_SAVE_FOLDER, fname)
                 cv2.imwrite(filename, corrected)
                 logger.warning(

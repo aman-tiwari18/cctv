@@ -131,10 +131,8 @@ def detect_zero_crowd(frame, device_id: str, camera_no: str, save_folder: str, c
         if now - _rtsp_last_save.get(key, 0) >= COOLDOWN_TIME:
             _rtsp_last_save[key] = now
             ts = time.strftime("%Y%m%d_%H%M%S")
-            if camera_id_pk:
-                fname = f"zero_{camera_id_pk}_{camera_no}_{ts}_persons{person_count}.jpg"
-            else:
-                fname = f"zero_{key}_{ts}_persons{person_count}.jpg"
+            # Standard format: crowd_zero_{device_id}_{camera_no}_{ts}.jpg
+            fname = f"crowd_zero_{device_id}_{camera_no}_{ts}.jpg"
             
             filename = os.path.join(save_folder, fname)
             

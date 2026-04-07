@@ -193,10 +193,8 @@ def camera_tampering_worker(frame_queue):
                     _last_save_time[key] = now
 
                 ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                if camera_id_pk:
-                    fname = f"tamper_{camera_id_pk}_{camera_no}_{ts}.jpg"
-                else:
-                    fname = f"tamper_{key}_{ts}.jpg"
+                # Standard format: tampering_{device_id}_{camera_no}_{ts}.jpg
+                fname = f"tampering_{device_id}_{camera_no}_{ts}.jpg"
                 filename = os.path.join(RTSP_SAVE_FOLDER, fname)
                 cv2.imwrite(filename, frame)
                 logger.warning(

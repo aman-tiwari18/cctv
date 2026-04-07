@@ -113,10 +113,8 @@ def detect_persons_in_frame(frame, device_id="unknown", camera_no="unknown",
 
     if entry_exit_detected and time_elapsed >= COOLDOWN_TIME and save:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        # New naming: {script_name}_{camera_no}_{timestamp}.jpg
-        filename = (
-            f"{SAVE_FOLDER}/{script_name}_{camera_no}_{ts}.jpg"
-        )
+        # Standard format: {script_name}_{device_id}_{camera_no}_{ts}.jpg
+        filename = f"{SAVE_FOLDER}/{script_name}_{device_id}_{camera_no}_{ts}.jpg"
         cv2.imwrite(filename, frame)
         last_save_times[key] = now
         logging.info(f"[{device_id}-{camera_no}] 💾 Entry/Exit detected & saved: {filename}")

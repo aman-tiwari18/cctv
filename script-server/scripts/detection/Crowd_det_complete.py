@@ -105,11 +105,9 @@ def detect_persons_in_frame(frame, device_id="unknown", camera_no="unknown", scr
 
     if crowd_detected and time_elapsed >= COOLDOWN_TIME:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        # Format: {script_name}_{camera_id_pk}_{camera_no}_{timestamp}.jpg
-        if camera_id_pk:
-            fname = f"{script_name}_{camera_id_pk}_{camera_no}_{timestamp}.jpg"
-        else:
-            fname = f"{script_name}_{device_id}_{camera_no}_{timestamp}.jpg"
+        # Format: {script_name}_{device_id}_{camera_no}_{timestamp}.jpg
+        # device_id and camera_no used for lookup in backend
+        fname = f"{script_name}_{device_id}_{camera_no}_{timestamp}.jpg"
             
         filename = f"{SAVE_FOLDER}/{fname}"
         cv2.imwrite(filename, frame)

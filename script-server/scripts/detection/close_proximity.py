@@ -147,7 +147,8 @@ def process_dav_video():
         now = time.time()
         if violations and (now - last_save_time) >= COOLDOWN_TIME:
             ts = time.strftime("%Y%m%d_%H%M%S")
-            filename = f"{SAVE_FOLDER}/violation_{DEVICE_ID}_{CAMERA_NO}_{ts}.jpg"
+            # Standard format: violation_{device_id}_{camera_no}_{ts}.jpg
+            filename = f"{SAVE_FOLDER}/violation_{device_id}_{camera_no}_{ts}.jpg"
             cv2.imwrite(filename, frame)
             last_save_time = now
             logging.info(f"💾 Proximity violation saved: {filename}")

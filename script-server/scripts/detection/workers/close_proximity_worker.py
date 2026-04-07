@@ -162,10 +162,8 @@ def _save_violation_frame(frame, violations, device_id, camera_no, save_folder, 
 
     proximity_core.proximity_detector.frame_count += 1
     timestamp = time.strftime("%Y%m%d_%H%M%S")
-    if camera_id_pk:
-        filename = f"proximity_{camera_id_pk}_{camera_no}_{timestamp}.jpg"
-    else:
-        filename = f"proximity_{device_id}_{camera_no}_{timestamp}.jpg"
+    # Standard format: proximity_{device_id}_{camera_no}_{timestamp}.jpg
+    filename = f"proximity_{device_id}_{camera_no}_{timestamp}.jpg"
     filepath = os.path.join(save_folder, filename)
     cv2.imwrite(filepath, frame)
     return filepath

@@ -222,6 +222,34 @@ def get_hls_camera_by_ch_code(ch_code: str, exam_date: str = None) -> dict:
         return {}
 
 
+def get_rtsp_camera_by_device_and_ch(device_id: str, camera_no: str) -> dict:
+    """Fetch one active RTSP camera row by device_id and camera_no."""
+    if not device_id or not camera_no:
+        return {}
+
+    sql = """
+        SELECT
+            id, device_id, exam_id, centre_name, tc_code,
+            camera_name, camera_no, city, state, cctv_url,
+            is_active, classification
+        FROM camera_links_rtsp
+        WHERE device_id = %s
+          AND camera_no = %s
+          AND is_active = 1
+        LIMIT 1
+    """
+    try:
+        conn = _get_connection()
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (device_id, camera_no))
+                row = cur.fetchone()
+                return row or {}
+    except Exception as e:
+        logger.error(f"[DB] Error fetching camera_links_rtsp by device/ch ({device_id}/{camera_no}): {e}")
+        return {}
+
+
 # ============================================================
 # 🧪  STANDALONE TEST
 # ============================================================

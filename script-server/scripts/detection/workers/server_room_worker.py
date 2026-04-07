@@ -116,14 +116,9 @@ def detect_persons_in_frame(frame, device_id: str, camera_no: str, save_folder: 
 
         if server_violation and elapsed >= COOLDOWN_TIME:
             ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
-            # Filename format: {script_name}_{camera_id_pk}_{camera_no}_{ts}.jpg
-            # camera_id_pk is the DB primary key — unique across all cameras
-            if camera_id_pk:
-                fname = f"{script_name}_{camera_id_pk}_{camera_no}_{ts}.jpg"
-            elif camera_no:
-                fname = f"{script_name}_{camera_no}_{ts}.jpg"
-            else:
-                fname = f"{script_name}_{device_id}_{ts}.jpg"
+            # Filename format: {script_name}_{device_id}_{camera_no}_{ts}.jpg
+            # device_id and camera_no are used for lookup in the backend
+            fname = f"{script_name}_{device_id}_{camera_no}_{ts}.jpg"
             path = os.path.join(save_folder, fname)
             cv2.imwrite(path, frame)
             last_save_times[key] = now
