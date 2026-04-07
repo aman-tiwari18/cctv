@@ -220,6 +220,7 @@ app = FastAPI(
 # ── Static file serving for detection images ──────────────────
 RESULTS_DIR = Path(SCRIPTS_DIR).resolve() / "detection" / "results" / "tcs_detections"
 RTSP_RESULTS_DIR = Path(SCRIPTS_DIR).resolve() / "detection" / "results"
+# CLIENT_SELECTED_DIR = Path(SCRIPTS_DIR).resolve() / "detection" / "results" / "client_selected_images"
 CLIENT_SELECTED_DIR = Path(SCRIPTS_DIR).resolve() / "detection" / "results" / "client_selected_images"
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 RTSP_RESULTS_DIR.mkdir(parents=True, exist_ok=True)

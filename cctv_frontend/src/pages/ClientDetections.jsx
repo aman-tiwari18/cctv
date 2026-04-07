@@ -348,7 +348,10 @@ const ClientDetections = () => {
       if (res.data.success) {
         setImages((res.data.data || []).map((item) => ({
           ...item,
-          image_url: item.image_url || item.imageUrl,
+        //   image_url: item.image_url || item.imageUrl,
+        image_url: item.image_url
+  ? `${window.location.origin}${item.image_url}`
+  : item.imageUrl,
         })));
         setTotal(res.data.total || 0);
         setCounts(res.data.counts || {});
@@ -385,7 +388,10 @@ const ClientDetections = () => {
     socket.on('disconnect', () => setSocketConnected(false));
 
     socket.on('client-detection:new', (item) => {
-      const newItem = { ...item, image_url: item.image_url || item.imageUrl };
+      const newItem = { ...item,
+          image_url: item.image_url
+      ? `${window.location.origin}${item.image_url}`
+      : item.imageUrl, };
       setImages((prev) => {
         const key = buildImageKey(newItem);
         if (prev.some((existing) => buildImageKey(existing) === key)) {
