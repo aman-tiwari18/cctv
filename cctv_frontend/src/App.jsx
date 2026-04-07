@@ -13,6 +13,7 @@ import Shifts from './pages/Shifts';
 import Analytics from './pages/Analytics';
 import Executions from './pages/Executions';
 import Detections from './pages/Detections';
+import ClientDetections from './pages/ClientDetections';
 
 // Create Material-UI theme
 const theme = createTheme({
@@ -113,6 +114,7 @@ function App() {
             <Route path="analytics" element={<Analytics />} />
             <Route path="executions" element={<Executions />} />
             <Route path="detections" element={<Detections />} />
+            <Route path="client-detections" element={<ClientDetections />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

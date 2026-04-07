@@ -5,6 +5,7 @@ import {
   ToggleButtonGroup, ToggleButton, Pagination,
   Dialog, DialogContent, IconButton, Skeleton,
   InputAdornment, Button, Tooltip, Snackbar, Alert,
+  Checkbox,
 } from '@mui/material';
 import {
   GridView, ViewList, Search, Close, CameraAlt,
@@ -15,6 +16,7 @@ import {
 } from '@mui/icons-material';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import { enGB } from 'date-fns/locale';
 import axios from 'axios';
 import { io } from 'socket.io-client';
 import { API_BASE_1, IMG_BASE, SOCKET_URL, SOCKET_PATH } from '../constants/data';
@@ -113,7 +115,7 @@ function StatCard({ typeKey, count, selected, onClick }) {
 }
 
 // ─── Detection Card ───────────────────────────────────────────────────────────
-function DetectionCard({ item, onClick }) {
+function DetectionCard({ item, onClick, selected, onToggleSelect }) {
   const meta = TYPE_META[item.type] || { label: item.type, color: '#94a3b8', bg: '#f1f5f9' };
   const [imgError, setImgError] = useState(false);
   const cameraName = item.cameraName || item.camera_name || item.camera_id || '-';
@@ -137,6 +139,16 @@ function DetectionCard({ item, onClick }) {
       }}
     >
       <Box sx={{ position: 'relative', bgcolor: '#0f172a' }}>
+        <Checkbox
+          checked={Boolean(selected)}
+          onChange={(e) => { e.stopPropagation(); onToggleSelect(item); }}
+          onClick={(e) => e.stopPropagation()}
+          size="small"
+          sx={{
+            position: 'absolute', top: 8, left: 8, zIndex: 2,
+            bgcolor: 'rgba(255,255,255,0.92)', borderRadius: 1,
+          }}
+        />
         {imgError ? (
           <Box sx={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#1e293b' }}>
             <CameraAlt sx={{ fontSize: 48, color: '#475569' }} />
@@ -284,8 +296,19 @@ export default function Detections() {
   const [typeFilter, setTypeFilter] = useState('');
   const [dateFilter, setDateFilter] = useState(todayDate);
   const [selected, setSelected] = useState(null);
+  const [selectedPaths, setSelectedPaths] = useState([]);
+  const [copyingToClient, setCopyingToClient] = useState(false);
+  const [clientSnackbar, setClientSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [liveAlert, setLiveAlert] = useState(null);
   const [socketConnected, setSocketConnected] = useState(false);
+
+  const buildSelectionKey = (item) => `${item.source}|${item.type}|${item.relativePath}`;
+  const toggleSelection = (item) => {
+    const key = buildSelectionKey(item);
+    setSelectedPaths((prev) => (
+      prev.includes(key) ? prev.filter((value) => value !== key) : [...prev, key]
+    ));
+  };
 
   const fetchDetections = useCallback(async (pg = 1) => {
     setLoading(true);
@@ -460,7 +483,7 @@ export default function Detections() {
               ))}
             </Select>
           </FormControl>
-          <LocalizationProvider dateAdapter={AdapterDateFns}>
+          <LocalizationProvider dateAdapter={AdapterDateFns} adapterLocale={enGB}>
             <DatePicker
               label="Date"
               value={parseDDMMYYYYToDate(dateFilter)}
@@ -482,6 +505,30 @@ export default function Detections() {
               Clear Filters
             </Button>
           )}
+          <Button
+            size="medium"
+            variant="contained"
+            disabled={selectedPaths.length === 0 || copyingToClient}
+            onClick={async () => {
+              const selectedItems = data.filter((item) => selectedPaths.includes(buildSelectionKey(item)));
+              if (selectedItems.length === 0) return;
+              setCopyingToClient(true);
+              try {
+                await axios.post(`${API_BASE_1}/client-detections/copy`, {
+                  items: selectedItems.map(({ source, type, relativePath }) => ({ source, type, relativePath })),
+                });
+                setSelectedPaths([]);
+                setClientSnackbar({ open: true, message: `${selectedItems.length} image(s) pushed to client`, severity: 'success' });
+              } catch (err) {
+                console.error('Failed to push selected images:', err);
+                setClientSnackbar({ open: true, message: 'Failed to push selected images to client', severity: 'error' });
+              } finally {
+                setCopyingToClient(false);
+              }
+            }}
+          >
+            {copyingToClient ? 'Pushing...' : `Push ${selectedPaths.length || 0} to client`}
+          </Button>
           <Box sx={{ ml: 'auto' }}>
             <ToggleButtonGroup value={view} exclusive onChange={(_, v) => v && setView(v)} size="small">
               <ToggleButton value="grid" id="view-grid"><GridView /></ToggleButton>
@@ -517,7 +564,12 @@ export default function Detections() {
         <Grid container spacing={2}>
           {data.map((item, i) => (
             <Grid item xs={12} sm={6} md={3} key={`${item.filename}-${i}`}>
-              <DetectionCard item={item} onClick={setSelected} />
+              <DetectionCard
+                item={item}
+                onClick={setSelected}
+                selected={selectedPaths.includes(buildSelectionKey(item))}
+                onToggleSelect={toggleSelection}
+              />
             </Grid>
           ))}
         </Grid>
@@ -540,6 +592,12 @@ export default function Detections() {
                 sx={{ cursor: 'pointer', borderRadius: 2, '&:hover': { boxShadow: 3 }, border: '1px solid #e2e8f0' }}
               >
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, p: 1.5 }}>
+                  <Checkbox
+                    checked={selectedPaths.includes(buildSelectionKey(item))}
+                    onChange={(e) => { e.stopPropagation(); toggleSelection(item); }}
+                    size="small"
+                    sx={{ ml: 1 }}
+                  />
                   <Box
                     component="img"
                     src={`${IMG_BASE}${item.image_url}`}
@@ -625,6 +683,22 @@ export default function Detections() {
           {liveAlert
             ? `New ${TYPE_META[liveAlert.type]?.label || liveAlert.type}${liveAlert.issueLabel ? ` (${liveAlert.issueLabel})` : ''} alert from ${liveAlert.cameraName || liveAlert.camera_id}`
             : ''}
+        </Alert>
+      </Snackbar>
+
+      <Snackbar
+        open={clientSnackbar.open}
+        autoHideDuration={5000}
+        onClose={() => setClientSnackbar({ ...clientSnackbar, open: false })}
+        anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+      >
+        <Alert
+          onClose={() => setClientSnackbar({ ...clientSnackbar, open: false })}
+          severity={clientSnackbar.severity}
+          variant="filled"
+          sx={{ width: '100%' }}
+        >
+          {clientSnackbar.message}
         </Alert>
       </Snackbar>
     </Box>
