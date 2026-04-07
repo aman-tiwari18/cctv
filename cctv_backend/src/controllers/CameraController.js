@@ -227,15 +227,29 @@ exports.uploadCameras = async (req, res) => {
             });
         }
 
-        const recordsToInsert = validRecords;
+        // Filter out duplicate ch_code for HLS
+        let recordsToInsert = validRecords;
+        if (linkType === "HLS") {
+            const existingChCodes = await Model.findAll({
+                where: { exam_id: examId, ch_code: { [Op.ne]: null } },
+                attributes: ['ch_code']
+            });
+            const existingSet = new Set(existingChCodes.map(c => c.ch_code));
+            recordsToInsert = validRecords.filter(record => !record.ch_code || !existingSet.has(record.ch_code));
+        }
 
         await Model.bulkCreate(recordsToInsert);
         // Cleanup temp file
         try { fs.unlinkSync(req.file.path); } catch (_) {}
 
+        const skipped = linkType === "HLS" ? validRecords.length - recordsToInsert.length : 0;
+        const message = skipped > 0 
+            ? `Successfully uploaded ${recordsToInsert.length} cameras. Skipped ${skipped} duplicate ch_code entries.`
+            : `Successfully uploaded ${recordsToInsert.length} cameras.`;
+
         res.status(200).json({
             success: true,
-            message: `Successfully uploaded ${recordsToInsert.length} cameras.`,
+            message,
         });
     } catch (error) {
         if (error?.name && error.name.includes("Sequelize")) {

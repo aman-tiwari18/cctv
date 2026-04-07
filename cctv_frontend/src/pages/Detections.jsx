@@ -13,6 +13,8 @@ import {
   WarningAmber, Insights, ImageNotSupported, FlipCameraAndroid, SecurityUpdateWarning,
   VisibilityOff, PersonOff,
 } from '@mui/icons-material';
+import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
+import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import axios from 'axios';
 import { io } from 'socket.io-client';
 import { API_BASE_1, IMG_BASE, SOCKET_URL, SOCKET_PATH } from '../constants/data';
@@ -50,6 +52,36 @@ const TYPE_ICONS = {
 };
 
 const PAGE_SIZE = 50;
+
+const formatDateDDMMYYYY = (dateInput) => {
+  const date = typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateInput)
+    ? new Date(dateInput)
+    : new Date(dateInput);
+
+  if (Number.isNaN(date.getTime())) return '';
+
+  const dd = String(date.getDate()).padStart(2, '0');
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const yyyy = date.getFullYear();
+  return `${dd}-${mm}-${yyyy}`;
+};
+
+const parseDateForQuery = (value) => {
+  if (!value) return '';
+  const isoMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (isoMatch) return value;
+  const dmyMatch = /^(\d{2})-(\d{2})-(\d{4})$/.exec(value);
+  if (dmyMatch) return `${dmyMatch[3]}-${dmyMatch[2]}-${dmyMatch[1]}`;
+  return value;
+};
+
+const parseDDMMYYYYToDate = (value) => {
+  if (!value) return null;
+  const match = /^([0-3]\d)-([0-1]\d)-(\d{4})$/.exec(value);
+  if (!match) return null;
+  const [, dd, mm, yyyy] = match;
+  return new Date(yyyy, mm - 1, dd);
+};
 
 // ─── Stat Card ────────────────────────────────────────────────────────────────
 function StatCard({ typeKey, count, selected, onClick }) {
@@ -239,6 +271,8 @@ function Lightbox({ item, onClose }) {
 }
 
 // ─── Main Page ─────────────────────────────────────────────────────────────────
+const todayDate = formatDateDDMMYYYY(new Date());
+
 export default function Detections() {
   const [data, setData] = useState([]);
   const [counts, setCounts] = useState({});
@@ -248,7 +282,7 @@ export default function Detections() {
   const [view, setView] = useState('grid');
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
-  const [dateFilter, setDateFilter] = useState('');
+  const [dateFilter, setDateFilter] = useState(todayDate);
   const [selected, setSelected] = useState(null);
   const [liveAlert, setLiveAlert] = useState(null);
   const [socketConnected, setSocketConnected] = useState(false);
@@ -258,7 +292,7 @@ export default function Detections() {
     try {
       const params = new URLSearchParams({ page: pg, limit: PAGE_SIZE });
       if (typeFilter) params.append('type', typeFilter);
-      if (dateFilter) params.append('date', dateFilter);
+      if (dateFilter) params.append('date', parseDateForQuery(dateFilter));
       if (search.trim()) params.append('search', search.trim());
 
       const res = await axios.get(`${API_BASE_1}/detections?${params}`);
@@ -276,7 +310,8 @@ export default function Detections() {
 
   const matchesFilters = useCallback((item) => {
     if (typeFilter && item.type !== typeFilter) return false;
-    if (dateFilter && item.date !== dateFilter) return false;
+    const normalizedDateFilter = parseDateForQuery(dateFilter);
+    if (dateFilter && item.date !== normalizedDateFilter) return false;
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       const haystack = [
@@ -409,14 +444,14 @@ export default function Detections() {
         <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
           <FilterList color="action" />
           <TextField
-            size="small"
+            size="medium"
             placeholder="Search camera, center, city or TC..."
             value={search}
             onChange={e => setSearch(e.target.value)}
             InputProps={{ startAdornment: <InputAdornment position="start"><Search fontSize="small" /></InputAdornment> }}
             sx={{ minWidth: 240 }}
           />
-          <FormControl size="small" sx={{ minWidth: 180 }}>
+          <FormControl size="medium" sx={{ minWidth: 180 }}>
             <InputLabel>Detection Type</InputLabel>
             <Select value={typeFilter} label="Detection Type" onChange={e => setTypeFilter(e.target.value)}>
               <MenuItem value="">All Types</MenuItem>
@@ -425,17 +460,25 @@ export default function Detections() {
               ))}
             </Select>
           </FormControl>
-          <TextField
-            type="date"
-            size="small"
-            label="Date"
-            InputLabelProps={{ shrink: true }}
-            value={dateFilter}
-            onChange={e => setDateFilter(e.target.value)}
-            sx={{ minWidth: 150 }}
-          />
+          <LocalizationProvider dateAdapter={AdapterDateFns}>
+            <DatePicker
+              label="Date"
+              value={parseDDMMYYYYToDate(dateFilter)}
+              onChange={(date) => setDateFilter(formatDateDDMMYYYY(date))}
+              inputFormat="dd-MM-yyyy"
+              mask="__-__-____"
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  size="small"
+                  placeholder="dd-mm-yyyy"
+                  sx={{ minWidth: 150 }}
+                />
+              )}
+            />
+          </LocalizationProvider>
           {(typeFilter || dateFilter || search) && (
-            <Button size="small" onClick={() => { setTypeFilter(''); setDateFilter(''); setSearch(''); }}>
+            <Button size="medium" onClick={() => { setTypeFilter(''); setDateFilter(todayDate); setSearch(''); }}>
               Clear Filters
             </Button>
           )}

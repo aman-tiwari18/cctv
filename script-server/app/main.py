@@ -1,6 +1,10 @@
+#main.py
 import asyncio
 import re
 import os
+import openpyxl
+from openpyxl.styles import Font
+from pydantic import BaseModel
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -16,7 +20,7 @@ from app.config import HTTP_PORT, MAIN_BACKEND_URL, POLL_INTERVAL_MS, SCRIPTS_DI
 from app.logger import logger
 from app.log_manager import log_manager
 from app.poller import poller_service
-from scripts.detection.utils.db_client import get_hls_camera_by_ch_code, get_rtsp_camera_by_id
+from scripts.detection.utils.db_client import get_hls_camera_by_ch_code, get_rtsp_camera_by_id, get_hls_cameras, get_rtsp_cameras
 
 # Import legacy pipeline functionality from the old backend
 from scripts.detection.backend.schemas import (
@@ -375,13 +379,13 @@ def status_analytics_route():
 # ==========================================
 
 DETECTION_FOLDERS = {
-    "proximity":  "close_proximity_results",
-    "crowd":      "crowd_detection_results",
+    "proximity":  "proximity_detection",
+    "crowd":      "crowd_detection",
     "crowd_five": "crowd_detection_threshold",
     "crowd_zero": "zero_person_detection",
-    "server":     "server_room_results",
+    "server":     "server_room_detection",
     "intruder":   "intruder_detection",
-    "entry_exit": "entry_exit_results",
+    "entry_exit": "entry_exit_detection",
     "phone":      "phone_detection",
     "blind_spot": "blind_spot_detection",
     "invigilator":"invigilator_detection",
@@ -635,4 +639,384 @@ async def disconnect(sid):
 
 
 fastapi_app = app
+# ==========================================
+# Report Generation Endpoint
+# ==========================================
+# Yeh poora block main.py mein paste karo —
+# existing imports ke neeche aur @app routes ke saath.
+#
+# Required imports (main.py ke top pe already nahi hain toh add karo):
+#   import sys, openpyxl
+#   from openpyxl.styles import Font
+#   from pydantic import BaseModel
+#   from scripts.detection.utils.db_client import DB_CONFIG, get_hls_cameras, get_rtsp_cameras
+# ==========================================
+
+import sys
+import openpyxl
+from openpyxl.styles import Font
+from pydantic import BaseModel
+import pymysql
+
+# db_client already imported in main.py — sirf ye 2 functions add karo
+from scripts.detection.utils.db_client import (
+    DB_CONFIG,
+    get_hls_cameras,
+    get_rtsp_cameras,
+)
+
+# ── Config ──────────────────────────────────────────────────────
+_REPORT_OUTPUT_DIR  = "/data/cctv_backup/cctv-analytics-system"
+_REPORT_BASE_IMG    = "http://www.examscctvmonitoring.com/cctv/images/results/new_tcs_results"
+_REPORT_RESULTS_DIR = str(Path(SCRIPTS_DIR).resolve() / "detection" / "results" / "tcs_detections")
+
+os.makedirs(_REPORT_OUTPUT_DIR, exist_ok=True)
+
+_REPORT_PREFIX_MAP = {
+    "crowd":      "Crowd",
+    "EntryExit":  "Entry Exit",
+    "phone":      "Phone",
+    "violation":  "Proximity",
+    "server":     "Server Room",
+    "tampering":  "Camera Tampering",
+    "Inversion":  "Camera Inversion",
+    "lessthan5":  "Crowd Threshold",
+    "zero":       "Zero Person",
+    "blind":      "Blind Spot",
+}
+
+_REPORT_SCAN_FOLDERS = [
+    "crowd_detection_results",
+    "entry_exit_detection_results",
+    "phone_detection_results",
+    "proximity_detection_results",
+    "server_room_detection_results",
+    "camera_tampering_detection_results",
+    "camera_inversion_detection_results",
+    "crowd_detection_threshold",
+    "zero_person_detection",
+    "blind_spot_detection_results",
+]
+
+
+# ── Request schema ───────────────────────────────────────────────
+class ReportRequest(BaseModel):
+    exam_id: int
+    date: str   # "YYYY-MM-DD"
+
+
+# ── Extra DB helpers (db_client mein nahi hain) ──────────────────
+def _report_db_conn():
+    """db_client ka DB_CONFIG reuse — no duplication."""
+    cfg = {k: v for k, v in DB_CONFIG.items() if k != "cursorclass"}
+    return pymysql.connect(**cfg, cursorclass=pymysql.cursors.DictCursor)
+
+
+def _fetch_exam(exam_id: int) -> dict | None:
+    with _report_db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, exam_name, link_type FROM exams WHERE id=%s LIMIT 1",
+                (exam_id,)
+            )
+            return cur.fetchone()
+
+
+def _fetch_shifts(exam_id: int) -> list:
+    with _report_db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, shift_name, start_time, end_time "
+                "FROM exam_shifts WHERE exam_id=%s AND is_active=1 ORDER BY start_time",
+                (exam_id,)
+            )
+            rows = cur.fetchall()
+
+    result = []
+    for r in rows:
+        val = r["start_time"]
+        # MySQL TIME → Python time (comes as timedelta from pymysql)
+        def _td(v):
+            if isinstance(v, time):
+                return v
+            t = int(v.total_seconds())
+            return time(t // 3600, (t % 3600) // 60, t % 60)
+
+        result.append({
+            "id":         r["id"],
+            "shift_name": r["shift_name"],
+            "start_time": _td(r["start_time"]),
+            "end_time":   _td(r["end_time"]),
+        })
+    return result
+
+
+# ── Scan helpers ─────────────────────────────────────────────────
+def _report_ch_from_file(filename: str) -> str | None:
+    m = re.search(r'_(ch\d+)_\d{8}_\d{6}', os.path.basename(filename), re.IGNORECASE)
+    return m.group(1).lower() if m else None
+
+
+def _report_dt_from_file(filename: str) -> datetime | None:
+    m = re.search(r'(\d{8})_(\d{6})', filename)
+    if m:
+        try:
+            return datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S")
+        except Exception:
+            return None
+    return None
+
+
+def _report_det_type(filename: str) -> str:
+    name = os.path.basename(filename)
+    for prefix, label in _REPORT_PREFIX_MAP.items():
+        if name.startswith(prefix + "_"):
+            return label
+    return "Unknown"
+
+
+def _report_shift_for(image_time, shifts: list) -> dict | None:
+    for s in shifts:
+        if s["start_time"] <= image_time <= s["end_time"]:
+            return s
+    return None
+
+
+def _auto_width(ws, max_w=40):
+    for col in ws.columns:
+        mx = max((len(str(c.value)) for c in col if c.value), default=0)
+        ws.column_dimensions[col[0].column_letter].width = min(mx + 2, max_w)
+
+
+# ── Scan detection images ────────────────────────────────────────
+def _scan_detections(cameras: list, shifts: list, target_date: str):
+    ch_map       = {str(c["ch_code"]).strip().lower(): c for c in cameras if c.get("ch_code")}
+    shift_counts = {s["shift_name"]: {} for s in shifts}
+    detections   = []
+    matched = unmatched = 0
+
+    for folder in _REPORT_SCAN_FOLDERS:
+        fpath = os.path.join(_REPORT_RESULTS_DIR, folder)
+        if not os.path.exists(fpath):
+            continue
+
+        for root, _, files in os.walk(fpath):
+            if "false_positives" in root.lower():
+                continue
+            for fname in files:
+                if not fname.lower().endswith((".jpg", ".jpeg", ".png")):
+                    continue
+
+                dt = _report_dt_from_file(fname)
+                if not dt or dt.strftime("%Y-%m-%d") != target_date:
+                    continue
+
+                shift = _report_shift_for(dt.time(), shifts)
+                if not shift:
+                    continue
+
+                ch = _report_ch_from_file(fname)
+                cam = ch_map.get(ch) if ch else None
+
+                if not cam:
+                    unmatched += 1
+                    continue
+
+                matched += 1
+                sname = shift["shift_name"]
+                key   = cam["ch_code"]
+                shift_counts[sname][key] = shift_counts[sname].get(key, 0) + 1
+
+                detections.append([
+                    sname, cam["ch_code"], cam.get("camera_name"),
+                    cam.get("centre_name"), cam.get("city"), cam.get("state"),
+                    cam.get("tc_code"), _report_det_type(fname),
+                    dt.strftime("%Y-%m-%d %H:%M:%S"),
+                    f"{_REPORT_BASE_IMG}/{folder}/{fname}", "View",
+                ])
+
+    logger.info(f"[Report] Matched={matched} Unmatched={unmatched}")
+    return shift_counts, detections
+
+
+# ── Excel builders ───────────────────────────────────────────────
+def _build_excel(cameras, shift_counts, shifts, detections) -> openpyxl.Workbook:
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+
+    # --- Per-shift sheets ---
+    shift_headers = [
+        "City", "State", "Center", "TC Code", "Ch Code",
+        "Camera Name", "Cam Type", "Classification",
+        "Events (Excl. Rejected)", "Rejected Events", "Camera Status",
+    ]
+    for shift in shifts:
+        ws = wb.create_sheet(shift["shift_name"])
+        ws.append(shift_headers)
+        for c in range(1, len(shift_headers) + 1):
+            ws.cell(row=1, column=c).font = Font(bold=True)
+        for cam in cameras:
+            ch    = cam.get("ch_code", "")
+            count = shift_counts.get(shift["shift_name"], {}).get(ch, 0)
+            ws.append([
+                cam.get("city"), cam.get("state"), cam.get("centre_name"),
+                cam.get("tc_code"), ch, cam.get("camera_name"),
+                cam.get("camera_category"), cam.get("classification"),
+                count, 0,
+                "Online" if cam.get("is_active") == 1 else "Offline",
+            ])
+        _auto_width(ws)
+
+    # --- Detections List sheet ---
+    ws = wb.create_sheet("Detections List")
+    det_headers = [
+        "Shift", "Ch Code", "Camera Name", "Center Name",
+        "City", "State", "TC Code",
+        "Detection Type", "Detection Time", "Image URL", "View",
+    ]
+    ws.append(det_headers)
+    for c in range(1, len(det_headers) + 1):
+        ws.cell(row=1, column=c).font = Font(bold=True)
+    for row in detections:
+        ws.append(row)
+    _auto_width(ws)
+
+    # --- Analysis sheet ---
+    ws  = wb.create_sheet("Analysis")
+    row = 1
+    total_all = 0
+
+    for shift in shifts:
+        sname = shift["shift_name"]
+        ws.cell(row=row, column=1, value=f"{sname} ANALYSIS").font = Font(bold=True)
+        row += 1
+        total_cams  = len(cameras)
+        online_cams = sum(1 for c in cameras if c.get("is_active") == 1)
+        total_det   = sum(shift_counts.get(sname, {}).values())
+        total_all  += total_det
+
+        for label, val in [
+            ("Total Cameras",    total_cams),
+            ("Online Cameras",   online_cams),
+            ("Offline Cameras",  total_cams - online_cams),
+            ("Total Detections", total_det),
+            ("Online Rate",      f"{(online_cams/total_cams*100) if total_cams else 0:.2f}%"),
+            ("Shift Start",      str(shift["start_time"])),
+            ("Shift End",        str(shift["end_time"])),
+        ]:
+            ws.cell(row=row, column=1, value=label)
+            ws.cell(row=row, column=2, value=val)
+            row += 1
+
+        row += 1
+        ws.cell(row=row, column=1,
+                value=f"Top 5 Most Active ({sname})").font = Font(bold=True)
+        row += 1
+        cam_map = {c["ch_code"]: c for c in cameras}
+        for i, (ch, cnt) in enumerate(
+            sorted(shift_counts.get(sname, {}).items(), key=lambda x: -x[1])[:5], 1
+        ):
+            cam = cam_map.get(ch, {})
+            ws.cell(row=row, column=1, value=f"{i}. {ch} — {cam.get('camera_name','N/A')}")
+            ws.cell(row=row, column=2, value=f"{cnt} detections")
+            row += 1
+        row += 2
+
+    ws.cell(row=row, column=1, value="OVERALL SUMMARY").font = Font(bold=True)
+    row += 1
+    for label, val in [
+        ("Total Detections (All Shifts)", total_all),
+        ("Total Shifts",                  len(shifts)),
+        ("Total Cameras",                 len(cameras)),
+    ]:
+        ws.cell(row=row, column=1, value=label)
+        ws.cell(row=row, column=2, value=val)
+        row += 1
+
+    _auto_width(ws)
+    return wb
+
+
+# ── Route ────────────────────────────────────────────────────────
+@fastapi_app.post("/generate-report")
+def generate_report(req: ReportRequest):
+    """
+    POST /cctv_dev/generate-report
+    Body: { "exam_id": 1, "date": "2026-04-05" }
+    """
+    # Validate date
+    try:
+        datetime.strptime(req.date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(400, "date must be YYYY-MM-DD")
+
+    # Step 1 — exam info
+    try:
+        exam = _fetch_exam(req.exam_id)
+    except Exception as e:
+        raise HTTPException(500, f"DB error: {e}")
+
+    if not exam:
+        raise HTTPException(404, f"exam_id {req.exam_id} not found")
+
+    link_type = (exam.get("link_type") or "").upper()
+    logger.info(f"[Report] exam={exam['exam_name']} link_type={link_type} date={req.date}")
+
+    # Step 2 — shifts (dynamic)
+    try:
+        shifts = _fetch_shifts(req.exam_id)
+    except Exception as e:
+        raise HTTPException(500, f"DB error: {e}")
+
+    if not shifts:
+        raise HTTPException(404, f"No active shifts for exam_id={req.exam_id}")
+
+    logger.info(f"[Report] Shifts: {[s['shift_name'] for s in shifts]}")
+
+    # Step 3 — cameras via existing db_client
+    cameras = []
+
+    if link_type == "HLS":
+        seen = set()
+        for shift in shifts:
+            for cam in get_hls_cameras(req.exam_id, shift["id"], req.date):
+                ch = str(cam.get("ch_code", "")).strip().lower()
+                if ch and ch not in seen:
+                    seen.add(ch)
+                    cameras.append(cam)
+
+    elif link_type == "RTSP":
+        cameras = get_rtsp_cameras(req.exam_id)
+
+    else:
+        raise HTTPException(400, f"Unsupported link_type='{link_type}'")
+
+    if not cameras:
+        raise HTTPException(404,
+            f"No cameras for exam_id={req.exam_id} link_type={link_type} date={req.date}")
+
+    logger.info(f"[Report] Cameras loaded: {len(cameras)}")
+
+    # Step 4 — scan detection images
+    shift_counts, detections = _scan_detections(cameras, shifts, req.date)
+
+    # Step 5 — build & save Excel
+    wb = _build_excel(cameras, shift_counts, shifts, detections)
+    output_file = os.path.join(_REPORT_OUTPUT_DIR, f"exam_{req.exam_id}_{req.date}.xlsx")
+    wb.save(output_file)
+
+    total_det = sum(sum(sc.values()) for sc in shift_counts.values())
+    logger.info(f"[Report] Saved: {output_file}")
+
+    return {
+        "success":          True,
+        "exam_id":          req.exam_id,
+        "exam_name":        exam.get("exam_name"),
+        "link_type":        link_type,
+        "date":             req.date,
+        "shifts":           [s["shift_name"] for s in shifts],
+        "total_cameras":    len(cameras),
+        "total_detections": total_det,
+        "output_file":      output_file,
+    }
 app = socketio.ASGIApp(sio, other_asgi_app=fastapi_app, socketio_path="socket.io")

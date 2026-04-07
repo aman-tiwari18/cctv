@@ -39,6 +39,8 @@ import {
   Close,
   AccessTime,
 } from '@mui/icons-material';
+import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
+import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { examsAPI } from '../services/api';
 
 const ALL_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -87,8 +89,8 @@ const Exams = () => {
         exam_body: exam.exam_body,
         link_type: exam.link_type,
         description: exam.description || '',
-        start_date: exam.start_date || '',
-        end_date: exam.end_date || '',
+        start_date: exam.start_date ? formatDateDDMMYYYY(exam.start_date) : '',
+        end_date: exam.end_date ? formatDateDDMMYYYY(exam.end_date) : '',
         skip_days: exam.skip_days || [],
         skip_dates: exam.skip_dates || [],
         shifts: exam.examShifts?.map(s => ({
@@ -143,13 +145,16 @@ const Exams = () => {
 
   // Skip dates management
   const handleAddSkipDate = () => {
-    if (newSkipDate && !formData.skip_dates.includes(newSkipDate)) {
-      setFormData((prev) => ({
-        ...prev,
-        skip_dates: [...prev.skip_dates, newSkipDate].sort(),
-      }));
-      setNewSkipDate('');
-    }
+    if (!newSkipDate) return;
+    const parsedDate = parseDDMMYYYYToISO(newSkipDate);
+    const validDate = /^\d{4}-\d{2}-\d{2}$/.test(parsedDate);
+    if (!validDate || formData.skip_dates.includes(parsedDate)) return;
+
+    setFormData((prev) => ({
+      ...prev,
+      skip_dates: [...prev.skip_dates, parsedDate].sort(),
+    }));
+    setNewSkipDate('');
   };
 
   const handleRemoveSkipDate = (date) => {
@@ -184,10 +189,16 @@ const Exams = () => {
 
   const handleSubmit = async () => {
     try {
+      const payload = {
+        ...formData,
+        start_date: parseDDMMYYYYToISO(formData.start_date),
+        end_date: parseDDMMYYYYToISO(formData.end_date),
+      };
+
       if (editingExam) {
-        await examsAPI.update(editingExam.id, formData);
+        await examsAPI.update(editingExam.id, payload);
       } else {
-        await examsAPI.create(formData);
+        await examsAPI.create(payload);
       }
       handleCloseDialog();
       loadExams();
@@ -238,13 +249,40 @@ const Exams = () => {
     return { totalDays, validDays, skippedDays: totalDays - validDays };
   };
 
+  const formatDateDDMMYYYY = (dateStr) => {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    if (Number.isNaN(date.getTime())) return '';
+    const dd = String(date.getDate()).padStart(2, '0');
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const yyyy = date.getFullYear();
+    return `${dd}-${mm}-${yyyy}`;
+  };
+
+  const parseDDMMYYYYToISO = (value) => {
+    if (!value) return '';
+    const match = /^([0-3]\d)-([0-1]\d)-(\d{4})$/.exec(value);
+    if (!match) return value;
+    const [, dd, mm, yyyy] = match;
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  const parseDDMMYYYYToDate = (value) => {
+    if (!value) return null;
+    const match = /^([0-3]\d)-([0-1]\d)-(\d{4})$/.exec(value);
+    if (!match) return null;
+    const [, dd, mm, yyyy] = match;
+    return new Date(yyyy, mm - 1, dd);
+  };
+
   const formatDate = (dateStr) => {
     if (!dateStr) return '—';
-    return new Date(dateStr).toLocaleDateString('en-IN', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-    });
+    const date = new Date(dateStr);
+    if (Number.isNaN(date.getTime())) return '—';
+    const dd = String(date.getDate()).padStart(2, '0');
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const yyyy = date.getFullYear();
+    return `${dd}-${mm}-${yyyy}`;
   };
 
   if (loading) {
@@ -498,32 +536,34 @@ const Exams = () => {
           <Typography variant="caption" color="text.secondary" display="block" mb={1}>
             Set the start and end dates for the exam period
           </Typography>
-          <Grid container spacing={2}>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
-                type="date"
-                label="Start Date"
-                name="start_date"
-                value={formData.start_date}
-                onChange={handleChange}
-                margin="dense"
-                InputLabelProps={{ shrink: true }}
-              />
+          <LocalizationProvider dateAdapter={AdapterDateFns}>
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={6}>
+                <DatePicker
+                  label="Start Date"
+                  value={parseDDMMYYYYToDate(formData.start_date)}
+                  onChange={(date) => setFormData({ ...formData, start_date: formatDateDDMMYYYY(date) })}
+                  inputFormat="dd-MM-yyyy"
+                  mask="__-__-____"
+                  renderInput={(params) => (
+                    <TextField fullWidth margin="dense" size="small" {...params} />
+                  )}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <DatePicker
+                  label="End Date"
+                  value={parseDDMMYYYYToDate(formData.end_date)}
+                  onChange={(date) => setFormData({ ...formData, end_date: formatDateDDMMYYYY(date) })}
+                  inputFormat="dd-MM-yyyy"
+                  mask="__-__-____"
+                  renderInput={(params) => (
+                    <TextField fullWidth margin="dense" size="small" {...params} />
+                  )}
+                />
+              </Grid>
             </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
-                type="date"
-                label="End Date"
-                name="end_date"
-                value={formData.end_date}
-                onChange={handleChange}
-                margin="dense"
-                InputLabelProps={{ shrink: true }}
-              />
-            </Grid>
-          </Grid>
+          </LocalizationProvider>
 
           <Divider sx={{ my: 2 }} />
 
@@ -562,14 +602,18 @@ const Exams = () => {
               Skip Specific Dates
             </Typography>
             <Box display="flex" gap={1} alignItems="center" mb={1}>
-              <TextField
-                type="date"
-                size="small"
-                value={newSkipDate}
-                onChange={(e) => setNewSkipDate(e.target.value)}
-                InputLabelProps={{ shrink: true }}
-                sx={{ minWidth: 180 }}
-              />
+              <LocalizationProvider dateAdapter={AdapterDateFns}>
+                <DatePicker
+                  label="Skip Date"
+                  value={parseDDMMYYYYToDate(newSkipDate)}
+                  onChange={(date) => setNewSkipDate(formatDateDDMMYYYY(date))}
+                  inputFormat="dd-MM-yyyy"
+                  mask="__-__-____"
+                  renderInput={(params) => (
+                    <TextField size="small" sx={{ minWidth: 180 }} {...params} />
+                  )}
+                />
+              </LocalizationProvider>
               <Button
                 size="small"
                 variant="outlined"

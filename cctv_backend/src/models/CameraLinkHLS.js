@@ -70,6 +70,13 @@ const CameraLinkHLS = sequelize.define(
         tableName: "camera_links_hls",
         timestamps: true,
         underscored: true,
+        indexes: [
+            {
+                unique: true,
+                fields: ['exam_id', 'ch_code'],
+                name: 'unique_exam_ch_code'
+            }
+        ]
     }
 );
 

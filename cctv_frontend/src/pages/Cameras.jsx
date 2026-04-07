@@ -10,6 +10,8 @@ import {
   Add, Edit, Delete, Upload, CloudUpload, Download,
   TableChart, Refresh,
 } from '@mui/icons-material';
+import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
+import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { camerasAPI, examsAPI, shiftsAPI } from '../services/api';
 
 // ─────────────────────────────────────────────────────────────
@@ -17,6 +19,32 @@ import { camerasAPI, examsAPI, shiftsAPI } from '../services/api';
 // ─────────────────────────────────────────────────────────────
 const truncate = (str, n = 40) =>
   str && str.length > n ? str.slice(0, n) + '…' : str;
+
+const formatDateDDMMYYYY = (dateStr) => {
+  if (!dateStr) return '';
+  const date = new Date(dateStr);
+  if (Number.isNaN(date.getTime())) return '';
+  const dd = String(date.getDate()).padStart(2, '0');
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const yyyy = date.getFullYear();
+  return `${dd}-${mm}-${yyyy}`;
+};
+
+const parseDDMMYYYYToISO = (value) => {
+  if (!value) return '';
+  const match = /^([0-3]\d)-([0-1]\d)-(\d{4})$/.exec(value);
+  if (!match) return value;
+  const [, dd, mm, yyyy] = match;
+  return `${yyyy}-${mm}-${dd}`;
+};
+
+const parseDDMMYYYYToDate = (value) => {
+  if (!value) return null;
+  const match = /^([0-3]\d)-([0-1]\d)-(\d{4})$/.exec(value);
+  if (!match) return null;
+  const [, dd, mm, yyyy] = match;
+  return new Date(yyyy, mm - 1, dd);
+};
 
 const HLS_EMPTY   = {
   centre_name: '', tc_code: '', city: '', state: '',
@@ -95,7 +123,7 @@ const Cameras = () => {
         params.shift_id = filterShiftId;
       }
       if (filterExamDate) {
-        params.exam_date = filterExamDate;
+        params.exam_date = parseDDMMYYYYToISO(filterExamDate);
       }
 
       const res = await camerasAPI.getByExam(selectedExam, params);
@@ -122,7 +150,7 @@ const Cameras = () => {
             camera_name: camera.camera_name || '', ch_code: camera.ch_code || '',
             cctv_url: camera.cctv_url || '', camera_category: camera.camera_category || '',
             classification: camera.classification || '',
-            exam_date: camera.exam_date || '', shift_id: camera.shift_id || '' }
+            exam_date: formatDateDDMMYYYY(camera.exam_date || ''), shift_id: camera.shift_id || '' }
           : { device_id: camera.device_id || '', tc_code: camera.tc_code || '',
             camera_name: camera.camera_name || '', city: camera.city || '',
             centre_name: camera.centre_name || camera.tc_name || '',
@@ -143,11 +171,17 @@ const Cameras = () => {
       if (!formData.camera_name?.trim()) { setFormError('Camera Name is required'); return; }
       if (!formData.cctv_url?.trim()) { setFormError('CCTV URL is required'); return; }
     }
+
+    const submissionData = isHLS ? {
+      ...formData,
+      exam_date: parseDDMMYYYYToISO(formData.exam_date),
+    } : formData;
+
     try {
       if (editingCamera) {
-        await camerasAPI.update(editingCamera.id, formData, selectedExam);
+        await camerasAPI.update(editingCamera.id, submissionData, selectedExam);
       } else {
-        await camerasAPI.create(selectedExam, formData);
+        await camerasAPI.create(selectedExam, submissionData);
       }
       setOpenDialog(false);
       loadCameras();
@@ -170,7 +204,7 @@ const Cameras = () => {
     try {
       const res = await camerasAPI.uploadExcel(selectedExam, uploadFile, {
         shiftId: uploadShiftId || undefined,
-        examDate: uploadDate   || undefined,
+        examDate: uploadDate ? parseDDMMYYYYToISO(uploadDate) : undefined,
       });
       setUploadResult(res.data);
       setOpenUpload(false);
@@ -191,7 +225,8 @@ const Cameras = () => {
   };
 
   return (
-    <Box>
+    <LocalizationProvider dateAdapter={AdapterDateFns}>
+      <Box>
       {/* ── Header ───────────────────────────────────────────── */}
       <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={3}>
         <Box>
@@ -248,15 +283,15 @@ const Cameras = () => {
       </Box>
 
       {/* ── Exam selector ─────────────────────────────────────── */}
-      <Paper sx={{ p: 2, mb: 3, borderRadius: 2 }}>
+      <Paper sx={{ p: 2, mb: 3, borderRadius: 2, fontSize: '1.1rem' }}>
         <Stack spacing={2}>
-          <TextField select label="Select Exam" value={selectedExam}
+          <TextField select label="Select Exam"  value={selectedExam}
             onChange={(e) => {
               setSelectedExam(e.target.value);
               setFilterShiftId('');
               setFilterExamDate('');
               setPage(0);
-            }} fullWidth size="small">
+            }} fullWidth size="medium">
             <MenuItem value="">— Select an exam —</MenuItem>
             {exams.map((exam) => (
               <MenuItem key={exam.id} value={exam.id}>
@@ -267,8 +302,16 @@ const Cameras = () => {
             ))}
           </TextField>
 
+          {/* equal-width shift + date filters using CSS grid */}
           {selectedExam && isHLS && (
-            <Box display="flex" gap={2} flexDirection={{ xs: 'column', md: 'row' }}>
+            <Box
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: 2,
+              }}
+            >
+              {/* shrink keeps label at top — never overlaps "All shifts" value */}
               <TextField
                 select
                 fullWidth
@@ -278,24 +321,32 @@ const Cameras = () => {
                   setFilterShiftId(e.target.value);
                   setPage(0);
                 }}
-                size="small"
+                size="medium"
+                InputLabelProps={{ shrink: true }}
+                SelectProps={{
+                  displayEmpty: true,
+                  renderValue: (value) => {
+                    if (!value) return 'All shifts';
+                    const matched = shifts.find((s) => String(s.id) === String(value));
+                    return matched?.shift_name || `#${value}`;
+                  },
+                }}
               >
                 <MenuItem value="">All shifts</MenuItem>
                 {shifts.map((shift) => (
                   <MenuItem key={shift.id} value={shift.id}>{shift.shift_name}</MenuItem>
                 ))}
               </TextField>
-              <TextField
-                fullWidth
+
+              <DatePicker
                 label="Filter by Exam Date"
-                type="date"
-                value={filterExamDate}
-                onChange={(e) => {
-                  setFilterExamDate(e.target.value);
+                value={parseDDMMYYYYToDate(filterExamDate)}
+                onChange={(date) => {
+                  setFilterExamDate(formatDateDDMMYYYY(date));
                   setPage(0);
                 }}
-                size="small"
-                InputLabelProps={{ shrink: true }}
+                inputFormat="dd-MM-yyyy"
+                renderInput={(params) => <TextField {...params} fullWidth size="small" />}
               />
             </Box>
           )}
@@ -365,7 +416,7 @@ const Cameras = () => {
                           <Chip label={cam.camera_category || 'N/A'} size="small" />
                         </TableCell>
                         <TableCell>{cam.classification || '-'}</TableCell>
-                        <TableCell>{cam.exam_date || '-'}</TableCell>
+                        <TableCell>{formatDateDDMMYYYY(cam.exam_date) || '-'}</TableCell>
                         <TableCell>
                           {cam.shift_id
                             ? (shifts.find((s) => s.id === cam.shift_id)?.shift_name || `#${cam.shift_id}`)
@@ -462,12 +513,16 @@ const Cameras = () => {
               <TextField fullWidth label="Classification" name="classification"
                 value={formData.classification || ''} onChange={(e) => setFormData({ ...formData, classification: e.target.value })}
                 margin="dense" size="small" />
-              <TextField fullWidth label="Exam Date" name="exam_date" type="date"
-                value={formData.exam_date || ''} onChange={(e) => setFormData({ ...formData, exam_date: e.target.value })}
-                margin="dense" size="small" InputLabelProps={{ shrink: true }} />
+              <DatePicker
+                label="Exam Date"
+                value={parseDDMMYYYYToDate(formData.exam_date)}
+                onChange={(date) => setFormData({ ...formData, exam_date: formatDateDDMMYYYY(date) })}
+                inputFormat="dd-MM-yyyy"
+                renderInput={(params) => <TextField {...params} fullWidth margin="dense" size="small" />}
+              />
               <TextField select fullWidth label="Shift (leave blank = all shifts)" name="shift_id"
                 value={formData.shift_id || ''} onChange={(e) => setFormData({ ...formData, shift_id: e.target.value })}
-                margin="dense" size="small"
+                margin="dense" size="medium"
                 SelectProps={{
                   displayEmpty: true,
                   renderValue: (value) => {
@@ -522,11 +577,33 @@ const Cameras = () => {
       </Dialog>
 
       {/* ── Upload Dialog ─────────────────────────────────────── */}
-      <Dialog open={openUpload} onClose={() => setOpenUpload(false)} maxWidth="sm" fullWidth>
+      {/* FIX: overflow visible so the calendar popper isn't clipped;
+               minHeight gives enough room; aligned to top so calendar
+               has space to expand downward                          */}
+      <Dialog
+        open={openUpload}
+        onClose={() => setOpenUpload(false)}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: {
+            overflow: 'visible',       // let calendar pop outside the Paper
+            minHeight: 380,
+          },
+        }}
+        sx={{
+          '& .MuiDialog-container': {
+            alignItems: 'flex-start',  // push dialog toward top → more room below
+            pt: 10,
+          },
+        }}
+      >
         <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <CloudUpload /> Upload Camera Links Excel
         </DialogTitle>
-        <DialogContent>
+
+        {/* FIX: overflow visible on DialogContent so popper isn't clipped */}
+        <DialogContent sx={{ overflow: 'visible' }}>
           {uploadError && <Alert severity="error" sx={{ mb: 2 }}>{uploadError}</Alert>}
 
           <Alert severity="info" sx={{ mb: 2 }}>
@@ -543,30 +620,53 @@ const Cameras = () => {
             <input type="file" hidden accept=".xlsx,.xls" onChange={(e) => { setUploadFile(e.target.files[0]); setUploadError(''); }} />
           </Button>
 
-          {/* HLS-only options */}
+          {/* HLS-only options — CSS grid for guaranteed equal widths */}
           {isHLS && (
-            <Box display="flex" gap={2} mt={1}>
-              <TextField select fullWidth label="Shift (optional — blank = all shifts)"
-                value={uploadShiftId} onChange={(e) => setUploadShiftId(e.target.value)} size="small"
+            <Box
+              sx={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: 2,
+                mt: 1,
+              }}
+            >
+              {/* Shift selector — InputLabelProps shrink prevents label/value overlap */}
+              <TextField
+                select
+                fullWidth
+                label="Shift (optional)"
+                value={uploadShiftId}
+                onChange={(e) => setUploadShiftId(e.target.value)}
+                size="medium"
+                InputLabelProps={{ shrink: true }}
                 SelectProps={{
                   displayEmpty: true,
                   renderValue: (value) => {
                     if (!value) return 'All shifts';
-                    const matchedShift = shifts.find((s) => String(s.id) === String(value));
-                    return matchedShift?.shift_name || `#${value}`;
+                    const matched = shifts.find((s) => String(s.id) === String(value));
+                    return matched?.shift_name || `#${value}`;
                   },
-                }}>
+                }}
+              >
                 <MenuItem value="">All shifts</MenuItem>
                 {shifts.map((s) => (
                   <MenuItem key={s.id} value={s.id}>{s.shift_name}</MenuItem>
                 ))}
               </TextField>
-              <TextField fullWidth label="Exam Date (optional)" type="date" size="small"
-                value={uploadDate} onChange={(e) => setUploadDate(e.target.value)}
-                InputLabelProps={{ shrink: true }} />
+
+              {/* Date picker — portalId renders the calendar in <body> so it
+                  fully escapes the Dialog's overflow/stacking context        */}
+              <DatePicker
+                label="Exam Date (optional)"
+                value={parseDDMMYYYYToDate(uploadDate)}
+                onChange={(date) => setUploadDate(formatDateDDMMYYYY(date))}
+                inputFormat="dd-MM-yyyy"
+                renderInput={(params) => <TextField {...params} fullWidth size="small" />}
+              />
             </Box>
           )}
         </DialogContent>
+
         <DialogActions sx={{ justifyContent: 'space-between', px: 3, pb: 2 }}>
           <Box display="flex" gap={1}>
             <Tooltip title="Download blank HLS template">
@@ -593,6 +693,7 @@ const Cameras = () => {
         </DialogActions>
       </Dialog>
     </Box>
+    </LocalizationProvider>
   );
 };
 
