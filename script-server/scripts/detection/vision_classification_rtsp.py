@@ -779,7 +779,8 @@ def update_excel_in_memory(row_id, label, status, status_detail=""):
     with excel_lock:
         mask = df["Row_ID"] == row_id
         if mask.any():
-            df.loc[mask, SCENE_COLUMN_TARGET] = label
+            if label is not None:
+                df.loc[mask, SCENE_COLUMN_TARGET] = label
             df.loc[mask, "Status"] = status
             df.loc[mask, "Status Detail"] = status_detail
             logger.debug(f"Updated Row {row_id}: {status} - {label}")
@@ -970,6 +971,13 @@ def main():
                         if is_accessible and stream_url:
                             # Store for Pass 2
                             accessible_cameras.append((row_id, stream_url))
+                            # Mark as accessible immediately
+                            update_excel_in_memory(
+                                row_id, 
+                                None, 
+                                'Accessible',
+                                'Stream accessible'
+                            )
                         else:
                             # Mark as not accessible
                             update_excel_in_memory(

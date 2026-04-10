@@ -51,6 +51,10 @@ const CameraLinkHLS = sequelize.define(
             type: DataTypes.STRING,
             allowNull: true,
         },
+        status: {
+            type: DataTypes.STRING,
+            allowNull: true,
+        },
         exam_date: {
             type: DataTypes.DATEONLY,
             allowNull: true,

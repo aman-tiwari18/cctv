@@ -13,13 +13,13 @@ Architecture: GPU-batched YOLO worker + per-camera feeder threads
 Compatible with TCS streaming links (HLS format).
 """
 
+import queue
 import sys
 import os
 sys.path.insert(0, os.path.dirname(__file__))
 
 import cv2
 import time
-import queue
 import threading
 import signal
 import logging
@@ -87,8 +87,8 @@ TARGET_SCENES = [
 # ─────────────────────────── queue / batching ─────────────────────────────────
 SAMPLE_EVERY   = int(os.environ.get("TCS_CROWD_ZERO_SAMPLE_EVERY",  10))
 GPU_BATCH_SIZE = int(os.environ.get("TCS_CROWD_ZERO_BATCH_SIZE",    64))
-GPU_QUEUE_SIZE = int(os.environ.get("TCS_CROWD_ZERO_QUEUE_SIZE",  1024))
-THREAD_DELAY   = float(os.environ.get("TCS_CROWD_ZERO_THREAD_DELAY", 0.05))
+GPU_QUEUE_SIZE = int(os.environ.get("TCS_CROWD_ZERO_QUEUE_SIZE",  128))
+THREAD_DELAY   = float(os.environ.get("TCS_CROWD_ZERO_THREAD_DELAY", 0.1))
 
 # ─────────────────────────── globals ──────────────────────────────────────────
 gpu_queue: queue.Queue = queue.Queue(maxsize=GPU_QUEUE_SIZE)
@@ -148,33 +148,65 @@ def detect_zero_crowd(frame, device_id: str, camera_no: str, save_folder: str, c
             )
 
 def crowd_zero_worker(frame_queue):
-    logger.info("🟢 [CrowdZeroWorker] RTSP worker started")
-    get_yolo_model()
+    """
+    RTSP Worker — GPU Batch Queue Architecture.
+    Receives packets from the RTSP producer and pushes them into
+    the shared gpu_queue for batch inference.
+    """
+    import torch
+    logger.info("🟢 [CrowdZeroWorker] RTSP batch-worker started")
+    stop_event = threading.Event()
 
-    while True:
-        data = frame_queue.get()
-        if data is None:
-            logger.info("🔴 [CrowdZeroWorker] RTSP worker stopping")
-            break
+    # Start the SAME GPU batch worker that HLS uses
+    gpu_t = threading.Thread(
+        target=gpu_worker,
+        args=(None, stop_event),
+        daemon=True,
+        name="crowd_zero_rtsp_gpu_worker"
+    )
+    gpu_t.start()
 
-        if isinstance(data, dict):
-            frame = data.get("frame")
-            device_id = str(data.get("device_id", "unknown"))
-            camera_no = str(data.get("camera_no", "0"))
-            camera_id_pk = str(data.get("camera_id_pk", ""))
-        elif len(data) == 4:
-            frame, device_id, camera_no, camera_id_pk = data
-        else:
-            frame, device_id, camera_no = data
-            camera_id_pk = ""
+    try:
+        while True:
+            data = frame_queue.get()
+            if data is None:
+                logger.info("🔴 [CrowdZeroWorker] RTSP batch-worker stopping")
+                break
 
-        detect_zero_crowd(
-            frame.copy(),
-            str(device_id),
-            str(camera_no),
-            save_folder=RTSP_SAVE_FOLDER,
-            camera_id_pk=str(camera_id_pk)
-        )
+            # Unpack — supports dict, 4-tuple, 3-tuple
+            if isinstance(data, dict):
+                frame        = data.get("frame")
+                device_id    = str(data.get("device_id", "unknown"))
+                camera_no    = str(data.get("camera_no") or data.get("ch_no") or "0")
+                camera_id_pk = str(data.get("camera_id_pk", ""))
+            elif len(data) == 4:
+                frame, device_id, camera_no, camera_id_pk = data
+            else:
+                frame, device_id, camera_no = data
+                camera_id_pk = ""
+
+            if frame is None:
+                continue
+
+            try:
+                gpu_queue.put({
+                    "frame":    frame.copy(),
+                    "device_id": str(device_id),
+                    "camera_no": str(camera_no),
+                    "ch_no":    str(camera_no), # for compatibility
+                    "source_type": "RTSP",
+                    "state":    {"last_save": 0},
+                }, timeout=0.1)
+            except queue.Full:
+                pass
+            del frame
+
+    finally:
+        stop_event.set()
+        gpu_t.join(timeout=5)
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        logger.info("🔴 [CrowdZeroWorker] GPU worker shut down")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -277,6 +309,9 @@ def gpu_worker(df, stop_event: threading.Event):
             results = model(frames, conf=CONFIDENCE, verbose=False)
         except Exception as exc:
             logger.error(f"[GPU] YOLO batch error: {exc}")
+            for item in batch:
+                if 'frame' in item: del item['frame']
+            del batch
             continue
 
         # ── per-frame post-processing ─────────────────────────────────────────
@@ -297,28 +332,28 @@ def gpu_worker(df, stop_event: threading.Event):
             # per-camera cooldown
             if now - state["last_save"] < COOLDOWN_TIME:
                 continue
-
             # global rate limiter
-            should_save, current_rate, _ = rate_limiter.should_save_detection(camera_id)
-            if not should_save:
-                logger.info(
-                    f"[{camera_id}] Zero-person rate-limited "
-                    f"({current_rate}/25 this min)"
-                )
-                continue
+            if now - state.get('last_save', 0) > COOLDOWN_TIME:
+                should_save, current_rate, _ = rate_limiter.should_save_detection(camera_id)
+                if should_save:
+                    state['last_save'] = now
+                    timestamp = time.strftime("%Y%m%d_%H%M%S")
+                    
+                    # ── Source-Aware Naming Format ──────────────
+                    if item.get("source_type") == "HLS":
+                        filename = os.path.join(TCS_ZERO_SAVE_FOLDER, f"crowd_zero_ch{ch_no}_{timestamp}.jpg")
+                    else:
+                        # RTSP: {script}_{device_id}_{camera_no}_{ts}.jpg
+                        dev_id = item.get("device_id") or camera_id
+                        filename = os.path.join(TCS_ZERO_SAVE_FOLDER, f"crowd_zero_{dev_id}_{ch_no}_{timestamp}.jpg")
+                    
+                    cv2.imwrite(filename, frame)
+                    logger.info(f"🚨 ALERT: CROWD ZERO at {camera_id} (count={person_count})")
+            
+            if 'frame' in item: del item['frame']
 
-            state["last_save"] = now
-
-            ts       = time.strftime("%Y%m%d_%H%M%S")
-            filename = os.path.join(
-                TCS_ZERO_SAVE_FOLDER,
-                f"zero_ch{ch_no}_{ts}_persons{person_count}.jpg",
-            )
-            cv2.imwrite(filename, frame)
-            logger.warning(
-                f"[{camera_id}] ZERO/LOW PERSON: {person_count} — "
-                f"saved: {filename} ({current_rate}/25 this min)"
-            )
+        del batch
+        if 'results' in locals(): del results
         # GPU memory report
         if torch.cuda.is_available():
             mem = torch.cuda.memory_allocated() / 1e9
@@ -383,14 +418,20 @@ def camera_thread(cfg: dict, stop_event: threading.Event):
         # the frames we want to detect.
 
         try:
-            gpu_queue.put_nowait({
-                "frame":     frame,
-                "camera_id": camera_id,
-                "ch_no":     ch_no,
-                "state":     state,
-            })
+            gpu_queue.put({
+                'frame': frame.copy(),
+                'camera_id': camera_id,
+                'ch_no': ch_no,
+                'source_type': 'HLS',
+                'state': state
+            }, timeout=0.1)
         except queue.Full:
             skipped_queue_full += 1
+            del frame
+            continue
+        
+        # Cleanup
+        del frame
 
     cap.release()
     logger.info(
@@ -423,6 +464,7 @@ def crowd_zero_det_worker_hls(camera_configs, stop_event=None):
 
     camera_configs = filtered_configs
 
+    cv2.setNumThreads(0) # Prevent thread explosion
     if persistent_mode:
         _ensure_shared_hls_gpu_worker()
     else:
@@ -478,6 +520,7 @@ def main():
         logger.warning("No cameras found — exiting.")
         return
 
+    cv2.setNumThreads(0)
     stop_event = threading.Event()
 
     # single GPU worker
@@ -487,21 +530,15 @@ def main():
     gpu_t.start()
 
     # per-camera feeder threads
-    cam_threads = []
-    for cfg in camera_configs:
-        t = threading.Thread(
-            target=camera_thread,
-            args=(cfg, stop_event),
-            daemon=True,
-            name=f"cam_{cfg['camera_id']}",
-        )
-        t.start()
-        cam_threads.append(t)
-        time.sleep(THREAD_DELAY)
+    # Start camera threads using ThreadPoolExecutor
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=64) as executor:
+        for cfg in camera_configs:
+            executor.submit(camera_thread, cfg, stop_event)
+            time.sleep(THREAD_DELAY)
 
     try:
-        for t in cam_threads:
-            t.join()
+        stop_event.wait()
     except KeyboardInterrupt:
         logger.info("Interrupted — stopping...")
         stop_event.set()
@@ -510,6 +547,7 @@ def main():
 
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+    logger.info("✅ All crowd_zero HLS cameras completed")
 
 
 if __name__ == "__main__":

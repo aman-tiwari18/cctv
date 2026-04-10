@@ -12,6 +12,7 @@ Architecture: GPU-batched YOLO worker + per-camera feeder threads
 Compatible with TCS streaming links (HLS format).
 """
 
+import queue
 import sys
 import os
 sys.path.insert(0, os.path.dirname(__file__))
@@ -19,7 +20,6 @@ sys.path.insert(0, os.path.dirname(__file__))
 import cv2
 import numpy as np
 import time
-import queue
 import threading
 import signal
 import logging
@@ -88,9 +88,9 @@ TARGET_SCENES = ["Computer Lab"]
 
 # ─────────────────────────── queue / batching ─────────────────────────────────
 SAMPLE_EVERY = int(os.environ.get("TCS_BLINDSPOT_SAMPLE_EVERY", 2))
-GPU_BATCH_SIZE = int(os.environ.get("TCS_BLINDSPOT_BATCH_SIZE", 32))
-GPU_QUEUE_SIZE = int(os.environ.get("TCS_BLINDSPOT_QUEUE_SIZE", 512))
-THREAD_DELAY = float(os.environ.get("TCS_BLINDSPOT_THREAD_DELAY", 0.05))
+GPU_BATCH_SIZE = int(os.environ.get("TCS_BLINDSPOT_BATCH_SIZE", 64))
+GPU_QUEUE_SIZE = int(os.environ.get("TCS_BLINDSPOT_QUEUE_SIZE", 128))
+THREAD_DELAY = float(os.environ.get("TCS_BLINDSPOT_THREAD_DELAY", 0.1))
 COOLDOWN_TIME = int(os.environ.get("TCS_BLINDSPOT_COOLDOWN_SEC", 180))
 
 # ─────────────────────────── globals ──────────────────────────────────────────
@@ -352,7 +352,7 @@ class BlindSpotDetector:
 
     # ── save helper ───────────────────────────────────────────────────────────
 
-    def save_detection(self, frame: np.ndarray, issues: dict, save_folder: str = None) -> str | None:
+    def save_detection(self, frame: np.ndarray, issues: dict, save_folder: str = None, item: dict = None) -> str | None:
         """Persist annotated frame if issues found and cooldown elapsed."""
         if save_folder is None:
             save_folder = BLIND_SPOT_SAVE_FOLDER
@@ -376,16 +376,27 @@ class BlindSpotDetector:
             return None
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        # Standard format: blindspot_{device_id}_{camera_no}_{ts}.jpg
-        fname = f"blindspot_{self.camera_id}_{self.ch_no}_{ts}.jpg"
+        
+        # ── Source-Aware Naming Format ──────────────
+        source_type = item.get("source_type", "HLS") if item else "HLS"
+
+        if source_type == "HLS":
+            # blindspot_ch[ch_no]_[timestamp].jpg
+            fname = f"blindspot_ch{self.ch_no}_{ts}.jpg"
+        else:
+            # RTSP: blindspot_[device_id]_[camera_no]_[timestamp].jpg
+            dev_id = item.get("device_id") if item else self.camera_id
+            fname = f"blindspot_{dev_id}_{self.ch_no}_{ts}.jpg"
             
-        filepath = os.path.join(save_folder, fname)
-        cv2.imwrite(filepath, frame)
-        self.last_save_time = now
-        logger.warning(
-            f"[{self.camera_id}] Blind spot detected ({total_persons} persons) pk={self.camera_id_pk} — saved: {filepath}"
-        )
-        return filepath
+        if fname:
+            filepath = os.path.join(save_folder, fname)
+            cv2.imwrite(filepath, frame)
+            self.last_save_time = now
+            logger.warning(
+                f"[{self.camera_id}] Blind spot detected ({total_persons} persons) — saved: {filepath}"
+            )
+            return filepath
+        return None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -497,6 +508,9 @@ def gpu_worker(df, stop_event: threading.Event):
             results = model(frames, conf=CONFIDENCE_THRESHOLD, verbose=False)
         except Exception as exc:
             logger.error(f"[GPU] YOLO batch error: {exc}")
+            for item in batch:
+                if 'frame' in item: del item['frame']
+            del batch
             continue
 
         # ── per-frame processing ──────────────────────────────────────────────
@@ -516,9 +530,16 @@ def gpu_worker(df, stop_event: threading.Event):
             # rate-limiter check
             should_save, _, _ = rate_limiter.should_save_detection(camera_id)
             if should_save:
-                saved = detector.save_detection(annotated, issues)
+                saved = detector.save_detection(annotated, issues, item=item)
                 if saved:
                     logger.info(f"[{camera_id}] Saved: {saved}")
+            
+            # Explicit cleanup
+            del annotated
+            if 'frame' in item: del item['frame']
+
+        del batch
+        if 'results' in locals(): del results
 
         # GPU memory report
         if torch.cuda.is_available():
@@ -568,7 +589,7 @@ def camera_thread(cfg: dict, stop_event: threading.Event):
     logger.info(f"[{camera_id}] Stream open @ {fps:.1f} FPS (inside_lab={is_inside_lab})")
 
     # one detector per camera (holds movement history, issue counts, etc.)
-    detector   = BlindSpotDetector(camera_id, ch_no=cfg.get("ch_no", "unknown"))
+    detector   = BlindSpotDetector(camera_id, ch_no=str(cfg.get("ch_no") or camera_id))
     frame_count = 0
 
     while not stop_event.is_set():
@@ -588,9 +609,15 @@ def camera_thread(cfg: dict, stop_event: threading.Event):
                 "is_inside_lab": is_inside_lab,
                 "detector":      detector,   # stateful; only this thread writes to it
                 "cfg":           cfg,
+                "source_type":   "HLS",
+                "ch_no":         str(cfg.get("ch_no") or camera_id),
             })
         except queue.Full:
+            del frame
             pass  # drop frame if queue is backed up
+        
+        # Cleanup
+        del frame
 
     cap.release()
     logger.info(
@@ -609,59 +636,77 @@ _rtsp_detectors = {}
 _rtsp_lock = threading.Lock()
 
 def blind_spot_worker(frame_queue):
-    logger.info("🟢 [BlindSpotWorker] RTSP worker started")
-    model = get_yolo_model()
+    """
+    RTSP Worker — GPU Batch Queue Architecture.
+    Receives packets from the RTSP producer and pushes them into
+    the shared gpu_queue for batch inference via _ensure_shared_hls_gpu_worker.
+    """
+    import torch
+    logger.info("🟢 [BlindSpotWorker] RTSP batch-worker started")
+    stop_event = threading.Event()
 
-    while True:
-        data = frame_queue.get()
-        if data is None:
-            logger.info("🔴 [BlindSpotWorker] RTSP worker stopping")
-            break
+    # Start the SAME GPU batch worker that HLS uses
+    _ensure_shared_hls_gpu_worker()
 
-        if isinstance(data, dict):
-            frame = data.get("frame")
-            device_id = str(data.get("device_id", "unknown"))
-            camera_no = str(data.get("camera_no", "0"))
-            camera_id_pk = str(data.get("camera_id_pk", ""))
-        elif len(data) == 4:
-            frame, device_id, camera_no, camera_id_pk = data
-        else:
-            frame, device_id, camera_no = data
-            camera_id_pk = ""
+    try:
+        while True:
+            data = frame_queue.get()
+            if data is None:
+                logger.info("🔴 [BlindSpotWorker] RTSP batch-worker stopping")
+                break
 
-        key = camera_id_pk if camera_id_pk else f"{device_id}_{camera_no}"
-        log_key = f"{device_id}_{camera_no}"
+            # Unpack — supports dict, 4-tuple, 3-tuple
+            if isinstance(data, dict):
+                frame        = data.get("frame")
+                device_id    = str(data.get("device_id", "unknown"))
+                camera_no    = str(data.get("camera_no") or data.get("ch_no") or "0")
+                camera_id_pk = str(data.get("camera_id_pk", ""))
+            elif len(data) == 4:
+                frame, device_id, camera_no, camera_id_pk = data
+            else:
+                frame, device_id, camera_no = data
+                camera_id_pk = ""
 
-        with _rtsp_lock:
-            if key not in _rtsp_detectors:
-                _rtsp_detectors[key] = BlindSpotDetector(
-                    camera_id=log_key, 
-                    ch_no=camera_no,
-                    camera_id_pk=camera_id_pk
-                )
-            detector = _rtsp_detectors[key]
+            if frame is None:
+                continue
 
-        try:
-            results = model(frame, conf=CONFIDENCE_THRESHOLD, verbose=False)[0]
-            person_boxes = [b for b in results.boxes if int(b.cls[0]) == 0]
+            # Get or create detector for this RTSP stream
+            with _rtsp_lock:
+                key = camera_id_pk if camera_id_pk else f"{device_id}_{camera_no}"
+                if key not in _rtsp_detectors:
+                    _rtsp_detectors[key] = BlindSpotDetector(camera_id=str(device_id), ch_no=str(camera_no))
+                detector = _rtsp_detectors[key]
 
-            # True for is_inside_lab because RTSP streams are primarily lab cameras, 
-            # or could be extracted from a DB check in reality. Defaults to True for safety checks.
-            annotated, issues = detector.analyze_frame(frame.copy(), person_boxes, is_inside_lab=True)
-            
-            should_save, _, _ = rate_limiter.should_save_detection(key)
-            if should_save:
-                saved = detector.save_detection(annotated, issues, save_folder=RTSP_SAVE_FOLDER)
-                if saved:
-                    logger.info(f"[BlindSpotWorker] Saved RTSP: {saved}")
-        except Exception as e:
-            logger.error(f"[BlindSpotWorker] RTSP Error for {log_key}: {e}")
+            try:
+                gpu_queue.put({
+                    "frame":        frame.copy(),
+                    "camera_id":    str(device_id),
+                    "ch_no":        str(camera_no),
+                    "camera_id_pk": str(camera_id_pk),
+                    "save_folder":  RTSP_SAVE_FOLDER,
+                    "is_inside_lab": True,
+                    "detector":     detector,
+                    "cfg":          {"source_type": "RTSP", "device_id": device_id},
+                    "source_type":  "RTSP",
+                }, timeout=0.1)
+            except queue.Full:
+                pass
+            del frame
+
+    finally:
+        stop_event.set()
+        _STOP_EVENT.set()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        logger.info("🔴 [BlindSpotWorker] GPU worker shut down")
 
 def blind_spot_worker_hls(camera_configs, stop_event=None):
     """
     HLS worker entrypoint used by master_pipeline.
     Accepts one camera config dict or a list of config dicts.
     """
+    import torch
+    cv2.setNumThreads(0) # Prevent thread explosion
     if isinstance(camera_configs, dict):
         camera_configs = [camera_configs]
 
@@ -692,23 +737,17 @@ def blind_spot_worker_hls(camera_configs, stop_event=None):
         )
         gpu_t.start()
 
-    threads = []
-    for cfg in camera_configs:
-        t = threading.Thread(
-            target=camera_thread,
-            args=(cfg, stop_event),
-            daemon=True,
-            name=f"blind_spot_{cfg.get('camera_id', 'cam')}",
-        )
-        t.start()
-        threads.append(t)
-        time.sleep(THREAD_DELAY)
+    # Start camera threads using ThreadPoolExecutor
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=64) as executor:
+        for cfg in camera_configs:
+            executor.submit(camera_thread, cfg, stop_event)
+            time.sleep(THREAD_DELAY)
 
-    logger.info(f"[BlindSpotWorker][HLS] Started {len(threads)} camera threads")
+    logger.info(f"[BlindSpotWorker][HLS] Started {len(camera_configs)} camera threads")
 
     try:
-        for t in threads:
-            t.join()
+        stop_event.wait()
     except KeyboardInterrupt:
         stop_event.set()
 
@@ -746,22 +785,15 @@ def main():
     )
     gpu_t.start()
 
-    # start per-camera feeder threads
-    cam_threads = []
-    for cfg in camera_configs:
-        t = threading.Thread(
-            target=camera_thread,
-            args=(cfg, stop_event),
-            daemon=True,
-            name=f"cam_{cfg['camera_id']}",
-        )
-        t.start()
-        cam_threads.append(t)
-        time.sleep(THREAD_DELAY)   # stagger stream opens
+    # start per-camera feeder threads using ThreadPoolExecutor
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=64) as executor:
+        for cfg in camera_configs:
+            executor.submit(camera_thread, cfg, stop_event)
+            time.sleep(THREAD_DELAY)   # stagger stream opens
 
     try:
-        for t in cam_threads:
-            t.join()
+        stop_event.wait()
     except KeyboardInterrupt:
         logger.info("Interrupted — stopping…")
         stop_event.set()

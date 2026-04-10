@@ -281,7 +281,7 @@ const Executions = () => {
       {/* Header */}
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Box>
-          <Box display="flex" alignItems="center" gap={1}>
+          {/* <Box display="flex" alignItems="center" gap={1}>
             <Typography variant="h4" fontWeight="bold">Script Executions</Typography>
             {runningCount > 0 && (
               <Chip
@@ -291,8 +291,8 @@ const Executions = () => {
                 sx={{ bgcolor: '#dcfce7', color: '#15803d', fontWeight: 700, fontSize: '0.72rem' }}
               />
             )}
-          </Box>
-          <Typography variant="body1" color="text.secondary">
+          </Box> */}
+          <Typography variant="body1" color="text.secondary" fontSize= "0.9rem">
             Monitor and control script assignments
             {runningCount > 0 && ' · Auto-refreshing every 10s'}
           </Typography>

@@ -93,10 +93,10 @@ const Analytics = () => {
     <Box>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Box>
-          <Typography variant="h4" fontWeight="bold" gutterBottom>
+          {/* <Typography variant="h4" fontWeight="bold" gutterBottom>
             Script Scheduling
-          </Typography>
-          <Typography variant="body1" color="text.secondary">
+          </Typography> */}
+          <Typography variant="body1" color="text.secondary" fontSize="0.9rem">
             Manage script assignments for exam shifts
           </Typography>
         </Box>

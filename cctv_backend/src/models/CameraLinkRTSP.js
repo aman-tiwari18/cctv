@@ -52,6 +52,10 @@ const CameraLinkRTSP = sequelize.define(
             type: DataTypes.STRING,
             allowNull: true,
         },
+        status: {
+            type: DataTypes.STRING,
+            allowNull: true,
+        },
         is_active: {
             type: DataTypes.BOOLEAN,
             defaultValue: true,

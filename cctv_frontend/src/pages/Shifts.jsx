@@ -83,10 +83,10 @@ const Shifts = () => {
     <Box>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Box>
-          <Typography variant="h4" fontWeight="bold" gutterBottom>
-            Exam Shifts
-          </Typography>
-          <Typography variant="body1" color="text.secondary">
+              {/* <Typography variant="h4" fontWeight="bold" gutterBottom>
+                Exam Shifts
+              </Typography> */}
+          <Typography variant="body1" color="text.secondary" fontSize="0.9rem">
             View shifts defined for each exam
           </Typography>
         </Box>

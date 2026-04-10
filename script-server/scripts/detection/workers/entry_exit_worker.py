@@ -516,6 +516,7 @@ Merged from:
   - entry_exit_det_tcs.py  (HLS / TCS flow)
 """
 
+import queue
 import time
 import os
 import logging
@@ -532,8 +533,10 @@ _STOP_EVENT = threading.Event()
 def _handle_stop(sig, frame):
     _STOP_EVENT.set()
 
-signal.signal(signal.SIGINT,  _handle_stop)
-signal.signal(signal.SIGTERM, _handle_stop)
+import threading
+if threading.current_thread() is threading.main_thread():
+    signal.signal(signal.SIGINT,  _handle_stop)
+    signal.signal(signal.SIGTERM, _handle_stop)
 
 # ================= LOGGING =================
 logging.basicConfig(
@@ -653,32 +656,65 @@ def detect_entry_exit(frame, device_id: str, camera_no: str, save_folder: str, s
 # =====================================================
 def entry_exit_worker(frame_queue):
     """
-    Queue-based worker — receives (frame, device_id, camera_no)
-    packets from the RTSP producer.
+    RTSP Worker — GPU Batch Queue Architecture.
+    Receives packets from the RTSP producer and pushes them into
+    the shared _gpu_queue for batch inference.
     """
-    logger.info("🟢 [EntryExitWorker] RTSP worker started")
+    import torch
+    logger.info("🟢 [EntryExitWorker] RTSP batch-worker started")
+    stop_event = threading.Event()
 
-    while True:
-        data = frame_queue.get()
-        if data is None:
-            logger.info("🔴 [EntryExitWorker] RTSP worker stopping")
-            break
+    # Start the SAME GPU batch worker that HLS uses
+    gpu_t = threading.Thread(
+        target=_hls_gpu_batch_worker,
+        args=(stop_event, RTSP_SAVE_FOLDER),
+        daemon=True
+    )
+    gpu_t.start()
 
-        # Unpack: (frame, device_id, camera_no) or (frame, device_id, camera_no, camera_id_pk)
-        if len(data) == 4:
-            frame, device_id, camera_no, camera_id_pk = data
-        else:
-            frame, device_id, camera_no = data
-            camera_id_pk = ""
+    try:
+        while True:
+            data = frame_queue.get()
+            if data is None:
+                logger.info("🔴 [EntryExitWorker] RTSP batch-worker stopping")
+                break
 
-        detect_entry_exit(
-            frame.copy(),
-            str(device_id),
-            str(camera_no),
-            save_folder=RTSP_SAVE_FOLDER,
-            script_name="entry_exit",
-            camera_id_pk=str(camera_id_pk)
-        )
+            # Unpack — supports dict, 4-tuple, 3-tuple
+            if isinstance(data, dict):
+                frame        = data.get("frame")
+                device_id    = str(data.get("device_id", "unknown"))
+                camera_no    = str(data.get("camera_no") or data.get("ch_no") or "0")
+                camera_id_pk = str(data.get("camera_id_pk", ""))
+            elif len(data) == 4:
+                frame, device_id, camera_no, camera_id_pk = data
+            else:
+                frame, device_id, camera_no = data
+                camera_id_pk = ""
+
+            if frame is None:
+                continue
+
+            try:
+                _gpu_queue.put({
+                    "frame":        frame.copy(),
+                    "device_id":    str(device_id),
+                    "camera_no":    str(camera_no),
+                    "ch_no":        str(camera_no), # for compatibility
+                    "camera_id_pk": str(camera_id_pk),
+                    "script_name":  "EntryExit",
+                    "source_type":  "RTSP",
+                    "state":        {},
+                }, timeout=0.1)
+            except queue.Full:
+                pass
+            del frame
+
+    finally:
+        stop_event.set()
+        gpu_t.join(timeout=5)
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        logger.info("🔴 [EntryExitWorker] GPU worker shut down")
 
 
 # =====================================================
@@ -694,7 +730,6 @@ def entry_exit_worker(frame_queue):
 # =====================================================
 
 import sys
-import queue
 
 # Ensure detection root is on path for imports
 _DETECTION_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -711,9 +746,9 @@ from tcs_scheduler import frame_should_process
 from detection_rate_limiter import get_rate_limiter
 
 # ── GPU Queue Config ─────────────────────────────────
-GPU_BATCH_SIZE     = int(os.environ.get("GPU_BATCH_SIZE", "96"))
-GPU_QUEUE_MAX_SIZE = int(os.environ.get("GPU_QUEUE_MAX_SIZE", "1024"))
-THREAD_START_DELAY = float(os.environ.get("THREAD_START_DELAY_MS", "200")) / 1000.0
+GPU_BATCH_SIZE     = int(os.environ.get("GPU_BATCH_SIZE", "64"))
+GPU_QUEUE_MAX_SIZE = int(os.environ.get("GPU_QUEUE_MAX_SIZE", "256"))
+THREAD_START_DELAY = float(os.environ.get("THREAD_START_DELAY_MS", "100")) / 1000.0
 ENTRY_SAMPLE_EVERY = 20  # 🔥 1/20 sampling as per user snippet
 
 _gpu_queue = queue.Queue(maxsize=GPU_QUEUE_MAX_SIZE)
@@ -737,7 +772,7 @@ def _ensure_shared_hls_gpu_worker(save_folder):
 
 
 
-def _hls_gpu_batch_worker(stop_event, save_folder, cooldown_time=120):
+def _hls_gpu_batch_worker(stop_event, save_folder, cooldown_time=30):
     """
     GPU batch worker — pulls frames from _gpu_queue in batches,
     runs entry_core.detect_persons_batch() for high performance.
@@ -772,30 +807,53 @@ def _hls_gpu_batch_worker(stop_event, save_folder, cooldown_time=120):
             batch_results = entry_core.detect_persons_batch(batch_items)
             
             for item, (processed_frame, detected, person_count) in zip(batch_items, batch_results):
-                camera_id = item['camera_id']
-                ch_no = item['ch_no']
+                camera_id = item.get('device_id') or item.get('camera_id')
+                ch_no     = item['ch_no']
+                script_name = item.get('script_name', 'EntryExit')
 
                 if not detected:
+                    if 'frame' in item: del item['frame']
                     continue
 
                 now = time.time()
                 last_time = _last_save_time.get(camera_id, 0)
 
                 if now - last_time < cooldown_time:
+                    if 'frame' in item: del item['frame']
                     continue
 
                 _last_save_time[camera_id] = now
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = os.path.join(
-                    save_folder,
-                    f"EntryExit_ch{ch_no}_{timestamp}.jpg"
-                )
+                
+                # ── Source-Aware Naming Format ──────────────
+                if item.get("source_type") == "HLS":
+                    filename = os.path.join(
+                        save_folder,
+                        f"{script_name}_ch{ch_no}_{timestamp}.jpg"
+                    )
+                else:
+                    # RTSP: {script}_{device_id}_{camera_no}_{ts}.jpg
+                    dev_id = item.get("device_id") or camera_id
+                    filename = os.path.join(
+                        save_folder,
+                        f"{script_name}_{dev_id}_{ch_no}_{timestamp}.jpg"
+                    )
 
                 cv2.imwrite(filename, processed_frame)
                 logger.info(f"[SAVE] 🚪 {filename} (Persons: {person_count})")
+                
+                # Cleanup
+                if 'frame' in item: del item['frame']
+                del processed_frame
+
+            del batch_items
+            if 'batch_results' in locals(): del batch_results
 
         except Exception as e:
             logger.error(f"[BATCH ERROR][Entry/Exit] {e}")
+            for item in batch_items:
+                if 'frame' in item: del item['frame']
+            del batch_items
 
     logger.info("🔴 [EntryExitWorker][HLS] GPU batch worker stopped")
 
@@ -847,10 +905,15 @@ def _hls_camera_thread(cfg, stop_event):
                 "frame": frame.copy(),
                 "camera_id": camera_id,
                 "ch_no": ch_no,
-                "script_code": "entry_exit"
+                "script_name": "EntryExit",
+                "source_type": "HLS",
             }, timeout=0.1)
         except queue.Full:
+            del frame
             continue
+        
+        # Cleanup
+        del frame
 
     cap.release()
     logger.info(f"[EntryExitWorker][HLS] 🔴 Camera thread stopped → {camera_id}")
@@ -866,6 +929,7 @@ def entry_exit_worker_hls(camera_configs, stop_event=None):
     Can also accept a single dict for backward compatibility.
     """
     import torch
+    cv2.setNumThreads(0) # Prevent thread explosion
 
     # Handle single config (backward compat)
     if isinstance(camera_configs, dict):
@@ -919,23 +983,14 @@ def entry_exit_worker_hls(camera_configs, stop_event=None):
         )
         gpu_t.start()
 
-    # Start Camera Threads
-    threads = []
-    for cfg in filtered_configs:
-        t = threading.Thread(target=_hls_camera_thread, args=(cfg, stop_event), daemon=True)
-        t.start()
-        threads.append(t)
-        time.sleep(THREAD_START_DELAY)
+    # Start Camera Threads with ThreadPoolExecutor
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=64) as executor:
+        for cfg in filtered_configs:
+            executor.submit(_hls_camera_thread, cfg, stop_event)
+            time.sleep(THREAD_START_DELAY)
 
-
-    logger.info(f"[EntryExitWorker][HLS] Started {len(threads)} camera threads + 1 GPU worker")
-
-    # Wait for all camera threads
-    try:
-        for t in threads:
-            t.join()
-    except KeyboardInterrupt:
-        stop_event.set()
+    stop_event.wait()
 
     if persistent_mode:
         logger.info("[EntryExitWorker][HLS] ✅ Camera threads completed (shared GPU worker still running)")

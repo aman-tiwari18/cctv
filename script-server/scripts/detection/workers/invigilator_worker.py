@@ -7,6 +7,7 @@ Merged from:
   - invigilator_tracking_tcs.py (HLS / TCS flow)
 """
 
+import queue
 import os
 import time
 import cv2
@@ -388,31 +389,65 @@ def track_invigilator(frame, device_id: str, camera_no: str, base_dir: str, came
 # =====================================================
 def invigilator_worker(frame_queue):
     """
-    Queue-based worker — receives (frame, device_id, camera_no)
-    packets from the RTSP producer.
+    RTSP Worker — GPU Batch Queue Architecture.
+    Receives packets from the RTSP producer and pushes them into
+    the shared _gpu_queue for batch inference.
     """
-    logger.info("🟢 [InvigilatorWorker] RTSP worker started")
+    import torch
+    logger.info("🟢 [InvigilatorWorker] RTSP batch-worker started")
+    stop_event = threading.Event()
 
-    while True:
-        data = frame_queue.get()
-        if data is None:
-            logger.info("🔴 [InvigilatorWorker] RTSP worker stopping")
-            break
+    # Start the SAME GPU batch worker that HLS uses
+    gpu_t = threading.Thread(
+        target=_hls_gpu_batch_worker,
+        args=(stop_event,),
+        daemon=True
+    )
+    gpu_t.start()
 
-        # Unpack: (frame, device_id, camera_no) or (frame, device_id, camera_no, camera_id_pk)
-        if len(data) == 4:
-            frame, device_id, camera_no, camera_id_pk = data
-        else:
-            frame, device_id, camera_no = data
-            camera_id_pk = ""
+    try:
+        while True:
+            data = frame_queue.get()
+            if data is None:
+                logger.info("🔴 [InvigilatorWorker] RTSP batch-worker stopping")
+                break
 
-        track_invigilator(
-            frame.copy(),
-            str(device_id),
-            str(camera_no),
-            base_dir=RTSP_BASE_DIR,
-            camera_id_pk=str(camera_id_pk)
-        )
+            # Unpack — supports dict, 4-tuple, 3-tuple
+            if isinstance(data, dict):
+                frame        = data.get("frame")
+                device_id    = str(data.get("device_id", "unknown"))
+                camera_no    = str(data.get("camera_no") or data.get("ch_no") or "0")
+                camera_id_pk = str(data.get("camera_id_pk", ""))
+            elif len(data) == 4:
+                frame, device_id, camera_no, camera_id_pk = data
+            else:
+                frame, device_id, camera_no = data
+                camera_id_pk = ""
+
+            if frame is None:
+                continue
+
+            try:
+                _gpu_queue.put({
+                    "frame":        frame.copy(),
+                    "device_id":    str(device_id),
+                    "camera_no":    str(camera_no),
+                    "ch_no":        str(camera_no),
+                    "camera_id_pk": str(camera_id_pk),
+                    "base_dir":     RTSP_BASE_DIR,
+                    "source_type":  "RTSP",
+                    "result_cb":    on_result, # Added for RTSP tracking support
+                }, timeout=0.1)
+            except queue.Full:
+                pass
+            del frame
+
+    finally:
+        stop_event.set()
+        gpu_t.join(timeout=5)
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        logger.info("🔴 [InvigilatorWorker] GPU worker shut down")
 
 
 # =====================================================
@@ -430,7 +465,6 @@ def invigilator_worker(frame_queue):
 
 import sys
 import gc
-import queue
 
 _DETECTION_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _DETECTION_ROOT not in sys.path:
@@ -446,8 +480,8 @@ from tcs_scheduler import frame_should_process, get_sample_every
 
 # ── GPU Queue Config ─────────────────────────────────
 GPU_BATCH_SIZE     = int(os.environ.get("GPU_BATCH_SIZE", "64"))
-GPU_QUEUE_MAX_SIZE = int(os.environ.get("GPU_QUEUE_MAX_SIZE", "1024"))
-THREAD_START_DELAY = float(os.environ.get("THREAD_START_DELAY_MS", "200")) / 1000.0
+GPU_QUEUE_MAX_SIZE = int(os.environ.get("GPU_QUEUE_MAX_SIZE", "128"))
+THREAD_START_DELAY = float(os.environ.get("THREAD_START_DELAY_MS", "100")) / 1000.0
 INV_SAMPLE_EVERY   = get_sample_every("TCS_INVIGILATOR_SAMPLE_EVERY", 2)
 
 _gpu_queue = queue.Queue(maxsize=GPU_QUEUE_MAX_SIZE)
@@ -500,6 +534,9 @@ def _hls_gpu_batch_worker(stop_event):
                     conf_threshold=DETECTION_THRESHOLD, 
                     min_height=MIN_HEIGHT
                 )
+                for item in batch:
+                    if 'frame' in item: del item['frame']
+                del batch
             except Exception as e:
                 logger.error(f"❌ [InvigilatorWorker] GPU batch processing error: {e}")
                 # Continue processing despite error
@@ -510,6 +547,9 @@ def _hls_gpu_batch_worker(stop_event):
                             item['callback']([], item['frame'])
                         except Exception as cb_err:
                             logger.error(f"❌ [InvigilatorWorker] Callback error: {cb_err}")
+                for item in batch:
+                    if 'frame' in item: del item['frame']
+                del batch
 
     logger.info("🔴 [InvigilatorWorker][HLS] GPU worker stopped")
 
@@ -543,7 +583,11 @@ def _hls_camera_thread(cfg, stop_event, results_dir):
 
     #     _hls_inv_stats[camera_id]['total_tracked'] = len(detections)
 
-    def on_result(detections, frame):
+    def on_result(detections, frame, item):
+        camera_id = item.get('device_id') or item.get('camera_id')
+        ch_no     = item.get('camera_no') or item.get('ch_no')
+        src_type  = item.get('source_type', 'HLS')
+        
         tracker = _get_hls_tracker(camera_id, results_dir)
         display_frame = frame.copy()
         visible_ids = set()
@@ -556,7 +600,14 @@ def _hls_camera_thread(cfg, stop_event, results_dir):
             visible_ids.add(tid)
             tracker.mark_visible(tid)
             tracker.update_track_status(tid, track.bbox)
-            tracker.check_and_save_static_frames(display_frame, frame, tid)
+            
+            # 🔥 Pass source_type/device_id to save_frame
+            tracker.check_and_save_static_frames(
+                display_frame, frame, tid, 
+                source_type=src_type, 
+                device_id=camera_id, 
+                camera_no=ch_no
+            )
 
             # Draw boxes
             x1, y1, x2, y2 = map(int, track.bbox)
@@ -569,10 +620,10 @@ def _hls_camera_thread(cfg, stop_event, results_dir):
         for tid in set(tracker.visibility_status.keys()) - visible_ids:
             tracker.mark_invisible(tid)
 
-        tracker.check_and_save_invisible_frames(display_frame)
+        tracker.check_and_save_invisible_frames(display_frame, source_type=src_type, device_id=camera_id, camera_no=ch_no)
 
         if visible_ids:
-            tracker.check_and_save_annotated(display_frame)
+            tracker.check_and_save_annotated(display_frame, source_type=src_type, device_id=camera_id, camera_no=ch_no)
 
         _hls_inv_stats[camera_id]['total_tracked'] = len(detections)
         _hls_inv_stats[camera_id]['static_alerts'] = len(tracker.static_events_saved)
@@ -607,10 +658,16 @@ def _hls_camera_thread(cfg, stop_event, results_dir):
                 _gpu_queue.put_nowait({
                     'frame':     frame,
                     'camera_id': camera_id,
+                    'ch_no':     cfg.get('ch_no', '0'),
+                    'source_type': 'HLS',
                     'result_cb': on_result,
                 })
             except queue.Full:
+                del frame
                 continue
+            
+            # Cleanup
+            del frame
 
     except Exception as e:
         logger.error(f"[{camera_id}] Error: {e}")
@@ -632,6 +689,7 @@ def invigilator_worker_hls(camera_configs, stop_event=None):
     Can also accept a single dict for backward compatibility.
     """
     import torch
+    cv2.setNumThreads(0) # Prevent thread explosion
 
     if isinstance(camera_configs, dict):
         camera_configs = [camera_configs]
@@ -665,28 +723,17 @@ def invigilator_worker_hls(camera_configs, stop_event=None):
     )
     gpu_t.start()
 
-    # Start camera threads with staggered delay
-    threads = []
-    total = len(camera_configs)
-    for i, cfg in enumerate(camera_configs):
-        t = threading.Thread(
-            target=_hls_camera_thread,
-            args=(cfg, stop_event, results_dir),
-            name=f"Inv-{cfg.get('camera_id', i)}",
-            daemon=True
-        )
-        t.start()
-        threads.append(t)
-        time.sleep(THREAD_START_DELAY)
+    # Start camera threads using ThreadPoolExecutor for scaling
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=64) as executor:
+        for cfg in camera_configs:
+            executor.submit(_hls_camera_thread, cfg, stop_event, results_dir)
+            time.sleep(THREAD_START_DELAY)
 
-        if (i + 1) % 100 == 0:
-            logger.info(f"  {i + 1}/{total} invigilator camera threads started...")
-
-    logger.info(f"[InvigilatorWorker][HLS] All {total} cameras started + 1 GPU worker")
+    logger.info(f"[InvigilatorWorker][HLS] All {len(camera_configs)} cameras started + 1 GPU worker")
 
     try:
-        for t in threads:
-            t.join()
+        stop_event.wait()
     except KeyboardInterrupt:
         stop_event.set()
 

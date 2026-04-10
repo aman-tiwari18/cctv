@@ -35,6 +35,8 @@ try:
         get_rtsp_cameras,
         update_hls_classification,
         update_rtsp_classification,
+        update_hls_status,
+        update_rtsp_status,
     )
 except ImportError:
     sys.path.append(os.path.join(os.path.dirname(__file__), "utils"))
@@ -43,6 +45,8 @@ except ImportError:
         get_rtsp_cameras,
         update_hls_classification,
         update_rtsp_classification,
+        update_hls_status,
+        update_rtsp_status,
     )
 
 # ===========================================================================
@@ -97,7 +101,7 @@ os.makedirs(SAVE_FOLDER, exist_ok=True)
 
 # One shared thread-pool for all blocking I/O (OpenCV, FFmpeg, HLS extract)
 _THREAD_POOL = ThreadPoolExecutor(max_workers=THREAD_POOL_SIZE)
-
+A
 logger.info("=" * 80)
 logger.info("TCS Camera Classification — DB Mode | H200 Optimized")
 logger.info(f"  CPU cores        : {_CPU_CORES}")
@@ -600,19 +604,41 @@ def _bulk_persist(runtime: dict, classifications: List[dict]) -> int:
     for item in classifications:
         cam_id = str(item.get("camera_id") or "").strip()
         label  = str(item.get("classification") or "").strip()
+        status = str(item.get("status") or "").strip() or None
         if not cam_id or not label:
             continue
         try:
             if runtime["link_type"] == "HLS":
                 updated += update_hls_classification(
                     runtime["exam_id"], runtime["shift_id"],
-                    runtime["assignment_date"], cam_id, label,
+                    runtime["assignment_date"], cam_id, label, status
                 )
             else:
-                updated += update_rtsp_classification(runtime["exam_id"], cam_id, label)
+                updated += update_rtsp_classification(runtime["exam_id"], cam_id, label, status)
         except Exception as e:
             logger.error(f"DB persist failed for {cam_id}: {e}")
     logger.info(f"Bulk DB persist complete: {updated} rows updated")
+    return updated
+
+
+def _bulk_persist_status(runtime: dict, statuses: List[dict]) -> int:
+    updated = 0
+    for item in statuses:
+        cam_id = str(item.get("camera_id") or "").strip()
+        status = str(item.get("status") or "").strip()
+        if not cam_id or not status:
+            continue
+        try:
+            if runtime["link_type"] == "HLS":
+                updated += update_hls_status(
+                    runtime["exam_id"], runtime["shift_id"],
+                    runtime["assignment_date"], cam_id, status
+                )
+            else:
+                updated += update_rtsp_status(runtime["exam_id"], cam_id, status)
+        except Exception as e:
+            logger.error(f"DB status persist failed for {cam_id}: {e}")
+    logger.info(f"Bulk DB status persist complete: {updated} rows updated")
     return updated
 
 
@@ -771,6 +797,13 @@ async def run_assignment_mode() -> dict:
             f"Pass-1 done {time.time()-p1_start:.1f}s | "
             f"accessible={len(accessible)} failed={len(failed)}"
         )
+        
+        statuses_to_persist = []
+        for x in accessible:
+            statuses_to_persist.append({"camera_id": x["camera_id"], "status": "Accessible"})
+        for x in failed:
+            statuses_to_persist.append({"camera_id": x["camera_id"], "status": "Not Accessible"})
+        _bulk_persist_status(runtime, statuses_to_persist)
 
         if not accessible:
             logger.warning("No accessible cameras — nothing to classify")
@@ -805,6 +838,7 @@ async def run_assignment_mode() -> dict:
                 "camera_id":      res["camera_id"],
                 "camera_name":    res.get("camera_name"),
                 "classification": res["classification"],
+                "status":         res.get("status")
             })
             if res.get("status") != "Accessible":
                 failed.append({"camera_id": res["camera_id"], "reason": res.get("detail")})

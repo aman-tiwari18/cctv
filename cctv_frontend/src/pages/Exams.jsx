@@ -295,12 +295,9 @@ const Exams = () => {
 
   return (
     <Box>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+      <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
         <Box>
-          <Typography variant="h4" fontWeight="bold" gutterBottom>
-            Exams
-          </Typography>
-          <Typography variant="body1" color="text.secondary">
+          <Typography variant="body1" color="text.secondary" fontSize= "0.9rem">
             Manage exam configurations, date ranges, shifts, and monitoring settings
           </Typography>
         </Box>

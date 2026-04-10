@@ -47,6 +47,7 @@ def load_cameras_for_execution(execution: dict) -> list:
             cameras.append({
                 "cctv_url":       row["cctv_url"],
                 "camera_id":      ch_code,
+                "ch_no":          ch_code,   # Added to ensure workers get the channel code
                 "camera_id_pk":   str(row.get("id", "")),   # DB primary key — always unique
                 "classification": str(row.get("classification", "")).strip(),
                 "link_type":      "HLS",

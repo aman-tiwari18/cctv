@@ -6,15 +6,15 @@ import shutil
 import openpyxl
 from openpyxl.styles import Font
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime,time
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import quote
 from typing import Optional, List
 import socketio
 from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 
 from app.config import HTTP_PORT, MAIN_BACKEND_URL, POLL_INTERVAL_MS, SCRIPTS_DIR
@@ -217,17 +217,13 @@ app = FastAPI(
     root_path="/cctv_dev"
 )
 
-# ── Static file serving for detection images ──────────────────
+# ── Detection image directories ──────────────────────────────
 RESULTS_DIR = Path(SCRIPTS_DIR).resolve() / "detection" / "results" / "tcs_detections"
 RTSP_RESULTS_DIR = Path(SCRIPTS_DIR).resolve() / "detection" / "results"
-# CLIENT_SELECTED_DIR = Path(SCRIPTS_DIR).resolve() / "detection" / "results" / "client_selected_images"
 CLIENT_SELECTED_DIR = Path(SCRIPTS_DIR).resolve() / "detection" / "results" / "client_selected_images"
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 RTSP_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 CLIENT_SELECTED_DIR.mkdir(parents=True, exist_ok=True)
-app.mount("/detection-images", StaticFiles(directory=str(RESULTS_DIR)), name="detection-images")
-app.mount("/rtsp-detection-images", StaticFiles(directory=str(RTSP_RESULTS_DIR)), name="rtsp-detection-images")
-app.mount("/client-detection-images", StaticFiles(directory=str(CLIENT_SELECTED_DIR)), name="client-detection-images")
 
 app.add_middleware(
     CORSMiddleware,
@@ -241,6 +237,35 @@ async def log_requests(request: Request, call_next):
     logger.debug(f"{request.method} {request.url.path}")
     response = await call_next(request)
     return response
+
+
+# ── Image serving endpoints (replaces StaticFiles mounts) ─────
+def _safe_resolve(base_dir: Path, relative: str) -> Path:
+    """Resolve a relative path against base_dir, preventing directory traversal."""
+    candidate = (base_dir / relative).resolve()
+    if not str(candidate).startswith(str(base_dir.resolve())):
+        raise HTTPException(status_code=400, detail="Invalid path")
+    if not candidate.exists() or not candidate.is_file():
+        raise HTTPException(status_code=404, detail="Image not found")
+    return candidate
+
+
+@app.get("/serve-detection-images/{file_path:path}")
+async def serve_detection_image(file_path: str):
+    resolved = _safe_resolve(RESULTS_DIR, file_path)
+    return FileResponse(resolved, media_type="image/jpeg")
+
+
+@app.get("/serve-rtsp-detection-images/{file_path:path}")
+async def serve_rtsp_detection_image(file_path: str):
+    resolved = _safe_resolve(RTSP_RESULTS_DIR, file_path)
+    return FileResponse(resolved, media_type="image/jpeg")
+
+
+@app.get("/serve-client-detection-images/{file_path:path}")
+async def serve_client_detection_image(file_path: str):
+    resolved = _safe_resolve(CLIENT_SELECTED_DIR, file_path)
+    return FileResponse(resolved, media_type="image/jpeg")
 
 @app.get("/health")
 async def health_check():
@@ -531,11 +556,11 @@ def parse_detection_filename(
         "static_person": "Static Person",
     }
 
-    # ── Image URL: different mount point for RTSP vs HLS ──
+    # ── Image URL: different endpoint for RTSP vs HLS ──
     if source == "rtsp":
-        image_url = f"/cctv_dev/rtsp-detection-images/{DETECTION_FOLDERS[type_key]}/{image_rel}"
+        image_url = f"/serve-rtsp-detection-images/{DETECTION_FOLDERS[type_key]}/{image_rel}"
     else:
-        image_url = f"/cctv_dev/detection-images/{DETECTION_FOLDERS[type_key]}/{image_rel}"
+        image_url = f"/serve-detection-images/{DETECTION_FOLDERS[type_key]}/{image_rel}"
 
     return {
         "filename":    basename,
@@ -570,12 +595,85 @@ def parse_detection_filename(
         "image_url":   image_url,
     }
 
+# @app.get("/detections")
+# def list_detections(
+#     type: Optional[str] = None,
+#     date: Optional[str] = None,
+#     search: Optional[str] = None,
+#     source: Optional[str] = None,
+#     page: int = 1,
+#     limit: int = 50,
+# ):
+#     rows = []
+#     folders = {type: DETECTION_FOLDERS[type]} if type and type in DETECTION_FOLDERS else DETECTION_FOLDERS
+
+#     def _scan_dir(base_dir: Path, origin: str):
+#         for type_key, folder_name in folders.items():
+#             folder = base_dir / folder_name
+#             if not folder.exists():
+#                 continue
+#             for f in _iter_detection_files(type_key, folder):
+#                 relative_path = str(f.relative_to(folder).as_posix())
+#                 item = parse_detection_filename(
+#                     relative_path, type_key, f,
+#                     is_new_image=False, source=origin,
+#                 )
+
+#                 if date and not item["date"].startswith(date):
+#                     continue
+
+#                 if search:
+#                     q = search.lower()
+#                     haystack = " ".join([
+#                         str(item.get("camera_id") or ""),
+#                         str(item.get("cameraName") or ""),
+#                         str(item.get("centerName") or ""),
+#                         str(item.get("city") or ""),
+#                         str(item.get("state") or ""),
+#                         str(item.get("tcCode") or ""),
+#                     ]).lower()
+#                     if q not in haystack:
+#                         continue
+
+#                 rows.append((f.stat().st_mtime, item))
+
+#     # Scan based on source filter or both
+#     if source != "rtsp":
+#         _scan_dir(RESULTS_DIR, "hls")
+#     if source != "hls":
+#         _scan_dir(RTSP_RESULTS_DIR, "rtsp")
+
+#     # Sort by file write time descending (newest first).
+#     rows.sort(key=lambda x: x[0], reverse=True)
+#     results = [item for _, item in rows]
+
+#     total = len(results)
+#     start = (page - 1) * limit
+#     paginated = results[start: start + limit]
+
+#     # Summary counts per type
+#     counts = {k: 0 for k in DETECTION_FOLDERS}
+#     for r in results:
+#         counts[r["type"]] = counts.get(r["type"], 0) + 1
+
+#     return {
+#         "success": True,
+#         "total":   total,
+#         "page":    page,
+#         "limit":   limit,
+#         "counts":  counts,
+#         "data":    paginated,
+#     }
+
+
 @app.get("/detections")
 def list_detections(
     type: Optional[str] = None,
     date: Optional[str] = None,
     search: Optional[str] = None,
     source: Optional[str] = None,
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None,
     page: int = 1,
     limit: int = 50,
 ):
@@ -596,6 +694,15 @@ def list_detections(
 
                 if date and not item["date"].startswith(date):
                     continue
+
+                if start_time or end_time:
+                    time_str = item.get("time")
+                    if time_str and len(time_str) >= 4:
+                        h_m = f"{time_str[:2]}:{time_str[2:4]}"
+                        if start_time and h_m < start_time:
+                            continue
+                        if end_time and h_m > end_time:
+                            continue
 
                 if search:
                     q = search.lower()
@@ -641,6 +748,7 @@ def list_detections(
     }
 
 
+
 def _validate_relative_path(path_str: str) -> Path:
     candidate = Path(path_str)
     if candidate.is_absolute() or ".." in candidate.parts:
@@ -678,11 +786,18 @@ class ClientDetectionCopyRequest(BaseModel):
 
 
 @app.post("/client-detections/copy")
-def copy_client_detections(payload: ClientDetectionCopyRequest):
+async def copy_client_detections(payload: ClientDetectionCopyRequest):
     copied = []
+    failed = []
 
     for item in payload.items:
-        src_path = _resolve_detection_source_path(item.source, item.type, item.relativePath)
+        try:
+            src_path = _resolve_detection_source_path(item.source, item.type, item.relativePath)
+        except HTTPException as e:
+            logger.warning(f"Skipping copy for {item.relativePath}: {e.detail}")
+            failed.append({"relativePath": item.relativePath, "error": e.detail})
+            continue
+
         dest_path = CLIENT_SELECTED_DIR / item.source / DETECTION_FOLDERS[item.type] / item.relativePath
         dest_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src_path, dest_path)
@@ -698,20 +813,92 @@ def copy_client_detections(payload: ClientDetectionCopyRequest):
             "source": item.source,
             "type": item.type,
             "relativePath": item.relativePath,
-            "image_url": f"/cctv_dev/client-detection-images/{item.source}/{DETECTION_FOLDERS[item.type]}/{item.relativePath}",
+            "image_url": f"/serve-client-detection-images/{item.source}/{DETECTION_FOLDERS[item.type]}/{item.relativePath}",
         })
         copied.append(copied_item)
 
         try:
-            asyncio.create_task(sio.emit("client-detection:new", copied_item))
-        except RuntimeError:
-            logger.warning("Unable to schedule client detection socket emit")
+            await sio.emit("client-detection:new", copied_item)
+            logger.info(f"Emitted client-detection:new for {item.relativePath}")
+        except Exception as e:
+            logger.warning(f"Failed to emit client detection socket event: {e}")
 
-    return {"success": True, "copied": copied}
+    return {"success": True, "copied": copied, "failed": failed}
+
+
+# @app.get("/client-detections")
+# def list_client_detections(page: int = 1, limit: int = 100, source: Optional[str] = None, type: Optional[str] = None):
+#     rows = []
+
+#     for root, _, files in os.walk(CLIENT_SELECTED_DIR):
+#         for filename in files:
+#             if not filename.lower().endswith((".jpg", ".jpeg", ".png", ".bmp", ".webp")):
+#                 continue
+
+#             file_path = Path(root) / filename
+#             rel = file_path.relative_to(CLIENT_SELECTED_DIR).as_posix()
+#             parts = rel.split("/")
+#             if len(parts) < 3:
+#                 continue
+
+#             source_part = parts[0]
+#             folder_name = parts[1]
+#             relative_path = "/".join(parts[2:])
+#             type_key = next((k for k, v in DETECTION_FOLDERS.items() if v == folder_name), folder_name)
+
+#             if source and source != source_part:
+#                 continue
+#             if type and type != type_key:
+#                 continue
+
+#             item = parse_detection_filename(
+#                 relative_path,
+#                 type_key,
+#                 file_path,
+#                 is_new_image=False,
+#                 source=source_part,
+#             )
+#             item.update({
+#                 "source": source_part,
+#                 "type": type_key,
+#                 "filename": filename,
+#                 "relativePath": relative_path,
+#                 "image_url": f"/serve-client-detection-images/{rel}",
+#                 "_mtime": file_path.stat().st_mtime,
+#             })
+#             rows.append(item)
+
+#     rows.sort(key=lambda item: item.get("_mtime", 0), reverse=True)
+
+#     total = len(rows)
+#     start = (page - 1) * limit
+#     paginated = rows[start: start + limit]
+
+#     counts = {k: 0 for k in DETECTION_FOLDERS}
+#     for row in rows:
+#         counts[row["type"]] = counts.get(row["type"], 0) + 1
+
+#     return {
+#         "success": True,
+#         "total": total,
+#         "page": page,
+#         "limit": limit,
+#         "counts": counts,
+#         "data": paginated,
+#     }
 
 
 @app.get("/client-detections")
-def list_client_detections(page: int = 1, limit: int = 100, source: Optional[str] = None, type: Optional[str] = None):
+def list_client_detections(
+    page: int = 1, 
+    limit: int = 100, 
+    source: Optional[str] = None, 
+    type: Optional[str] = None,
+    date: Optional[str] = None,
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None,
+    search: Optional[str] = None,
+):
     rows = []
 
     for root, _, files in os.walk(CLIENT_SELECTED_DIR):
@@ -747,9 +934,35 @@ def list_client_detections(page: int = 1, limit: int = 100, source: Optional[str
                 "type": type_key,
                 "filename": filename,
                 "relativePath": relative_path,
-                "image_url": f"/cctv_dev/client-detection-images/{rel}",
+                "image_url": f"/serve-client-detection-images/{rel}",
                 "_mtime": file_path.stat().st_mtime,
             })
+
+            if date and not item["date"].startswith(date):
+                continue
+            
+            if start_time or end_time:
+                time_str = item.get("time")
+                if time_str and len(time_str) >= 4:
+                    h_m = f"{time_str[:2]}:{time_str[2:4]}"
+                    if start_time and h_m < start_time:
+                        continue
+                    if end_time and h_m > end_time:
+                        continue
+                        
+            if search:
+                q = search.lower()
+                haystack = " ".join([
+                    str(item.get("filename") or ""),
+                    str(item.get("cameraName") or ""),
+                    str(item.get("centerName") or ""),
+                    str(item.get("city") or ""),
+                    str(item.get("state") or ""),
+                    str(item.get("tcCode") or ""),
+                ]).lower()
+                if q not in haystack:
+                    continue
+
             rows.append(item)
 
     rows.sort(key=lambda item: item.get("_mtime", 0), reverse=True)
@@ -831,16 +1044,16 @@ _REPORT_PREFIX_MAP = {
 }
 
 _REPORT_SCAN_FOLDERS = [
-    "crowd_detection_results",
-    "entry_exit_detection_results",
-    "phone_detection_results",
-    "proximity_detection_results",
-    "server_room_detection_results",
-    "camera_tampering_detection_results",
-    "camera_inversion_detection_results",
+    "crowd_detection",
+    "entry_exit_detection",
+    "phone_detection",
+    "proximity_detection",
+    "server_room_detection",
+    "camera_tampering_detection",
+    "camera_inversion_detection",
     "crowd_detection_threshold",
     "zero_person_detection",
-    "blind_spot_detection_results",
+    "blind_spot_detection",
 ]
 
 
@@ -898,8 +1111,8 @@ def _fetch_shifts(exam_id: int) -> list:
 
 # ── Scan helpers ─────────────────────────────────────────────────
 def _report_ch_from_file(filename: str) -> str | None:
-    m = re.search(r'_(ch\d+)_\d{8}_\d{6}', os.path.basename(filename), re.IGNORECASE)
-    return m.group(1).lower() if m else None
+    m = re.search(r'_ch?(\d+)_\d{8}_\d{6}', os.path.basename(filename), re.IGNORECASE)
+    return m.group(1) if m else None
 
 
 def _report_dt_from_file(filename: str) -> datetime | None:
@@ -965,7 +1178,14 @@ def _scan_detections(cameras: list, shifts: list, target_date: str):
 
                 if not cam:
                     unmatched += 1
-                    continue
+                    cam = {
+                        "ch_code": ch,
+                        "camera_name": "Unknown",
+                        "centre_name": "",
+                        "city": "",
+                        "state": "",
+                        "tc_code": ""
+                    }
 
                 matched += 1
                 sname = shift["shift_name"]
@@ -977,7 +1197,7 @@ def _scan_detections(cameras: list, shifts: list, target_date: str):
                     cam.get("centre_name"), cam.get("city"), cam.get("state"),
                     cam.get("tc_code"), _report_det_type(fname),
                     dt.strftime("%Y-%m-%d %H:%M:%S"),
-                    f"{_REPORT_BASE_IMG}/{folder}/{fname}", "View",
+                    fname, "View",
                 ])
 
     logger.info(f"[Report] Matched={matched} Unmatched={unmatched}")

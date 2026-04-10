@@ -6,11 +6,11 @@ Detects camera rotation using YOLOv11 + Places365.
 Truly batched: N frames -> 4*N rotations -> Single inference pass.
 """
 
+import queue
 import os
 import sys
 import time
 import cv2
-import queue
 import logging
 import threading
 import signal
@@ -43,8 +43,8 @@ HLS_SAVE_FOLDER = os.path.join(_DETECTION_ROOT, "results/tcs_detections/camera_i
 os.makedirs(HLS_SAVE_FOLDER, exist_ok=True)
 
 GPU_BATCH_SIZE     = int(os.environ.get("GPU_BATCH_SIZE", "64"))
-GPU_QUEUE_MAX_SIZE = int(os.environ.get("GPU_QUEUE_MAX_SIZE", "1024"))
-THREAD_START_DELAY = float(os.environ.get("THREAD_START_DELAY_MS", "10")) / 1000.0
+GPU_QUEUE_MAX_SIZE = int(os.environ.get("GPU_QUEUE_MAX_SIZE", "128"))
+THREAD_START_DELAY = float(os.environ.get("THREAD_START_DELAY_MS", "100")) / 1000.0
 INVERSION_COOLDOWN = 120
 SAMPLE_EVERY       = 3  # 🔥 High frequency for rotation checks
 
@@ -105,9 +105,7 @@ def _detect_orientation_batch(frames):
     for idx, frame in enumerate(frames):
         rot_v = [
             ("original", frame),
-            ("90", cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)),
             ("180", cv2.rotate(frame, cv2.ROTATE_180)),
-            ("270", cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)),
         ]
         for name, img in rot_v:
             all_rotations.append(img)
@@ -141,6 +139,12 @@ def _detect_orientation_batch(frames):
     outputs = []
     for i in range(len(frames)):
         outputs.append((index_map[i][1], index_map[i][2]))
+    
+    # Explicit cleanup
+    del all_rotations
+    del tensors
+    del meta
+    
     return outputs
 
 # ================= GPU WORKER =================
@@ -155,7 +159,7 @@ def _hls_gpu_batch_worker(stop_event, save_folder):
             continue
 
         deadline = time.time() + 0.2
-        while len(batch_items) < (GPU_BATCH_SIZE // 4) and time.time() < deadline:
+        while len(batch_items) < (GPU_BATCH_SIZE // 2) and time.time() < deadline:
             try:
                 batch_items.append(_gpu_queue.get_nowait())
             except queue.Empty:
@@ -178,12 +182,31 @@ def _hls_gpu_batch_worker(stop_event, save_folder):
                     
                     _last_save_time[cam_id] = now
                     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    filename = os.path.join(save_folder, f"Inversion_ch{ch_no}_{ts}.jpg")
+                    
+                    # ── Source-Aware Naming Format ──────────────
+                    if item.get("source_type") == "HLS":
+                        # Inversion_ch[ch_no]_[timestamp].jpg
+                        filename = os.path.join(save_folder, f"Inversion_ch{ch_no}_{ts}.jpg")
+                    else:
+                        # RTSP: Inversion_[device_id]_[camera_no]_[timestamp].jpg
+                        dev_id = item.get("device_id") or cam_id
+                        filename = os.path.join(save_folder, f"Inversion_{dev_id}_{ch_no}_{ts}.jpg")
+                    
                     cv2.imwrite(filename, corrected)
                     logger.warning(f"[INVERSION] 🔄 {cam_id} ({orientation}) saved to {filename}")
+                
+                # Cleanup
+                if 'frame' in item: del item['frame']
+                del corrected
+
+            del batch_items
+            if 'results' in locals(): del results
 
         except Exception as e:
             logger.error(f"[BATCH ERROR] {e}")
+            for item in batch_items:
+                if 'frame' in item: del item['frame']
+            del batch_items
 
     logger.info("🔴 [InversionWorker] GPU Batch Worker stopped")
 
@@ -217,10 +240,15 @@ def _hls_camera_thread(cfg, stop_event):
             _gpu_queue.put({
                 "frame": frame.copy(),
                 "camera_id": cam_id,
-                "ch_no": cfg.get('ch_no') or cfg.get('camera_no') or cfg.get('camera_id', 'unknown')
+                "ch_no": cfg.get('ch_no') or cfg.get('camera_no') or cfg.get('camera_id', 'unknown'),
+                "source_type": "HLS",
             }, timeout=0.1)
         except queue.Full:
+            del frame
             continue
+        
+        # Cleanup
+        del frame
     cap.release()
 
 # ================= PERSISTENT GPU WORKER STATE =================
@@ -253,59 +281,64 @@ _inversion_last_save = {}
 
 def camera_inversion_worker(frame_queue):
     """
-    Queue-based worker — receives (frame, device_id, camera_no) tuples
-    from the RTSP producer.
+    RTSP Worker — GPU Batch Queue Architecture.
+    Receives packets from the RTSP producer and pushes them into
+    the shared gpu_queue for batch inference via _ensure_shared_hls_gpu_worker.
     """
-    _load_models()
-    logger.info("🟢 [InversionWorker] RTSP worker started")
+    import torch
+    logger.info("🟢 [InversionWorker] RTSP batch-worker started")
+    stop_event = threading.Event()
 
-    while True:
-        data = frame_queue.get()
-        if data is None:
-            logger.info("🔴 [InversionWorker] RTSP worker stopping")
-            break
+    # Start the SAME GPU batch worker that HLS uses
+    _ensure_shared_hls_gpu_worker()
 
-        if isinstance(data, dict):
-            frame = data.get("frame")
-            device_id = str(data.get("device_id", "unknown"))
-            camera_no = str(data.get("camera_no", "0"))
-            camera_id_pk = str(data.get("camera_id_pk", ""))
-        elif len(data) == 4:
-            frame, device_id, camera_no, camera_id_pk = data
-        else:
-            frame, device_id, camera_no = data
-            camera_id_pk = ""
+    try:
+        while True:
+            data = frame_queue.get()
+            if data is None:
+                logger.info("🔴 [InversionWorker] RTSP batch-worker stopping")
+                break
 
-        try:
-            results = _detect_orientation_batch([frame.copy()])
-            if not results:
+            # Unpack — supports dict, 4-tuple, 3-tuple
+            if isinstance(data, dict):
+                frame        = data.get("frame")
+                device_id    = str(data.get("device_id", "unknown"))
+                camera_no    = str(data.get("camera_no") or data.get("ch_no") or "0")
+                camera_id_pk = str(data.get("camera_id_pk", ""))
+            elif len(data) == 4:
+                frame, device_id, camera_no, camera_id_pk = data
+            else:
+                frame, device_id, camera_no = data
+                camera_id_pk = ""
+
+            if frame is None:
                 continue
 
-            corrected, orientation = results[0]
+            try:
+                _gpu_queue.put({
+                    "frame":        frame.copy(),
+                    "device_id":    str(device_id),
+                    "camera_no":    str(camera_no),
+                    "ch_no":        str(camera_no), # for compatibility
+                    "camera_id_pk": str(camera_id_pk),
+                    "source_type":  "RTSP",
+                    "save_folder":  RTSP_SAVE_FOLDER,
+                }, timeout=0.1)
+            except queue.Full:
+                pass
+            del frame
 
-            if orientation != "original":
-                key = camera_id_pk if camera_id_pk else f"{device_id}_{camera_no}"
-                log_key = f"{device_id}_{camera_no}"
-                now = time.time()
-                if now - _inversion_last_save.get(key, 0) < INVERSION_COOLDOWN:
-                    continue
-                _inversion_last_save[key] = now
-
-                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                # Standard format: inversion_{device_id}_{camera_no}_{ts}.jpg
-                fname = f"inversion_{device_id}_{camera_no}_{ts}.jpg"
-                filename = os.path.join(RTSP_SAVE_FOLDER, fname)
-                cv2.imwrite(filename, corrected)
-                logger.warning(
-                    f"[InversionWorker] ⚠️ Camera rotated: {orientation} | "
-                    f"pk={camera_id_pk} {log_key} → {filename}"
-                )
-        except Exception as e:
-            logger.error(f"[InversionWorker] RTSP error for {device_id}_{camera_no}: {e}")
+    finally:
+        stop_event.set()
+        _STOP_EVENT.set()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        logger.info("🔴 [InversionWorker] GPU worker shut down")
 
 
 # ================= ENTRY POINT =================
 def camera_inversion_worker_hls(camera_configs, stop_event=None):
+    cv2.setNumThreads(0) # Prevent thread explosion
     if isinstance(camera_configs, dict):
         camera_configs = [camera_configs]
 
@@ -337,22 +370,17 @@ def camera_inversion_worker_hls(camera_configs, stop_event=None):
         )
         gpu_t.start()
 
-    threads = []
-    for cfg in camera_configs:
-        t = threading.Thread(
-            target=_hls_camera_thread,
-            args=(cfg, stop_event),
-            daemon=True
-        )
-        t.start()
-        threads.append(t)
-        time.sleep(THREAD_START_DELAY)
+    # Start Camera Threads with ThreadPoolExecutor
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=64) as executor:
+        for cfg in camera_configs:
+            executor.submit(_hls_camera_thread, cfg, stop_event)
+            time.sleep(THREAD_START_DELAY)
 
-    logger.info(f"[InversionWorker][HLS] Started {len(threads)} camera threads + 1 GPU worker")
+    logger.info(f"[InversionWorker][HLS] Started {len(camera_configs)} camera threads + 1 GPU worker")
 
     try:
-        for t in threads:
-            t.join()
+        stop_event.wait()
     except KeyboardInterrupt:
         stop_event.set()
 

@@ -133,7 +133,8 @@ def _hls_camera_thread(cfg, stop_event):
                     _last_save_time[camera_id] = now
 
                 ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = os.path.join(HLS_SAVE_FOLDER, f"Tampering_ch{ch_no}_{ts}.jpg")
+                # HLS: tampering_ch[ch_no]_[timestamp].jpg
+                filename = os.path.join(HLS_SAVE_FOLDER, f"tampering_ch{ch_no}_{ts}.jpg")
                 cv2.imwrite(filename, frame)
                 logger.warning(
                     f"[TamperingWorker] ⚠️ {status} | {camera_id} "
@@ -142,6 +143,8 @@ def _hls_camera_thread(cfg, stop_event):
                 )
         except Exception as e:
             logger.error(f"[TamperingWorker] {camera_id} → {e}")
+        finally:
+            del frame
 
     cap.release()
     logger.info(f"[TamperingWorker] 🔴 Camera thread stopped → {camera_id}")
@@ -158,43 +161,43 @@ os.makedirs(RTSP_SAVE_FOLDER, exist_ok=True)
 
 def camera_tampering_worker(frame_queue):
     """
-    Queue-based worker — receives (frame, device_id, camera_no) tuples
-    from the RTSP producer.
+    RTSP Worker — Asynchronous CPU architecture.
+    Uses a ThreadPoolExecutor to handle OpenCV-based tampering detection
+    without blocking the main frame queue.
     """
-    logger.info("🟢 [TamperingWorker] RTSP worker started")
-
-    while True:
-        data = frame_queue.get()
-        if data is None:
-            logger.info("🔴 [TamperingWorker] RTSP worker stopping")
-            break
-
-        if isinstance(data, dict):
-            frame = data.get("frame")
-            device_id = str(data.get("device_id", "unknown"))
-            camera_no = str(data.get("camera_no", "0"))
-            camera_id_pk = str(data.get("camera_id_pk", ""))
-        elif len(data) == 4:
-            frame, device_id, camera_no, camera_id_pk = data
+    logger.info("🟢 [TamperingWorker] RTSP batch-worker started")
+    from concurrent.futures import ThreadPoolExecutor
+    
+    def process_frame(packet):
+        if isinstance(packet, dict):
+            frame = packet.get("frame")
+            device_id = str(packet.get("device_id", "unknown"))
+            camera_no = str(packet.get("camera_no") or packet.get("ch_no") or "0")
+            camera_id_pk = str(packet.get("camera_id_pk", ""))
+        elif len(packet) == 4:
+            frame, device_id, camera_no, camera_id_pk = packet
         else:
-            frame, device_id, camera_no = data
+            frame, device_id, camera_no = packet
             camera_id_pk = ""
 
-        try:
-            status, brightness, blur_score, edge_density = _detect_camera_tampering(frame.copy())
+        if frame is None:
+            return
 
+        try:
+            status, brightness, blur_score, edge_density = _detect_camera_tampering(frame)
             if status != "Normal":
                 key = camera_id_pk if camera_id_pk else f"{device_id}_{camera_no}"
                 log_key = f"{device_id}_{camera_no}"
                 now = time.time()
                 with _state_lock:
                     if now - _last_save_time.get(key, 0) < COOLDOWN_TIME:
-                        continue
+                        return
                     _last_save_time[key] = now
 
                 ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                # Standard format: tampering_{device_id}_{camera_no}_{ts}.jpg
-                fname = f"tampering_{device_id}_{camera_no}_{ts}.jpg"
+                # RTSP: tampering_[device_id]_[camera_no]_[timestamp].jpg
+                dev_id = camera_id_pk or device_id
+                fname = f"tampering_{dev_id}_{camera_no}_{ts}.jpg"
                 filename = os.path.join(RTSP_SAVE_FOLDER, fname)
                 cv2.imwrite(filename, frame)
                 logger.warning(
@@ -203,7 +206,22 @@ def camera_tampering_worker(frame_queue):
                     f"edge={edge_density:.3f} → {filename}"
                 )
         except Exception as e:
-            logger.error(f"[TamperingWorker] RTSP error for {device_id}_{camera_no}: {e}")
+            logger.error(f"[TamperingWorker] Processing error: {e}")
+        finally:
+            del frame
+
+    # Use a thread pool to handle CPU detections asynchronously
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        while True:
+            packet = frame_queue.get()
+            if packet is None:
+                logger.info("🔴 [TamperingWorker] RTSP batch-worker stopping")
+                break
+            
+            # Submit task to executor
+            executor.submit(process_frame, packet)
+
+    logger.info("🔴 [TamperingWorker] worker shut down")
 
 
 # =====================================================
@@ -234,28 +252,18 @@ def camera_tampering_worker_hls(camera_configs, stop_event=None):
 
     camera_configs = filtered_configs
 
-    # Start per-camera threads (no GPU worker — pure CPU detection)
-    threads = []
-    total = len(camera_configs)
-    for i, cfg in enumerate(camera_configs):
-        t = threading.Thread(
-            target=_hls_camera_thread,
-            args=(cfg, stop_event),
-            name=f"Tamper-{cfg.get('camera_id', i)}",
-            daemon=True
-        )
-        t.start()
-        threads.append(t)
-        time.sleep(THREAD_DELAY)
-
-        if (i + 1) % 100 == 0:
-            logger.info(f"  {i + 1}/{total} tampering camera threads started...")
+    # Start per-camera threads using ThreadPoolExecutor for scaling
+    from concurrent.futures import ThreadPoolExecutor
+    cv2.setNumThreads(0) # Prevent thread explosion
+    with ThreadPoolExecutor(max_workers=64) as executor:
+        for cfg in camera_configs:
+            executor.submit(_hls_camera_thread, cfg, stop_event)
+            time.sleep(THREAD_DELAY)
 
     logger.info(f"[TamperingWorker][HLS] Started {total} camera threads (pure CPU)")
 
     try:
-        for t in threads:
-            t.join()
+        stop_event.wait()
     except KeyboardInterrupt:
         stop_event.set()
 

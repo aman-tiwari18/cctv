@@ -52,8 +52,17 @@ CAMERA_NO = "CH19"
 os.makedirs(SAVE_FOLDER, exist_ok=True)
 
 # ================= YOLO LOAD ===============
-print("Loading YOLO model...")
-yolo_model = YOLO(MODEL_PATH)
+_yolo_model = None
+
+def get_yolo_model():
+    global _yolo_model
+    if _yolo_model is None:
+        print("Loading YOLO model...")
+        _yolo_model = YOLO(MODEL_PATH)
+    return _yolo_model
+
+# For backward compatibility
+yolo_model = get_yolo_model()
 
 # ================= GLOBAL STATE ============
 last_save_times = {}
@@ -63,7 +72,8 @@ person_counts = {}
 # SAME FUNCTION LOGIC (UNCHANGED)
 # =====================================================
 def detect_persons_in_frame(frame, device_id="unknown", camera_no="unknown", script_name="crowd", camera_id_pk=""):
-    results = yolo_model(frame, conf=CONF_THRESHOLD, verbose=False)[0]
+    model = get_yolo_model()
+    results = model(frame, conf=CONF_THRESHOLD, verbose=False)[0]
 
     person_detections = [
         box for box in results.boxes
@@ -210,14 +220,17 @@ if __name__ == "__main__":
     main()
 
 # ================= BATCH DETECTION =================
-def detect_persons_batch(items):
+def detect_persons_batch(items, min_persons=None):
     """
     Truly batched person detection for crowd detection.
     Integrated for high-performance GPU batching.
     """
+    if min_persons is None:
+        min_persons = MIN_PERSONS
+
     frames = [item['frame'] for item in items]
-    # Use the global yolo_model defined above
-    results = yolo_model(frames, conf=CONF_THRESHOLD, verbose=False)
+    model = get_yolo_model()
+    results = model(frames, conf=CONF_THRESHOLD, verbose=False)
     
     outputs = []
     for item, result in zip(items, results):
@@ -236,7 +249,7 @@ def detect_persons_batch(items):
             x1, y1, x2, y2 = map(int, box.xyxy[0])
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
             
-        detected = person_count >= MIN_PERSONS
+        detected = person_count >= min_persons
         outputs.append((frame, detected, person_count))
         
     return outputs

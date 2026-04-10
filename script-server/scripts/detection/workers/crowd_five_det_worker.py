@@ -15,13 +15,13 @@ Excel columns used:
 Saved filename format:  lessthan5_ch{ch_no}_{timestamp}.jpg
 """
 
+import queue
 import sys
 import os
 sys.path.insert(0, os.path.dirname(__file__))
 
 import cv2
 import time
-import queue
 import threading
 import signal
 import logging
@@ -67,10 +67,10 @@ person_counts = {}
 SAMPLE_EVERY = get_sample_every("TCS_CROWD_SAMPLE_EVERY", default=10)
 
 # GPU Batch Worker
-GPU_BATCH_SIZE  = int(os.getenv("TCS_GPU_BATCH_SIZE",    "32"))
-GPU_QUEUE_SIZE  = int(os.getenv("TCS_GPU_QUEUE_SIZE",    "512"))
+GPU_BATCH_SIZE  = int(os.getenv("TCS_GPU_BATCH_SIZE",    "64"))
+GPU_QUEUE_SIZE  = int(os.getenv("TCS_GPU_QUEUE_SIZE",    "128"))
 GPU_FILL_WINDOW = float(os.getenv("TCS_GPU_FILL_WINDOW", "0.2"))
-THREAD_DELAY    = float(os.getenv("TCS_THREAD_DELAY",    "0.05"))
+THREAD_DELAY    = float(os.getenv("TCS_THREAD_DELAY",    "0.1"))
 
 # Rate limiter
 RATE_LIMIT_PER_MIN = int(os.getenv("TCS_RATE_LIMIT", "25"))
@@ -153,7 +153,9 @@ def detect_five_crowd(frame, device_id: str, camera_no: str, save_folder: str, c
 
             _rtsp_last_save[key] = now
             ts = time.strftime("%Y%m%d_%H%M%S")
-            # Standard format: crowd_five_{device_id}_{camera_no}_{ts}.jpg
+            
+            # ── Source-Aware Naming Format ──────────────
+            # RTSP: {script}_{device_id}_{camera_no}_{ts}.jpg
             fname = f"crowd_five_{device_id}_{camera_no}_{ts}.jpg"
             
             filename = os.path.join(save_folder, fname)
@@ -170,33 +172,66 @@ def detect_five_crowd(frame, device_id: str, camera_no: str, save_folder: str, c
             )
 
 def crowd_five_worker(frame_queue):
-    logger.info("🟢 [CrowdFiveWorker] RTSP worker started")
-    get_yolo_model()
+    """
+    RTSP Worker — GPU Batch Queue Architecture.
+    Receives packets from the RTSP producer and pushes them into
+    the shared gpu_queue for batch inference.
+    """
+    import torch
+    logger.info("🟢 [CrowdFiveWorker] RTSP batch-worker started")
+    stop_event = threading.Event()
 
-    while True:
-        data = frame_queue.get()
-        if data is None:
-            logger.info("🔴 [CrowdFiveWorker] RTSP worker stopping")
-            break
+    # Start the SAME GPU batch worker that HLS uses
+    gpu_t = threading.Thread(
+        target=gpu_worker,
+        args=(stop_event,),
+        daemon=True,
+        name="crowd_five_rtsp_gpu_worker"
+    )
+    gpu_t.start()
 
-        if isinstance(data, dict):
-            frame = data.get("frame")
-            device_id = str(data.get("device_id", "unknown"))
-            camera_no = str(data.get("camera_no", "0"))
-            camera_id_pk = str(data.get("camera_id_pk", ""))
-        elif len(data) == 4:
-            frame, device_id, camera_no, camera_id_pk = data
-        else:
-            frame, device_id, camera_no = data
-            camera_id_pk = ""
+    try:
+        while True:
+            data = frame_queue.get()
+            if data is None:
+                logger.info("🔴 [CrowdFiveWorker] RTSP batch-worker stopping")
+                break
 
-        detect_five_crowd(
-            frame.copy(),
-            str(device_id),
-            str(camera_no),
-            save_folder=RTSP_SAVE_FOLDER,
-            camera_id_pk=str(camera_id_pk)
-        )
+            # Unpack — supports dict, 4-tuple, 3-tuple
+            if isinstance(data, dict):
+                frame        = data.get("frame")
+                device_id    = str(data.get("device_id", "unknown"))
+                camera_no    = str(data.get("camera_no") or data.get("ch_no") or "0")
+                camera_id_pk = str(data.get("camera_id_pk", ""))
+            elif len(data) == 4:
+                frame, device_id, camera_no, camera_id_pk = data
+            else:
+                frame, device_id, camera_no = data
+                camera_id_pk = ""
+
+            if frame is None:
+                continue
+
+            try:
+                gpu_queue.put({
+                    "frame":        frame.copy(),
+                    "device_id":    str(device_id),
+                    "camera_no":    str(camera_no),
+                    "ch_no":        str(camera_no), # for compatibility
+                    "camera_id_pk": str(camera_id_pk),
+                    "source_type":  "RTSP",
+                    "save_folder":  RTSP_SAVE_FOLDER,
+                }, timeout=0.1)
+            except queue.Full:
+                pass
+            del frame
+
+    finally:
+        stop_event.set()
+        gpu_t.join(timeout=5)
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        logger.info("🔴 [CrowdFiveWorker] GPU worker shut down")
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  EXCEL LOADER
@@ -291,6 +326,9 @@ def gpu_worker(stop_event: threading.Event):
         # Step 3 — detect + save each item
         for item in batch:
             _detect_and_save(item)
+            if 'frame' in item: del item['frame'] # Cleanup after detection
+
+        del batch
 
         # Step 4 — VRAM stats
         if torch.cuda.is_available():
@@ -360,7 +398,16 @@ def _detect_and_save(item: dict):
     # ── Save  →  lessthan5_ch{ch_no}_{timestamp}.jpg ─────────────────────
     state["last_save"] = now
     timestamp = time.strftime("%Y%m%d_%H%M%S")
-    filename  = os.path.join(SAVE_FOLDER, f"lessthan5_ch{ch_no}_{timestamp}.jpg")
+    
+    # ── Source-Aware Naming Format ──────────────
+    if item.get("source_type") == "HLS":
+        fname = f"lessthan5_ch{ch_no}_{timestamp}.jpg"
+    else:
+        # RTSP: {script}_{device_id}_{camera_no}_{ts}.jpg
+        dev_id = item.get("device_id") or camera_id
+        fname = f"crowd_five_{dev_id}_{ch_no}_{timestamp}.jpg"
+    
+    filename = os.path.join(item.get("save_folder", SAVE_FOLDER), fname)
 
     save_frame = processed_frame if processed_frame is not None else frame
     cv2.imwrite(filename, save_frame)
@@ -418,16 +465,20 @@ def camera_thread(cfg: dict, stop_event: threading.Event):
 
         # Enqueue
         try:
-            gpu_queue.put_nowait({
-                "frame":     frame,
-                "camera_id": camera_id,
-                "ch_no":     cfg.get("ch_no") or cfg.get("camera_no") or "0",
-                "state":     per_camera_state,
-            })
+            gpu_queue.put({
+                "frame":       frame.copy(),
+                "camera_id":   camera_id,
+                "ch_no":       cfg.get("ch_no") or cfg.get("camera_no") or "0",
+                "state":       per_camera_state,
+                "source_type": "HLS",
+                "save_folder": SAVE_FOLDER,
+            }, timeout=0.1)
         except queue.Full:
             skip_queue += 1
+            del frame
             if skip_queue % 100 == 1:
                 logger.warning(f"[{camera_id}] Queue full — drops: {skip_queue}")
+            continue
 
         # Periodic stats
         if frame_count % 500 == 0:
@@ -524,40 +575,25 @@ def main():
         logger.error("No cameras found — exiting.")
         return
 
-    stop_event = threading.Event()
+    cv2.setNumThreads(0) # Prevent thread explosion
+    _ensure_shared_hls_gpu_worker()
 
-    # GPU batch worker
-    gpu_t = threading.Thread(
-        target=gpu_worker, args=(stop_event,), daemon=True, name="gpu-batch-worker"
-    )
-    gpu_t.start()
+    stop_event = _STOP_EVENT
 
     # One thread per camera
-    cam_threads = []
-    for cfg in configs:
-        t = threading.Thread(
-            target=camera_thread,
-            args=(cfg, stop_event),
-            daemon=True,
-            name=f"cam-{cfg['camera_id']}",
-        )
-        t.start()
-        cam_threads.append((t, cfg))
-        time.sleep(THREAD_DELAY)
+    # Start threads with ThreadPoolExecutor
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=64) as executor:
+        for cfg in configs:
+            executor.submit(camera_thread, cfg, stop_event)
+            time.sleep(THREAD_DELAY)
 
-    logger.info(f"Launched {len(cam_threads)} camera threads")
-
-    try:
-        for t, _ in cam_threads:
-            t.join()
-    except KeyboardInterrupt:
-        logger.info("Interrupted — shutting down…")
-        stop_event.set()
-
+    stop_event.wait()
+    stop_event.set()
+    
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-
-    logger.info("All done.")
+    logger.info("✅ All crowd_five HLS cameras completed")
 
 
 if __name__ == "__main__":

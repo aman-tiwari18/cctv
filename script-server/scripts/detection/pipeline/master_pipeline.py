@@ -44,19 +44,47 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# ================= IMPORT WORKERS =================
-from workers.server_room_worker      import server_room_worker,      server_room_worker_hls
-from workers.crowd_worker            import crowd_worker,            crowd_worker_hls
-from workers.intruder_worker         import intruder_worker,         intruder_worker_hls
-from workers.entry_exit_worker       import entry_exit_worker,       entry_exit_worker_hls
-from workers.close_proximity_worker  import close_proximity_worker,  close_proximity_worker_hls
-from workers.phone_worker            import phone_worker,            phone_worker_hls
-from workers.invigilator_worker      import invigilator_worker,      invigilator_worker_hls
-from workers.camera_tampering_worker import camera_tampering_worker, camera_tampering_worker_hls
-from workers.camera_inversion_worker import camera_inversion_worker, camera_inversion_worker_hls
-from workers.crowd_zero_det_worker   import crowd_zero_worker,       crowd_zero_det_worker_hls
-from workers.crowd_five_det_worker   import crowd_five_worker,       crowd_five_det_worker_hls
-from workers.blind_spot_worker       import blind_spot_worker,       blind_spot_worker_hls
+import importlib
+
+def get_worker(analytic_name, mode="rtsp"):
+    """
+    Lazily import the requested worker to prevent loading unused models.
+    Returns the worker function for the given analytic and mode (rtsp/hls).
+    """
+    # Mapping: analytic -> (module_name, rtsp_function_name, hls_function_name)
+    mapping = {
+        "server":      ("server_room_worker",      "server_room_worker",      "server_room_worker_hls"),
+        "crowd":       ("crowd_worker",            "crowd_worker",            "crowd_worker_hls"),
+        "intruder":    ("intruder_worker",         "intruder_worker",         "intruder_worker_hls"),
+        "entry_exit":  ("entry_exit_worker",       "entry_exit_worker",       "entry_exit_worker_hls"),
+        "proximity":   ("close_proximity_worker",  "close_proximity_worker",  "close_proximity_worker_hls"),
+        "phone":       ("phone_worker",            "phone_worker",            "phone_worker_hls"),
+        "invigilator": ("invigilator_worker",      "invigilator_worker",      "invigilator_worker_hls"),
+        "tamper":      ("camera_tampering_worker", "camera_tampering_worker", "camera_tampering_worker_hls"),
+        "inversion":   ("camera_inversion_worker", "camera_inversion_worker", "camera_inversion_worker_hls"),
+        "crowd_zero":  ("crowd_zero_det_worker",   "crowd_zero_worker",       "crowd_zero_det_worker_hls"),
+        "crowd_five":  ("crowd_five_det_worker",   "crowd_five_worker",       "crowd_five_det_worker_hls"),
+        "blind_spot":  ("blind_spot_worker",       "blind_spot_worker",       "blind_spot_worker_hls"),
+    }
+    
+    if analytic_name not in mapping:
+        logger.error(f"Unknown analytic requested: {analytic_name}")
+        return None
+        
+    module_name, rtsp_fn, hls_fn = mapping[analytic_name]
+    try:
+        # Try importing as a package first
+        try:
+            module = importlib.import_module(f"workers.{module_name}")
+        except (ImportError, ModuleNotFoundError):
+            # Fallback if workers/ directory is already in sys.path
+            module = importlib.import_module(module_name)
+
+        fn_name = rtsp_fn if mode.lower() == "rtsp" else hls_fn
+        return getattr(module, fn_name)
+    except (ImportError, AttributeError, ModuleNotFoundError) as e:
+        logger.error(f"Failed to load worker {analytic_name} ({mode}): {e}")
+        return None
 
 
 # ================= CAMERA LOADER (DB-driven) =================
@@ -71,37 +99,7 @@ MAX_CONCURRENT = 10          # max concurrent RTSP producers
 DSS_USER = "system"
 DSS_PASS = "Coreiseven@@"
 
-# ── RTSP workers: each receives frames via multiprocessing.Queue ──────────────
-RTSP_WORKER_MAP = {
-    "server":      server_room_worker,
-    "crowd":       crowd_worker,
-    "intruder":    intruder_worker,
-    "entry_exit":  entry_exit_worker,
-    "proximity":   close_proximity_worker,
-    "phone":       phone_worker,
-    "invigilator": invigilator_worker,
-    "tamper":      camera_tampering_worker,
-    "inversion":   camera_inversion_worker,
-    "crowd_zero":  crowd_zero_worker,
-    "crowd_five":  crowd_five_worker,
-    "blind_spot":  blind_spot_worker,
-}
-
-# ── HLS workers: each receives the full camera-config list ───────────────────
-HLS_WORKER_MAP = {
-    "server":      server_room_worker_hls,
-    "crowd":       crowd_worker_hls,
-    "intruder":    intruder_worker_hls,
-    "entry_exit":  entry_exit_worker_hls,
-    "proximity":   close_proximity_worker_hls,
-    "phone":       phone_worker_hls,
-    "invigilator": invigilator_worker_hls,
-    "tamper":      camera_tampering_worker_hls,
-    "inversion":   camera_inversion_worker_hls,
-    "crowd_zero":  crowd_zero_det_worker_hls,
-    "crowd_five":  crowd_five_det_worker_hls,
-    "blind_spot":  blind_spot_worker_hls,
-}
+# Dynamic worker loading enabled – mapping moved to get_worker() helper.
 
 
 # ================= GRACEFUL SHUTDOWN =================
@@ -414,14 +412,15 @@ def run_rtsp_pipeline(camera_group, max_concurrent=MAX_CONCURRENT):
                     continue
                 scripts_seen.add(script)
 
-                if script not in RTSP_WORKER_MAP:
-                    logger.warning(f"⚠️ RTSP Worker '{script}' not in map — skipping")
+                worker_fn = get_worker(script, mode="rtsp")
+                if not worker_fn:
+                    logger.warning(f"⚠️ RTSP Worker '{script}' not found — skipping")
                     continue
 
                 q = mp.Queue(maxsize=QUEUE_SIZE)
                 queues.append(q)
                 p = mp.Process(
-                    target=RTSP_WORKER_MAP[script],
+                    target=worker_fn,
                     args=(q,),
                     name=f"{script}_{label}",
                     daemon=True
@@ -475,11 +474,10 @@ def run_hls_pipeline(camera_group):
 
     threads = []
     for script_code, configs in grouped.items():
-        if script_code not in HLS_WORKER_MAP:
-            logger.warning(f"⚠️ HLS Worker '{script_code}' not in map — skipping {len(configs)} cameras")
+        worker_fn = get_worker(script_code, mode="hls")
+        if not worker_fn:
+            logger.warning(f"⚠️ HLS Worker '{script_code}' not found — skipping {len(configs)} cameras")
             continue
-
-        worker_fn = HLS_WORKER_MAP[script_code]
         t = threading.Thread(
             target=worker_fn,
             args=(configs,),

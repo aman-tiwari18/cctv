@@ -163,9 +163,22 @@ class SimplifiedTracker(Tracker):
 
             self.static_status[track_id] = static
 
-    def save_frame(self, frame, folder, prefix):
+    def save_frame(self, frame, folder, prefix, source_type="HLS", device_id=None, camera_no=None):
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        path = os.path.join(folder, f"{self.cam_name}_{prefix}_{ts}.jpg")
+        
+        # ── Source-Aware Naming Format ──────────────
+        if source_type == "HLS":
+            # [detection]_ch[ch_no]_[timestamp].jpg
+            # Note: prefix (static/no_targets) is included for context
+            ch_no = camera_no or self.cam_name
+            fname = f"invigilator_{prefix}_ch{ch_no}_{ts}.jpg"
+        else:
+            # RTSP: [detection]_[device_id]_[camera_no]_[timestamp].jpg
+            dev_id = device_id or self.cam_name
+            cam_no = camera_no or "0"
+            fname = f"invigilator_{prefix}_{dev_id}_{cam_no}_{ts}.jpg"
+            
+        path = os.path.join(folder, fname)
         cv2.imwrite(path, frame)
         return path
 
@@ -278,7 +291,8 @@ def detect_invigilators_batch(items, model=None, conf_threshold=0.5, min_height=
         
         # Trigger the callback for this specific camera/frame
         try:
-            item['result_cb'](detections, item['frame'])
+            # Pass the detections, the frame, AND the entire item (for source_type/device_id)
+            item['result_cb'](detections, item['frame'], item)
         except Exception as e:
             print(f"[CALLBACK ERROR][Invigilator] {item.get('camera_id')}: {e}")
 
