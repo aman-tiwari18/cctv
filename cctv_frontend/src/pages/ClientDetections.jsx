@@ -18,6 +18,7 @@ import {
   IconButton,
   Skeleton,
   InputAdornment,
+  Grid, CardMedia, CardContent, Dialog, DialogContent, Checkbox,
 } from '@mui/material';
 import {
   Refresh,
@@ -26,7 +27,6 @@ import {
   FilterList,
   Event,
   AccessTime,
-  ViewCarousel,
   ViewList,
   ImageNotSupported,
   WarningAmber,
@@ -43,6 +43,9 @@ import {
   ChevronLeft,
   ChevronRight,
   KeyboardArrowDown,
+  Check,
+  Close as CloseIcon,
+  GridView, LocationCity, Close,
 } from '@mui/icons-material';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -53,19 +56,199 @@ import { API_BASE_1, SOCKET_URL, SOCKET_PATH } from '../constants/data';
 import { useDetectionCounts } from '../contexts/DetectionCountsContext';
 
 const TYPE_META = {
-  proximity: { label: 'Close Proximity', color: '#f59e0b', bg: '#fef3c7' },
-  crowd: { label: 'Crowd Detection', color: '#3b82f6', bg: '#dbeafe' },
-  crowd_five: { label: 'Crowd < 5', color: '#2563eb', bg: '#dbeafe' },
-  crowd_zero: { label: 'Zero Person', color: '#0f766e', bg: '#ccfbf1' },
-  server: { label: 'Server Room', color: '#ef4444', bg: '#fee2e2' },
-  intruder: { label: 'Intruder', color: '#8b5cf6', bg: '#ede9fe' },
-  entry_exit: { label: 'Entry/Exit', color: '#10b981', bg: '#d1fae5' },
-  phone: { label: 'Phone', color: '#6366f1', bg: '#e0e7ff' },
-  blind_spot: { label: 'Blind Spot', color: '#7c3aed', bg: '#ede9fe' },
-  invigilator: { label: 'Invigilator', color: '#ec4899', bg: '#fce7f3' },
-  inversion: { label: 'Camera Inversion', color: '#0ea5e9', bg: '#e0f2fe' },
-  tamper: { label: 'Camera Tampering', color: '#dc2626', bg: '#fef2f2' },
+  proximity: { label: 'Close Proximity', color: '#5cb88a', bg: '#e5f5ed' },
+  crowd: { label: 'Crowd Detection', color: '#e24d7b', bg: '#fce4ec' },
+  crowd_five: { label: 'Crowd < 5', color: '#e06050', bg: '#fce8e6' },
+  crowd_zero: { label: 'Zero Person', color: '#6b5b95', bg: '#edeaf3' },
+  server: { label: 'Server Room', color: '#a0623d', bg: '#f3ebe4' },
+  intruder: { label: 'Intruder', color: '#d94466', bg: '#fce4ea' },
+  entry_exit: { label: 'Entry/Exit', color: '#1d7a7d', bg: '#e0f0f0' },
+  phone: { label: 'Phone', color: '#465a38', bg: '#e8ece5' },
+  blind_spot: { label: 'Blind Spot', color: '#b0a850', bg: '#f3f2e4' },
+  invigilator: { label: 'Invigilator', color: '#00bfcf', bg: '#e0f7fa' },
+  inversion: { label: 'Camera Inversion', color: '#7a86b4', bg: '#eceef5' },
+  tamper: { label: 'Camera Tampering', color: '#00c8d4', bg: '#e0f8fa' },
 };
+
+const TYPE_ICONS = {
+  proximity: WarningAmber,
+  crowd: Groups,
+  crowd_five: Groups,
+  crowd_zero: PersonOff,
+  server: Dns,
+  intruder: DirectionsWalk,
+  entry_exit: MeetingRoom,
+  phone: Smartphone,
+  blind_spot: VisibilityOff,
+  invigilator: Visibility,
+  inversion: FlipCameraAndroid,
+  tamper: SecurityUpdateWarning,
+  default: CameraAlt,
+};
+
+function DetectionCard({ item, onClick, selected, onToggleSelect, hideCheckbox }) {
+  const meta = TYPE_META[item.type] || { label: item.type, color: '#94a3b8', bg: '#f1f5f9' };
+  const [imgError, setImgError] = useState(false);
+  const cameraName = item.cameraName || item.camera_name || item.camera_id || '-';
+  const centerName = item.centerName || item.centre_name || '-';
+  const city = item.city || '-';
+  const examDate = item.examDate || (item.date ? item.date.split('-').reverse().join('-') : '-');
+  const invigilatorEventLabel = item.type === 'invigilator'
+    ? (item.issueLabel || (item.issueType ? String(item.issueType).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : ''))
+    : '';
+
+  return (
+    <Card
+      onClick={() => onClick(item)}
+      sx={{
+        cursor: 'pointer',
+        borderRadius: 3,
+        overflow: 'hidden',
+        transition: 'all 0.22s ease',
+        '&:hover': { transform: 'translateY(-4px) scale(1.005)', boxShadow: '0 14px 30px rgba(15, 23, 42, 0.14)' },
+        border: '1px solid #e2e8f0',
+      }}
+    >
+      <Box sx={{ position: 'relative', bgcolor: '#0f172a' }}>
+        {!hideCheckbox && onToggleSelect && (
+          <Checkbox
+            checked={Boolean(selected)}
+            onChange={(e) => { e.stopPropagation(); onToggleSelect(item); }}
+            onClick={(e) => e.stopPropagation()}
+            size="small"
+            sx={{
+              position: 'absolute', top: 8, left: 8, zIndex: 2,
+              bgcolor: 'rgba(255,255,255,0.92)', borderRadius: 1,
+            }}
+          />
+        )}
+        {imgError ? (
+          <Box sx={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#1e293b' }}>
+            <CameraAlt sx={{ fontSize: 48, color: '#475569' }} />
+          </Box>
+        ) : (
+          <CardMedia
+            component="img"
+            height={220}
+            image={item.image_url}
+            alt={item.camera_id}
+            onError={() => setImgError(true)}
+            sx={{ objectFit: 'cover' }}
+          />
+        )}
+        <Chip
+          label={meta.label}
+          size="small"
+          sx={{
+            position: 'absolute', top: 8, right: 8,
+            bgcolor: meta.color, color: '#fff',
+            fontWeight: 700, fontSize: '0.65rem',
+          }}
+        />
+        {invigilatorEventLabel && (
+          <Chip
+            label={invigilatorEventLabel}
+            size="small"
+            sx={{
+              position: 'absolute', bottom: 8, right: 8,
+              bgcolor: 'rgba(15, 23, 42, 0.72)', color: '#fff',
+              fontWeight: 700, fontSize: '0.65rem',
+            }}
+          />
+        )}
+        {item.count != null && (
+          <Chip
+            icon={<Warning sx={{ fontSize: 12, color: '#fff !important' }} />}
+            label={
+              item.type === 'proximity'
+                ? `${item.count} violation${item.count > 1 ? 's' : ''}`
+                : `${item.count} person${item.count > 1 ? 's' : ''}`
+            }
+            size="small"
+            sx={{
+              position: 'absolute', top: 8, left: (!hideCheckbox && onToggleSelect) ? 40 : 8,
+              bgcolor: 'rgba(0,0,0,0.65)', color: '#fff',
+              fontSize: '0.65rem',
+            }}
+          />
+        )}
+      </Box>
+      <CardContent sx={{ p: 2, pb: '14px !important' }}>
+        <Typography variant="h6" fontWeight={800} sx={{ color: '#1e293b', lineHeight: 1.25, mb: 1.5 }}>
+          {centerName}
+        </Typography>
+
+        <Box sx={{ display: 'grid', gridTemplateColumns: '26px 1fr', rowGap: 1.1, columnGap: 1, alignItems: 'center' }}>
+          <CameraAlt sx={{ fontSize: 16, color: '#64748b' }} />
+          <Typography variant="body1" fontWeight={700} color="#334155">{cameraName}</Typography>
+
+          <Event sx={{ fontSize: 16, color: '#64748b' }} />
+          <Typography variant="body1" fontWeight={700} color="#334155">{examDate}</Typography>
+
+          <AccessTime sx={{ fontSize: 16, color: '#64748b' }} />
+          <Typography variant="body1" fontWeight={700} color="#334155">{item.detected_at || '-'}</Typography>
+
+          <LocationCity sx={{ fontSize: 16, color: '#64748b' }} />
+          <Typography variant="body1" fontWeight={700} color="#334155">{city}</Typography>
+        </Box>
+
+        {item.confidence != null && (
+          <Typography variant="caption" color={meta.color} fontWeight={600} sx={{ display: 'block', mt: 1.5 }}>
+            Conf: {(item.confidence * 100).toFixed(0)}%
+          </Typography>
+        )}
+
+        {item.tcCode && (
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+            TC: {item.tcCode}
+          </Typography>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function Lightbox({ item, onClose }) {
+  if (!item) return null;
+  const meta = TYPE_META[item.type] || {};
+  const invigilatorEventLabel = item.type === 'invigilator'
+    ? (item.issueLabel || (item.issueType ? String(item.issueType).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : ''))
+    : '';
+  return (
+    <Dialog open onClose={onClose} maxWidth="lg" fullWidth>
+      <DialogContent sx={{ p: 0, bgcolor: '#0f172a', position: 'relative' }}>
+        <IconButton onClick={onClose} sx={{ position: 'absolute', top: 8, right: 8, zIndex: 10, color: '#fff', bgcolor: 'rgba(0,0,0,0.5)' }}>
+          <Close />
+        </IconButton>
+        <img
+          src={item.image_url}
+          alt={item.camera_id}
+          style={{ width: '100%', maxHeight: '80vh', objectFit: 'contain', display: 'block' }}
+        />
+        <Box sx={{ p: 2, color: '#fff' }}>
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+            <Chip label={meta.label} size="small" sx={{ bgcolor: meta.color, color: '#fff', fontWeight: 700 }} />
+            {invigilatorEventLabel && (
+              <Chip label={invigilatorEventLabel} size="small" sx={{ bgcolor: '#334155', color: '#fff' }} />
+            )}
+            {item.count != null && <Chip label={`Count: ${item.count}`} size="small" sx={{ bgcolor: '#334155', color: '#fff' }} />}
+            {item.confidence != null && (
+              <Chip label={`Confidence: ${(item.confidence * 100).toFixed(1)}%`} size="small" sx={{ bgcolor: '#334155', color: '#fff' }} />
+            )}
+          </Box>
+          <Typography variant="h6" sx={{ mt: 1, fontWeight: 700 }}>{item.cameraName || item.camera_id}</Typography>
+          <Typography variant="body2" color="#94a3b8">{item.detected_at}</Typography>
+          {item.centerName && (
+            <Typography variant="body2" color="#94a3b8">
+              {item.centerName}{item.city ? ` — ${item.city}` : ''}{item.state ? `, ${item.state}` : ''}
+            </Typography>
+          )}
+          {item.tcCode && <Typography variant="body2" color="#94a3b8">TC: {item.tcCode}</Typography>}
+        </Box>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 const SOURCE_OPTIONS = [
   { value: '', label: 'All Sources' },
@@ -125,158 +308,238 @@ const todayDate = formatDateDDMMYYYY(new Date());
 
 const buildImageKey = (item) => `${item.source}|${item.type}|${item.relativePath}`;
 
-/* ── Carousel View ── */
-function CarouselView({ data, currentIndex, onIndexChange }) {
-  const thumbRef = useRef(null);
-  const item = data[currentIndex];
-  if (!item) return null;
+// function ListViewPanel({ data, selectedIndex, onSelect }) {
+//   const item = data[selectedIndex];
 
-  const meta = TYPE_META[item.type] || { label: item.type, color: '#94a3b8' };
-  const centerName = item.centerName || item.centre_name || '-';
-  const cameraName = item.cameraName || item.camera_id || item.filename || '-';
-  const city = item.city || '-';
-  const examDate = item.examDate || (item.date ? item.date.split('-').reverse().join('-') : '-');
+//   useEffect(() => {
+//     const handler = (e) => {
+//       if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
 
-  const goPrev = () => onIndexChange(Math.max(0, currentIndex - 1));
-  const goNext = () => onIndexChange(Math.min(data.length - 1, currentIndex + 1));
+//       if (e.key === 'ArrowUp') {
+//         e.preventDefault();
+//         onSelect(Math.max(0, selectedIndex - 1));
+//       }
+//       if (e.key === 'ArrowDown') {
+//         e.preventDefault();
+//         onSelect(Math.min(data.length - 1, selectedIndex + 1));
+//       }
+//       if (e.key === 'ArrowLeft') {
+//         e.preventDefault();
+//         console.log('Yes clicked via ArrowLeft');
+//       }
+//       if (e.key === 'ArrowRight') {
+//         e.preventDefault();
+//         console.log('No clicked via ArrowRight');
+//       }
+//     };
+//     window.addEventListener('keydown', handler);
+//     return () => window.removeEventListener('keydown', handler);
+//   }, [selectedIndex, data.length, item, onSelect]);
 
-  // Arrow key navigation
+//   return (
+//     <Box sx={{ display: 'flex', gap: 2, height: 'calc(100vh - 260px)', minHeight: 500 }}>
+//       <Box sx={{
+//         width: 400, flexShrink: 0, overflowY: 'auto',
+//         borderRight: '1px solid #e2e8f0', pr: 1,
+//         // borderRadius: 5, bgcolor: '#ffffff',
+//         bgcolor: '#ffffff',
+//       }}>
+
+//         {data.map((listItem, idx) => {
+//           const isActive = idx === selectedIndex;
+//           const centerName = listItem.centerName || listItem.centre_name || '-';
+//           const cameraName = listItem.cameraName || listItem.camera_id || listItem.filename || '-';
+//           const city = listItem.city || '-';
+
+//           return (
+//             <Box
+//               key={`${listItem.filename}-${idx}`}
+//               onClick={() => onSelect(idx)}
+//               sx={{
+//                 display: 'flex',
+//                 alignItems: 'stretch',
+//                 mb: 0.5,
+//                 cursor: 'pointer',
+//                 bgcolor: isActive ? '#eff6ff' : 'transparent',
+//                 borderLeft: isActive ? '3px solid #2563eb' : '3px solid transparent',
+//                 '&:hover': { bgcolor: isActive ? '#eff6ff' : '#f8fafc' },
+//               }}
+//             >
+//               <Box
+//                 component="img"
+//                 src={listItem.image_url}
+//                 alt={listItem.camera_id}
+//                 sx={{
+//                   width: { xs: 62, sm: 70, md: 70 },
+//                   height: { xs: 62, sm: 70, md: 70 },
+//                   flexShrink: 0,
+//                   objectFit: 'cover',
+//                   alignSelf: 'center',
+//                   borderRadius: 1,
+//                   my: 0.5,
+//                   ml: 1,
+//                   mr: 1.5,
+//                 }}
+//                 onError={(e) => { e.target.style.display = 'none'; }}
+//               />
+
+//               <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+//                 {(() => {
+//                   if (!listItem.detected_at || listItem.detected_at === '-') {
+//                     return (
+//                       <Typography variant="body2" fontWeight={500} color="text.secondary" fontSize={12}>
+//                         -
+//                       </Typography>
+//                     );
+//                   }
+//                   const commaIdx = listItem.detected_at.indexOf(',');
+//                   const datePart = commaIdx !== -1 ? listItem.detected_at.substring(0, commaIdx + 1) : listItem.detected_at;
+//                   const timePart = commaIdx !== -1 ? listItem.detected_at.substring(commaIdx + 1).trim() : '';
+
+//                   return (
+//                     <>
+//                       <Typography variant="body2" fontWeight={600} color="text.primary" fontSize={13}>
+//                         {datePart}
+//                       </Typography>
+//                       {timePart && (
+//                         <Typography variant="caption" fontWeight={500} color="text.secondary" fontSize={12}>
+//                           {timePart}
+//                         </Typography>
+//                       )}
+//                     </>
+//                   );
+//                 })()}
+//               </Box>
+//             </Box>
+//           );
+//         })}
+//       </Box>
+
+//       {/* Right panel: Image + Details side-by-side */}
+//       <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+//         {item ? (
+//           <>
+//             <Typography variant="h6" fontWeight={700} sx={{ mb: 1 }}>
+//               {(TYPE_META[item.type] || { label: item.type }).label}
+//             </Typography>
+
+//             {/* Image + Details row */}
+//             <Box sx={{ display: 'flex', gap: 2.5, flex: 1, minHeight: 0 }}>
+//               {/* Image */}
+//               <Box sx={{
+//                 flex: 1, position: 'relative', borderRadius: 3, overflow: 'hidden',
+//                 bgcolor: '#fff',
+//                 boxShadow: '0 4px 20px rgba(0,0,0,0.12)',
+//               }}>
+//                 <Box
+//                   component="img"
+//                   src={item.image_url}
+//                   alt={item.filename}
+//                   sx={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+//                   onError={(e) => { e.target.style.display = 'none'; }}
+//                 />
+//               </Box>
+
+//               {/* Details card */}
+//               <Box sx={{
+//                 width: 260, flexShrink: 0,
+//                 bgcolor: '#fff', borderRadius: 3, p: 2.5,
+//                 border: '1px solid #e8ecf1',
+//                 display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
+//               }}>
+//                 <Box>
+//                   <Typography variant="caption" sx={{ color: '#2563eb', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', fontSize: '0.7rem' }}>
+//                     Image Info
+//                   </Typography>
+
+//                   <Box sx={{ mt: 2 }}>
+//                     <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', fontSize: '0.6rem' }}>
+//                       Camera ID
+//                     </Typography>
+//                     <Typography variant="body2" fontWeight={700} sx={{ color: '#0f172a', mt: 0.3 }}>
+//                       {item.cameraName || item.camera_id || item.filename || '-'}
+//                     </Typography>
+//                   </Box>
+
+//                   <Box sx={{ mt: 1.5 }}>
+//                     <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', fontSize: '0.6rem' }}>
+//                       Location
+//                     </Typography>
+//                     <Typography variant="body2" fontWeight={700} sx={{ color: '#0f172a', mt: 0.3 }}>
+//                       {item.centerName || item.centre_name || '-'}, {item.city || '-'}
+//                     </Typography>
+//                   </Box>
+
+//                   <Box sx={{ mt: 1.5 }}>
+//                     <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', fontSize: '0.6rem' }}>
+//                       Timestamp
+//                     </Typography>
+//                     <Typography variant="body2" fontWeight={700} sx={{ color: '#0f172a', mt: 0.3 }}>
+//                       {item.detected_at || '-'}
+//                     </Typography>
+//                   </Box>
+
+//                   <Box sx={{ mt: 1.5 }}>
+//                     <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', fontSize: '0.6rem' }}>
+//                       Detection Type
+//                     </Typography>
+//                     <Chip
+//                       label={(TYPE_META[item.type] || { label: item.type }).label}
+//                       size="small"
+//                       sx={{
+//                         mt: 0.5,
+//                         bgcolor: (TYPE_META[item.type] || { bg: '#f1f5f9' }).bg,
+//                         color: (TYPE_META[item.type] || { color: '#64748b' }).color,
+//                         fontWeight: 600, fontSize: '0.7rem',
+//                       }}
+//                     />
+//                   </Box>
+//                 </Box>
+//               </Box>
+//             </Box>
+//           </>
+//         ) : (
+//           <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+//             <Typography color="text.secondary">Select a detection to preview</Typography>
+//           </Box>
+//         )}
+//       </Box>
+//     </Box>
+//   );
+// }
+
+function ListViewPanel({ data, selectedIndex, onSelect }) {
+  const item = data[selectedIndex];
+  const itemRefs = useRef([]); // ✅ ref array for each list item
+
   useEffect(() => {
     const handler = (e) => {
-      if (e.key === 'ArrowLeft') { e.preventDefault(); goPrev(); }
-      if (e.key === 'ArrowRight') { e.preventDefault(); goNext(); }
+      if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
+      if (e.key === 'ArrowUp') { e.preventDefault(); onSelect(Math.max(0, selectedIndex - 1)); }
+      if (e.key === 'ArrowDown') { e.preventDefault(); onSelect(Math.min(data.length - 1, selectedIndex + 1)); }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [currentIndex, data.length]);
+  }, [selectedIndex, data.length, onSelect]);
 
+  // ✅ Auto-scroll directly via ref — most reliable approach
   useEffect(() => {
-    if (thumbRef.current) {
-      const el = thumbRef.current.children[currentIndex];
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
-    }
-  }, [currentIndex]);
-
-  return (
-    <Box tabIndex={-1} sx={{ outline: 'none' }}>
-      <Typography variant="h6" fontWeight={300} textAlign="center" fontSize={12} sx={{ mb: 1 }}>
-        {currentIndex + 1} / {data.length} {meta.label} Detections
-      </Typography>
-
-      <Box sx={{ position: 'relative', bgcolor: '#0f172a', borderRadius: 3, overflow: 'hidden', mb: 2 }}>
-        <IconButton
-          onClick={goPrev}
-          disabled={currentIndex === 0}
-          sx={{
-            position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', zIndex: 3,
-            bgcolor: 'rgba(255,255,255,0.9)', '&:hover': { bgcolor: '#fff' }, '&.Mui-disabled': { opacity: 0.3 },
-          }}
-        >
-          <ChevronLeft />
-        </IconButton>
-        <IconButton
-          onClick={goNext}
-          disabled={currentIndex === data.length - 1}
-          sx={{
-            position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', zIndex: 3,
-            bgcolor: 'rgba(255,255,255,0.9)', '&:hover': { bgcolor: '#fff' }, '&.Mui-disabled': { opacity: 0.3 },
-          }}
-        >
-          <ChevronRight />
-        </IconButton>
-
-        <Box
-          component="img"
-          src={item.image_url}
-          alt={item.filename}
-          sx={{ width: '100%', height: 550, objectFit: 'contain', display: 'block' }}
-          onError={(e) => { e.target.style.display = 'none'; }}
-        />
-
-        <Box sx={{
-          position: 'absolute', bottom: 0, left: 0, right: 0,
-          background: 'linear-gradient(transparent, rgba(15,23,42,0.85))',
-          p: 2.5, pt: 5, color: '#fff',
-        }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
-            <Box>
-              <Typography variant="caption" color="#94a3b8">Cam:</Typography>
-              <Typography variant="subtitle1" fontWeight={700}>{cameraName}</Typography>
-              <Typography variant="caption" color="#94a3b8">Center:</Typography>
-              <Typography variant="body2" fontWeight={600}>{centerName}</Typography>
-            </Box>
-            <Box sx={{ textAlign: 'right' }}>
-              <Typography variant="caption" color="#94a3b8">Date:</Typography>
-              <Typography variant="subtitle1" fontWeight={700}>{examDate}</Typography>
-              <Typography variant="body2" color="#94a3b8">{city}</Typography>
-            </Box>
-          </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Event sx={{ fontSize: 16, color: '#94a3b8' }} />
-            <Typography variant="body2" color="#94a3b8">
-              {examDate} - {item.detected_at || '-'}
-            </Typography>
-          </Box>
-        </Box>
-      </Box>
-
-      <Typography variant="body2" textAlign="center" color="text.secondary" sx={{ mb: 1 }}>
-        {currentIndex + 1} of {data.length}
-      </Typography>
-
-      <Box
-        ref={thumbRef}
-        sx={{
-          display: 'flex', gap: 1, overflowX: 'auto', pb: 1, px: 1,
-          '&::-webkit-scrollbar': { height: 4 },
-          '&::-webkit-scrollbar-thumb': { bgcolor: '#cbd5e1', borderRadius: 2 },
-        }}
-      >
-        {data.map((thumbItem, idx) => (
-          <Box
-            key={`${thumbItem.filename}-${idx}`}
-            onClick={() => onIndexChange(idx)}
-            sx={{
-              flexShrink: 0, width: 100, cursor: 'pointer', textAlign: 'center',
-              borderRadius: 1.5, border: idx === currentIndex ? '2px solid #2563eb' : '2px solid transparent',
-              overflow: 'hidden', transition: 'border-color 0.15s',
-            }}
-          >
-            <Box
-              component="img"
-              src={thumbItem.image_url}
-              alt=""
-              sx={{ width: '100%', height: 60, objectFit: 'cover', display: 'block' }}
-              onError={(e) => { e.target.style.display = 'none'; }}
-            />
-            <Typography
-              variant="caption"
-              fontWeight={idx === currentIndex ? 700 : 500}
-              color={idx === currentIndex ? '#2563eb' : 'text.secondary'}
-              sx={{ display: 'block', mt: 0.3 }}
-            >
-              {thumbItem.detected_at || '-'}
-            </Typography>
-          </Box>
-        ))}
-      </Box>
-    </Box>
-  );
-}
-
-/* ── List View ── */
-function ListViewPanel({ data, selectedIndex, onSelect }) {
-  const item = data[selectedIndex];
+    const el = itemRefs.current[selectedIndex];
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [selectedIndex]);
 
   return (
     <Box sx={{ display: 'flex', gap: 2, height: 'calc(100vh - 260px)', minHeight: 500 }}>
-      <Box sx={{
-        width: 400, flexShrink: 0, overflowY: 'auto',
-        borderRight: '1px solid #e2e8f0', pr: 1,
-        // borderRadius: 5, bgcolor: '#ffffff',
-        bgcolor: '#ffffff',
-      }}>
-
+      <Box
+        sx={{
+          width: 300, flexShrink: 0, overflowY: 'auto',
+          borderRight: '1px solid #e2e8f0', pr: 1,
+          bgcolor: '#ffffff',
+          scrollbarWidth: 'none',
+          msOverflowStyle: 'none',
+          '&::-webkit-scrollbar': { display: 'none' },
+        }}
+      >
         {data.map((listItem, idx) => {
           const isActive = idx === selectedIndex;
           const centerName = listItem.centerName || listItem.centre_name || '-';
@@ -286,63 +549,110 @@ function ListViewPanel({ data, selectedIndex, onSelect }) {
           return (
             <Box
               key={`${listItem.filename}-${idx}`}
+              ref={(el) => (itemRefs.current[idx] = el)} // ✅ assign ref per item
               onClick={() => onSelect(idx)}
               sx={{
-                p: 1.5, mb: 0.5, cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'stretch',
+                mb: 0.5,
+                cursor: 'pointer',
                 bgcolor: isActive ? '#eff6ff' : 'transparent',
                 borderLeft: isActive ? '3px solid #2563eb' : '3px solid transparent',
                 '&:hover': { bgcolor: isActive ? '#eff6ff' : '#f8fafc' },
               }}
             >
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                {/* <AccessTime sx={{ fontSize: 14, color: '#2563eb' }} /> */}
-                <Typography variant="body2" fontWeight={700} color="#2563eb">
-                  {listItem.detected_at || '-'}
-                </Typography>
+              <Box
+                component="img"
+                src={listItem.image_url}
+                alt={listItem.camera_id}
+                sx={{
+                  width: { xs: 62, sm: 70, md: 70 },
+                  height: { xs: 62, sm: 70, md: 70 },
+                  flexShrink: 0,
+                  objectFit: 'cover',
+                  alignSelf: 'center',
+                  borderRadius: 1,
+                  my: 0.5, ml: 1, mr: 1.5,
+                }}
+                onError={(e) => { e.target.style.display = 'none'; }}
+              />
+
+              <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                {(() => {
+                  if (!listItem.detected_at || listItem.detected_at === '-') {
+                    return <Typography variant="body2" fontWeight={500} color="text.secondary" fontSize={12}>-</Typography>;
+                  }
+                  const commaIdx = listItem.detected_at.indexOf(',');
+                  const datePart = commaIdx !== -1 ? listItem.detected_at.substring(0, commaIdx + 1) : listItem.detected_at;
+                  const timePart = commaIdx !== -1 ? listItem.detected_at.substring(commaIdx + 1).trim() : '';
+                  return (
+                    <>
+                      <Typography variant="body2" fontWeight={600} color="text.primary" fontSize={13}>{datePart}</Typography>
+                      {timePart && <Typography variant="caption" fontWeight={500} color="text.secondary" fontSize={12}>{timePart}</Typography>}
+                    </>
+                  );
+                })()}
               </Box>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                {centerName}, {cameraName}
-              </Typography>
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                {city}
-              </Typography>
             </Box>
           );
         })}
       </Box>
 
-      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {item ? (
           <>
             <Typography variant="h6" fontWeight={700} sx={{ mb: 1 }}>
               {(TYPE_META[item.type] || { label: item.type }).label}
             </Typography>
-            <Box sx={{ position: 'relative', borderRadius: 3, overflow: 'hidden', bgcolor: '#0f172a', flex: 1, maxHeight: 650, height: '70vh' }}>
-              <Box
-                component="img"
-                src={item.image_url}
-                alt={item.filename}
-                sx={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
-                onError={(e) => { e.target.style.display = 'none'; }}
-              />
+
+            <Box sx={{ display: 'flex', gap: 2.5, flex: 1, minHeight: 0 }}>
               <Box sx={{
-                position: 'absolute', bottom: 0, left: 0, right: 0,
-                background: 'linear-gradient(transparent, rgba(15,23,42,0.85))',
-                p: 2, pt: 4, color: '#fff',
+                flex: 1, position: 'relative', borderRadius: 3, overflow: 'hidden',
+                bgcolor: '#fff'
               }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                  <Box>
-                    <Typography variant="caption" color="#94a3b8">Cam:</Typography>
-                    <Typography variant="subtitle2" fontWeight={700}>{item.cameraName || item.camera_id || '-'}</Typography>
-                    <Typography variant="caption" color="#94a3b8">Center:</Typography>
-                    <Typography variant="body2" fontWeight={600}>{item.centerName || item.centre_name || '-'}</Typography>
+                <Box
+                  component="img"
+                  src={item.image_url}
+                  alt={item.filename}
+                  sx={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+                  onError={(e) => { e.target.style.display = 'none'; }}
+                />
+              </Box>
+
+              <Box sx={{
+                width: 260, flexShrink: 0,
+                bgcolor: '#fff', borderRadius: 3, p: 2.5,
+                // border: '1px solid #e8ecf1',
+                display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
+              }}>
+                <Box>
+                  <Typography variant="caption" sx={{ color: '#2563eb', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', fontSize: '0.7rem' }}>
+                    Image Info
+                  </Typography>
+                  <Box sx={{ mt: 2 }}>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', fontSize: '0.6rem' }}>Camera ID</Typography>
+                    <Typography variant="body2" fontWeight={700} sx={{ color: '#0f172a', mt: 0.3 }}>{item.cameraName || item.camera_id || item.filename || '-'}</Typography>
                   </Box>
-                  <Box sx={{ textAlign: 'right' }}>
-                    <Typography variant="caption" color="#94a3b8">Date:</Typography>
-                    <Typography variant="subtitle2" fontWeight={700}>
-                      {item.examDate || (item.date ? item.date.split('-').reverse().join('-') : '-')}
-                    </Typography>
-                    <Typography variant="body2" color="#94a3b8">{item.city || '-'}</Typography>
+                  <Box sx={{ mt: 1.5 }}>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', fontSize: '0.6rem' }}>Location</Typography>
+                    <Typography variant="body2" fontWeight={700} sx={{ color: '#0f172a', mt: 0.3 }}>{item.centerName || item.centre_name || '-'}, {item.city || '-'}</Typography>
+                  </Box>
+                  <Box sx={{ mt: 1.5 }}>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', fontSize: '0.6rem' }}>Timestamp</Typography>
+                    <Typography variant="body2" fontWeight={700} sx={{ color: '#0f172a', mt: 0.3 }}>{item.detected_at || '-'}</Typography>
+                  </Box>
+                  <Box sx={{ mt: 1.5 }}>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', fontSize: '0.6rem' }}>Detection Type</Typography>
+                    <Chip
+                      label={(TYPE_META[item.type] || { label: item.type }).label}
+                      size="small"
+                      sx={{
+                        mt: 0.5,
+                        bgcolor: (TYPE_META[item.type] || { bg: '#f1f5f9' }).bg,
+                        color: (TYPE_META[item.type] || { color: '#64748b' }).color,
+                        fontWeight: 600, fontSize: '0.7rem',
+                      }}
+                    />
                   </Box>
                 </Box>
               </Box>
@@ -358,9 +668,8 @@ function ListViewPanel({ data, selectedIndex, onSelect }) {
   );
 }
 
-/* ── Main Component ── */
 const ClientDetections = () => {
-  const { setAllCounts, typeFilter, setTypeFilter } = useDetectionCounts();
+  const { setAllCounts, setUnfilteredCounts, typeFilter, setTypeFilter } = useDetectionCounts();
 
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [images, setImages] = useState([]);
@@ -369,7 +678,7 @@ const ClientDetections = () => {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(50);
-  const [view, setView] = useState('carousel');
+  const [view, setView] = useState('grid');
   const [search, setSearch] = useState('');
   const [sourceFilter, setSourceFilter] = useState('');
   const [dateFilter, setDateFilter] = useState(todayDate);
@@ -379,8 +688,8 @@ const ClientDetections = () => {
   const [appliedEndTime, setAppliedEndTime] = useState('');
   const [socketConnected, setSocketConnected] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
-  const [carouselIndex, setCarouselIndex] = useState(0);
   const [listSelectedIndex, setListSelectedIndex] = useState(0);
+  const [selected, setSelected] = useState(null);
 
   // Fetch unfiltered counts once for sidebar
   const fetchAllCounts = useCallback(async () => {
@@ -388,12 +697,15 @@ const ClientDetections = () => {
       const params = new URLSearchParams({ limit: 1 });
       const res = await axios.get(`${API_BASE_1}/client-detections?${params}`);
       if (res.data.success) {
-        setAllCounts(res.data.counts || {});
+        setUnfilteredCounts(res.data.counts || {});
+        if (typeFilter.length === 0) {
+          setAllCounts(res.data.counts || {});
+        }
       }
     } catch (err) {
       console.error('Failed to fetch all counts:', err);
     }
-  }, [setAllCounts]);
+  }, [setAllCounts, setUnfilteredCounts, typeFilter.length]);
 
   useEffect(() => {
     fetchAllCounts();
@@ -403,7 +715,7 @@ const ClientDetections = () => {
     setLoading(true);
     try {
       const params = new URLSearchParams({ page: pg, limit: rpp });
-      if (typeFilter) params.append('type', typeFilter);
+      if (typeFilter.length > 0) params.append('type', typeFilter.join(','));
       if (sourceFilter) params.append('source', sourceFilter);
       if (dateFilter) params.append('date', parseDateForQuery(dateFilter));
       if (search.trim()) params.append('search', search.trim());
@@ -435,7 +747,6 @@ const ClientDetections = () => {
   }, [sourceFilter, typeFilter, dateFilter, search, appliedStartTime, appliedEndTime, rowsPerPage, setAllCounts]);
 
   useEffect(() => {
-    setCarouselIndex(0);
     setListSelectedIndex(0);
     fetchClientImages(1, rowsPerPage);
   }, [fetchClientImages, rowsPerPage]);
@@ -469,7 +780,7 @@ const ClientDetections = () => {
   }, [setAllCounts]);
 
   const matchesFilters = useCallback((item) => {
-    if (typeFilter && item.type !== typeFilter) return false;
+    if (typeFilter.length > 0 && !typeFilter.includes(item.type)) return false;
     if (sourceFilter && item.source !== sourceFilter) return false;
     if (dateFilter) {
       const normalized = parseDateForQuery(dateFilter);
@@ -531,7 +842,7 @@ const ClientDetections = () => {
               '& input': { color: '#334155', '&::placeholder': { color: '#94a3b8', opacity: 1 } }
             }
           }}
-          sx={{ minWidth: 260, maxWidth: 420, flex: 1 }}
+          sx={{ minWidth: 260, maxWidth: 600, flex: 1 }}
         />
         <Box sx={{ position: 'relative', minWidth: 350 }}>
           <TextField
@@ -676,10 +987,10 @@ const ClientDetections = () => {
           />
 
 
-          {(typeFilter || dateFilter !== todayDate || search || sourceFilter || startTime || endTime) && (
+          {(typeFilter.length > 0 || dateFilter !== todayDate || search || sourceFilter || startTime || endTime) && (
             <Button
               size="small"
-              onClick={() => { setTypeFilter(''); setDateFilter(todayDate); setSearch(''); setSourceFilter(''); setStartTime(''); setEndTime(''); setAppliedStartTime(''); setAppliedEndTime(''); }}
+              onClick={() => { setTypeFilter([]); setDateFilter(todayDate); setSearch(''); setSourceFilter(''); setStartTime(''); setEndTime(''); setAppliedStartTime(''); setAppliedEndTime(''); }}
               sx={{ height: 36, borderRadius: '8px', fontSize: 13, textTransform: 'none', color: '#64748b' }}
             >
               Clear
@@ -689,7 +1000,7 @@ const ClientDetections = () => {
 
           <Button
             variant="contained"
-            startIcon={<FilterList sx={{ fontSize: 16 }} />}
+            // startIcon={<FilterList sx={{ fontSize: 16 }} />}
             onClick={() => { setAppliedStartTime(startTime); setAppliedEndTime(endTime); }}
             disableElevation
             sx={{
@@ -703,29 +1014,51 @@ const ClientDetections = () => {
         </Box>
       </Box>
 
-      <Box sx={{ mb: 1, display: 'flex', justifyContent: 'flex-end' }}>
-        <ToggleButtonGroup
-          value={view} exclusive onChange={(_, v) => v && setView(v)} size="small"
-          sx={{
-            bgcolor: '#ffffff',
-            border: '0.5px solid #e2e8f0',
-            height: 36,
-            borderRadius: '8px',
-            p: '2px',
-            '& .MuiToggleButton-root': {
-              border: 'none', borderRadius: '6px !important', textTransform: 'none',
-              px: 1.5, fontSize: 13, color: '#64748b',
-              '&.Mui-selected': { bgcolor: '#f8fafc', color: '#0f172a', boxShadow: '0 1px 2px rgba(0,0,0,0.05)', fontWeight: 600 }
-            }
-          }}
-        >
-          <ToggleButton value="carousel">
-            <ViewCarousel sx={{ fontSize: 16, mr: 0.5 }} /> Carousel
-          </ToggleButton>
-          <ToggleButton value="list">
-            <ViewList sx={{ fontSize: 16, mr: 0.5 }} /> List View
-          </ToggleButton>
-        </ToggleButtonGroup>
+      {/* ── Selected Type Chips + View Toggle ── */}
+      <Box sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+        {typeFilter.map((key) => {
+          const meta = TYPE_META[key] || { label: key, color: '#94a3b8', bg: '#f1f5f9' };
+          return (
+            <Chip
+              key={key}
+              label={meta.label}
+              size="small"
+              onDelete={() => setTypeFilter(typeFilter.filter((t) => t !== key))}
+              sx={{
+                bgcolor: meta.bg,
+                color: meta.color,
+                fontWeight: 600,
+                fontSize: '0.75rem',
+                borderRadius: '16px',
+                '& .MuiChip-deleteIcon': { color: meta.color, fontSize: 16, '&:hover': { color: meta.color } },
+              }}
+            />
+          );
+        })}
+        <Box sx={{ ml: 'auto' }}>
+          <ToggleButtonGroup
+            value={view} exclusive onChange={(_, v) => v && setView(v)} size="small"
+            sx={{
+              bgcolor: '#ffffff',
+              border: '0.5px solid #e2e8f0',
+              height: 36,
+              borderRadius: '8px',
+              p: '2px',
+              '& .MuiToggleButton-root': {
+                border: 'none', borderRadius: '6px !important', textTransform: 'none',
+                px: 1.5, fontSize: 13, color: '#64748b',
+                '&.Mui-selected': { bgcolor: '#f8fafc', color: '#0f172a', boxShadow: '0 1px 2px rgba(0,0,0,0.05)', fontWeight: 600 }
+              }
+            }}
+          >
+            <ToggleButton value="grid">
+              <GridView sx={{ fontSize: 16, mr: 0.5 }} /> Grid View
+            </ToggleButton>
+            <ToggleButton value="list">
+              <ViewList sx={{ fontSize: 16, mr: 0.5 }} /> List View
+            </ToggleButton>
+          </ToggleButtonGroup>
+        </Box>
       </Box>
 
       {/* ── Content ── */}
@@ -746,12 +1079,18 @@ const ClientDetections = () => {
             Push selected detections from the admin page to populate this viewer
           </Typography>
         </Box>
-      ) : view === 'carousel' ? (
-        <CarouselView
-          data={filteredImages}
-          currentIndex={carouselIndex}
-          onIndexChange={setCarouselIndex}
-        />
+      ) : view === 'grid' ? (
+        <Grid container spacing={2}>
+          {filteredImages.map((item, i) => (
+            <Grid item xs={12} sm={6} md={3} key={`${item.filename}-${i}`}>
+              <DetectionCard
+                item={item}
+                onClick={setSelected}
+                hideCheckbox={true}
+              />
+            </Grid>
+          ))}
+        </Grid>
       ) : (
         <ListViewPanel
           data={filteredImages}
@@ -759,6 +1098,8 @@ const ClientDetections = () => {
           onSelect={setListSelectedIndex}
         />
       )}
+
+      <Lightbox item={selected} onClose={() => setSelected(null)} />
 
       <Snackbar
         open={snackbar.open}

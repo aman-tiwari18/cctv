@@ -2,17 +2,20 @@ import React, { createContext, useContext, useState } from 'react';
 
 const DetectionCountsContext = createContext({
   allCounts: {},
-  setAllCounts: () => {},
-  typeFilter: '',
-  setTypeFilter: () => {},
+  setAllCounts: () => { },
+  unfilteredCounts: {},
+  setUnfilteredCounts: () => { },
+  typeFilter: [],
+  setTypeFilter: () => { },
 });
 
 export const DetectionCountsProvider = ({ children }) => {
   const [allCounts, setAllCounts] = useState({});
-  const [typeFilter, setTypeFilter] = useState('');
+  const [unfilteredCounts, setUnfilteredCounts] = useState({});
+  const [typeFilter, setTypeFilter] = useState([]);
 
   return (
-    <DetectionCountsContext.Provider value={{ allCounts, setAllCounts, typeFilter, setTypeFilter }}>
+    <DetectionCountsContext.Provider value={{ allCounts, setAllCounts, unfilteredCounts, setUnfilteredCounts, typeFilter, setTypeFilter }}>
       {children}
     </DetectionCountsContext.Provider>
   );

@@ -123,12 +123,14 @@ class ScriptRunner:
             "tampering",
             "blind_spot",
         }
-        standalone_script_paths = {
-            "vision": self.scripts_dir / "detection/vision_classification.py",
-        }
 
-        if script_code in standalone_script_paths:
-            full_script_path = standalone_script_paths[script_code]
+        link_type_for_path = str(execution_metadata.get("link_type") or execution.get("link_type") or "HLS").upper()
+
+        if script_code == "vision":
+            if link_type_for_path == "RTSP":
+                full_script_path = self.scripts_dir / "detection/vision_classification_rtsp.py"
+            else:
+                full_script_path = self.scripts_dir / "detection/vision_classification.py"
         elif script_code in pipeline_codes:
             full_script_path = self.scripts_dir / "detection/pipeline/master_pipeline.py"
         else:

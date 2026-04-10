@@ -18,6 +18,7 @@ import {
   MenuItem,
   Collapse,
   Chip,
+  Button,
 } from '@mui/material';
 import {
   Menu as MenuIcon,
@@ -43,6 +44,8 @@ import {
   VisibilityOff,
   FlipCameraAndroid,
   SecurityUpdateWarning,
+  Download,
+  TableChart,
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import { DetectionCountsProvider, useDetectionCounts } from '../contexts/DetectionCountsContext';
@@ -66,18 +69,18 @@ const sidebarPalette = {
 
 // Subtle, cohesive icon colors — all within the blue-slate-indigo range to match the app
 const TYPE_META = {
-  proximity: { label: 'Close Proximity', icon: WarningAmber, iconColor: '#b45309' },
-  crowd: { label: 'Crowd Detection', icon: Groups, iconColor: '#1d4ed8' },
-  crowd_five: { label: 'Crowd < 5', icon: Groups, iconColor: '#1e40af' },
-  crowd_zero: { label: 'Zero Person', icon: PersonOff, iconColor: '#0f766e' },
-  server: { label: 'Server Room', icon: Dns, iconColor: '#be123c' },
-  intruder: { label: 'Intruder', icon: DirectionsWalk, iconColor: '#6d28d9' },
-  entry_exit: { label: 'Entry/Exit', icon: MeetingRoom, iconColor: '#047857' },
-  phone: { label: 'Phone', icon: Smartphone, iconColor: '#4338ca' },
-  blind_spot: { label: 'Blind Spot', icon: VisibilityOff, iconColor: '#5b21b6' },
-  invigilator: { label: 'Invigilator', icon: Visibility, iconColor: '#9d174d' },
-  inversion: { label: 'Camera Inversion', icon: FlipCameraAndroid, iconColor: '#0369a1' },
-  tamper: { label: 'Camera Tampering', icon: SecurityUpdateWarning, iconColor: '#991b1b' },
+  proximity: { label: 'Close Proximity', icon: WarningAmber, iconColor: '#5cb88a' },
+  crowd: { label: 'Crowd Detection', icon: Groups, iconColor: '#e24d7b' },
+  crowd_five: { label: 'Crowd < 5', icon: Groups, iconColor: '#e06050' },
+  crowd_zero: { label: 'Zero Person', icon: PersonOff, iconColor: '#6b5b95' },
+  server: { label: 'Server Room', icon: Dns, iconColor: '#a0623d' },
+  intruder: { label: 'Intruder', icon: DirectionsWalk, iconColor: '#d94466' },
+  entry_exit: { label: 'Entry/Exit', icon: MeetingRoom, iconColor: '#1d7a7d' },
+  phone: { label: 'Phone', icon: Smartphone, iconColor: '#465a38' },
+  blind_spot: { label: 'Blind Spot', icon: VisibilityOff, iconColor: '#b0a850' },
+  invigilator: { label: 'Invigilator', icon: Visibility, iconColor: '#00bfcf' },
+  inversion: { label: 'Camera Inversion', icon: FlipCameraAndroid, iconColor: '#7a86b4' },
+  tamper: { label: 'Camera Tampering', icon: SecurityUpdateWarning, iconColor: '#00c8d4' },
 };
 
 const menuItems = [
@@ -91,21 +94,26 @@ const menuItems = [
   { text: 'Client Detections', icon: <Visibility />, path: '/client-detections', hasSubItems: true },
 ];
 
-/* ── Detection Sub-Items (no "All" row) ── */
+/* ── Detection Sub-Items (multi-select) ── */
 function DetectionSubItems({ counts, typeFilter, onTypeSelect }) {
   return (
     <List component="div" disablePadding sx={{ pb: 0.5 }}>
       {Object.entries(TYPE_META).map(([key, meta]) => {
         const count = counts[key] || 0;
-        // if (count === 0) return null;
-        const isActive = typeFilter === key;
+        const isActive = typeFilter.includes(key);
         const IconComp = meta.icon;
 
         return (
           <ListItem key={key} disablePadding sx={{ px: 1 }}>
             <ListItemButton
               selected={isActive}
-              onClick={() => onTypeSelect(isActive ? '' : key)}
+              onClick={() => {
+                if (isActive) {
+                  onTypeSelect(typeFilter.filter((t) => t !== key));
+                } else {
+                  onTypeSelect([...typeFilter, key]);
+                }
+              }}
               sx={{
                 minHeight: 34,
                 pl: 5,
@@ -158,7 +166,7 @@ function DetectionSubItems({ counts, typeFilter, onTypeSelect }) {
 
 /* ── Sidebar Content ── */
 function SidebarContent({ items, currentPath, onNavigate }) {
-  const { allCounts, typeFilter, setTypeFilter } = useDetectionCounts();
+  const { unfilteredCounts, typeFilter, setTypeFilter } = useDetectionCounts();
   const [detectionsOpen, setDetectionsOpen] = useState(false);
 
   const isDetectionPage = currentPath === '/detections' || currentPath === '/client-detections';
@@ -258,7 +266,7 @@ function SidebarContent({ items, currentPath, onNavigate }) {
               {isDetectionItem && isActive && (
                 <Collapse in={detectionsOpen} timeout="auto" unmountOnExit>
                   <DetectionSubItems
-                    counts={allCounts}
+                    counts={unfilteredCounts}
                     typeFilter={typeFilter}
                     onTypeSelect={setTypeFilter}
                   />
@@ -278,7 +286,7 @@ function LayoutInner() {
   const location = useLocation();
   const { user, logout } = useAuth();
 
-  const { allCounts } = useDetectionCounts();
+  const { allCounts, unfilteredCounts } = useDetectionCounts();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState(null);
 
@@ -338,15 +346,15 @@ function LayoutInner() {
 
           {(location.pathname === '/detections' || location.pathname === '/client-detections') && (
             <Chip
-              label={`TOTAL DETECTIONS  ${Object.values(allCounts).reduce((a, b) => a + b, 0).toLocaleString()}`}
+              label={`TOTAL DETECTIONS  ${Object.values(unfilteredCounts).reduce((a, b) => a + b, 0).toLocaleString()}`}
               variant="outlined"
               sx={{
                 ml: 2,
                 fontWeight: 700,
                 fontSize: '0.75rem',
-                borderColor: '#2563eb',
-                color: '#2563eb',
-                bgcolor: '#e0e7ff',
+                border: 'none',
+                color: '#a96664',
+                bgcolor: '#fbefef',
                 borderRadius: '20px',
                 height: 32,
                 '& .MuiChip-label': { px: 2 },
@@ -357,18 +365,50 @@ function LayoutInner() {
           <Box sx={{ flexGrow: 1 }} />
 
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Typography
-              variant="body2"
-              sx={{ display: { xs: 'none', md: 'block' }, color: '#64748b', fontWeight: 500 }}
-            >
-              {user?.username}
-            </Typography>
+            {location.pathname === '/detections' && (
+              <>
+                <Button
+                  variant="contained"
+                  startIcon={<Download sx={{ fontSize: 16 }} />}
+                  disableElevation
+                  sx={{
+                    height: 34,
+                    borderRadius: '8px',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    textTransform: 'none',
+                    bgcolor: '#e0e7fa',
+                    color: '#2563eb',
+                    px: 2,
+                    transition: 'all 0.2s ease',
+                    '&:hover': { bgcolor: '#e0e7fa', opacity: 0.8, transform: 'translateY(-1px)' },
+                  }}
+                >
+                  Download Report
+                </Button>
+                <Button
+                  variant="contained"
+                  startIcon={<img src={`${import.meta.env.BASE_URL}file-excel-fill.svg`} alt="excel" style={{ width: 18, height: 18, filter: 'invert(32%) sepia(93%) saturate(1548%) hue-rotate(213deg) brightness(97%) contrast(93%)' }} />}
+                  disableElevation
+                  sx={{
+                    height: 34,
+                    borderRadius: '8px',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    textTransform: 'none',
+                    bgcolor: '#e0e7fa',
+                    color: '#2563eb',
+                    px: 2,
+                    transition: 'all 0.2s ease',
+                    '&:hover': { bgcolor: '#e0e7fa', opacity: 0.8, transform: 'translateY(-1px)' },
+                  }}
+                >
+                  Export in Excel
+                </Button>
+              </>
+            )}
             <IconButton onClick={(e) => setAnchorEl(e.currentTarget)} size="small">
-              <Avatar
-                sx={{ width: 32, height: 32, fontSize: '0.9rem', fontWeight: 600, bgcolor: '#2563eb' }}
-              >
-                {user?.username?.charAt(0).toUpperCase()}
-              </Avatar>
+              <AccountCircle sx={{ fontSize: 32, color: '#94a3b8' }} />
             </IconButton>
           </Box>
         </Toolbar>

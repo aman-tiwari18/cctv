@@ -1,19 +1,21 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
-  Box, Card, Typography, Chip,
+  Box, Card, CardMedia, CardContent, Typography, Chip,
   TextField, Select, MenuItem, FormControl, InputLabel,
   ToggleButtonGroup, ToggleButton, Pagination, TablePagination,
-  IconButton, Skeleton,
-  InputAdornment, Button, Snackbar, Alert,
+  IconButton, Skeleton, Grid, Checkbox, Dialog, DialogContent,
+  InputAdornment, Button, Snackbar, Alert, LinearProgress,
 } from '@mui/material';
 import {
-  Search, CameraAlt,
+  Search, CameraAlt, GridView, Close,
   AccessTime, Warning, Person, FilterList, Refresh, Event, LocationCity,
   Groups, Dns, DirectionsWalk, MeetingRoom, Smartphone, Visibility,
   WarningAmber, ImageNotSupported, FlipCameraAndroid, SecurityUpdateWarning,
   VisibilityOff, PersonOff,
-  ChevronLeft, ChevronRight, ViewCarousel, ViewList,
-  PersonAdd, KeyboardArrowDown
+  ChevronLeft, ChevronRight, ViewList,
+  PersonAdd, KeyboardArrowDown,
+  ZoomIn, Fullscreen, VerifiedUser, FiberManualRecord,
+  Check, Close as CloseIcon,
 } from '@mui/icons-material';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -24,21 +26,199 @@ import { API_BASE_1, IMG_BASE, SOCKET_URL, SOCKET_PATH } from '../constants/data
 import { useDetectionCounts } from '../contexts/DetectionCountsContext';
 
 const TYPE_META = {
-  proximity: { label: 'Close Proximity', color: '#f59e0b', bg: '#fef3c7', iconKey: 'proximity' },
-  crowd: { label: 'Crowd Detection', color: '#3b82f6', bg: '#dbeafe', iconKey: 'crowd' },
-  crowd_five: { label: 'Crowd < 5', color: '#2563eb', bg: '#dbeafe', iconKey: 'crowd_five' },
-  crowd_zero: { label: 'Zero Person', color: '#0f766e', bg: '#ccfbf1', iconKey: 'crowd_zero' },
-  server: { label: 'Server Room', color: '#ef4444', bg: '#fee2e2', iconKey: 'server' },
-  intruder: { label: 'Intruder', color: '#8b5cf6', bg: '#ede9fe', iconKey: 'intruder' },
-  entry_exit: { label: 'Entry/Exit', color: '#10b981', bg: '#d1fae5', iconKey: 'entry_exit' },
-  phone: { label: 'Phone', color: '#6366f1', bg: '#e0e7ff', iconKey: 'phone' },
-  blind_spot: { label: 'Blind Spot', color: '#7c3aed', bg: '#ede9fe', iconKey: 'blind_spot' },
-  invigilator: { label: 'Invigilator', color: '#ec4899', bg: '#fce7f3', iconKey: 'invigilator' },
-  inversion: { label: 'Camera Inversion', color: '#0ea5e9', bg: '#e0f2fe', iconKey: 'inversion' },
-  tamper: { label: 'Camera Tampering', color: '#dc2626', bg: '#fef2f2', iconKey: 'tamper' },
+  proximity: { label: 'Close Proximity', color: '#5cb88a', bg: '#e5f5ed', iconKey: 'proximity' },
+  crowd: { label: 'Crowd Detection', color: '#e24d7b', bg: '#fce4ec', iconKey: 'crowd' },
+  crowd_five: { label: 'Crowd < 5', color: '#e06050', bg: '#fce8e6', iconKey: 'crowd_five' },
+  crowd_zero: { label: 'Zero Person', color: '#6b5b95', bg: '#edeaf3', iconKey: 'crowd_zero' },
+  server: { label: 'Server Room', color: '#a0623d', bg: '#f3ebe4', iconKey: 'server' },
+  intruder: { label: 'Intruder', color: '#d94466', bg: '#fce4ea', iconKey: 'intruder' },
+  entry_exit: { label: 'Entry/Exit', color: '#1d7a7d', bg: '#e0f0f0', iconKey: 'entry_exit' },
+  phone: { label: 'Phone', color: '#465a38', bg: '#e8ece5', iconKey: 'phone' },
+  blind_spot: { label: 'Blind Spot', color: '#b0a850', bg: '#f3f2e4', iconKey: 'blind_spot' },
+  invigilator: { label: 'Invigilator', color: '#00bfcf', bg: '#e0f7fa', iconKey: 'invigilator' },
+  inversion: { label: 'Camera Inversion', color: '#7a86b4', bg: '#eceef5', iconKey: 'inversion' },
+  tamper: { label: 'Camera Tampering', color: '#00c8d4', bg: '#e0f8fa', iconKey: 'tamper' },
 };
 
+const TYPE_ICONS = {
+  proximity: WarningAmber,
+  crowd: Groups,
+  crowd_five: Groups,
+  crowd_zero: PersonOff,
+  server: Dns,
+  intruder: DirectionsWalk,
+  entry_exit: MeetingRoom,
+  phone: Smartphone,
+  blind_spot: VisibilityOff,
+  invigilator: Visibility,
+  inversion: FlipCameraAndroid,
+  tamper: SecurityUpdateWarning,
+  default: CameraAlt,
+};
 
+function DetectionCard({ item, onClick, selected, onToggleSelect, hideCheckbox }) {
+  const meta = TYPE_META[item.type] || { label: item.type, color: '#94a3b8', bg: '#f1f5f9' };
+  const [imgError, setImgError] = useState(false);
+  const cameraName = item.cameraName || item.camera_name || item.camera_id || '-';
+  const centerName = item.centerName || item.centre_name || '-';
+  const city = item.city || '-';
+  const examDate = item.examDate || (item.date ? item.date.split('-').reverse().join('-') : '-');
+  const invigilatorEventLabel = item.type === 'invigilator'
+    ? (item.issueLabel || (item.issueType ? String(item.issueType).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : ''))
+    : '';
+
+  return (
+    <Card
+      onClick={() => onClick(item)}
+      sx={{
+        cursor: 'pointer',
+        borderRadius: 3,
+        overflow: 'hidden',
+        transition: 'all 0.22s ease',
+        '&:hover': { transform: 'translateY(-4px) scale(1.005)', boxShadow: '0 14px 30px rgba(15, 23, 42, 0.14)' },
+        border: '1px solid #e2e8f0',
+      }}
+    >
+      <Box sx={{ position: 'relative', bgcolor: '#0f172a' }}>
+        {!hideCheckbox && onToggleSelect && (
+          <Checkbox
+            checked={Boolean(selected)}
+            onChange={(e) => { e.stopPropagation(); onToggleSelect(item); }}
+            onClick={(e) => e.stopPropagation()}
+            size="small"
+            sx={{
+              position: 'absolute', top: 8, left: 8, zIndex: 2,
+              bgcolor: 'rgba(255,255,255,0.92)', borderRadius: 1,
+            }}
+          />
+        )}
+        {imgError ? (
+          <Box sx={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#1e293b' }}>
+            <CameraAlt sx={{ fontSize: 48, color: '#475569' }} />
+          </Box>
+        ) : (
+          <CardMedia
+            component="img"
+            height={220}
+            image={`${IMG_BASE}${item.image_url}`}
+            alt={item.camera_id}
+            onError={() => setImgError(true)}
+            sx={{ objectFit: 'cover' }}
+          />
+        )}
+        <Chip
+          label={meta.label}
+          size="small"
+          sx={{
+            position: 'absolute', top: 8, right: 8,
+            bgcolor: meta.color, color: '#fff',
+            fontWeight: 700, fontSize: '0.65rem',
+          }}
+        />
+        {invigilatorEventLabel && (
+          <Chip
+            label={invigilatorEventLabel}
+            size="small"
+            sx={{
+              position: 'absolute', bottom: 8, right: 8,
+              bgcolor: 'rgba(15, 23, 42, 0.72)', color: '#fff',
+              fontWeight: 700, fontSize: '0.65rem',
+            }}
+          />
+        )}
+        {item.count != null && (
+          <Chip
+            icon={<Warning sx={{ fontSize: 12, color: '#fff !important' }} />}
+            label={
+              item.type === 'proximity'
+                ? `${item.count} violation${item.count > 1 ? 's' : ''}`
+                : `${item.count} person${item.count > 1 ? 's' : ''}`
+            }
+            size="small"
+            sx={{
+              position: 'absolute', top: 8, left: (!hideCheckbox && onToggleSelect) ? 40 : 8,
+              bgcolor: 'rgba(0,0,0,0.65)', color: '#fff',
+              fontSize: '0.65rem',
+            }}
+          />
+        )}
+      </Box>
+      <CardContent sx={{ p: 2, pb: '14px !important' }}>
+        <Typography variant="h6" fontWeight={800} sx={{ color: '#1e293b', lineHeight: 1.25, mb: 1.5 }}>
+          {centerName}
+        </Typography>
+
+        <Box sx={{ display: 'grid', gridTemplateColumns: '26px 1fr', rowGap: 1.1, columnGap: 1, alignItems: 'center' }}>
+          <CameraAlt sx={{ fontSize: 16, color: '#64748b' }} />
+          <Typography variant="body1" fontWeight={700} color="#334155">{cameraName}</Typography>
+
+          <Event sx={{ fontSize: 16, color: '#64748b' }} />
+          <Typography variant="body1" fontWeight={700} color="#334155">{examDate}</Typography>
+
+          <AccessTime sx={{ fontSize: 16, color: '#64748b' }} />
+          <Typography variant="body1" fontWeight={700} color="#334155">{item.detected_at || '-'}</Typography>
+
+          <LocationCity sx={{ fontSize: 16, color: '#64748b' }} />
+          <Typography variant="body1" fontWeight={700} color="#334155">{city}</Typography>
+        </Box>
+
+        {item.confidence != null && (
+          <Typography variant="caption" color={meta.color} fontWeight={600} sx={{ display: 'block', mt: 1.5 }}>
+            Conf: {(item.confidence * 100).toFixed(0)}%
+          </Typography>
+        )}
+
+        {item.tcCode && (
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+            TC: {item.tcCode}
+          </Typography>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function Lightbox({ item, onClose }) {
+  if (!item) return null;
+  const meta = TYPE_META[item.type] || {};
+  const invigilatorEventLabel = item.type === 'invigilator'
+    ? (item.issueLabel || (item.issueType ? String(item.issueType).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : ''))
+    : '';
+  return (
+    <Dialog open onClose={onClose} maxWidth="lg" fullWidth>
+      <DialogContent sx={{ p: 0, bgcolor: '#0f172a', position: 'relative' }}>
+        <IconButton onClick={onClose} sx={{ position: 'absolute', top: 8, right: 8, zIndex: 10, color: '#fff', bgcolor: 'rgba(0,0,0,0.5)' }}>
+          <Close />
+        </IconButton>
+        <img
+          src={`${IMG_BASE}${item.image_url}`}
+          alt={item.camera_id}
+          style={{ width: '100%', maxHeight: '80vh', objectFit: 'contain', display: 'block' }}
+        />
+        <Box sx={{ p: 2, color: '#fff' }}>
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+            <Chip label={meta.label} size="small" sx={{ bgcolor: meta.color, color: '#fff', fontWeight: 700 }} />
+            {invigilatorEventLabel && (
+              <Chip label={invigilatorEventLabel} size="small" sx={{ bgcolor: '#334155', color: '#fff' }} />
+            )}
+            {item.count != null && <Chip label={`Count: ${item.count}`} size="small" sx={{ bgcolor: '#334155', color: '#fff' }} />}
+            {item.confidence != null && (
+              <Chip label={`Confidence: ${(item.confidence * 100).toFixed(1)}%`} size="small" sx={{ bgcolor: '#334155', color: '#fff' }} />
+            )}
+          </Box>
+          <Typography variant="h6" sx={{ mt: 1, fontWeight: 700 }}>{item.cameraName || item.camera_id}</Typography>
+          <Typography variant="body2" color="#94a3b8">{item.detected_at}</Typography>
+          {item.centerName && (
+            <Typography variant="body2" color="#94a3b8">
+              {item.centerName}{item.city ? ` — ${item.city}` : ''}{item.state ? `, ${item.state}` : ''}
+            </Typography>
+          )}
+          {item.tcCode && <Typography variant="body2" color="#94a3b8">TC: {item.tcCode}</Typography>}
+        </Box>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 const formatDateDDMMYYYY = (dateInput) => {
   const date = typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateInput)
@@ -90,203 +270,47 @@ const timeStringToSeconds = (t) => {
 const todayDate = formatDateDDMMYYYY(new Date());
 
 
-function CarouselView({ data, currentIndex, onIndexChange, onPushToClient, copyingToClient }) {
-  const thumbRef = useRef(null);
-  const containerRef = useRef(null);
-  const item = data[currentIndex];
-  if (!item) return null;
-
-  const meta = TYPE_META[item.type] || { label: item.type, color: '#94a3b8' };
-  const centerName = item.centerName || item.centre_name || '-';
-  const cameraName = item.cameraName || item.camera_name || item.camera_id || '-';
-  const city = item.city || '-';
-  const examDate = item.examDate || (item.date ? item.date.split('-').reverse().join('-') : '-');
-
-  const goPrev = () => onIndexChange(Math.max(0, currentIndex - 1));
-  const goNext = () => onIndexChange(Math.min(data.length - 1, currentIndex + 1));
-
-  useEffect(() => {
-    const handler = (e) => {
-      if (e.key === 'ArrowLeft') { e.preventDefault(); goPrev(); }
-      if (e.key === 'ArrowRight') { e.preventDefault(); goNext(); }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [currentIndex, data.length]);
-
-  useEffect(() => {
-    if (thumbRef.current) {
-      const el = thumbRef.current.children[currentIndex];
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
-    }
-  }, [currentIndex]);
-
-  return (
-    <Box ref={containerRef} tabIndex={-1} sx={{ outline: 'none' }}>
-      <Typography variant="h6" fontWeight={300} fontSize={12} textAlign="center" sx={{ mb: 1, mt: 0 }}>
-        {currentIndex + 1} / {data.length} {meta.label} Detections
-      </Typography>
-
-      <Box sx={{ position: 'relative', bgcolor: '#0f172a', borderRadius: 3, overflow: 'hidden', mb: 1 }}>
-        <IconButton
-          onClick={goPrev}
-          disabled={currentIndex === 0}
-          sx={{
-            position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', zIndex: 3,
-            bgcolor: 'rgba(255,255,255,0.9)', '&:hover': { bgcolor: '#fff' }, '&.Mui-disabled': { opacity: 0.3 },
-          }}
-        >
-          <ChevronLeft />
-        </IconButton>
-        <IconButton
-          onClick={goNext}
-          disabled={currentIndex === data.length - 1}
-          sx={{
-            position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', zIndex: 3,
-            bgcolor: 'rgba(255,255,255,0.9)', '&:hover': { bgcolor: '#fff' }, '&.Mui-disabled': { opacity: 0.3 },
-          }}
-        >
-          <ChevronRight />
-        </IconButton>
-
-        <Box
-          component="img"
-          src={`${IMG_BASE}${item.image_url}`}
-          alt={item.camera_id}
-          sx={{ width: '100%', height: 550, objectFit: 'contain', display: 'block' }}
-          onError={(e) => { e.target.style.display = 'none'; }}
-        />
-
-        {/* Details overlay */}
-        <Box sx={{
-          position: 'absolute', bottom: 0, left: 0, right: 0,
-          background: 'linear-gradient(transparent, rgba(15,23,42,0.85))',
-          p: 2.5, pt: 5, color: '#fff',
-        }}>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
-            <Box>
-              <Box display="flex" gap={1} alignItems="center">
-                <Typography variant="caption" color="#94a3b8">
-                  Cam:
-                </Typography>
-                <Typography variant="subtitle1" fontWeight={700}>
-                  {cameraName}
-                </Typography>
-              </Box>
-
-              <Box display="flex" gap={1} alignItems="center">
-                <Typography variant="caption" color="#94a3b8">
-                  Center:
-                </Typography>
-                <Typography variant="body2" fontWeight={600}>
-                  {centerName}
-                </Typography>
-              </Box>
-              <Box display="flex" gap={1} alignItems="center">
-                <Typography variant="caption" color="#94a3b8">
-                  City:
-                </Typography>
-                <Typography variant="body2" fontWeight={600}>
-                  {city}
-                </Typography>
-              </Box>
-            </Box>
-          </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Event sx={{ fontSize: 16, color: '#94a3b8' }} />
-            <Typography variant="body2" color="#94a3b8">
-              {item.detected_at || '-'}
-            </Typography>
-          </Box>
-        </Box>
-      </Box>
-
-      {/* Push to Client button — outside image, bottom center */}
-      <Box sx={{ display: 'flex', justifyContent: 'center', mb: 2, mt: 2 }}>
-        <Button
-          variant="contained"
-          startIcon={<PersonAdd />}
-          disabled={copyingToClient}
-          onClick={() => onPushToClient([item])}
-          sx={{
-            bgcolor: '#2563eb',
-            borderRadius: 2,
-            textTransform: 'none',
-            fontWeight: 700,
-            px: 4,
-            '&:hover': { bgcolor: '#1d4ed8' },
-          }}
-        >
-          {copyingToClient ? 'Pushing...' : 'Push to Client'}
-        </Button>
-      </Box>
-
-      {/* Counter */}
-      {/* <Typography variant="body2" textAlign="center" color="text.secondary" sx={{ mb: 1 }}>
-        {currentIndex + 1} of {data.length}
-      </Typography> */}
-
-      {/* Thumbnail strip */}
-      <Box
-        ref={thumbRef}
-        sx={{
-          display: 'flex', gap: 1, overflowX: 'auto', pb: 1, px: 1,
-          '&::-webkit-scrollbar': { height: 4 },
-          '&::-webkit-scrollbar-thumb': { bgcolor: '#cbd5e1', borderRadius: 2 },
-        }}
-      >
-        {data.map((thumbItem, idx) => (
-          <Box
-            key={`${thumbItem.filename}-${idx}`}
-            onClick={() => onIndexChange(idx)}
-            sx={{
-              flexShrink: 0, width: 100, cursor: 'pointer', textAlign: 'center',
-              borderRadius: 1.5, border: idx === currentIndex ? '2px solid #2563eb' : '2px solid transparent',
-              overflow: 'hidden', transition: 'border-color 0.15s',
-            }}
-          >
-            <Box
-              component="img"
-              src={`${IMG_BASE}${thumbItem.image_url}`}
-              alt=""
-              sx={{ width: '100%', height: 60, objectFit: 'cover', display: 'block' }}
-              onError={(e) => { e.target.style.display = 'none'; }}
-            />
-            <Typography
-              variant="caption"
-              fontWeight={idx === currentIndex ? 700 : 500}
-              color={idx === currentIndex ? '#2563eb' : 'text.secondary'}
-              sx={{ display: 'block', mt: 0.3 }}
-            >
-              {thumbItem.detected_at || '-'}
-            </Typography>
-          </Box>
-        ))}
-      </Box>
-    </Box>
-  );
-}
 
 
 function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingToClient }) {
   const item = data[selectedIndex];
+  const itemRefs = useRef([]);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
+      if (e.key === 'ArrowUp') { e.preventDefault(); onSelect(Math.max(0, selectedIndex - 1)); }
+      if (e.key === 'ArrowDown') { e.preventDefault(); onSelect(Math.min(data.length - 1, selectedIndex + 1)); }
+      if (e.key === 'ArrowLeft') { e.preventDefault(); if (item && !copyingToClient && onPushToClient) onPushToClient([item]); }
+      if (e.key === 'ArrowRight') { e.preventDefault(); console.log('No action via ArrowRight'); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [selectedIndex, data.length, item, copyingToClient, onSelect, onPushToClient]);
+
+  useEffect(() => {
+    const el = itemRefs.current[selectedIndex];
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [selectedIndex]);
 
   return (
     <Box sx={{ display: 'flex', gap: 2, height: 'calc(100vh - 260px)', minHeight: 500 }}>
+
       <Box sx={{
-        width: 400, flexShrink: 0, overflowY: 'auto',
+        width: 300, flexShrink: 0, overflowY: 'auto',
         borderRight: '1px solid #e2e8f0', pr: 1,
         bgcolor: '#ffffff',
+        scrollbarWidth: 'none',
+        msOverflowStyle: 'none',
+        '&::-webkit-scrollbar': { display: 'none' },
       }}>
         {data.map((listItem, idx) => {
           const isActive = idx === selectedIndex;
-          const centerName = listItem.centerName || listItem.centre_name || '-';
-          const cameraName = listItem.cameraName || listItem.camera_name || listItem.camera_id || '-';
-          const city = listItem.city || '-';
 
           return (
             <Box
               key={`${listItem.filename}-${idx}`}
+              ref={(el) => (itemRefs.current[idx] = el)} // ✅ direct DOM ref
               onClick={() => onSelect(idx)}
               sx={{
                 display: 'flex',
@@ -303,100 +327,137 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
                 src={`${IMG_BASE}${listItem.image_url}`}
                 alt={listItem.camera_id}
                 sx={{
-                  width: { xs: 62, sm: 70, md: 50 },
-                  height: { xs: 62, sm: 70, md: 50 },
+                  width: { xs: 62, sm: 70, md: 70 },
+                  height: { xs: 62, sm: 70, md: 70 },
                   flexShrink: 0,
                   objectFit: 'cover',
                   alignSelf: 'center',
                   borderRadius: 1,
-                  m: 1,
+                  my: 0.5, ml: 1, mr: 1.5,
                 }}
                 onError={(e) => { e.target.style.display = 'none'; }}
               />
 
-              <Box sx={{ p: 1.5, flex: 1, minWidth: 0 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                  <Typography variant="body2" fontWeight={700} color="#2563eb" noWrap>
-                    {listItem.detected_at || '-'}
-                  </Typography>
-                </Box>
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }} noWrap>
-                  {centerName}, {cameraName}
-                </Typography>
-                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }} noWrap>
-                  {city}
-                </Typography>
+              <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                {(() => {
+                  if (!listItem.detected_at || listItem.detected_at === '-') {
+                    return <Typography variant="body2" fontWeight={500} color="text.secondary" fontSize={12}>-</Typography>;
+                  }
+                  const commaIdx = listItem.detected_at.indexOf(',');
+                  const datePart = commaIdx !== -1 ? listItem.detected_at.substring(0, commaIdx + 1) : listItem.detected_at;
+                  const timePart = commaIdx !== -1 ? listItem.detected_at.substring(commaIdx + 1).trim() : '';
+                  return (
+                    <>
+                      <Typography variant="body2" fontWeight={600} color="text.primary" fontSize={13}>{datePart}</Typography>
+                      {timePart && <Typography variant="caption" fontWeight={500} color="text.secondary" fontSize={12}>{timePart}</Typography>}
+                    </>
+                  );
+                })()}
               </Box>
             </Box>
           );
         })}
       </Box>
 
-      {/* Right panel unchanged */}
-      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+      {/* Right panel */}
+      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {item ? (
           <>
             <Typography variant="h6" fontWeight={700} sx={{ mb: 1 }}>
               {(TYPE_META[item.type] || { label: item.type }).label}
             </Typography>
 
-            <Box sx={{
-              position: 'relative', borderRadius: 3, overflow: 'hidden', bgcolor: '#0f172a', flex: 1, height: '70vh',
-              maxHeight: 650
-            }}>
-              <Box
-                component="img"
-                src={`${IMG_BASE}${item.image_url}`}
-                alt={item.camera_id}
-                sx={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
-                onError={(e) => { e.target.style.display = 'none'; }}
-              />
-
+            <Box sx={{ display: 'flex', gap: 2.5, flex: 1, minHeight: 0 }}>
+              {/* Image */}
               <Box sx={{
-                position: 'absolute', bottom: 0, left: 0, right: 0,
-                background: 'linear-gradient(transparent, rgba(15,23,42,0.85))',
-                p: 2, pt: 4, color: '#fff',
+                flex: 1, position: 'relative', borderRadius: 3, overflow: 'hidden',
+                bgcolor: '#fff'
               }}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1, alignItems: 'flex-start' }}>
-                  <Box>
-                    <Box display="flex" gap={1} alignItems="center">
-                      <Typography variant="caption" color="#94a3b8">Cam:</Typography>
-                      <Typography variant="subtitle1" fontWeight={700}>
-                        {item.cameraName || item.camera_id || '-'}
-                      </Typography>
-                    </Box>
-                    <Box display="flex" gap={1} alignItems="center">
-                      <Typography variant="caption" color="#94a3b8">Center:</Typography>
-                      <Typography variant="body2" fontWeight={600}>
-                        {item.centerName || item.centre_name || '-'}
-                      </Typography>
-                    </Box>
-                    <Box display="flex" gap={1} alignItems="center">
-                      <Typography variant="caption" color="#94a3b8">City:</Typography>
-                      <Typography variant="body2" fontWeight={600}>{item.city || '-'}</Typography>
-                    </Box>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <Event sx={{ fontSize: 16, color: '#94a3b8' }} />
-                      <Typography variant="body2" color="#94a3b8">{item.detected_at || '-'}</Typography>
-                    </Box>
+                <Box
+                  component="img"
+                  src={`${IMG_BASE}${item.image_url}`}
+                  alt={item.camera_id}
+                  sx={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+                  onError={(e) => { e.target.style.display = 'none'; }}
+                />
+              </Box>
+
+              {/* Details card */}
+              <Box sx={{
+                width: 260, flexShrink: 0,
+                bgcolor: '#fff', borderRadius: 3, p: 2.5,
+                // border: '1px solid #e8ecf1',
+                display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
+              }}>
+                <Box>
+                  <Typography variant="caption" sx={{ color: '#2563eb', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', fontSize: '0.7rem' }}>
+                    Image Info
+                  </Typography>
+                  <Box sx={{ mt: 2 }}>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', fontSize: '0.6rem' }}>Camera ID</Typography>
+                    <Typography variant="body2" fontWeight={700} sx={{ color: '#0f172a', mt: 0.3 }}>{item.cameraName || item.camera_name || item.camera_id || '-'}</Typography>
+                  </Box>
+                  <Box sx={{ mt: 1.5 }}>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', fontSize: '0.6rem' }}>Location</Typography>
+                    <Typography variant="body2" fontWeight={700} sx={{ color: '#0f172a', mt: 0.3 }}>{item.centerName || item.centre_name || '-'}, {item.city || '-'}</Typography>
+                  </Box>
+                  <Box sx={{ mt: 1.5 }}>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', fontSize: '0.6rem' }}>Timestamp</Typography>
+                    <Typography variant="body2" fontWeight={700} sx={{ color: '#0f172a', mt: 0.3 }}>{item.detected_at || '-'}</Typography>
+                  </Box>
+                  <Box sx={{ mt: 1.5 }}>
+                    <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', fontSize: '0.6rem' }}>Detection Type</Typography>
+                    <Chip
+                      label={(TYPE_META[item.type] || { label: item.type }).label}
+                      size="small"
+                      sx={{
+                        mt: 0.5,
+                        bgcolor: (TYPE_META[item.type] || { bg: '#f1f5f9' }).bg,
+                        color: (TYPE_META[item.type] || { color: '#64748b' }).color,
+                        fontWeight: 600, fontSize: '0.7rem',
+                      }}
+                    />
+                  </Box>
+                </Box>
+
+                {/* Yes / No buttons */}
+                <Box sx={{ mt: 2.5 }}>
+                  <Typography variant="caption" sx={{ display: 'block', mb: 1, color: '#64748b', fontWeight: 600, textAlign: 'center' }}>
+                    Push to client?
+                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 1.5 }}>
+                    <Button
+                      variant="contained"
+                      startIcon={<Check />}
+                      fullWidth
+                      disableElevation
+                      onClick={() => onPushToClient([item])}
+                      disabled={copyingToClient}
+                      sx={{
+                        bgcolor: '#4bb271ff', color: '#fff', fontWeight: 700,
+                        borderRadius: 2, textTransform: 'none', fontSize: 13,
+                        '&:hover': { bgcolor: '#3c8457ff' },
+                      }}
+                    >
+                      {copyingToClient ? 'Pushing...' : 'Yes'}
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      startIcon={<CloseIcon />}
+                      fullWidth
+                      disableElevation
+                      onClick={() => console.log('No clicked')}
+                      sx={{
+                        borderColor: '#ef4444', color: '#ef4444', fontWeight: 700,
+                        borderRadius: 2, textTransform: 'none', fontSize: 13,
+                        '&:hover': { bgcolor: '#fef2f2', borderColor: '#dc2626' },
+                      }}
+                    >
+                      No
+                    </Button>
                   </Box>
                 </Box>
               </Box>
-            </Box>
-
-            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
-              <Button
-                variant="contained"
-                startIcon={<PersonAdd />}
-                disabled={copyingToClient}
-                onClick={() => onPushToClient([item])}
-                sx={{
-                  bgcolor: '#2563eb', borderRadius: 2, textTransform: 'none',
-                  fontWeight: 700, px: 4, '&:hover': { bgcolor: '#1d4ed8' },
-                }}
-              >
-                {copyingToClient ? 'Pushing...' : 'Push to Client'}
-              </Button>
             </Box>
           </>
         ) : (
@@ -411,7 +472,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
 
 
 export default function Detections() {
-  const { setAllCounts, typeFilter, setTypeFilter } = useDetectionCounts();
+  const { setAllCounts, setUnfilteredCounts, typeFilter, setTypeFilter } = useDetectionCounts();
 
   const [data, setData] = useState([]);
   const [counts, setCounts] = useState({});
@@ -419,7 +480,7 @@ export default function Detections() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(50);
-  const [view, setView] = useState('carousel');
+  const [view, setView] = useState('grid');
   const [search, setSearch] = useState('');
   const [dateFilter, setDateFilter] = useState(todayDate);
   const [startTime, setStartTime] = useState('');
@@ -430,9 +491,19 @@ export default function Detections() {
   const [clientSnackbar, setClientSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [liveAlert, setLiveAlert] = useState(null);
   const [socketConnected, setSocketConnected] = useState(false);
-  const [carouselIndex, setCarouselIndex] = useState(0);
   const [listSelectedIndex, setListSelectedIndex] = useState(0);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
+
+  const [selected, setSelected] = useState(null);
+  const [selectedPaths, setSelectedPaths] = useState([]);
+
+  const buildSelectionKey = (item) => `${item.source}|${item.type}|${item.relativePath}`;
+  const toggleSelection = (item) => {
+    const key = buildSelectionKey(item);
+    setSelectedPaths((prev) => (
+      prev.includes(key) ? prev.filter((value) => value !== key) : [...prev, key]
+    ));
+  };
 
   const fetchAllCounts = useCallback(async () => {
     try {
@@ -440,12 +511,15 @@ export default function Detections() {
       if (dateFilter) params.append('date', parseDateForQuery(dateFilter));
       const res = await axios.get(`${API_BASE_1}/detections?${params}`);
       if (res.data.success) {
-        setAllCounts(res.data.counts || {});
+        setUnfilteredCounts(res.data.counts || {});
+        if (typeFilter.length === 0) {
+          setAllCounts(res.data.counts || {});
+        }
       }
     } catch (err) {
       console.error('Failed to fetch all counts:', err);
     }
-  }, [dateFilter, setAllCounts]);
+  }, [dateFilter, setAllCounts, setUnfilteredCounts, typeFilter.length]);
 
   useEffect(() => {
     fetchAllCounts();
@@ -455,7 +529,7 @@ export default function Detections() {
     setLoading(true);
     try {
       const params = new URLSearchParams({ page: pg, limit: rpp });
-      if (typeFilter) params.append('type', typeFilter);
+      if (typeFilter.length > 0) params.append('type', typeFilter.join(','));
       if (dateFilter) params.append('date', parseDateForQuery(dateFilter));
       if (search.trim()) params.append('search', search.trim());
       if (appliedStartTime) params.append('start_time', appliedStartTime);
@@ -476,7 +550,7 @@ export default function Detections() {
   }, [typeFilter, dateFilter, search, appliedStartTime, appliedEndTime, rowsPerPage, setAllCounts]);
 
   const matchesFilters = useCallback((item) => {
-    if (typeFilter && item.type !== typeFilter) return false;
+    if (typeFilter.length > 0 && !typeFilter.includes(item.type)) return false;
     const normalizedDateFilter = parseDateForQuery(dateFilter);
     if (dateFilter && item.date !== normalizedDateFilter) return false;
     if (search.trim()) {
@@ -504,7 +578,7 @@ export default function Detections() {
 
   useEffect(() => {
     setPage(1);
-    setCarouselIndex(0);
+
     setListSelectedIndex(0);
     fetchDetections(1);
   }, [fetchDetections]);
@@ -541,7 +615,7 @@ export default function Detections() {
 
   const handlePageChange = (_, pg) => {
     setPage(pg);
-    setCarouselIndex(0);
+
     setListSelectedIndex(0);
     fetchDetections(pg);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -595,7 +669,7 @@ export default function Detections() {
               '& input': { color: '#334155', '&::placeholder': { color: '#94a3b8', opacity: 1 } }
             }
           }}
-          sx={{ minWidth: 260, maxWidth: 420, flex: 1 }}
+          sx={{ minWidth: 260, maxWidth: 600, flex: 1 }}
         />
         <Box sx={{ position: 'relative', minWidth: 150, maxWidth: 100 }}>
           <TextField
@@ -739,10 +813,10 @@ export default function Detections() {
             }}
           />
 
-          {(typeFilter || dateFilter !== todayDate || search || startTime || endTime) && (
+          {(typeFilter.length > 0 || dateFilter !== todayDate || search || startTime || endTime) && (
             <Button
               size="small"
-              onClick={() => { setTypeFilter(''); setDateFilter(todayDate); setSearch(''); setStartTime(''); setEndTime(''); setAppliedStartTime(''); setAppliedEndTime(''); }}
+              onClick={() => { setTypeFilter([]); setDateFilter(todayDate); setSearch(''); setStartTime(''); setEndTime(''); setAppliedStartTime(''); setAppliedEndTime(''); }}
               sx={{ height: 36, borderRadius: '8px', fontSize: 13, textTransform: 'none', color: '#64748b' }}
             >
               Clear
@@ -750,7 +824,7 @@ export default function Detections() {
           )}
           <Button
             variant="contained"
-            startIcon={<FilterList sx={{ fontSize: 16 }} />}
+            // startIcon={<FilterList sx={{ fontSize: 16 }} />}
             onClick={() => { setAppliedStartTime(startTime); setAppliedEndTime(endTime); }}
             disableElevation
             sx={{
@@ -764,30 +838,51 @@ export default function Detections() {
         </Box>
       </Box>
 
-      {/* ── View Toggle (Replaced Result Count) ── */}
-      <Box sx={{ mb: 1, display: 'flex', justifyContent: 'flex-end' }}>
-        <ToggleButtonGroup
-          value={view} exclusive onChange={(_, v) => v && setView(v)} size="small"
-          sx={{
-            bgcolor: '#ffffff',
-            border: '0.5px solid #e2e8f0',
-            height: 36,
-            borderRadius: '8px',
-            p: '2px',
-            '& .MuiToggleButton-root': {
-              border: 'none', borderRadius: '6px !important', textTransform: 'none',
-              px: 1.5, fontSize: 13, color: '#64748b',
-              '&.Mui-selected': { bgcolor: '#f8fafc', color: '#0f172a', boxShadow: '0 1px 2px rgba(0,0,0,0.05)', fontWeight: 600 }
-            }
-          }}
-        >
-          <ToggleButton value="carousel">
-            <ViewCarousel sx={{ fontSize: 16, mr: 0.5 }} /> Carousel
-          </ToggleButton>
-          <ToggleButton value="list">
-            <ViewList sx={{ fontSize: 16, mr: 0.5 }} /> List View
-          </ToggleButton>
-        </ToggleButtonGroup>
+      {/* ── Selected Type Chips + View Toggle ── */}
+      <Box sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+        {typeFilter.map((key) => {
+          const meta = TYPE_META[key] || { label: key, color: '#94a3b8', bg: '#f1f5f9' };
+          return (
+            <Chip
+              key={key}
+              label={meta.label}
+              size="small"
+              onDelete={() => setTypeFilter(typeFilter.filter((t) => t !== key))}
+              sx={{
+                bgcolor: meta.bg,
+                color: meta.color,
+                fontWeight: 600,
+                fontSize: '0.75rem',
+                borderRadius: '16px',
+                '& .MuiChip-deleteIcon': { color: meta.color, fontSize: 16, '&:hover': { color: meta.color } },
+              }}
+            />
+          );
+        })}
+        <Box sx={{ ml: 'auto' }}>
+          <ToggleButtonGroup
+            value={view} exclusive onChange={(_, v) => v && setView(v)} size="small"
+            sx={{
+              bgcolor: '#ffffff',
+              border: '0.5px solid #e2e8f0',
+              height: 36,
+              borderRadius: '8px',
+              p: '2px',
+              '& .MuiToggleButton-root': {
+                border: 'none', borderRadius: '6px !important', textTransform: 'none',
+                px: 1.5, fontSize: 13, color: '#64748b',
+                '&.Mui-selected': { bgcolor: '#f8fafc', color: '#0f172a', boxShadow: '0 1px 2px rgba(0,0,0,0.05)', fontWeight: 600 }
+              }
+            }}
+          >
+            <ToggleButton value="grid">
+              <GridView sx={{ fontSize: 16, mr: 0.5 }} /> Grid View
+            </ToggleButton>
+            <ToggleButton value="list">
+              <ViewList sx={{ fontSize: 16, mr: 0.5 }} /> List View
+            </ToggleButton>
+          </ToggleButtonGroup>
+        </Box>
       </Box>
 
       {/* ── Content ── */}
@@ -808,14 +903,19 @@ export default function Detections() {
             Try changing your filters or run a script to generate detections
           </Typography>
         </Box>
-      ) : view === 'carousel' ? (
-        <CarouselView
-          data={filteredData}
-          currentIndex={carouselIndex}
-          onIndexChange={setCarouselIndex}
-          onPushToClient={pushToClient}
-          copyingToClient={copyingToClient}
-        />
+      ) : view === 'grid' ? (
+        <Grid container spacing={2}>
+          {filteredData.map((item, i) => (
+            <Grid item xs={12} sm={6} md={3} key={`${item.filename}-${i}`}>
+              <DetectionCard
+                item={item}
+                onClick={setSelected}
+                selected={selectedPaths.includes(buildSelectionKey(item))}
+                onToggleSelect={toggleSelection}
+              />
+            </Grid>
+          ))}
+        </Grid>
       ) : (
         <ListViewPanel
           data={filteredData}
@@ -827,7 +927,8 @@ export default function Detections() {
       )}
 
 
-      {/* Snackbars */}
+      <Lightbox item={selected} onClose={() => setSelected(null)} />
+
       <Snackbar
         open={Boolean(liveAlert)}
         autoHideDuration={5000}

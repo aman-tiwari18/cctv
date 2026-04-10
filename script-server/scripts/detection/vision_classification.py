@@ -101,7 +101,7 @@ os.makedirs(SAVE_FOLDER, exist_ok=True)
 
 # One shared thread-pool for all blocking I/O (OpenCV, FFmpeg, HLS extract)
 _THREAD_POOL = ThreadPoolExecutor(max_workers=THREAD_POOL_SIZE)
-A
+
 logger.info("=" * 80)
 logger.info("TCS Camera Classification — DB Mode | H200 Optimized")
 logger.info(f"  CPU cores        : {_CPU_CORES}")
