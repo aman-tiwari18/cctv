@@ -15,8 +15,9 @@ import {
   ChevronLeft, ChevronRight, ViewList,
   PersonAdd, KeyboardArrowDown,
   ZoomIn, Fullscreen, VerifiedUser, FiberManualRecord,
-  Check, Close as CloseIcon,
+  Check, Close as CloseIcon
 } from '@mui/icons-material';
+import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { enGB } from 'date-fns/locale';
@@ -24,6 +25,7 @@ import axios from 'axios';
 import { io } from 'socket.io-client';
 import { API_BASE_1, IMG_BASE, SOCKET_URL, SOCKET_PATH } from '../constants/data';
 import { useDetectionCounts } from '../contexts/DetectionCountsContext';
+import * as XLSX from 'xlsx';
 
 const TYPE_META = {
   proximity: { label: 'Close Proximity', color: '#5cb88a', bg: '#e5f5ed', iconKey: 'proximity' },
@@ -56,7 +58,7 @@ const TYPE_ICONS = {
   default: CameraAlt,
 };
 
-function DetectionCard({ item, onClick, selected, onToggleSelect, hideCheckbox }) {
+function DetectionCard({ item, onClick, onPushToClient, copyingId, onSkip }) {
   const meta = TYPE_META[item.type] || { label: item.type, color: '#94a3b8', bg: '#f1f5f9' };
   const [imgError, setImgError] = useState(false);
   const cameraName = item.cameraName || item.camera_name || item.camera_id || '-';
@@ -66,6 +68,8 @@ function DetectionCard({ item, onClick, selected, onToggleSelect, hideCheckbox }
   const invigilatorEventLabel = item.type === 'invigilator'
     ? (item.issueLabel || (item.issueType ? String(item.issueType).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : ''))
     : '';
+
+  const isLoading = copyingId === (item.id || item.timestamp || item.image_url);
 
   return (
     <Card
@@ -80,18 +84,7 @@ function DetectionCard({ item, onClick, selected, onToggleSelect, hideCheckbox }
       }}
     >
       <Box sx={{ position: 'relative', bgcolor: '#0f172a' }}>
-        {!hideCheckbox && onToggleSelect && (
-          <Checkbox
-            checked={Boolean(selected)}
-            onChange={(e) => { e.stopPropagation(); onToggleSelect(item); }}
-            onClick={(e) => e.stopPropagation()}
-            size="small"
-            sx={{
-              position: 'absolute', top: 8, left: 8, zIndex: 2,
-              bgcolor: 'rgba(255,255,255,0.92)', borderRadius: 1,
-            }}
-          />
-        )}
+
         {imgError ? (
           <Box sx={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#1e293b' }}>
             <CameraAlt sx={{ fontSize: 48, color: '#475569' }} />
@@ -136,44 +129,110 @@ function DetectionCard({ item, onClick, selected, onToggleSelect, hideCheckbox }
             }
             size="small"
             sx={{
-              position: 'absolute', top: 8, left: (!hideCheckbox && onToggleSelect) ? 40 : 8,
+              position: 'absolute', top: 8, left: 8,
               bgcolor: 'rgba(0,0,0,0.65)', color: '#fff',
               fontSize: '0.65rem',
             }}
           />
         )}
       </Box>
-      <CardContent sx={{ p: 2, pb: '14px !important' }}>
-        <Typography variant="h6" fontWeight={800} sx={{ color: '#1e293b', lineHeight: 1.25, mb: 1.5 }}>
+      <CardContent sx={{ p: 1, pb: '10px !important', mx: 2 }}>
+        <Typography
+          variant="h6"
+          fontWeight={600}
+          fontSize={14}
+          noWrap
+          sx={{
+            color: '#1e293b',
+            lineHeight: 1.5,
+            mb: 0.5,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap'
+          }}
+        >
           {centerName}
         </Typography>
 
-        <Box sx={{ display: 'grid', gridTemplateColumns: '26px 1fr', rowGap: 1.1, columnGap: 1, alignItems: 'center' }}>
-          <CameraAlt sx={{ fontSize: 16, color: '#64748b' }} />
-          <Typography variant="body1" fontWeight={700} color="#334155">{cameraName}</Typography>
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: '26px 1fr',
+            rowGap: 0.3,
+            alignItems: 'center'
+          }}
+        >
+          <CameraAlt sx={{ fontSize: 14, color: '#777' }} />
+          <Typography sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
+            {cameraName}
+          </Typography>
 
-          <Event sx={{ fontSize: 16, color: '#64748b' }} />
-          <Typography variant="body1" fontWeight={700} color="#334155">{examDate}</Typography>
+          <AccessTime sx={{ fontSize: 14, color: '#777' }} />
+          <Typography sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
+            {item.detected_at || '-'}
+          </Typography>
 
-          <AccessTime sx={{ fontSize: 16, color: '#64748b' }} />
-          <Typography variant="body1" fontWeight={700} color="#334155">{item.detected_at || '-'}</Typography>
-
-          <LocationCity sx={{ fontSize: 16, color: '#64748b' }} />
-          <Typography variant="body1" fontWeight={700} color="#334155">{city}</Typography>
+          <LocationCity sx={{ fontSize: 14, color: '#777' }} />
+          <Typography sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
+            {city}
+          </Typography>
         </Box>
 
         {item.confidence != null && (
-          <Typography variant="caption" color={meta.color} fontWeight={600} sx={{ display: 'block', mt: 1.5 }}>
+          <Typography
+            variant="caption"
+            sx={{ display: 'block', mt: 1, lineHeight: 1.5 }}
+            color={meta.color}
+            fontWeight={500}
+          >
             Conf: {(item.confidence * 100).toFixed(0)}%
           </Typography>
         )}
-
-        {item.tcCode && (
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-            TC: {item.tcCode}
-          </Typography>
-        )}
       </CardContent>
+
+      <Box sx={{ mx: 2, mb: 4, mt: 1 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'end', gap: 1.5 }}>
+          <Button
+            variant="outlined"
+            fullWidth
+            disableElevation
+            onClick={(e) => { e.stopPropagation(); if (onSkip) onSkip(item); }}
+            sx={{
+              borderColor: '#c3c5d8', color: '#475569', fontWeight: 900,
+              width: "80px",
+              height: "40px",
+              borderRadius: 3, textTransform: 'none', fontSize: 12,
+              '&:hover': { bgcolor: '#c3c5d8', borderColor: '#c3c5d8' },
+            }}
+          >
+            Skip
+          </Button>
+          <Button
+            variant="contained"
+            endIcon={<KeyboardArrowRightIcon />}
+            fullWidth
+            disableElevation
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onPushToClient && !isLoading) onPushToClient([item]);
+            }}
+            disabled={isLoading}
+            sx={{
+              bgcolor: '#3c81f6',
+              color: '#fff',
+              fontWeight: 900,
+              height: "40px",
+              width: "140px",
+              borderRadius: 3,
+              textTransform: 'none',
+              fontSize: 12,
+              '&:hover': { bgcolor: '#1e40af' },
+            }}
+          >
+            {isLoading ? 'Pushing...' : 'Push to client'}
+          </Button>
+        </Box>
+      </Box>
     </Card>
   );
 }
@@ -276,17 +335,30 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
   const item = data[selectedIndex];
   const itemRefs = useRef([]);
 
+  const goNext = useCallback(() => onSelect(Math.min(data.length - 1, selectedIndex + 1)), [data.length, selectedIndex, onSelect]);
+
+  const handleSkip = useCallback(() => {
+    console.log('Skip clicked');
+    goNext();
+  }, [goNext]);
+
+  const handlePush = useCallback(async () => {
+    if (!item || copyingToClient || !onPushToClient) return;
+    await onPushToClient([item]);
+    goNext();
+  }, [item, copyingToClient, onPushToClient, goNext]);
+
   useEffect(() => {
     const handler = (e) => {
       if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
       if (e.key === 'ArrowUp') { e.preventDefault(); onSelect(Math.max(0, selectedIndex - 1)); }
-      if (e.key === 'ArrowDown') { e.preventDefault(); onSelect(Math.min(data.length - 1, selectedIndex + 1)); }
-      if (e.key === 'ArrowLeft') { e.preventDefault(); if (item && !copyingToClient && onPushToClient) onPushToClient([item]); }
-      if (e.key === 'ArrowRight') { e.preventDefault(); console.log('No action via ArrowRight'); }
+      if (e.key === 'ArrowDown') { e.preventDefault(); goNext(); }
+      if (e.key === 'ArrowRight') { e.preventDefault(); handlePush(); }
+      if (e.key === 'ArrowLeft') { e.preventDefault(); handleSkip(); }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [selectedIndex, data.length, item, copyingToClient, onSelect, onPushToClient]);
+  }, [selectedIndex, data.length, item, copyingToClient, onSelect, onPushToClient, goNext, handlePush, handleSkip]);
 
   useEffect(() => {
     const el = itemRefs.current[selectedIndex];
@@ -382,78 +454,133 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
                 />
               </Box>
 
-              {/* Details card */}
               <Box sx={{
-                width: 260, flexShrink: 0,
+                width: 360, flexShrink: 0,
                 bgcolor: '#fff', borderRadius: 3, p: 2.5,
-                // border: '1px solid #e8ecf1',
                 display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
               }}>
-                <Box>
-                  <Typography variant="caption" sx={{ color: '#2563eb', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', fontSize: '0.7rem' }}>
-                    Image Info
+                <CardContent sx={{ p: 1, pb: '10px !important' }}>
+                  <Typography
+                    variant="h6"
+                    fontWeight={600}
+                    fontSize={14}
+                    sx={{ color: '#1e293b', lineHeight: 1.5, mb: 0.5 }}
+                  >
+                    {item.centerName || item.centre_name || '-'}
                   </Typography>
-                  <Box sx={{ mt: 2 }}>
-                    <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', fontSize: '0.6rem' }}>Camera ID</Typography>
-                    <Typography variant="body2" fontWeight={700} sx={{ color: '#0f172a', mt: 0.3 }}>{item.cameraName || item.camera_name || item.camera_id || '-'}</Typography>
-                  </Box>
-                  <Box sx={{ mt: 1.5 }}>
-                    <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', fontSize: '0.6rem' }}>Location</Typography>
-                    <Typography variant="body2" fontWeight={700} sx={{ color: '#0f172a', mt: 0.3 }}>{item.centerName || item.centre_name || '-'}, {item.city || '-'}</Typography>
-                  </Box>
-                  <Box sx={{ mt: 1.5 }}>
-                    <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', fontSize: '0.6rem' }}>Timestamp</Typography>
-                    <Typography variant="body2" fontWeight={700} sx={{ color: '#0f172a', mt: 0.3 }}>{item.detected_at || '-'}</Typography>
-                  </Box>
-                  <Box sx={{ mt: 1.5 }}>
-                    <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', fontSize: '0.6rem' }}>Detection Type</Typography>
-                    <Chip
-                      label={(TYPE_META[item.type] || { label: item.type }).label}
-                      size="small"
-                      sx={{
-                        mt: 0.5,
-                        bgcolor: (TYPE_META[item.type] || { bg: '#f1f5f9' }).bg,
-                        color: (TYPE_META[item.type] || { color: '#64748b' }).color,
-                        fontWeight: 600, fontSize: '0.7rem',
-                      }}
-                    />
-                  </Box>
-                </Box>
 
-                {/* Yes / No buttons */}
+                  {/* Grid Info */}
+                  <Box
+                    sx={{
+                      display: 'grid',
+                      gridTemplateColumns: '26px 1fr',
+                      rowGap: 0.3,
+                      alignItems: 'center'
+                    }}
+                  >
+
+                    <CameraAlt sx={{ fontSize: 14, color: '#777' }} />
+                    <Typography sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
+                      {item.cameraName || item.camera_name || item.camera_id || '-'}
+                    </Typography>
+
+                    <AccessTime sx={{ fontSize: 14, color: '#777' }} />
+                    <Typography sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
+                      {item.detected_at || '-'}
+                    </Typography>
+
+
+                    <LocationCity sx={{ fontSize: 14, color: '#777' }} />
+                    <Typography sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
+                      {item.city || '-'}
+                    </Typography>
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'start',
+                        gap: 2,
+                        mt: 0.5,
+                      }}
+                    >
+                      <Typography
+                        sx={{
+                          fontSize: 12,
+                          color: '#aeaeaeff',
+                          fontWeight: 600,
+                          letterSpacing: '0.05em'
+                        }}
+                      >
+                        DETECTION
+                      </Typography>
+
+                      <Chip
+                        label={(TYPE_META[item.type] || { label: item.type }).label}
+                        size="small"
+                        sx={{
+                          height: 30,
+                          fontSize: '0.8rem',
+
+                          minWidth: 150,
+                          maxWidth: 280,
+                          width: 'fit-content',
+
+                          justifyContent: 'center',
+
+                          bgcolor: (TYPE_META[item.type] || { bg: '#f1f5f9' }).bg,
+                          color: (TYPE_META[item.type] || { color: '#64748b' }).color,
+                          fontWeight: 600
+                        }}
+                      />
+                    </Box>
+                  </Box>
+
+
+                  {item.confidence != null && (
+                    <Typography
+                      variant="caption"
+                      sx={{ display: 'block', mt: 0.8, lineHeight: 1.5 }}
+                      color={meta.color}
+                      fontWeight={500}
+                    >
+                      Conf: {(item.confidence * 100).toFixed(0)}%
+                    </Typography>
+                  )}
+                </CardContent>
+
                 <Box sx={{ mt: 2.5 }}>
-                  <Typography variant="caption" sx={{ display: 'block', mb: 1, color: '#64748b', fontWeight: 600, textAlign: 'center' }}>
-                    Push to client?
-                  </Typography>
                   <Box sx={{ display: 'flex', gap: 1.5 }}>
                     <Button
-                      variant="contained"
-                      startIcon={<Check />}
+                      variant="outlined"
+                      // startIcon={<CloseIcon />}
                       fullWidth
                       disableElevation
-                      onClick={() => onPushToClient([item])}
-                      disabled={copyingToClient}
+                      onClick={handleSkip}
                       sx={{
-                        bgcolor: '#4bb271ff', color: '#fff', fontWeight: 700,
-                        borderRadius: 2, textTransform: 'none', fontSize: 13,
-                        '&:hover': { bgcolor: '#3c8457ff' },
+                        borderColor: '#c3c5d8', color: '#475569', fontWeight: 900,
+                        width: "100px",
+                        height: "40px",
+                        borderRadius: 2, textTransform: 'none', fontSize: 14,
+                        '&:hover': { bgcolor: '#c3c5d8', borderColor: '#c3c5d8' },
                       }}
                     >
-                      {copyingToClient ? 'Pushing...' : 'Yes'}
+                      Skip
                     </Button>
                     <Button
-                      variant="outlined"
-                      startIcon={<CloseIcon />}
+                      variant="contained"
+                      endIcon={<KeyboardArrowRightIcon />}
                       fullWidth
                       disableElevation
-                      onClick={() => console.log('No clicked')}
+                      onClick={handlePush}
+                      disabled={copyingToClient}
                       sx={{
-                        borderColor: '#ef4444', color: '#ef4444', fontWeight: 700,
-                        borderRadius: 2, textTransform: 'none', fontSize: 13,
-                        '&:hover': { bgcolor: '#fef2f2', borderColor: '#dc2626' },
+                        bgcolor: '#3c81f6', color: '#fff', fontWeight: 900,
+                        height: "40px",
+                        borderRadius: 2, textTransform: 'none', fontSize: 14,
+                        '&:hover': { bgcolor: '#1e40af' },
                       }}
                     >
-                      No
+                      {copyingToClient ? 'Pushing...' : 'Push to client'}
                     </Button>
                   </Box>
                 </Box>
@@ -472,7 +599,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
 
 
 export default function Detections() {
-  const { setAllCounts, setUnfilteredCounts, typeFilter, setTypeFilter } = useDetectionCounts();
+  const { setAllCounts, setUnfilteredCounts, typeFilter, setTypeFilter, setExportToExcel } = useDetectionCounts();
 
   const [data, setData] = useState([]);
   const [counts, setCounts] = useState({});
@@ -488,6 +615,7 @@ export default function Detections() {
   const [appliedStartTime, setAppliedStartTime] = useState('');
   const [appliedEndTime, setAppliedEndTime] = useState('');
   const [copyingToClient, setCopyingToClient] = useState(false);
+  const [copyingId, setCopyingId] = useState(null);
   const [clientSnackbar, setClientSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [liveAlert, setLiveAlert] = useState(null);
   const [socketConnected, setSocketConnected] = useState(false);
@@ -623,21 +751,122 @@ export default function Detections() {
 
   const pushToClient = async (items) => {
     if (items.length === 0) return;
-    setCopyingToClient(true);
+
+    const currentItem = items[0]; // since you're passing single item
+    const id = currentItem.id || currentItem.timestamp || currentItem.image_url;
+
+    setCopyingId(id);
+
     try {
       await axios.post(`${API_BASE_1}/client-detections/copy`, {
         items: items.map(({ source, type, relativePath }) => ({ source, type, relativePath })),
       });
-      setClientSnackbar({ open: true, message: `${items.length} image(s) pushed to client`, severity: 'success' });
+
+      setClientSnackbar({
+        open: true,
+        message: `${items.length} image(s) pushed to client`,
+        severity: 'success'
+      });
     } catch (err) {
-      console.error('Failed to push selected images:', err);
-      setClientSnackbar({ open: true, message: 'Failed to push selected images to client', severity: 'error' });
+      console.error(err);
+      setClientSnackbar({
+        open: true,
+        message: 'Failed to push selected images to client',
+        severity: 'error'
+      });
     } finally {
-      setCopyingToClient(false);
+      setCopyingId(null);
     }
   };
-
   const totalAll = Object.values(counts).reduce((a, b) => a + b, 0);
+
+ const exportToExcel = () => {
+  if (filteredData.length === 0) return;
+
+  const TYPE_LABELS = {
+    proximity: 'Close Proximity', crowd: 'Crowd Detection', crowd_five: 'Crowd < 5',
+    crowd_zero: 'Zero Person', server: 'Server Room', intruder: 'Intruder',
+    entry_exit: 'Entry/Exit', phone: 'Phone', blind_spot: 'Blind Spot',
+    invigilator: 'Invigilator', inversion: 'Camera Inversion', tamper: 'Camera Tampering',
+  };
+
+  // Build rows
+  const rows = filteredData.map((item) => {
+    // Convert date: "2026-04-08" → "08-04-2026"
+    const rawDate = item.date || '';
+    const formattedDate = rawDate.match(/^\d{4}-\d{2}-\d{2}$/)
+      ? rawDate.split('-').reverse().join('-')
+      : rawDate;
+
+    // Extract time: "08 Apr 2026, 05:58:53 PM" → "17:58:53"
+    const timeStr = (() => {
+      const m = /,\s*(\d{1,2}):(\d{2}):(\d{2})\s*(AM|PM)/i.exec(item.detected_at || '');
+      if (!m) return item.detected_at || '-';
+      let h = parseInt(m[1], 10);
+      const min = m[2], sec = m[3], ampm = m[4].toUpperCase();
+      if (ampm === 'PM' && h !== 12) h += 12;
+      if (ampm === 'AM' && h === 12) h = 0;
+      return `${String(h).padStart(2, '0')}:${min}:${sec}`;
+    })();
+
+    // Image URL: use the correct base path
+    // const IMAGE_BASE = 'http://172.31.102.8/cctv/images/results/new_tcs_results/';
+    // const imageUrl = item.image_url ? `${IMAGE_BASE}${item.image_url}` : '';
+    const IMAGE_BASE = `${API_BASE_1}`;
+    const imageUrl = item.image_url
+  ? `${IMAGE_BASE}${item.image_url}`
+  : '';
+
+    return {
+      'Detection Type': TYPE_LABELS[item.type] || item.type,
+      'Center Name': item.centerName || item.centre_name || '-',
+      'Camera Name': item.cameraName || item.camera_name || item.camera_id || '-',
+      'Location': item.location || '-',
+      'Device ID': item.deviceId || item.device_id || '-',
+      'Camera No': item.cameraNo || item.camera_no || '-',
+      'Date': formattedDate || '-',
+      'Time': timeStr,
+      'Timestamp': item.detected_at || '-',
+      'Persons Count': item.count ?? '',
+      'Confidence': item.confidence != null ? `${(item.confidence * 100).toFixed(1)}%` : '',
+      'City': item.city || '-',
+      'Download Image': imageUrl,
+    };
+  });
+
+  const ws = XLSX.utils.json_to_sheet(rows);
+
+  // Column widths
+  ws['!cols'] = [
+    { wch: 18 }, { wch: 40 }, { wch: 25 }, { wch: 20 }, { wch: 15 },
+    { wch: 12 }, { wch: 14 }, { wch: 22 }, { wch: 28 }, { wch: 14 },
+    { wch: 12 }, { wch: 20 }, { wch: 80 },
+  ];
+
+  // Add hyperlinks to the "Download Image" column (column M, index 12)
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  for (let R = range.s.r + 1; R <= range.e.r; R++) {
+    const cellAddr = XLSX.utils.encode_cell({ r: R, c: 12 }); // column M
+    const url = rows[R - 1]['Download Image'];
+    if (url) {
+      ws[cellAddr] = {
+        v: 'Click to Download',
+        t: 's',
+        l: { Target: url, Tooltip: 'Click to open image' },
+      };
+    }
+  }
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Detections');
+
+  const dateStr = dateFilter || formatDateDDMMYYYY(new Date());
+  XLSX.writeFile(wb, `cctv_detections_${dateStr}.xlsx`);
+ };
+  
+  useEffect(() => {
+    setExportToExcel(() => exportToExcel);
+  }, [exportToExcel]);
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: '#f8fafc' }}>
@@ -651,7 +880,7 @@ export default function Detections() {
         {/* Search */}
         <TextField
           size="small"
-          placeholder="Search detections..."
+          placeholder="Search center name , location..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           InputProps={{
@@ -828,12 +1057,12 @@ export default function Detections() {
             onClick={() => { setAppliedStartTime(startTime); setAppliedEndTime(endTime); }}
             disableElevation
             sx={{
-              bgcolor: '#1d4ed8',
+              bgcolor: '#3c81f6',
               height: 36, borderRadius: '8px', fontSize: 13, fontWeight: 600, textTransform: 'none', px: 2.5,
               '&:hover': { bgcolor: '#1e40af' }
             }}
           >
-            Apply
+            Search
           </Button>
         </Box>
       </Box>
@@ -906,12 +1135,20 @@ export default function Detections() {
       ) : view === 'grid' ? (
         <Grid container spacing={2}>
           {filteredData.map((item, i) => (
-            <Grid item xs={12} sm={6} md={3} key={`${item.filename}-${i}`}>
+            <Grid item xs={12} sm={6} md={3} key={`${item.chNo}-${i}`}>
+              {/* <DetectionCard
+                item={item}
+                onClick={setSelected}
+                onPushToClient={pushToClient}
+                copyingToClient={copyingToClient}
+                onSkip={() => console.log('Skip from grid view - unsupported auto-advance')}
+              /> */}
               <DetectionCard
                 item={item}
                 onClick={setSelected}
-                selected={selectedPaths.includes(buildSelectionKey(item))}
-                onToggleSelect={toggleSelection}
+                onPushToClient={pushToClient}
+                copyingId={copyingId}
+                onSkip={() => console.log('Skip from grid view - unsupported auto-advance')}
               />
             </Grid>
           ))}

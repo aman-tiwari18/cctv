@@ -86,7 +86,7 @@ const TYPE_ICONS = {
   default: CameraAlt,
 };
 
-function DetectionCard({ item, onClick, selected, onToggleSelect, hideCheckbox }) {
+function DetectionCard({ item, onClick }) {
   const meta = TYPE_META[item.type] || { label: item.type, color: '#94a3b8', bg: '#f1f5f9' };
   const [imgError, setImgError] = useState(false);
   const cameraName = item.cameraName || item.camera_name || item.camera_id || '-';
@@ -110,18 +110,6 @@ function DetectionCard({ item, onClick, selected, onToggleSelect, hideCheckbox }
       }}
     >
       <Box sx={{ position: 'relative', bgcolor: '#0f172a' }}>
-        {!hideCheckbox && onToggleSelect && (
-          <Checkbox
-            checked={Boolean(selected)}
-            onChange={(e) => { e.stopPropagation(); onToggleSelect(item); }}
-            onClick={(e) => e.stopPropagation()}
-            size="small"
-            sx={{
-              position: 'absolute', top: 8, left: 8, zIndex: 2,
-              bgcolor: 'rgba(255,255,255,0.92)', borderRadius: 1,
-            }}
-          />
-        )}
         {imgError ? (
           <Box sx={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#1e293b' }}>
             <CameraAlt sx={{ fontSize: 48, color: '#475569' }} />
@@ -166,41 +154,63 @@ function DetectionCard({ item, onClick, selected, onToggleSelect, hideCheckbox }
             }
             size="small"
             sx={{
-              position: 'absolute', top: 8, left: (!hideCheckbox && onToggleSelect) ? 40 : 8,
+              position: 'absolute', top: 8, left: 8,
               bgcolor: 'rgba(0,0,0,0.65)', color: '#fff',
               fontSize: '0.65rem',
             }}
           />
         )}
       </Box>
-      <CardContent sx={{ p: 2, pb: '14px !important' }}>
-        <Typography variant="h6" fontWeight={800} sx={{ color: '#1e293b', lineHeight: 1.25, mb: 1.5 }}>
+      <CardContent sx={{ p: 1, pb: '10px !important', mx: 2 }}>
+        <Typography
+          variant="h6"
+          fontWeight={600}
+          fontSize={14}
+          noWrap
+          sx={{
+            color: '#1e293b',
+            lineHeight: 1.5,
+            mb: 0.5,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap'
+          }}
+        >
           {centerName}
         </Typography>
 
-        <Box sx={{ display: 'grid', gridTemplateColumns: '26px 1fr', rowGap: 1.1, columnGap: 1, alignItems: 'center' }}>
-          <CameraAlt sx={{ fontSize: 16, color: '#64748b' }} />
-          <Typography variant="body1" fontWeight={700} color="#334155">{cameraName}</Typography>
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: '26px 1fr',
+            rowGap: 0.3,
+            alignItems: 'center'
+          }}
+        >
+          <CameraAlt sx={{ fontSize: 14, color: '#777' }} />
+          <Typography sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
+            {cameraName}
+          </Typography>
 
-          <Event sx={{ fontSize: 16, color: '#64748b' }} />
-          <Typography variant="body1" fontWeight={700} color="#334155">{examDate}</Typography>
+          <AccessTime sx={{ fontSize: 14, color: '#777' }} />
+          <Typography sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
+            {item.detected_at || '-'}
+          </Typography>
 
-          <AccessTime sx={{ fontSize: 16, color: '#64748b' }} />
-          <Typography variant="body1" fontWeight={700} color="#334155">{item.detected_at || '-'}</Typography>
-
-          <LocationCity sx={{ fontSize: 16, color: '#64748b' }} />
-          <Typography variant="body1" fontWeight={700} color="#334155">{city}</Typography>
+          <LocationCity sx={{ fontSize: 14, color: '#777' }} />
+          <Typography sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
+            {city}
+          </Typography>
         </Box>
 
         {item.confidence != null && (
-          <Typography variant="caption" color={meta.color} fontWeight={600} sx={{ display: 'block', mt: 1.5 }}>
+          <Typography
+            variant="caption"
+            sx={{ display: 'block', mt: 1, lineHeight: 1.5 }}
+            color={meta.color}
+            fontWeight={500}
+          >
             Conf: {(item.confidence * 100).toFixed(0)}%
-          </Typography>
-        )}
-
-        {item.tcCode && (
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-            TC: {item.tcCode}
           </Typography>
         )}
       </CardContent>
@@ -620,41 +630,106 @@ function ListViewPanel({ data, selectedIndex, onSelect }) {
               </Box>
 
               <Box sx={{
-                width: 260, flexShrink: 0,
+                width: 360, flexShrink: 0,
                 bgcolor: '#fff', borderRadius: 3, p: 2.5,
-                // border: '1px solid #e8ecf1',
                 display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
               }}>
-                <Box>
-                  <Typography variant="caption" sx={{ color: '#2563eb', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', fontSize: '0.7rem' }}>
-                    Image Info
+                <CardContent sx={{ p: 1, pb: '10px !important', mx: 2 }}>
+                  <Typography
+                    variant="h6"
+                    fontWeight={600}
+                    fontSize={14}
+                    noWrap
+                    sx={{
+                      color: '#1e293b',
+                      lineHeight: 1.5,
+                      mb: 0.5,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    {item.centerName || item.centre_name || '-'}
                   </Typography>
-                  <Box sx={{ mt: 2 }}>
-                    <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', fontSize: '0.6rem' }}>Camera ID</Typography>
-                    <Typography variant="body2" fontWeight={700} sx={{ color: '#0f172a', mt: 0.3 }}>{item.cameraName || item.camera_id || item.filename || '-'}</Typography>
-                  </Box>
-                  <Box sx={{ mt: 1.5 }}>
-                    <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', fontSize: '0.6rem' }}>Location</Typography>
-                    <Typography variant="body2" fontWeight={700} sx={{ color: '#0f172a', mt: 0.3 }}>{item.centerName || item.centre_name || '-'}, {item.city || '-'}</Typography>
-                  </Box>
-                  <Box sx={{ mt: 1.5 }}>
-                    <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', fontSize: '0.6rem' }}>Timestamp</Typography>
-                    <Typography variant="body2" fontWeight={700} sx={{ color: '#0f172a', mt: 0.3 }}>{item.detected_at || '-'}</Typography>
-                  </Box>
-                  <Box sx={{ mt: 1.5 }}>
-                    <Typography variant="caption" sx={{ color: '#94a3b8', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', fontSize: '0.6rem' }}>Detection Type</Typography>
-                    <Chip
-                      label={(TYPE_META[item.type] || { label: item.type }).label}
-                      size="small"
+
+                  {/* Grid Info */}
+                  <Box
+                    sx={{
+                      display: 'grid',
+                      gridTemplateColumns: '26px 1fr',
+                      rowGap: 0.3,
+                      alignItems: 'center'
+                    }}
+                  >
+
+                    <CameraAlt sx={{ fontSize: 14, color: '#777' }} />
+                    <Typography sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
+                      {item.cameraName || item.camera_name || item.camera_id || '-'}
+                    </Typography>
+
+                    <AccessTime sx={{ fontSize: 14, color: '#777' }} />
+                    <Typography sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
+                      {item.detected_at || '-'}
+                    </Typography>
+
+
+                    <LocationCity sx={{ fontSize: 14, color: '#777' }} />
+                    <Typography sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
+                      {item.city || '-'}
+                    </Typography>
+                    <Box
                       sx={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'start',
+                        gap: 2,
                         mt: 0.5,
-                        bgcolor: (TYPE_META[item.type] || { bg: '#f1f5f9' }).bg,
-                        color: (TYPE_META[item.type] || { color: '#64748b' }).color,
-                        fontWeight: 600, fontSize: '0.7rem',
                       }}
-                    />
+                    >
+                      <Typography
+                        sx={{
+                          fontSize: 12,
+                          color: '#aeaeaeff',
+                          fontWeight: 600,
+                          letterSpacing: '0.05em'
+                        }}
+                      >
+                        DETECTION
+                      </Typography>
+
+                      <Chip
+                        label={(TYPE_META[item.type] || { label: item.type }).label}
+                        size="small"
+                        sx={{
+                          height: 30,
+                          fontSize: '0.8rem',
+
+                          minWidth: 150,
+                          maxWidth: 280,
+                          width: 'fit-content',
+
+                          justifyContent: 'center',
+
+                          bgcolor: (TYPE_META[item.type] || { bg: '#f1f5f9' }).bg,
+                          color: (TYPE_META[item.type] || { color: '#64748b' }).color,
+                          fontWeight: 600
+                        }}
+                      />
+                    </Box>
                   </Box>
-                </Box>
+
+
+                  {item.confidence != null && (
+                    <Typography
+                      variant="caption"
+                      sx={{ display: 'block', mt: 0.8, lineHeight: 1.5 }}
+                      color={(TYPE_META[item.type] || {}).color}
+                      fontWeight={500}
+                    >
+                      Conf: {(item.confidence * 100).toFixed(0)}%
+                    </Typography>
+                  )}
+                </CardContent>
               </Box>
             </Box>
           </>
@@ -1086,7 +1161,6 @@ const ClientDetections = () => {
               <DetectionCard
                 item={item}
                 onClick={setSelected}
-                hideCheckbox={true}
               />
             </Grid>
           ))}

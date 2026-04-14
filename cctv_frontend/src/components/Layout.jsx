@@ -166,7 +166,7 @@ function DetectionSubItems({ counts, typeFilter, onTypeSelect }) {
 
 /* ── Sidebar Content ── */
 function SidebarContent({ items, currentPath, onNavigate }) {
-  const { unfilteredCounts, typeFilter, setTypeFilter } = useDetectionCounts();
+  const { unfilteredCounts, typeFilter, setTypeFilter,  } = useDetectionCounts();
   const [detectionsOpen, setDetectionsOpen] = useState(false);
 
   const isDetectionPage = currentPath === '/detections' || currentPath === '/client-detections';
@@ -286,7 +286,7 @@ function LayoutInner() {
   const location = useLocation();
   const { user, logout } = useAuth();
 
-  const { allCounts, unfilteredCounts } = useDetectionCounts();
+  const { allCounts, unfilteredCounts,exportToExcel  } = useDetectionCounts();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState(null);
 
@@ -384,12 +384,13 @@ function LayoutInner() {
                     '&:hover': { bgcolor: '#e0e7fa', opacity: 0.8, transform: 'translateY(-1px)' },
                   }}
                 >
-                  Download Report
+                  Consolidated Report
                 </Button>
                 <Button
                   variant="contained"
                   startIcon={<img src={`${import.meta.env.BASE_URL}file-excel-fill.svg`} alt="excel" style={{ width: 18, height: 18, filter: 'invert(32%) sepia(93%) saturate(1548%) hue-rotate(213deg) brightness(97%) contrast(93%)' }} />}
                   disableElevation
+                  onClick={exportToExcel}
                   sx={{
                     height: 34,
                     borderRadius: '8px',
@@ -403,7 +404,7 @@ function LayoutInner() {
                     '&:hover': { bgcolor: '#e0e7fa', opacity: 0.8, transform: 'translateY(-1px)' },
                   }}
                 >
-                  Export in Excel
+                  Export detections
                 </Button>
               </>
             )}

@@ -32,13 +32,31 @@ import {
 import { shiftScriptsAPI, scriptsAPI, executionsAPI } from '../services/api';
 import ExecutionStatusBadge from './ExecutionStatusBadge';
 
-const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
+/**
+ * ShiftScriptManager
+ *
+ * Props:
+ *  - shift, examId, onUpdate          — original props
+ *  - renderInline  (default true)     — when false, only renders the dialog (no Paper/list UI)
+ *  - openDialog    (external)         — parent-controlled dialog open state (used when renderInline=false)
+ *  - onCloseDialog                    — callback when dialog should close (used when renderInline=false)
+ *  - onScriptNamesReady(assignments)  — called with the active-assignment array so parent can render chips
+ */
+const ShiftScriptManager = ({
+    shift,
+    examId,
+    onUpdate,
+    renderInline = true,
+    openDialog: externalOpenDialog,
+    onCloseDialog: externalOnCloseDialog,
+    onScriptNamesReady,
+}) => {
     const [assignments, setAssignments] = useState([]);
     const [scripts, setScripts] = useState([]);
     const [executions, setExecutions] = useState([]);
     const [selectedDate, setSelectedDate] = useState('');
     const [loading, setLoading] = useState(false);
-    const [openDialog, setOpenDialog] = useState(false);
+    const [internalOpenDialog, setInternalOpenDialog] = useState(false);
     const [editingAssignment, setEditingAssignment] = useState(null);
     const [formData, setFormData] = useState({
         script_id: '',
@@ -48,11 +66,14 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
     });
     const [error, setError] = useState('');
 
+    /* ── Resolve dialog open state ── */
+    const isDialogOpen = renderInline ? internalOpenDialog : !!externalOpenDialog;
+
     useEffect(() => {
         if (shift) {
             loadScripts();
             loadAssignments();
-            loadExecutions();
+            if (renderInline) loadExecutions();
         } else {
             setSelectedDate('');
         }
@@ -70,8 +91,7 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
         }
 
         if (!selectedDate || !dates.includes(selectedDate)) {
-            // Try to set to today's date if available, otherwise use first available date
-            const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+            const today = new Date().toISOString().split('T')[0];
             if (dates.includes(today)) {
                 setSelectedDate(today);
             } else {
@@ -79,6 +99,14 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
             }
         }
     }, [assignments, selectedDate]);
+
+    /* ── Report script data to parent ── */
+    useEffect(() => {
+        if (onScriptNamesReady) {
+            const activeAssignments = assignments.filter((a) => a.is_active);
+            onScriptNamesReady(activeAssignments);
+        }
+    }, [assignments]);
 
     const activeAssignments = assignments.filter((assignment) => assignment.is_active);
     const availableDates = [...new Set(activeAssignments.map((assignment) => assignment.assignment_date).filter(Boolean))].sort();
@@ -149,12 +177,18 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
                 notes: ''
             });
         }
-        setOpenDialog(true);
+        if (renderInline) {
+            setInternalOpenDialog(true);
+        }
         setError('');
     };
 
     const handleCloseDialog = () => {
-        setOpenDialog(false);
+        if (renderInline) {
+            setInternalOpenDialog(false);
+        } else if (externalOnCloseDialog) {
+            externalOnCloseDialog();
+        }
         setEditingAssignment(null);
         setError('');
     };
@@ -198,6 +232,103 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
         }
     };
 
+    /* ── Shared Dialog JSX ── */
+    const dialogJSX = (
+        <Dialog open={isDialogOpen} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
+            <DialogTitle>
+                {editingAssignment ? 'Edit Script Assignment' : 'Assign Script to Shift'}
+            </DialogTitle>
+            <DialogContent>
+                {error && (
+                    <Alert severity="error" sx={{ mb: 2 }}>
+                        {error}
+                    </Alert>
+                )}
+                <TextField
+                    select
+                    fullWidth
+                    label="Select Script"
+                    name="script_id"
+                    value={formData.script_id}
+                    onChange={handleChange}
+                    margin="normal"
+                    required
+                    disabled={!!editingAssignment}
+                >
+                    <MenuItem value="">Select a script</MenuItem>
+                    {scripts.map((script) => (
+                        <MenuItem key={script.id} value={script.id}>
+                            <Box>
+                                <Typography variant="body2">{script.name}</Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                    Keyword: {script.script_id}
+                                </Typography>
+                            </Box>
+                        </MenuItem>
+                    ))}
+                </TextField>
+                <Box display="flex" gap={2}>
+                    <TextField
+                        type="time"
+                        label="Custom Start Time"
+                        name="custom_start_time"
+                        value={formData.custom_start_time}
+                        onChange={handleChange}
+                        margin="normal"
+                        InputLabelProps={{ shrink: true }}
+                        fullWidth
+                        required
+                        helperText="Override start time for this shift"
+                    />
+                    <TextField
+                        type="time"
+                        label="Custom End Time"
+                        name="custom_end_time"
+                        value={formData.custom_end_time}
+                        onChange={handleChange}
+                        margin="normal"
+                        InputLabelProps={{ shrink: true }}
+                        fullWidth
+                        required
+                        helperText="Override end time for this shift"
+                    />
+                </Box>
+                <TextField
+                    fullWidth
+                    multiline
+                    rows={2}
+                    label="Notes"
+                    name="notes"
+                    value={formData.notes}
+                    onChange={handleChange}
+                    margin="normal"
+                />
+            </DialogContent>
+            <DialogActions>
+                <Button onClick={handleCloseDialog}>Cancel</Button>
+                <Button
+                    onClick={handleSubmit}
+                    variant="contained"
+                    disabled={!formData.script_id || !formData.custom_start_time || !formData.custom_end_time}
+                >
+                    {editingAssignment ? 'Update' : 'Assign'}
+                </Button>
+            </DialogActions>
+        </Dialog>
+    );
+
+    /* ════════════════════════════════════════════
+       MODE 1 — Dialog-only (renderInline = false)
+       The parent (Analytics.jsx) handles the card UI.
+       We only render the dialog.
+       ════════════════════════════════════════════ */
+    if (!renderInline) {
+        return dialogJSX;
+    }
+
+    /* ════════════════════════════════════════════
+       MODE 2 — Full inline UI (original behaviour)
+       ════════════════════════════════════════════ */
     if (!shift) {
         return (
             <Paper sx={{ p: 3, textAlign: 'center' }}>
@@ -265,66 +396,58 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
                 ) : visibleAssignments.length > 0 ? (
                     <List>
                         {visibleAssignments.map((assignment) => (
-                                <ListItem key={assignment.id} divider>
-                                    <ListItemText
-                                        primary={
-                                            <Box display="flex" alignItems="center" gap={1}>
-                                                <Typography variant="body1" fontWeight="medium">
-                                                    {assignment.script?.name || 'Unknown Script'}
+                            <ListItem key={assignment.id} divider>
+                                <ListItemText
+                                    primary={
+                                        <Box display="flex" alignItems="center" gap={1}>
+                                            <Typography variant="body1" fontWeight="medium">
+                                                {assignment.script?.name || 'Unknown Script'}
+                                            </Typography>
+
+                                            {assignment.script?.script_id && (
+                                                <Chip
+                                                    label={assignment.script.script_id}
+                                                    size="small"
+                                                    color="secondary"
+                                                    variant="outlined"
+                                                />
+                                            )}
+                                        </Box>
+                                    }
+                                    secondary={
+                                        <Box mt={0.5}>
+                                            {(assignment.custom_start_time || assignment.custom_end_time) && (
+                                                <Typography variant="caption" color="text.secondary">
+                                                    Custom Time: {assignment.custom_start_time || 'N/A'} -{' '}
+                                                    {assignment.custom_end_time || 'N/A'}
                                                 </Typography>
+                                            )}
 
-                                                {assignment.script?.script_id && (
-                                                    <Chip
-                                                        label={assignment.script.script_id}
-                                                        size="small"
-                                                        color="secondary"
-                                                        variant="outlined"
-                                                    />
-                                                )}
+                                            {assignment.notes && (
+                                                <Typography
+                                                    variant="caption"
+                                                    display="block"
+                                                    color="text.secondary"
+                                                    sx={{ mt: 0.5 }}
+                                                >
+                                                    Note: {assignment.notes}
+                                                </Typography>
+                                            )}
+                                        </Box>
+                                    }
+                                />
 
-                                                {/* {assignment.assignment_date && (
-                                                    <Chip
-                                                        label={formatAssignmentDate(assignment.assignment_date)}
-                                                        size="small"
-                                                        variant="outlined"
-                                                    />
-                                                )} */}
-                                            </Box>
-                                        }
-                                        secondary={
-                                            <Box mt={0.5}>
-                                                {(assignment.custom_start_time || assignment.custom_end_time) && (
-                                                    <Typography variant="caption" color="text.secondary">
-                                                        Custom Time: {assignment.custom_start_time || 'N/A'} -{' '}
-                                                        {assignment.custom_end_time || 'N/A'}
-                                                    </Typography>
-                                                )}
+                                <ListItemSecondaryAction>
+                                    <IconButton size="small" onClick={() => handleOpenDialog(assignment)}>
+                                        <Edit fontSize="small" />
+                                    </IconButton>
 
-                                                {assignment.notes && (
-                                                    <Typography
-                                                        variant="caption"
-                                                        display="block"
-                                                        color="text.secondary"
-                                                        sx={{ mt: 0.5 }}
-                                                    >
-                                                        Note: {assignment.notes}
-                                                    </Typography>
-                                                )}
-                                            </Box>
-                                        }
-                                    />
-
-                                    <ListItemSecondaryAction>
-                                        <IconButton size="small" onClick={() => handleOpenDialog(assignment)}>
-                                            <Edit fontSize="small" />
-                                        </IconButton>
-
-                                        <IconButton size="small" onClick={() => handleDelete(assignment.id)}>
-                                            <Delete fontSize="small" />
-                                        </IconButton>
-                                    </ListItemSecondaryAction>
-                                </ListItem>
-                            ))}
+                                    <IconButton size="small" onClick={() => handleDelete(assignment.id)}>
+                                        <Delete fontSize="small" />
+                                    </IconButton>
+                                </ListItemSecondaryAction>
+                            </ListItem>
+                        ))}
                     </List>
                 ) : (
                     <Typography variant="body2" color="text.secondary" textAlign="center" py={2}>
@@ -354,88 +477,7 @@ const ShiftScriptManager = ({ shift, examId, onUpdate }) => {
                 </Paper>
             )}
 
-            {/* Add/Edit Dialog */}
-            <Dialog open={openDialog} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
-                <DialogTitle>
-                    {editingAssignment ? 'Edit Script Assignment' : 'Assign Script to Shift'}
-                </DialogTitle>
-                <DialogContent>
-                    {error && (
-                        <Alert severity="error" sx={{ mb: 2 }}>
-                            {error}
-                        </Alert>
-                    )}
-                    <TextField
-                        select
-                        fullWidth
-                        label="Select Script"
-                        name="script_id"
-                        value={formData.script_id}
-                        onChange={handleChange}
-                        margin="normal"
-                        required
-                        disabled={!!editingAssignment}
-                    >
-                        <MenuItem value="">Select a script</MenuItem>
-                        {scripts.map((script) => (
-                            <MenuItem key={script.id} value={script.id}>
-                                <Box>
-                                    <Typography variant="body2">{script.name}</Typography>
-                                    <Typography variant="caption" color="text.secondary">
-                                        Keyword: {script.script_id}
-                                    </Typography>
-                                </Box>
-                            </MenuItem>
-                        ))}
-                    </TextField>
-                    <Box display="flex" gap={2}>
-                        <TextField
-                            type="time"
-                            label="Custom Start Time"
-                            name="custom_start_time"
-                            value={formData.custom_start_time}
-                            onChange={handleChange}
-                            margin="normal"
-                            InputLabelProps={{ shrink: true }}
-                            fullWidth
-                            required
-                            helperText="Override start time for this shift"
-                        />
-                        <TextField
-                            type="time"
-                            label="Custom End Time"
-                            name="custom_end_time"
-                            value={formData.custom_end_time}
-                            onChange={handleChange}
-                            margin="normal"
-                            InputLabelProps={{ shrink: true }}
-                            fullWidth
-                            required
-                            helperText="Override end time for this shift"
-                        />
-                    </Box>
-                    <TextField
-                        fullWidth
-                        multiline
-                        rows={2}
-                        label="Notes"
-                        name="notes"
-                        value={formData.notes}
-                        onChange={handleChange}
-                        margin="normal"
-                    />
-                </DialogContent>
-                <DialogActions>
-                    <Button onClick={handleCloseDialog}>Cancel</Button>
-                    <Button
-                        onClick={handleSubmit}
-                        variant="contained"
-                        disabled={!formData.script_id || !formData.custom_start_time || !formData.custom_end_time}
-                    >
-                        {editingAssignment ? 'Update' : 'Assign'}
-                    </Button>
-                </DialogActions>
-            </Dialog>
+            {dialogJSX}
         </Box>
     );
 };
