@@ -51,7 +51,7 @@ export const camerasAPI = {
     uploadExcel: (examId, file, { shiftId, examDate } = {}) => {
         const formData = new FormData();
         formData.append('file', file);
-        if (shiftId)  formData.append('shiftId', shiftId);
+        if (shiftId) formData.append('shiftId', shiftId);
         if (examDate) formData.append('examDate', examDate);
         return api.post(`/exams/${examId}/cameras/upload`, formData, {
             headers: { 'Content-Type': 'multipart/form-data' }
@@ -93,6 +93,7 @@ export const executionsAPI = {
     getById: (id) => api.get(`/executions/${id}`),
     getStatistics: (params) => api.get('/executions/stats/summary', { params }),
     getByShift: (shiftId, params) => api.get(`/executions/shifts/${shiftId}/executions`, { params }),
+    getByExam: (examId, params) => api.get('/executions', { params: { ...params, exam_id: examId } }),
     getRecent: (limit = 20) => api.get(`/executions/recent?limit=${limit}`)
 };
 
@@ -103,6 +104,13 @@ export const shiftScriptsAPI = {
     bulkAssign: (shiftId, scripts) => api.post(`/shifts/${shiftId}/scripts/bulk`, { scripts }),
     update: (id, data) => api.put(`/shift-scripts/${id}`, data),
     delete: (id) => api.delete(`/shift-scripts/${id}`)
+};
+
+export const reportAPI = {
+    downloadReport: (dateStr) => api.get('/report/download', {
+        params: { date: dateStr },
+        responseType: 'blob'
+    })
 };
 
 export default api;

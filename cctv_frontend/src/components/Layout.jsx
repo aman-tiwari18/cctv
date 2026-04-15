@@ -29,6 +29,7 @@ import {
   Analytics,
   PlayCircle,
   Logout,
+  Slideshow,
   AccountCircle,
   CameraAlt,
   Visibility,
@@ -47,8 +48,11 @@ import {
   Download,
   TableChart,
 } from '@mui/icons-material';
+import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import { useAuth } from '../contexts/AuthContext';
+import { reportAPI } from '../services/api';
 import { DetectionCountsProvider, useDetectionCounts } from '../contexts/DetectionCountsContext';
+import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
 
 const DRAWER_WIDTH = 260;
 const APPBAR_HEIGHT = 64;
@@ -85,11 +89,11 @@ const TYPE_META = {
 
 const menuItems = [
   { text: 'Dashboard', icon: <Dashboard />, path: '/' },
-  { text: 'Exams', icon: <School />, path: '/exams' },
-  { text: 'Cameras', icon: <Videocam />, path: '/cameras' },
+  { text: 'Exams', icon: <ExamsSvgIcon />, path: '/exams' },
+  { text: 'Cameras', icon: <CameraAltIcon />, path: '/cameras' },
   { text: 'Shifts', icon: <Schedule />, path: '/shifts' },
   { text: 'Schedule Scripts', icon: <Analytics />, path: '/analytics' },
-  { text: 'Executions', icon: <PlayCircle />, path: '/executions' },
+  { text: 'Executions', icon: <Slideshow />, path: '/executions' },
   { text: 'Detections', icon: <CameraAlt />, path: '/detections', hasSubItems: true },
   { text: 'Client Detections', icon: <Visibility />, path: '/client-detections', hasSubItems: true },
 ];
@@ -166,7 +170,7 @@ function DetectionSubItems({ counts, typeFilter, onTypeSelect }) {
 
 /* ── Sidebar Content ── */
 function SidebarContent({ items, currentPath, onNavigate }) {
-  const { unfilteredCounts, typeFilter, setTypeFilter,  } = useDetectionCounts();
+  const { unfilteredCounts, typeFilter, setTypeFilter, } = useDetectionCounts();
   const [detectionsOpen, setDetectionsOpen] = useState(false);
 
   const isDetectionPage = currentPath === '/detections' || currentPath === '/client-detections';
@@ -196,7 +200,7 @@ function SidebarContent({ items, currentPath, onNavigate }) {
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
-          <Videocam sx={{ mr: 1, color: '#2563eb' }} />
+          <CameraAltIcon sx={{ mr: 1, color: '#2563eb' }} />
           <Typography variant="h6" fontWeight={700} color="#0f172a" noWrap>
             CCTV Monitor
           </Typography>
@@ -286,7 +290,7 @@ function LayoutInner() {
   const location = useLocation();
   const { user, logout } = useAuth();
 
-  const { allCounts, unfilteredCounts,exportToExcel  } = useDetectionCounts();
+  const { allCounts, unfilteredCounts, exportToExcel } = useDetectionCounts();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState(null);
 
@@ -309,6 +313,30 @@ function LayoutInner() {
   const handleLogout = () => {
     logout();
     navigate('/login');
+  };
+
+  const handleDownloadReport = async () => {
+    try {
+      // Use today's date in dd-mm-yyyy format if context date falls back, for now using strictly today 
+      // but ideally we could sync it with detections dateFilter.
+      const today = new Date();
+      const dd = String(today.getDate()).padStart(2, '0');
+      const mm = String(today.getMonth() + 1).padStart(2, '0');
+      const yyyy = today.getFullYear();
+      const dateStr = `${dd}-${mm}-${yyyy}`;
+
+      const response = await reportAPI.downloadReport(dateStr);
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `detection_report_${dateStr}.xlsx`);
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode.removeChild(link);
+    } catch (error) {
+      console.error('Download report failed:', error);
+      alert('Failed to download report.');
+    }
   };
 
   const currentPageTitle =
@@ -371,6 +399,7 @@ function LayoutInner() {
                   variant="contained"
                   startIcon={<Download sx={{ fontSize: 16 }} />}
                   disableElevation
+                  onClick={handleDownloadReport}
                   sx={{
                     height: 34,
                     borderRadius: '8px',

@@ -39,6 +39,7 @@ import {
   Close,
   AccessTime,
 } from '@mui/icons-material';
+import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { examsAPI } from '../services/api';
@@ -295,9 +296,9 @@ const Exams = () => {
 
   return (
     <Box>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Box>
-          <Typography variant="body1" color="text.secondary" fontSize= "0.9rem">
+          <Typography variant="body1" color="text.secondary">
             Manage exam configurations, date ranges, shifts, and monitoring settings
           </Typography>
         </Box>
@@ -314,129 +315,151 @@ const Exams = () => {
       <Grid container spacing={3}>
         {exams.map((exam) => {
           const dateInfo = getExamDateInfo(exam);
+          const isHLS = exam.link_type === 'HLS';
+          const isActive = exam.is_active !== false;
+
           return (
-            <Grid item xs={12} sm={6} md={4} key={exam.id}>
-              <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                <CardContent sx={{ flexGrow: 1 }}>
-                  <Box display="flex" justifyContent="space-between" alignItems="start" mb={2}>
-                    <Typography variant="h6" fontWeight="bold">
-                      {exam.exam_name}
-                    </Typography>
-                    <Chip
-                      label={exam.link_type}
-                      size="small"
-                      color={exam.link_type === 'RTSP' ? 'primary' : 'secondary'}
-                    />
-                  </Box>
-                  <Typography variant="body2" color="text.secondary" gutterBottom>
-                    <strong>Exam Body:</strong> {exam.exam_body}
+            <Grid item xs={12} sm={6} md={3} key={exam.id}>
+              <Box
+                sx={{
+                  bgcolor: '#fff',
+                  border: '1px solid #e8ecf1',
+                  borderRadius: 3,
+                  p: 2,
+                  height: '100%',
+                  minHeight: 400,
+                  maxWidth: 385,
+                  display: 'flex',
+                  flexDirection: 'column'
+                }}
+              >
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 0.4 }}>
+                  <Typography sx={{ fontWeight: 800, fontSize: '1.2rem', color: '#0f172a', lineHeight: 1.3, pr: 1, flex: 1 }}>
+                    {exam.exam_name}
                   </Typography>
-                  {exam.description && (
-                    <Typography variant="body2" color="text.secondary" mt={1}>
-                      {exam.description}
+                  <Chip
+                    label={exam.link_type}
+                    size="small"
+                    sx={{
+                      fontWeight: 700, fontSize: '0.68rem', height: 20,
+                      borderRadius: '6px', flexShrink: 0,
+                      bgcolor: isHLS ? '#1d4ed8' : '#a4b4ff', color: isHLS ? '#fff' : '#3a4e95',
+                    }}
+                  />
+                </Box>
+
+                {/* ── Row 2: EXAM BODY ── */}
+                <Typography sx={{ fontSize: '0.74rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#94a3b8', mb: 1.2 }}>
+                  Exam Body: {exam.exam_body}
+                </Typography>
+
+                {/* ── Row 3: Date range ── */}
+                {exam.start_date && exam.end_date && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.7, mb: 1.2 }}>
+                    <CalendarMonth sx={{ fontSize: 15, color: '#3b82f6', flexShrink: 0 }} />
+                    <Typography sx={{ fontSize: '0.77rem', fontWeight: 600, color: '#334155' }}>
+                      {formatDate(exam.start_date)} - {formatDate(exam.end_date)}
                     </Typography>
-                  )}
+                  </Box>
+                )}
 
-                  {/* Date Range Info */}
-                  {exam.start_date && exam.end_date && (
-                    <Box mt={2} p={1.5} sx={{ bgcolor: 'action.hover', borderRadius: 1 }}>
-                      <Box display="flex" alignItems="center" gap={0.5} mb={0.5}>
-                        <CalendarMonth fontSize="small" color="primary" />
-                        <Typography variant="body2" fontWeight="bold">
-                          {formatDate(exam.start_date)} — {formatDate(exam.end_date)}
-                        </Typography>
-                      </Box>
-                      {dateInfo && (
-                        <Typography variant="caption" color="text.secondary">
-                          {dateInfo.validDays} exam days • {dateInfo.skippedDays} days skipped
-                        </Typography>
-                      )}
-                      {exam.skip_days?.length > 0 && (
-                        <Box mt={0.5} display="flex" flexWrap="wrap" gap={0.5}>
-                          {exam.skip_days.map((day) => (
-                            <Chip
-                              key={day}
-                              label={day.substring(0, 3)}
-                              size="small"
-                              variant="outlined"
-                              color="warning"
-                              sx={{ height: 20, fontSize: '0.7rem' }}
-                            />
-                          ))}
-                          {exam.skip_dates?.length > 0 && (
-                            <Chip
-                              label={`+${exam.skip_dates.length} dates`}
-                              size="small"
-                              variant="outlined"
-                              color="error"
-                              sx={{ height: 20, fontSize: '0.7rem' }}
-                            />
-                          )}
-                        </Box>
-                      )}
+
+                {!isActive ? (
+                  <Box sx={{ bgcolor: '#f8fafc', borderRadius: 2, p: 1.2, mb: 1.2, textAlign: 'center' }}>
+                    <Typography sx={{ fontSize: '0.58rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#94a3b8', mb: 0.3 }}>Status</Typography>
+                    <Typography sx={{ fontSize: '1rem', fontWeight: 800, color: '#94a3b8' }}>Archived</Typography>
+                  </Box>
+                ) : dateInfo ? (
+                  <Box sx={{ bgcolor: '#f8fafc', borderRadius: 2, p: 1.2, mb: 1.2 }}>
+                    <Box sx={{ display: 'flex', gap: 2, mb: 0.8 }}>
+                      <Typography sx={{ fontSize: '0.68rem', fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#94a3b8' }}>
+                        Total Days-{dateInfo.totalDays}
+                      </Typography>
+                      <Typography sx={{ fontSize: '0.68rem', fontWeight: 700, letterSpacing: '0.07em', textTransform: 'uppercase', color: '#94a3b8' }}>
+                        Skipped Days-{dateInfo.skippedDays}
+                      </Typography>
                     </Box>
-                  )}
+                    {(exam.skip_days?.length > 0 || exam.skip_dates?.length > 0) && (
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                        {exam.skip_days?.map((day) => (
+                          <Chip key={day} label={day.substring(0, 3)} size="small"
+                            sx={{ height: 20, fontSize: '0.64rem', fontWeight: 600, color: '#475569', bgcolor: '#fff' }} />
+                        ))}
+                        {exam.skip_dates?.length > 0 && (
+                          <Chip label={`+${exam.skip_dates.length} dates`} size="small"
+                            sx={{ height: 20, fontSize: '0.64rem', fontWeight: 700, color: '#3b82f6', bgcolor: '#eff6ff' }} />
+                        )}
+                      </Box>
+                    )}
+                  </Box>
+                ) : null}
 
-                  {/* Shifts Info */}
-                  {exam.examShifts?.length > 0 && (
-                    <Box mt={1.5} display="flex" flexWrap="wrap" gap={0.5}>
+                {/* ── Shift Schedule ── each shift in its own grey box */}
+                {exam.examShifts?.length > 0 && (
+                  <Box sx={{ mb: 1.2 }}>
+                    <Typography sx={{ fontSize: '0.58rem', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#94a3b8', mb: 0.8 }}>
+                      Shift Schedule
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                       {exam.examShifts.map((shift) => (
-                        <Chip
+                        <Box
                           key={shift.id}
-                          icon={<AccessTime sx={{ fontSize: '0.85rem !important' }} />}
-                          label={`${shift.shift_name}: ${shift.start_time?.substring(0, 5)} - ${shift.end_time?.substring(0, 5)}`}
-                          size="small"
-                          color="info"
-                          variant="outlined"
-                          sx={{ fontSize: '0.75rem' }}
-                        />
+                          sx={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                            bgcolor: '#f8fafc', borderRadius: 1.5, px: 1.2, py: 1,
+                          }}
+                        >
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.7 }}>
+                            <Box sx={{ width: 22, height: 22, borderRadius: '50%', bgcolor: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                              <AccessTime sx={{ fontSize: 12, color: '#64748b' }} />
+                            </Box>
+                            <Typography sx={{ fontSize: '0.78rem', fontWeight: 600, color: '#1e293b' }}>{shift.shift_name}</Typography>
+                          </Box>
+                          <Typography sx={{ fontSize: '0.78rem', color: '#64748b' }}>
+                            {shift.start_time?.substring(0, 5)} - {shift.end_time?.substring(0, 5)}
+                          </Typography>
+                        </Box>
                       ))}
                     </Box>
-                  )}
-
-                  <Box mt={2} display="flex" gap={2}>
-                    <Box display="flex" alignItems="center" gap={0.5}>
-                      <Videocam fontSize="small" color="action" />
-                      <Typography variant="caption">
-                        {exam.camera_count || 0} cameras
-                      </Typography>
-                    </Box>
-                    <Box display="flex" alignItems="center" gap={0.5}>
-                      <Schedule fontSize="small" color="action" />
-                      <Typography variant="caption">
-                        {exam.examShifts?.length || 0} shifts
-                      </Typography>
-                    </Box>
-                    {/* <Box display="flex" alignItems="center" gap={0.5}>
-                      <Analytics fontSize="small" color="action" />
-                      <Typography variant="caption">
-                        {exam.analytics_task_count || 0} tasks
-                      </Typography>
-                    </Box> */}
                   </Box>
-                </CardContent>
-                <CardActions>
-                  <Button
-                    size="small"
-                    onClick={() => navigate(`/cameras?exam=${exam.id}`)}
-                  >
-                    Cameras
-                  </Button>
-                  <Button
-                    size="small"
-                    onClick={() => navigate(`/shifts?exam=${exam.id}`)}
-                  >
-                    Shifts
-                  </Button>
-                  <Box flexGrow={1} />
-                  <IconButton size="small" onClick={() => handleOpenDialog(exam)}>
-                    <Edit fontSize="small" />
-                  </IconButton>
-                  <IconButton size="small" onClick={() => handleDelete(exam.id)}>
-                    <Delete fontSize="small" />
-                  </IconButton>
-                </CardActions>
-              </Card>
+                )}
+
+                <Box sx={{ flex: 1 }} />
+
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 1.2, pt: 1.2, borderTop: '1px solid #f1f5f9' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                    <Box
+                      onClick={() => navigate(`/cameras?exam=${exam.id}`)}
+                      sx={{ display: 'flex', alignItems: 'center', gap: 0.4, cursor: 'pointer', '&:hover': { opacity: 0.75 } }}
+                    >
+                      <CameraAltIcon sx={{ fontSize: 15, color: '#3b82f6' }} />
+                      <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569' }}>
+                        {String(exam.camera_count || 0).padStart(2, '0')}
+                      </Typography>
+                    </Box>
+                    {/* Clickable shift count → /shifts */}
+                    <Box
+                      onClick={() => navigate(`/shifts?exam=${exam.id}`)}
+                      sx={{ display: 'flex', alignItems: 'center', gap: 0.4, cursor: 'pointer', '&:hover': { opacity: 0.75 } }}
+                    >
+                      <Schedule sx={{ fontSize: 15, color: '#2563eb' }} />
+                      <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569' }}>
+                        {String(exam.examShifts?.length || 0).padStart(2, '0')}
+                      </Typography>
+                    </Box>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                    <IconButton size="small" onClick={() => handleOpenDialog(exam)}
+                      sx={{ color: '#2563eb', '&:hover': { bgcolor: '#eff6ff' } }}>
+                      <Edit sx={{ fontSize: 17 }} />
+                    </IconButton>
+                    <IconButton size="small" onClick={() => handleDelete(exam.id)}
+                      sx={{ color: '#94a3b8', '&:hover': { bgcolor: '#f1f5f9' } }}>
+                      <Delete sx={{ fontSize: 17 }} />
+                    </IconButton>
+                  </Box>
+                </Box>
+              </Box>
             </Grid>
           );
         })}

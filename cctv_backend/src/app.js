@@ -13,6 +13,7 @@ const cameraLinkRoutes = require('./routes/cameraLinks');
 const executionRoutes = require('./routes/executions');
 const shiftScriptRoutes = require('./routes/shiftScripts');
 const scriptRoutes = require('./routes/scripts');
+const reportRoutes = require('./routes/report');
 
 const path = require('path');
 
@@ -55,6 +56,7 @@ app.use(`${BASE}/api`, shiftScriptRoutes);
 app.use(`${BASE}/api/exams`, examRoutes);
 app.use(`${BASE}/api/executions`, executionRoutes);
 app.use(`${BASE}/api/scripts`, scriptRoutes);
+app.use(`${BASE}/api/report`, reportRoutes);
 
 // ==========================
 // Frontend (optional)

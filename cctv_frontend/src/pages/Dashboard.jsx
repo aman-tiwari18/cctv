@@ -18,9 +18,11 @@ import {
   Autorenew,
   MoreHoriz,
   InfoOutlined,
+  Schedule
 } from '@mui/icons-material';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
 import { examsAPI, executionsAPI } from '../services/api';
+import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
 
 const StatCard = ({ title, value, icon, color, loading }) => (
   <Card
@@ -152,7 +154,7 @@ const Dashboard = () => {
           <StatCard
             title="Active Exams"
             value={stats.exams}
-            icon={<Assignment />}
+            icon={<ExamsSvgIcon />}
             color="#3b6cf5"
             loading={loading}
           />
@@ -161,7 +163,7 @@ const Dashboard = () => {
           <StatCard
             title="Total Shifts"
             value={stats.upcomingShifts}
-            icon={<FolderOpen />}
+            icon={<Schedule />}
             color="#3b6cf5"
             loading={loading}
           />
