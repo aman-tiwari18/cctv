@@ -1208,6 +1208,7 @@ import time
 import threading
 import signal
 import logging
+import uuid
 import torch
 from ultralytics import YOLO
 
@@ -1592,7 +1593,9 @@ def _detect_and_save(item: dict):
     
     # ── Source-Aware Naming Format ──────────────
     if item.get("source_type") == "HLS":
-        fname = f"lessthan5_ch{ch_no}_{timestamp}.jpg"
+        _uid = str(uuid.uuid4())
+        _exam_id = str(os.environ.get("EXAM_ID", "0")).strip()
+        fname = f"lessthan5_ch{ch_no}_exam{_exam_id}_{timestamp}_{_uid}.jpg"
     else:
         # RTSP: {script}_{device_id}_{camera_no}_{ts}.jpg
         dev_id = item.get("device_id") or camera_id

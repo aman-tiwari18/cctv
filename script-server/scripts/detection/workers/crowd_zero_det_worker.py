@@ -1161,6 +1161,7 @@ import time
 import threading
 import signal
 import logging
+import uuid
 import torch
 
 # Fix threading/BLAS errors
@@ -1487,7 +1488,9 @@ def gpu_worker(df, stop_event: threading.Event):
                     
                     # ── Source-Aware Naming Format ──────────────
                     if item.get("source_type") == "HLS":
-                        filename = os.path.join(TCS_ZERO_SAVE_FOLDER, f"crowd_zero_ch{ch_no}_{timestamp}.jpg")
+                        _uid = str(uuid.uuid4())
+                        _exam_id = str(os.environ.get("EXAM_ID", "0")).strip()
+                        filename = os.path.join(TCS_ZERO_SAVE_FOLDER, f"crowd_zero_ch{ch_no}_exam{_exam_id}_{timestamp}_{_uid}.jpg")
                     else:
                         # RTSP: {script}_{device_id}_{camera_no}_{ts}.jpg
                         dev_id = item.get("device_id") or camera_id

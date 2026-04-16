@@ -635,6 +635,7 @@ import time
 import threading
 import signal
 import logging
+import uuid
 import torch
 from datetime import datetime
 
@@ -777,7 +778,9 @@ def gpu_worker(stop_event):
                 final_frame = _add_status_overlay(final_frame, violations, len(p_boxes), camera_id, ch_no)
                 
                 if source_type == "HLS":
-                    filename = os.path.join(SAVE_FOLDER_HLS, f"proximity_ch{ch_no}_{timestamp}.jpg")
+                    _uid = str(uuid.uuid4())
+                    _exam_id = str(os.environ.get("EXAM_ID", "0")).strip()
+                    filename = os.path.join(SAVE_FOLDER_HLS, f"proximity_ch{ch_no}_exam{_exam_id}_{timestamp}_{_uid}.jpg")
                 else:
                     dev_id = item.get("device_id") or camera_id
                     filename = os.path.join(SAVE_FOLDER_RTSP, f"proximity_{dev_id}_{ch_no}_{timestamp}.jpg")
@@ -788,7 +791,8 @@ def gpu_worker(stop_event):
                 # --- Report to DB (HLS only) ---
                 if source_type == "HLS":
                     try:
-                        proximity_core.report_to_db_hls(
+                        from db_client import report_to_db_hls as _report_hls
+                        _report_hls(
                             ch_code=str(ch_no), 
                             image_name=os.path.basename(filename),
                             folder="proximity_detection"

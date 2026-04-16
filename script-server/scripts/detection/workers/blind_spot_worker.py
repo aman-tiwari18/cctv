@@ -1763,6 +1763,7 @@ import numpy as np
 import time
 import threading
 import signal
+import uuid
 import torch
 import pymysql
 import re
@@ -2130,8 +2131,10 @@ class BlindSpotDetector:
         source_type = item.get("source_type", "HLS") if item else "HLS"
 
         if source_type == "HLS":
-            # blindspot_ch[ch_no]_[timestamp].jpg
-            fname = f"blindspot_ch{self.ch_no}_{ts}.jpg"
+            # blindspot_ch[ch_no]_exam[exam_id]_[timestamp]_[uuid].jpg
+            _uid = str(uuid.uuid4())
+            _exam_id = str(os.environ.get("EXAM_ID", "0")).strip()
+            fname = f"blindspot_ch{self.ch_no}_exam{_exam_id}_{ts}_{_uid}.jpg"
         else:
             # RTSP: blindspot_[device_id]_[camera_no]_[timestamp].jpg
             dev_id = item.get("device_id") if item else self.camera_id

@@ -107,8 +107,8 @@ export const shiftScriptsAPI = {
 };
 
 export const reportAPI = {
-    downloadReport: (dateStr) => api.get('/report/download', {
-        params: { date: dateStr },
+    downloadReport: (params) => api.get('/report/download', {
+        params: params,
         responseType: 'blob'
     })
 };

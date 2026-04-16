@@ -702,6 +702,10 @@ def report_to_db_hls(ch_code: str, image_name: str, folder: str = "crowd_detecti
     Returns:
         True on success, False on any failure.
     """
+    # Extract UUID (v4) from filename — expected format: ..._<uuid>.jpg
+    _UUID_PATTERN = r'([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})'
+    uuid_match = re.search(_UUID_PATTERN, image_name, re.IGNORECASE)
+    unique_id = uuid_match.group(1) if uuid_match else None
     try:
         with open(_LOG_FILE, "a") as f:
             f.write(
@@ -775,18 +779,19 @@ def report_to_db_hls(ch_code: str, image_name: str, folder: str = "crowd_detecti
                         exam_id, shift_id, city, center_name, camera_id,
                         camera_name, camera_category, tc_code, ch_code,
                         state, camera_status, events, date_time,
-                        imageurl, detection_type
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        imageurl, detection_type, unique_id
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         cam.get('exam_id'), cam.get('shift_id'), cam.get('city'),
                         cam.get('centre_name'), report_camera_id, camera_name,
                         cam.get('camera_category'), cam.get('tc_code'), ch_code,
                         cam.get('state'), camera_status, 1, date_time, image_url, folder,
+                        unique_id,
                     ),
                 )
             conn.commit()
-            msg = f"[DB-REPORT] ✅ SUCCESS: {folder} report inserted for ch_code={ch_code}\n"
+            msg = f"[DB-REPORT] ✅ SUCCESS: {folder} report inserted for ch_code={ch_code} unique_id={unique_id}\n"
             logger.info(msg.strip())
             with open(_LOG_FILE, "a") as f:
                 f.write(msg)

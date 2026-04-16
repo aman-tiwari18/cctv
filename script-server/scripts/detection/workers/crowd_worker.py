@@ -650,6 +650,7 @@ import time
 import threading
 import signal
 import logging
+import uuid
 import torch
 from datetime import datetime
 
@@ -692,6 +693,9 @@ RTSP_SAVE_FOLDER = os.path.join(_DETECTION_ROOT, "results/crowd_detection_result
 
 os.makedirs(SAVE_FOLDER, exist_ok=True)
 os.makedirs(RTSP_SAVE_FOLDER, exist_ok=True)
+
+# ── Exam ID (injected into HLS filename) ─────────────────────
+_EXAM_ID = str(os.environ.get("EXAM_ID", "0")).strip()
 
 # Important logic settings
 COOLDOWN_TIME = 90
@@ -773,7 +777,8 @@ def gpu_worker(stop_event):
                             
                             # ── Source-Aware Naming Format ──────────────
                             if source_type == "HLS":
-                                filename = os.path.join(SAVE_FOLDER, f"crowd_ch{ch_no}_{timestamp}.jpg")
+                                _uid = str(uuid.uuid4())
+                                filename = os.path.join(SAVE_FOLDER, f"crowd_ch{ch_no}_exam{_EXAM_ID}_{timestamp}_{_uid}.jpg")
                             else:
                                 dev_id = item.get("device_id") or camera_id
                                 filename = os.path.join(RTSP_SAVE_FOLDER, f"crowd_{dev_id}_{ch_no}_{timestamp}.jpg")

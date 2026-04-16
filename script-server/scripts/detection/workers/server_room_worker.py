@@ -1016,6 +1016,7 @@ import os
 import logging
 import threading
 import signal
+import uuid
 from datetime import datetime
 
 import cv2
@@ -1344,9 +1345,11 @@ def _hls_gpu_worker(stop_event, save_folder, cooldown_time=60):
             
             # ── Source-Aware Naming Format ──────────────
             if item.get("source_type") == "HLS":
+                _uid = str(uuid.uuid4())
+                _exam_id = str(os.environ.get("EXAM_ID", "0")).strip()
                 filename = os.path.join(
                     save_folder,
-                    f"{script_name}_ch{ch_no}_{timestamp}.jpg"
+                    f"{script_name}_ch{ch_no}_exam{_exam_id}_{timestamp}_{_uid}.jpg"
                 )
             else:
                 # RTSP: {script}_{device_id}_{camera_no}_{ts}.jpg
@@ -1364,8 +1367,8 @@ def _hls_gpu_worker(stop_event, save_folder, cooldown_time=60):
             # --- Report to DB (HLS only) ---
             if item.get("source_type") == "HLS":
                 try:
-                    server_core.report_to_db_hls(
-                        ch_no=str(ch_no), 
+                    report_to_db_hls(
+                        ch_code=str(ch_no), 
                         image_name=os.path.basename(filename),
                         folder="server_room_detection"
                     )

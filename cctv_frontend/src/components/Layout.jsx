@@ -53,6 +53,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { reportAPI } from '../services/api';
 import { DetectionCountsProvider, useDetectionCounts } from '../contexts/DetectionCountsContext';
 import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
+import { CustomSvgIcon } from './DetectionSvgIcon';
 
 const DRAWER_WIDTH = 260;
 const APPBAR_HEIGHT = 64;
@@ -94,7 +95,7 @@ const menuItems = [
   { text: 'Shifts', icon: <Schedule />, path: '/shifts' },
   { text: 'Schedule Scripts', icon: <Analytics />, path: '/analytics' },
   { text: 'Executions', icon: <Slideshow />, path: '/executions' },
-  { text: 'Detections', icon: <CameraAlt />, path: '/detections', hasSubItems: true },
+  { text: 'Detections', icon: <CustomSvgIcon />, path: '/detections', hasSubItems: true },
   { text: 'Client Detections', icon: <Visibility />, path: '/client-detections', hasSubItems: true },
 ];
 
@@ -290,7 +291,7 @@ function LayoutInner() {
   const location = useLocation();
   const { user, logout } = useAuth();
 
-  const { allCounts, unfilteredCounts, exportToExcel } = useDetectionCounts();
+  const { allCounts, unfilteredCounts, exportToExcel, downloadConsolidatedReport } = useDetectionCounts();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState(null);
 
@@ -313,30 +314,6 @@ function LayoutInner() {
   const handleLogout = () => {
     logout();
     navigate('/login');
-  };
-
-  const handleDownloadReport = async () => {
-    try {
-      // Use today's date in dd-mm-yyyy format if context date falls back, for now using strictly today 
-      // but ideally we could sync it with detections dateFilter.
-      const today = new Date();
-      const dd = String(today.getDate()).padStart(2, '0');
-      const mm = String(today.getMonth() + 1).padStart(2, '0');
-      const yyyy = today.getFullYear();
-      const dateStr = `${dd}-${mm}-${yyyy}`;
-
-      const response = await reportAPI.downloadReport(dateStr);
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `detection_report_${dateStr}.xlsx`);
-      document.body.appendChild(link);
-      link.click();
-      link.parentNode.removeChild(link);
-    } catch (error) {
-      console.error('Download report failed:', error);
-      alert('Failed to download report.');
-    }
   };
 
   const currentPageTitle =
@@ -399,7 +376,7 @@ function LayoutInner() {
                   variant="contained"
                   startIcon={<Download sx={{ fontSize: 16 }} />}
                   disableElevation
-                  onClick={handleDownloadReport}
+                  onClick={downloadConsolidatedReport}
                   sx={{
                     height: 34,
                     borderRadius: '8px',

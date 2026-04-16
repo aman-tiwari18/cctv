@@ -697,6 +697,7 @@ import signal
 import numpy as np
 import pymysql
 import re
+import uuid
 from datetime import datetime
 
 # ================= GRACEFUL STOP FLAG =================
@@ -734,6 +735,9 @@ os.makedirs(HLS_SAVE_FOLDER, exist_ok=True)
 THREAD_DELAY  = float(os.environ.get("THREAD_START_DELAY_MS", "200")) / 1000.0
 COOLDOWN_TIME = int(os.environ.get("TAMPER_COOLDOWN_SEC", "45"))
 SAMPLE_EVERY  = int(os.environ.get("TAMPER_SAMPLE_EVERY", "5"))
+
+# ── Exam ID (injected into HLS filename) ─────────────────────
+_EXAM_ID = str(os.environ.get("EXAM_ID", "0")).strip()
 
 # ================= IMPORTS =================
 from tcs_hls_utils import extract_hls_streaming_url, test_hls_stream, open_hls_stream
@@ -818,8 +822,9 @@ def _hls_camera_thread(cfg, stop_event):
                     _last_save_time[camera_id] = now
 
                 ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                # HLS: tampering_ch[ch_no]_[timestamp].jpg
-                filename = os.path.join(HLS_SAVE_FOLDER, f"tampering_ch{ch_no}_{ts}.jpg")
+                _uid = str(uuid.uuid4())
+                # HLS: tampering_ch[ch_no]_exam[exam_id]_[timestamp]_[uuid].jpg
+                filename = os.path.join(HLS_SAVE_FOLDER, f"tampering_ch{ch_no}_exam{_EXAM_ID}_{ts}_{_uid}.jpg")
                 cv2.imwrite(filename, frame)
                 logger.warning(
                     f"[TamperingWorker] ⚠️ {status} | {camera_id} "

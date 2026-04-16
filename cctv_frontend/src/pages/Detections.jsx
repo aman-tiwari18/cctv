@@ -23,6 +23,7 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { enGB } from 'date-fns/locale';
 import axios from 'axios';
 import { io } from 'socket.io-client';
+import { reportAPI, examsAPI } from '../services/api';
 import { API_BASE_1, IMG_BASE, SOCKET_URL, SOCKET_PATH } from '../constants/data';
 import { useDetectionCounts } from '../contexts/DetectionCountsContext';
 import * as XLSX from 'xlsx';
@@ -58,7 +59,7 @@ const TYPE_ICONS = {
   default: CameraAlt,
 };
 
-function DetectionCard({ item, onClick, onPushToClient, copyingId, onSkip }) {
+function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onSkip }) {
   const meta = TYPE_META[item.type] || { label: item.type, color: '#94a3b8', bg: '#f1f5f9' };
   const [imgError, setImgError] = useState(false);
   const cameraName = item.cameraName || item.camera_name || item.camera_id || '-';
@@ -69,7 +70,7 @@ function DetectionCard({ item, onClick, onPushToClient, copyingId, onSkip }) {
     ? (item.issueLabel || (item.issueType ? String(item.issueType).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : ''))
     : '';
 
-  const isLoading = copyingId === (item.id || item.timestamp || item.image_url);
+  const isLoading = isPushing;
 
   return (
     <Card
@@ -192,33 +193,35 @@ function DetectionCard({ item, onClick, onPushToClient, copyingId, onSkip }) {
 
       <Box sx={{ mx: 2, mb: 4, mt: 1 }}>
         <Box sx={{ display: 'flex', justifyContent: 'end', gap: 1.5 }}>
-          <Button
-            variant="outlined"
-            fullWidth
-            disableElevation
-            onClick={(e) => { e.stopPropagation(); if (onSkip) onSkip(item); }}
-            sx={{
-              borderColor: '#c3c5d8', color: '#475569', fontWeight: 900,
-              width: "80px",
-              height: "40px",
-              borderRadius: 3, textTransform: 'none', fontSize: 12,
-              '&:hover': { bgcolor: '#c3c5d8', borderColor: '#c3c5d8' },
-            }}
-          >
-            Skip
-          </Button>
+          {!isPushed && (
+            <Button
+              variant="outlined"
+              fullWidth
+              disableElevation
+              onClick={(e) => { e.stopPropagation(); if (onSkip) onSkip(item); }}
+              sx={{
+                borderColor: '#c3c5d8', color: '#475569', fontWeight: 900,
+                width: "80px",
+                height: "40px",
+                borderRadius: 3, textTransform: 'none', fontSize: 12,
+                '&:hover': { bgcolor: '#c3c5d8', borderColor: '#c3c5d8' },
+              }}
+            >
+              Skip
+            </Button>
+          )}
+
           <Button
             variant="contained"
-            endIcon={<KeyboardArrowRightIcon />}
-            fullWidth
+            endIcon={!isPushed && <KeyboardArrowRightIcon />}
             disableElevation
             onClick={(e) => {
               e.stopPropagation();
-              if (onPushToClient && !isLoading) onPushToClient([item]);
+              if (onPushToClient && !isLoading && !isPushed) onPushToClient([item]);
             }}
-            disabled={isLoading}
+            disabled={isLoading || isPushed}
             sx={{
-              bgcolor: '#3c81f6',
+              bgcolor: isPushed ? '#94a3b8' : '#3c81f6',
               color: '#fff',
               fontWeight: 900,
               height: "40px",
@@ -226,10 +229,10 @@ function DetectionCard({ item, onClick, onPushToClient, copyingId, onSkip }) {
               borderRadius: 3,
               textTransform: 'none',
               fontSize: 12,
-              '&:hover': { bgcolor: '#1e40af' },
+              '&:hover': { bgcolor: isPushed ? '#94a3b8' : '#1e40af' },
             }}
           >
-            {isLoading ? 'Pushing...' : 'Push to client'}
+            {isLoading ? 'Pushing...' : (isPushed ? 'Pushed to client' : 'Push to client')}
           </Button>
         </Box>
       </Box>
@@ -331,8 +334,9 @@ const todayDate = formatDateDDMMYYYY(new Date());
 
 
 
-function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingToClient }) {
+function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingToClient, pushedUids }) {
   const item = data[selectedIndex];
+  const isPushed = item ? pushedUids.has(item.uid) : false;
   const itemRefs = useRef([]);
 
   const goNext = useCallback(() => onSelect(Math.min(data.length - 1, selectedIndex + 1)), [data.length, selectedIndex, onSelect]);
@@ -550,37 +554,38 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
 
                 <Box sx={{ mt: 2.5 }}>
                   <Box sx={{ display: 'flex', gap: 1.5 }}>
-                    <Button
-                      variant="outlined"
-                      // startIcon={<CloseIcon />}
-                      fullWidth
-                      disableElevation
-                      onClick={handleSkip}
-                      sx={{
-                        borderColor: '#c3c5d8', color: '#475569', fontWeight: 900,
-                        width: "100px",
-                        height: "40px",
-                        borderRadius: 2, textTransform: 'none', fontSize: 14,
-                        '&:hover': { bgcolor: '#c3c5d8', borderColor: '#c3c5d8' },
-                      }}
-                    >
-                      Skip
-                    </Button>
+                    {!isPushed && (
+                      <Button
+                        variant="outlined"
+                        fullWidth
+                        disableElevation
+                        onClick={handleSkip}
+                        sx={{
+                          borderColor: '#c3c5d8', color: '#475569', fontWeight: 900,
+                          width: "100px",
+                          height: "40px",
+                          borderRadius: 2, textTransform: 'none', fontSize: 14,
+                          '&:hover': { bgcolor: '#c3c5d8', borderColor: '#c3c5d8' },
+                        }}
+                      >
+                        Skip
+                      </Button>
+                    )}
                     <Button
                       variant="contained"
-                      endIcon={<KeyboardArrowRightIcon />}
-                      fullWidth
+                      endIcon={!isPushed && <KeyboardArrowRightIcon />}
                       disableElevation
                       onClick={handlePush}
-                      disabled={copyingToClient}
+                      disabled={copyingToClient || isPushed}
                       sx={{
-                        bgcolor: '#3c81f6', color: '#fff', fontWeight: 900,
+                        bgcolor: isPushed ? '#94a3b8' : '#3c81f6', color: '#fff', fontWeight: 900,
                         height: "40px",
+                        width: "180px",
                         borderRadius: 2, textTransform: 'none', fontSize: 14,
-                        '&:hover': { bgcolor: '#1e40af' },
+                        '&:hover': { bgcolor: isPushed ? '#94a3b8' : '#1e40af' },
                       }}
                     >
-                      {copyingToClient ? 'Pushing...' : 'Push to client'}
+                      {copyingToClient ? 'Pushing...' : (isPushed ? 'Pushed to client' : 'Push to client')}
                     </Button>
                   </Box>
                 </Box>
@@ -599,7 +604,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
 
 
 export default function Detections() {
-  const { setAllCounts, setUnfilteredCounts, typeFilter, setTypeFilter, setExportToExcel } = useDetectionCounts();
+  const { setAllCounts, setUnfilteredCounts, typeFilter, setTypeFilter, setExportToExcel, setDownloadConsolidatedReport } = useDetectionCounts();
 
   const [data, setData] = useState([]);
   const [counts, setCounts] = useState({});
@@ -609,6 +614,8 @@ export default function Detections() {
   const [rowsPerPage, setRowsPerPage] = useState(50);
   const [view, setView] = useState('grid');
   const [search, setSearch] = useState('');
+  const [exams, setExams] = useState([]);
+  const [examFilter, setExamFilter] = useState('');
   const [dateFilter, setDateFilter] = useState(todayDate);
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
@@ -616,6 +623,7 @@ export default function Detections() {
   const [appliedEndTime, setAppliedEndTime] = useState('');
   const [copyingToClient, setCopyingToClient] = useState(false);
   const [copyingId, setCopyingId] = useState(null);
+  const [pushedUids, setPushedUids] = useState(new Set());
   const [clientSnackbar, setClientSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [liveAlert, setLiveAlert] = useState(null);
   const [socketConnected, setSocketConnected] = useState(false);
@@ -633,10 +641,15 @@ export default function Detections() {
     ));
   };
 
+  const handleSkipLocally = useCallback((itemToRemove) => {
+    setData((prev) => prev.filter(i => (i.uid || i.id || i.image_url) !== (itemToRemove.uid || itemToRemove.id || itemToRemove.image_url)));
+  }, []);
+
   const fetchAllCounts = useCallback(async () => {
     try {
       const params = new URLSearchParams({ page: 1, limit: 1 });
       if (dateFilter) params.append('date', parseDateForQuery(dateFilter));
+      if (examFilter) params.append('exam_id', examFilter);
       const res = await axios.get(`${API_BASE_1}/detections?${params}`);
       if (res.data.success) {
         setUnfilteredCounts(res.data.counts || {});
@@ -653,6 +666,20 @@ export default function Detections() {
     fetchAllCounts();
   }, [fetchAllCounts]);
 
+  const loadExams = useCallback(async () => {
+    try {
+      const response = await examsAPI.getAll({ is_active: true });
+      const examList = Array.isArray(response?.data?.data) ? response.data.data : [];
+      setExams(examList);
+    } catch (err) {
+      console.error('Failed to load exams:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadExams();
+  }, [loadExams]);
+
   const fetchDetections = useCallback(async (pg = 1, rpp = rowsPerPage) => {
     setLoading(true);
     try {
@@ -660,6 +687,7 @@ export default function Detections() {
       if (typeFilter.length > 0) params.append('type', typeFilter.join(','));
       if (dateFilter) params.append('date', parseDateForQuery(dateFilter));
       if (search.trim()) params.append('search', search.trim());
+      if (examFilter) params.append('exam_id', examFilter);
       if (appliedStartTime) params.append('start_time', appliedStartTime);
       if (appliedEndTime) params.append('end_time', appliedEndTime);
 
@@ -675,12 +703,13 @@ export default function Detections() {
     } finally {
       setLoading(false);
     }
-  }, [typeFilter, dateFilter, search, appliedStartTime, appliedEndTime, rowsPerPage, setAllCounts]);
+  }, [typeFilter, dateFilter, search, examFilter, appliedStartTime, appliedEndTime, rowsPerPage, setAllCounts]);
 
   const matchesFilters = useCallback((item) => {
     if (typeFilter.length > 0 && !typeFilter.includes(item.type)) return false;
     const normalizedDateFilter = parseDateForQuery(dateFilter);
     if (dateFilter && item.date !== normalizedDateFilter) return false;
+    if (examFilter && String(item.exam_id) !== String(examFilter)) return false;
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       const haystack = [
@@ -759,7 +788,13 @@ export default function Detections() {
 
     try {
       await axios.post(`${API_BASE_1}/client-detections/copy`, {
-        items: items.map(({ source, type, relativePath }) => ({ source, type, relativePath })),
+        items: items.map(({ source, type, relativePath, uid }) => ({ source, type, relativePath, uid })),
+      });
+
+      setPushedUids((prev) => {
+        const next = new Set(prev);
+        items.forEach(itm => next.add(itm.uid || itm.id || itm.image_url));
+        return next;
       });
 
       setClientSnackbar({
@@ -780,93 +815,120 @@ export default function Detections() {
   };
   const totalAll = Object.values(counts).reduce((a, b) => a + b, 0);
 
- const exportToExcel = () => {
-  if (filteredData.length === 0) return;
+  const exportToExcel = () => {
+    if (filteredData.length === 0) return;
 
-  const TYPE_LABELS = {
-    proximity: 'Close Proximity', crowd: 'Crowd Detection', crowd_five: 'Crowd < 5',
-    crowd_zero: 'Zero Person', server: 'Server Room', intruder: 'Intruder',
-    entry_exit: 'Entry/Exit', phone: 'Phone', blind_spot: 'Blind Spot',
-    invigilator: 'Invigilator', inversion: 'Camera Inversion', tamper: 'Camera Tampering',
+    const TYPE_LABELS = {
+      proximity: 'Close Proximity', crowd: 'Crowd Detection', crowd_five: 'Crowd < 5',
+      crowd_zero: 'Zero Person', server: 'Server Room', intruder: 'Intruder',
+      entry_exit: 'Entry/Exit', phone: 'Phone', blind_spot: 'Blind Spot',
+      invigilator: 'Invigilator', inversion: 'Camera Inversion', tamper: 'Camera Tampering',
+    };
+
+    // Build rows
+    const rows = filteredData.map((item) => {
+      // Convert date: "2026-04-08" → "08-04-2026"
+      const rawDate = item.date || '';
+      const formattedDate = rawDate.match(/^\d{4}-\d{2}-\d{2}$/)
+        ? rawDate.split('-').reverse().join('-')
+        : rawDate;
+
+      // Extract time: "08 Apr 2026, 05:58:53 PM" → "17:58:53"
+      const timeStr = (() => {
+        const m = /,\s*(\d{1,2}):(\d{2}):(\d{2})\s*(AM|PM)/i.exec(item.detected_at || '');
+        if (!m) return item.detected_at || '-';
+        let h = parseInt(m[1], 10);
+        const min = m[2], sec = m[3], ampm = m[4].toUpperCase();
+        if (ampm === 'PM' && h !== 12) h += 12;
+        if (ampm === 'AM' && h === 12) h = 0;
+        return `${String(h).padStart(2, '0')}:${min}:${sec}`;
+      })();
+
+      // Image URL: use the correct base path
+      // const IMAGE_BASE = 'http://172.31.102.8/cctv/images/results/new_tcs_results/';
+      // const imageUrl = item.image_url ? `${IMAGE_BASE}${item.image_url}` : '';
+      const IMAGE_BASE = `${API_BASE_1}`;
+      const imageUrl = item.image_url
+        ? `${IMAGE_BASE}${item.image_url}`
+        : '';
+
+      return {
+        'Detection Type': TYPE_LABELS[item.type] || item.type,
+        'Center Name': item.centerName || item.centre_name || '-',
+        'Camera Name': item.cameraName || item.camera_name || item.camera_id || '-',
+        'Location': item.location || '-',
+        'Device ID': item.deviceId || item.device_id || '-',
+        'Camera No': item.cameraNo || item.camera_no || '-',
+        'Date': formattedDate || '-',
+        'Time': timeStr,
+        'Timestamp': item.detected_at || '-',
+        'Persons Count': item.count ?? '',
+        'Confidence': item.confidence != null ? `${(item.confidence * 100).toFixed(1)}%` : '',
+        'City': item.city || '-',
+        'Download Image': imageUrl,
+      };
+    });
+
+    const ws = XLSX.utils.json_to_sheet(rows);
+
+    // Column widths
+    ws['!cols'] = [
+      { wch: 18 }, { wch: 40 }, { wch: 25 }, { wch: 20 }, { wch: 15 },
+      { wch: 12 }, { wch: 14 }, { wch: 22 }, { wch: 28 }, { wch: 14 },
+      { wch: 12 }, { wch: 20 }, { wch: 80 },
+    ];
+
+    // Add hyperlinks to the "Download Image" column (column M, index 12)
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    for (let R = range.s.r + 1; R <= range.e.r; R++) {
+      const cellAddr = XLSX.utils.encode_cell({ r: R, c: 12 }); // column M
+      const url = rows[R - 1]['Download Image'];
+      if (url) {
+        ws[cellAddr] = {
+          v: 'Click to Download',
+          t: 's',
+          l: { Target: url, Tooltip: 'Click to open image' },
+        };
+      }
+    }
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Detections');
+
+    const dateStr = dateFilter || formatDateDDMMYYYY(new Date());
+    XLSX.writeFile(wb, `cctv_detections_${dateStr}.xlsx`);
   };
 
-  // Build rows
-  const rows = filteredData.map((item) => {
-    // Convert date: "2026-04-08" → "08-04-2026"
-    const rawDate = item.date || '';
-    const formattedDate = rawDate.match(/^\d{4}-\d{2}-\d{2}$/)
-      ? rawDate.split('-').reverse().join('-')
-      : rawDate;
+  const handleDownloadReport = useCallback(async () => {
+    try {
+      const params = {};
+      if (typeFilter.length > 0) params.type = typeFilter.join(',');
+      if (dateFilter) params.date = parseDateForQuery(dateFilter);
+      if (search.trim()) params.search = search.trim();
+      if (examFilter) params.exam_id = examFilter;
+      if (appliedStartTime) params.start_time = appliedStartTime;
+      if (appliedEndTime) params.end_time = appliedEndTime;
 
-    // Extract time: "08 Apr 2026, 05:58:53 PM" → "17:58:53"
-    const timeStr = (() => {
-      const m = /,\s*(\d{1,2}):(\d{2}):(\d{2})\s*(AM|PM)/i.exec(item.detected_at || '');
-      if (!m) return item.detected_at || '-';
-      let h = parseInt(m[1], 10);
-      const min = m[2], sec = m[3], ampm = m[4].toUpperCase();
-      if (ampm === 'PM' && h !== 12) h += 12;
-      if (ampm === 'AM' && h === 12) h = 0;
-      return `${String(h).padStart(2, '0')}:${min}:${sec}`;
-    })();
-
-    // Image URL: use the correct base path
-    // const IMAGE_BASE = 'http://172.31.102.8/cctv/images/results/new_tcs_results/';
-    // const imageUrl = item.image_url ? `${IMAGE_BASE}${item.image_url}` : '';
-    const IMAGE_BASE = `${API_BASE_1}`;
-    const imageUrl = item.image_url
-  ? `${IMAGE_BASE}${item.image_url}`
-  : '';
-
-    return {
-      'Detection Type': TYPE_LABELS[item.type] || item.type,
-      'Center Name': item.centerName || item.centre_name || '-',
-      'Camera Name': item.cameraName || item.camera_name || item.camera_id || '-',
-      'Location': item.location || '-',
-      'Device ID': item.deviceId || item.device_id || '-',
-      'Camera No': item.cameraNo || item.camera_no || '-',
-      'Date': formattedDate || '-',
-      'Time': timeStr,
-      'Timestamp': item.detected_at || '-',
-      'Persons Count': item.count ?? '',
-      'Confidence': item.confidence != null ? `${(item.confidence * 100).toFixed(1)}%` : '',
-      'City': item.city || '-',
-      'Download Image': imageUrl,
-    };
-  });
-
-  const ws = XLSX.utils.json_to_sheet(rows);
-
-  // Column widths
-  ws['!cols'] = [
-    { wch: 18 }, { wch: 40 }, { wch: 25 }, { wch: 20 }, { wch: 15 },
-    { wch: 12 }, { wch: 14 }, { wch: 22 }, { wch: 28 }, { wch: 14 },
-    { wch: 12 }, { wch: 20 }, { wch: 80 },
-  ];
-
-  // Add hyperlinks to the "Download Image" column (column M, index 12)
-  const range = XLSX.utils.decode_range(ws['!ref']);
-  for (let R = range.s.r + 1; R <= range.e.r; R++) {
-    const cellAddr = XLSX.utils.encode_cell({ r: R, c: 12 }); // column M
-    const url = rows[R - 1]['Download Image'];
-    if (url) {
-      ws[cellAddr] = {
-        v: 'Click to Download',
-        t: 's',
-        l: { Target: url, Tooltip: 'Click to open image' },
-      };
+      const response = await reportAPI.downloadReport(params);
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      const downloadDate = dateFilter ? parseDateForQuery(dateFilter) : formatDateDDMMYYYY(new Date());
+      link.setAttribute('download', `detection_report_${downloadDate}.xlsx`);
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode.removeChild(link);
+    } catch (error) {
+      console.error('Download report failed:', error);
+      alert('Failed to download report.');
     }
-  }
+  }, [typeFilter, dateFilter, search, appliedStartTime, appliedEndTime]);
 
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Detections');
-
-  const dateStr = dateFilter || formatDateDDMMYYYY(new Date());
-  XLSX.writeFile(wb, `cctv_detections_${dateStr}.xlsx`);
- };
-  
   useEffect(() => {
     setExportToExcel(() => exportToExcel);
-  }, [exportToExcel]);
+    setDownloadConsolidatedReport(() => handleDownloadReport);
+  }, [exportToExcel, handleDownloadReport, setExportToExcel, setDownloadConsolidatedReport]);
+
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: '#f8fafc' }}>
@@ -900,6 +962,27 @@ export default function Detections() {
           }}
           sx={{ minWidth: 260, maxWidth: 600, flex: 1 }}
         />
+        <FormControl size="small" sx={{ minWidth: 150 }}>
+          <InputLabel sx={{ fontSize: 14 }}>Exam</InputLabel>
+          <Select
+            value={examFilter}
+            label="Exam"
+            onChange={(e) => setExamFilter(e.target.value)}
+            sx={{
+              borderRadius: '8px', bgcolor: '#f8fafc', height: 36, fontSize: 14,
+              '& fieldset': { border: 'none' },
+            }}
+          >
+            <MenuItem value="">
+              <em>All Exams</em>
+            </MenuItem>
+            {exams.map((exam) => (
+              <MenuItem key={exam.id} value={exam.id}>
+                {exam.exam_name}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
         <Box sx={{ position: 'relative', minWidth: 150, maxWidth: 100 }}>
           <TextField
             type="date"
@@ -1148,7 +1231,7 @@ export default function Detections() {
                 onClick={setSelected}
                 onPushToClient={pushToClient}
                 copyingId={copyingId}
-                onSkip={() => console.log('Skip from grid view - unsupported auto-advance')}
+                onSkip={handleSkipLocally}
               />
             </Grid>
           ))}
@@ -1160,6 +1243,7 @@ export default function Detections() {
           onSelect={setListSelectedIndex}
           onPushToClient={pushToClient}
           copyingToClient={copyingToClient}
+          pushedUids={pushedUids}
         />
       )}
 

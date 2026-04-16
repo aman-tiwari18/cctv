@@ -1547,6 +1547,7 @@ import os
 import sys
 import time
 import cv2
+import uuid
 import logging
 import threading
 import signal
@@ -1734,7 +1735,9 @@ class SimplifiedTracker(Tracker):
             ch_code = self.cam_name.split('_')[-1] if '_' in self.cam_name else self.cam_name
 
         if source_type == "HLS":
-            fname = f"invigilator_{prefix}_ch{ch_code}_{ts}{sfx}.jpg"
+            _uid = str(uuid.uuid4())
+            _exam_id = str(os.environ.get("EXAM_ID", "0")).strip()
+            fname = f"invigilator_{prefix}_ch{ch_code}_exam{_exam_id}_{ts}_{_uid}{sfx}.jpg"
         else:
             fname = f"invigilator_{self.cam_name}_{ts}{sfx}.jpg"
 

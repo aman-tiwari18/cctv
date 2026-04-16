@@ -7,15 +7,18 @@ const DetectionCountsContext = createContext({
   setUnfilteredCounts: () => { },
   typeFilter: [],
   setTypeFilter: () => { },
-  exportToExcel: () => {},           // ← add this
-  setExportToExcel: () => {},
+  exportToExcel: () => { },
+  setExportToExcel: () => { },
+  downloadConsolidatedReport: () => { },
+  setDownloadConsolidatedReport: () => { },
 });
 
 export const DetectionCountsProvider = ({ children }) => {
   const [allCounts, setAllCounts] = useState({});
   const [unfilteredCounts, setUnfilteredCounts] = useState({});
   const [typeFilter, setTypeFilter] = useState([]);
-  const [exportToExcel, setExportToExcel] = useState(() => () => {});
+  const [exportToExcel, setExportToExcel] = useState(() => () => { });
+  const [downloadConsolidatedReport, setDownloadConsolidatedReport] = useState(() => () => { });
 
   return (
     <DetectionCountsContext.Provider value={{
@@ -27,6 +30,8 @@ export const DetectionCountsProvider = ({ children }) => {
       setTypeFilter,
       exportToExcel,
       setExportToExcel,
+      downloadConsolidatedReport,
+      setDownloadConsolidatedReport,
     }}>
       {children}
     </DetectionCountsContext.Provider>

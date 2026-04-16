@@ -216,16 +216,39 @@ const ShiftScriptManager = ({
         }
     }, [assignments]);
 
-    /* Reset card times + selection when dialog opens */
-    useEffect(() => {
-        if (isDialogOpen) { setCardTimes({}); setSelectedCards(new Set()); setError(''); }
-    }, [isDialogOpen]);
-
     const activeAssignments = assignments.filter((a) => a.is_active);
     const availableDates = [...new Set(activeAssignments.map((a) => a.assignment_date).filter(Boolean))].sort();
     const visibleAssignments = selectedDate
         ? activeAssignments.filter((a) => a.assignment_date === selectedDate)
         : activeAssignments;
+
+    /* Pre-fill card times + selection when dialog opens or date changes */
+    useEffect(() => {
+        if (!isDialogOpen) {
+            setCardTimes({});
+            setSelectedCards(new Set());
+            setError('');
+            return;
+        }
+
+        const newCardTimes = {};
+        const newSelectedCards = new Set();
+
+        visibleAssignments.forEach((a) => {
+            if (a.script_id) {
+                newSelectedCards.add(a.script_id);
+                newCardTimes[a.script_id] = {
+                    start: a.custom_start_time ? a.custom_start_time.substring(0, 5) : '',
+                    end: a.custom_end_time ? a.custom_end_time.substring(0, 5) : ''
+                };
+            }
+        });
+
+        setCardTimes(newCardTimes);
+        setSelectedCards(newSelectedCards);
+        setError('');
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isDialogOpen, assignments, selectedDate]);
 
     const formatDate = (v) => {
         if (!v) return 'No date';

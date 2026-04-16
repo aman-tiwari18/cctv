@@ -10,8 +10,9 @@ import {
 import {
   Add, Edit, Delete, Upload, CloudUpload, Download,
   TableChart, ChevronRight,
-  Videocam as VideocamIcon,
+  Videocam as VideocamIcon
 } from '@mui/icons-material';
+import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
@@ -232,7 +233,7 @@ const Cameras = () => {
           <Box sx={{ px: sidebarOpen ? 2.5 : 1, pt: 2.5, pb: 1.5, display: 'flex', alignItems: 'center', justifyContent: sidebarOpen ? 'space-between' : 'center' }}>
             {sidebarOpen && (
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <VideocamIcon sx={{ fontSize: 17, color: '#64748b' }} />
+                <CameraAltIcon sx={{ fontSize: 17, color: '#64748b' }} />
                 <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#334155' }}>
                   {viewingArchived ? 'Archived Exams' : 'Available Exams'}
                 </Typography>
@@ -321,7 +322,7 @@ const Cameras = () => {
             /* Empty state */
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 'calc(100vh - 200px)', textAlign: 'center', px: 4 }}>
               <Box sx={{ width: 96, height: 96, borderRadius: '50%', bgcolor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 3 }}>
-                <VideocamIcon sx={{ fontSize: 40, color: '#3b82f6' }} />
+                <CameraAltIcon sx={{ fontSize: 40, color: '#3b82f6' }} />
               </Box>
               <Typography variant="h5" sx={{ fontWeight: 700, color: '#1e293b', mb: 1.5 }}>Select an exam to view cameras</Typography>
               <Typography sx={{ fontSize: '0.92rem', color: '#64748b', maxWidth: 420, lineHeight: 1.6 }}>

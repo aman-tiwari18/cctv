@@ -638,6 +638,7 @@ import os
 import logging
 import threading
 import signal
+import uuid
 from datetime import datetime
 
 # ================= PATH SETUP =================
@@ -860,7 +861,9 @@ def _hls_gpu_worker(stop_event, save_folder, cooldown_time=480):
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             
             if item.get("source_type") == "HLS":
-                filename = os.path.join(save_folder, f"{script_name}_ch{ch_no}_{timestamp}.jpg")
+                _uid = str(uuid.uuid4())
+                _exam_id = str(os.environ.get("EXAM_ID", "0")).strip()
+                filename = os.path.join(save_folder, f"{script_name}_ch{ch_no}_exam{_exam_id}_{timestamp}_{_uid}.jpg")
             else:
                 device_id = item.get("device_id") or camera_id
                 filename = os.path.join(save_folder, f"{script_name}_{device_id}_{ch_no}_{timestamp}.jpg")

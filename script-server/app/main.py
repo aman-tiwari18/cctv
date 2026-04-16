@@ -21,7 +21,7 @@ from app.config import HTTP_PORT, MAIN_BACKEND_URL, POLL_INTERVAL_MS, SCRIPTS_DI
 from app.logger import logger
 from app.log_manager import log_manager
 from app.poller import poller_service
-from scripts.detection.utils.db_client import get_hls_camera_by_ch_code, get_rtsp_camera_by_id, get_hls_cameras, get_rtsp_cameras, get_rtsp_camera_by_device_and_ch
+from scripts.detection.utils.db_client import get_hls_camera_by_ch_code, get_rtsp_camera_by_id, get_hls_cameras, get_rtsp_cameras, get_rtsp_camera_by_device_and_ch, _get_connection
 
 # Import legacy pipeline functionality from the old backend
 from scripts.detection.backend.schemas import (
@@ -462,6 +462,19 @@ def parse_detection_filename(
     camera_id = ""
     suffix = ""
     rtsp_pk = 0
+    exam_id = None
+    uid = None
+
+    # Extract exam_id if present
+    exam_match = re.search(r'_exam(\d+)_', stem, flags=re.IGNORECASE)
+    if not exam_match:
+        # Check without trailing underscore just in case ts follows directly 
+        exam_match = re.search(r'_exam(\d+)', stem, flags=re.IGNORECASE)
+    if exam_match:
+        exam_id = int(exam_match.group(1))
+
+    # The uid is typically the the last segment of the stem
+    uid = stem.split("_")[-1]
 
     # ── Try RTSP naming pattern: {prefix}_{pk}_{camNo}_{date}_{time}... ──
     # Now agnostic to the source directory to handle complex samarth-style paths
@@ -593,6 +606,8 @@ def parse_detection_filename(
         "confidence":  confidence,
         "count":       count,
         "image_url":   image_url,
+        "exam_id":     exam_id,
+        "uid":         uid,
     }
 
 
@@ -605,6 +620,7 @@ def list_detections(
     source: Optional[str] = None,
     start_time: Optional[str] = None,
     end_time: Optional[str] = None,
+    exam_id: Optional[str] = None,
     page: int = 1,
     limit: int = 50,
 ):
@@ -624,6 +640,9 @@ def list_detections(
                 )
 
                 if date and not item["date"].startswith(date):
+                    continue
+                
+                if exam_id and str(item.get("exam_id")) != str(exam_id):
                     continue
 
                 if start_time or end_time:
@@ -710,6 +729,7 @@ class ClientDetectionCopyItem(BaseModel):
     source: str
     type: str
     relativePath: str
+    uid: Optional[str] = None
 
 
 class ClientDetectionCopyRequest(BaseModel):
@@ -721,38 +741,64 @@ async def copy_client_detections(payload: ClientDetectionCopyRequest):
     copied = []
     failed = []
 
-    for item in payload.items:
-        try:
-            src_path = _resolve_detection_source_path(item.source, item.type, item.relativePath)
-        except HTTPException as e:
-            logger.warning(f"Skipping copy for {item.relativePath}: {e.detail}")
-            failed.append({"relativePath": item.relativePath, "error": e.detail})
-            continue
+    conn = _get_connection()
+    try:
+        with conn.cursor() as cur:
+            for item in payload.items:
+                if not item.uid:
+                    failed.append({"relativePath": item.relativePath, "error": "No uid provided"})
+                    continue
+                
+                # Update the DB
+                sql = "UPDATE camera_report_hls SET pushed_to_client = 1 WHERE unique_id = %s"
+                cur.execute(sql, (item.uid,))
+                
+                if cur.rowcount == 0:
+                    failed.append({"uid": item.uid, "error": f"uid {item.uid} not found"})
+                    continue
+                
+                # Fetch row to reconstruct the socket payload
+                cur.execute("SELECT * FROM camera_report_hls WHERE unique_id = %s LIMIT 1", (item.uid,))
+                row = cur.fetchone()
+                
+                if row:
+                    imageurl_full = str(row.get("imageurl", ""))
+                    filename = imageurl_full.split("/")[-1] if "/" in imageurl_full else imageurl_full
+                    
+                    copied_item = parse_detection_filename(
+                        filename,
+                        item.type,
+                        file_path=None,
+                        is_new_image=False,
+                        source=item.source,
+                    )
+                    
+                    copied_item.update({
+                        "source": item.source,
+                        "type": item.type,
+                        "relativePath": item.relativePath,
+                        "id": row.get("id"),
+                        "cameraName": row.get("camera_name"),
+                        "centerName": row.get("center_name"),
+                        "city": row.get("city"),
+                        "state": row.get("state"),
+                        "tcCode": row.get("tc_code"),
+                        "category": row.get("camera_category"),
+                        "uid": row.get("unique_id"),
+                    })
+                    copied.append(copied_item)
 
-        dest_path = CLIENT_SELECTED_DIR / item.source / DETECTION_FOLDERS[item.type] / item.relativePath
-        dest_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src_path, dest_path)
-
-        copied_item = parse_detection_filename(
-            item.relativePath,
-            item.type,
-            dest_path,
-            is_new_image=False,
-            source=item.source,
-        )
-        copied_item.update({
-            "source": item.source,
-            "type": item.type,
-            "relativePath": item.relativePath,
-            "image_url": f"/serve-client-detection-images/{item.source}/{DETECTION_FOLDERS[item.type]}/{item.relativePath}",
-        })
-        copied.append(copied_item)
-
-        try:
-            await sio.emit("client-detection:new", copied_item)
-            logger.info(f"Emitted client-detection:new for {item.relativePath}")
-        except Exception as e:
-            logger.warning(f"Failed to emit client detection socket event: {e}")
+                    try:
+                        await sio.emit("client-detection:new", copied_item)
+                        logger.info(f"Emitted client-detection:new for {item.uid}")
+                    except Exception as e:
+                        logger.warning(f"Failed to emit client detection socket event: {e}")
+        conn.commit()
+    except Exception as e:
+        logger.error(f"DB Error in /client-detections/copy: {e}")
+        return {"success": False, "error": str(e)}
+    finally:
+        conn.close()
 
     return {"success": True, "copied": copied, "failed": failed}
 
@@ -769,72 +815,78 @@ def list_client_detections(
     search: Optional[str] = None,
 ):
     rows = []
-
-    for root, _, files in os.walk(CLIENT_SELECTED_DIR):
-        for filename in files:
-            if not filename.lower().endswith((".jpg", ".jpeg", ".png", ".bmp", ".webp")):
-                continue
-
-            file_path = Path(root) / filename
-            rel = file_path.relative_to(CLIENT_SELECTED_DIR).as_posix()
-            parts = rel.split("/")
-            if len(parts) < 3:
-                continue
-
-            source_part = parts[0]
-            folder_name = parts[1]
-            relative_path = "/".join(parts[2:])
-            type_key = next((k for k, v in DETECTION_FOLDERS.items() if v == folder_name), folder_name)
-
-            if source and source != source_part:
-                continue
-            if type and type != type_key:
-                continue
-
-            item = parse_detection_filename(
-                relative_path,
-                type_key,
-                file_path,
-                is_new_image=False,
-                source=source_part,
-            )
-            item.update({
-                "source": source_part,
-                "type": type_key,
-                "filename": filename,
-                "relativePath": relative_path,
-                "image_url": f"/serve-client-detection-images/{rel}",
-                "_mtime": file_path.stat().st_mtime,
-            })
-
-            if date and not item["date"].startswith(date):
-                continue
+    
+    conn = _get_connection()
+    try:
+        with conn.cursor() as cur:
+            query = "SELECT * FROM camera_report_hls WHERE pushed_to_client = 1 AND remove_from_client = 0 ORDER BY created_at DESC"
+            cur.execute(query)
+            db_rows = cur.fetchall()
             
-            if start_time or end_time:
-                time_str = item.get("time")
-                if time_str and len(time_str) >= 4:
-                    h_m = f"{time_str[:2]}:{time_str[2:4]}"
-                    if start_time and h_m < start_time:
-                        continue
-                    if end_time and h_m > end_time:
-                        continue
-                        
-            if search:
-                q = search.lower()
-                haystack = " ".join([
-                    str(item.get("filename") or ""),
-                    str(item.get("cameraName") or ""),
-                    str(item.get("centerName") or ""),
-                    str(item.get("city") or ""),
-                    str(item.get("state") or ""),
-                    str(item.get("tcCode") or ""),
-                ]).lower()
-                if q not in haystack:
+            for row in db_rows:
+                imageurl_full = str(row.get("imageurl", ""))
+                filename = imageurl_full.split("/")[-1] if "/" in imageurl_full else imageurl_full
+                folder_name = row.get("detection_type", "")
+                
+                type_key = next((k for k, v in DETECTION_FOLDERS.items() if v == folder_name), folder_name)
+                source_part = "rtsp" if "rtsp" in imageurl_full else "hls"
+                
+                if source and source != source_part:
+                    continue
+                if type and type != type_key:
                     continue
 
-            rows.append(item)
+                item = parse_detection_filename(
+                    filename,
+                    type_key,
+                    file_path=None,
+                    is_new_image=False,
+                    source=source_part,
+                )
+                
+                item.update({
+                    "source": source_part,
+                    "type": type_key,
+                    "filename": filename,
+                    "relativePath": f"{filename}",
+                    "cameraName": row.get("camera_name"),
+                    "centerName": row.get("center_name"),
+                    "city": row.get("city"),
+                    "state": row.get("state"),
+                    "tcCode": row.get("tc_code"),
+                    "category": row.get("camera_category"),
+                    "uid": row.get("unique_id"),
+                    "_mtime": row.get("created_at").timestamp() if hasattr(row.get("created_at"), "timestamp") else 0,
+                })
 
-    rows.sort(key=lambda item: item.get("_mtime", 0), reverse=True)
+                if date and not item["date"].startswith(date):
+                    continue
+                
+                if start_time or end_time:
+                    time_str = item.get("time")
+                    if time_str and len(time_str) >= 4:
+                        h_m = f"{time_str[:2]}:{time_str[2:4]}"
+                        if start_time and h_m < start_time:
+                            continue
+                        if end_time and h_m > end_time:
+                            continue
+                            
+                if search:
+                    q = search.lower()
+                    haystack = " ".join([
+                        str(item.get("filename") or ""),
+                        str(item.get("cameraName") or ""),
+                        str(item.get("centerName") or ""),
+                        str(item.get("city") or ""),
+                        str(item.get("state") or ""),
+                        str(item.get("tcCode") or ""),
+                    ]).lower()
+                    if q not in haystack:
+                        continue
+
+                rows.append(item)
+    finally:
+        conn.close()
 
     total = len(rows)
     start = (page - 1) * limit
@@ -852,6 +904,27 @@ def list_client_detections(
         "counts": counts,
         "data": paginated,
     }
+
+class ClientDetectionRemoveRequest(BaseModel):
+    uid: str
+
+@app.post("/client-detections/remove")
+async def remove_client_detection(payload: ClientDetectionRemoveRequest):
+    conn = _get_connection()
+    try:
+        with conn.cursor() as cur:
+            sql = "UPDATE camera_report_hls SET remove_from_client = 1 WHERE unique_id = %s"
+            cur.execute(sql, (payload.uid,))
+        conn.commit()
+        
+        await sio.emit("client-detection:remove", {"uid": payload.uid, "success": True})
+        
+        return {"success": True, "message": "Removed successfully"}
+    except Exception as e:
+        logger.error(f"DB Error in /client-detections/remove: {e}")
+        return {"success": False, "error": str(e)}
+    finally:
+        conn.close()
 
 
 @sio.event

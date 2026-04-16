@@ -86,7 +86,7 @@ const TYPE_ICONS = {
   default: CameraAlt,
 };
 
-function DetectionCard({ item, onClick }) {
+function DetectionCard({ item, onClick, onRemove, isRemoving, removed }) {
   const meta = TYPE_META[item.type] || { label: item.type, color: '#94a3b8', bg: '#f1f5f9' };
   const [imgError, setImgError] = useState(false);
   const cameraName = item.cameraName || item.camera_name || item.camera_id || '-';
@@ -214,6 +214,33 @@ function DetectionCard({ item, onClick }) {
           </Typography>
         )}
       </CardContent>
+
+      <Box sx={{ mx: 2, mb: 4, mt: 1 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'end', gap: 1.5 }}>
+          <Button
+            variant="contained"
+            disableElevation
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onRemove && !isRemoving && !removed) onRemove(item);
+            }}
+            disabled={isRemoving || removed}
+            sx={{
+              bgcolor: removed ? '#94a3b8' : '#ef4444',
+              color: '#fff',
+              fontWeight: 900,
+              height: "40px",
+              width: "120px",
+              borderRadius: 3,
+              textTransform: 'none',
+              fontSize: 12,
+              '&:hover': { bgcolor: removed ? '#94a3b8' : '#dc2626' },
+            }}
+          >
+            {isRemoving ? 'Removing...' : (removed ? 'Removed' : 'Remove')}
+          </Button>
+        </Box>
+      </Box>
     </Card>
   );
 }
@@ -518,9 +545,11 @@ const buildImageKey = (item) => `${item.source}|${item.type}|${item.relativePath
 //   );
 // }
 
-function ListViewPanel({ data, selectedIndex, onSelect }) {
+function ListViewPanel({ data, selectedIndex, onSelect, onRemove, removingId, removedUids }) {
   const item = data[selectedIndex];
   const itemRefs = useRef([]); // ✅ ref array for each list item
+  const removed = item ? removedUids.has(item.uid) : false;
+  const isRemoving = item ? removingId === item.uid : false;
 
   useEffect(() => {
     const handler = (e) => {
@@ -730,6 +759,28 @@ function ListViewPanel({ data, selectedIndex, onSelect }) {
                     </Typography>
                   )}
                 </CardContent>
+
+                <Box sx={{ mt: 2.5 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1.5 }}>
+                    <Button
+                      variant="contained"
+                      disableElevation
+                      onClick={() => {
+                        if (onRemove && !isRemoving && !removed) onRemove(item);
+                      }}
+                      disabled={isRemoving || removed}
+                      sx={{
+                        bgcolor: removed ? '#94a3b8' : '#ef4444', color: '#fff', fontWeight: 900,
+                        height: "40px",
+                        width: "160px",
+                        borderRadius: 2, textTransform: 'none', fontSize: 14,
+                        '&:hover': { bgcolor: removed ? '#94a3b8' : '#dc2626' },
+                      }}
+                    >
+                      {isRemoving ? 'Removing...' : (removed ? 'Removed' : 'Remove')}
+                    </Button>
+                  </Box>
+                </Box>
               </Box>
             </Box>
           </>
@@ -765,6 +816,8 @@ const ClientDetections = () => {
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [listSelectedIndex, setListSelectedIndex] = useState(0);
   const [selected, setSelected] = useState(null);
+  const [removedUids, setRemovedUids] = useState(new Set());
+  const [removingId, setRemovingId] = useState(null);
 
   // Fetch unfiltered counts once for sidebar
   const fetchAllCounts = useCallback(async () => {
@@ -851,6 +904,16 @@ const ClientDetections = () => {
       setAllCounts((prev) => ({ ...prev, [item.type]: (prev[item.type] || 0) + 1 }));
     });
 
+    socket.on('client-detection:remove', (payload) => {
+      if (payload && payload.uid) {
+        setRemovedUids((prev) => {
+          const next = new Set(prev);
+          next.add(payload.uid);
+          return next;
+        });
+      }
+    });
+
     return () => socket.disconnect();
   }, [setAllCounts]);
 
@@ -884,6 +947,37 @@ const ClientDetections = () => {
   }, [search, typeFilter, sourceFilter, dateFilter, appliedStartTime, appliedEndTime]);
 
   const filteredImages = useMemo(() => images.filter(matchesFilters), [images, matchesFilters]);
+
+  const handleRemove = async (item) => {
+    if (!item || !item.uid) return;
+    setRemovingId(item.uid);
+    try {
+      await axios.post(`${API_BASE_1}/client-detections/remove`, {
+        uid: item.uid,
+      });
+
+      setRemovedUids((prev) => {
+        const next = new Set(prev);
+        next.add(item.uid);
+        return next;
+      });
+
+      setSnackbar({
+        open: true,
+        message: 'Image removed from client detections',
+        severity: 'success'
+      });
+    } catch (err) {
+      console.error(err);
+      setSnackbar({
+        open: true,
+        message: 'Failed to remove image',
+        severity: 'error'
+      });
+    } finally {
+      setRemovingId(null);
+    }
+  };
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: '#f8fafc' }}>
@@ -1161,6 +1255,9 @@ const ClientDetections = () => {
               <DetectionCard
                 item={item}
                 onClick={setSelected}
+                onRemove={handleRemove}
+                isRemoving={removingId === item.uid}
+                removed={removedUids.has(item.uid)}
               />
             </Grid>
           ))}
@@ -1170,6 +1267,9 @@ const ClientDetections = () => {
           data={filteredImages}
           selectedIndex={listSelectedIndex}
           onSelect={setListSelectedIndex}
+          onRemove={handleRemove}
+          removingId={removingId}
+          removedUids={removedUids}
         />
       )}
 

@@ -4547,6 +4547,7 @@ import logging
 import threading
 import signal
 import queue
+import uuid
 from datetime import datetime
 
 import cv2
@@ -4672,8 +4673,10 @@ def detect_intruder(frame, device_id: str, camera_no: str, save_folder: str, cam
             
             # ── Source-Aware Naming Format ──────────────
             if source_type == "HLS":
-                # intruder_ch[ch_no]_[timestamp].jpg
-                fname = f"intruder_ch{camera_no}_{ts}.jpg"
+                # intruder_ch[ch_no]_exam[exam_id]_[timestamp]_[uuid].jpg
+                _uid = str(uuid.uuid4())
+                _exam_id = str(os.environ.get("EXAM_ID", "0")).strip()
+                fname = f"intruder_ch{camera_no}_exam{_exam_id}_{ts}_{_uid}.jpg"
             else:
                 # RTSP: intruder_[device_id]_[camera_no]_[timestamp].jpg
                 dev_id = camera_id_pk or device_id
@@ -4692,7 +4695,7 @@ def detect_intruder(frame, device_id: str, camera_no: str, save_folder: str, cam
             # --- Report to DB (HLS only) ---
             if source_type == "HLS":
                 try:
-                    intruder_core.report_to_db_hls(
+                    report_to_db_hls(
                         ch_code=str(camera_no), 
                         image_name=os.path.basename(path),
                         folder="intruder_detection"

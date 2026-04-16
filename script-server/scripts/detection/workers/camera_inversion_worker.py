@@ -923,6 +923,7 @@ import os
 import sys
 import time
 import cv2
+import uuid
 import logging
 import threading
 import signal
@@ -1107,12 +1108,14 @@ def _hls_gpu_batch_worker(stop_event, save_folder):
                     
                     # ── Source-Aware Naming Format ──────────────
                     if item.get("source_type") == "HLS":
-                        # Inversion_ch[ch_no]_[timestamp].jpg
-                        filename = os.path.join(save_folder, f"Inversion_ch{ch_no}_{ts}.jpg")
+                        # Inversion_ch[ch_no]_exam[exam_id]_[timestamp]_[uuid].jpg
+                        _uid = str(uuid.uuid4())
+                        _exam_id = str(os.environ.get("EXAM_ID", "0")).strip()
+                        filename = os.path.join(save_folder, f"inversion_ch{ch_no}_exam{_exam_id}_{ts}_{_uid}.jpg")
                     else:
                         # RTSP: Inversion_[device_id]_[camera_no]_[timestamp].jpg
                         dev_id = item.get("device_id") or cam_id
-                        filename = os.path.join(save_folder, f"Inversion_{dev_id}_{ch_no}_{ts}.jpg")
+                        filename = os.path.join(save_folder, f"inversion_{dev_id}_{ch_no}_{ts}.jpg")
                     
                     cv2.imwrite(filename, corrected)
                     logger.warning(f"[INVERSION] 🔄 {cam_id} ({orientation}) saved to {filename}")
