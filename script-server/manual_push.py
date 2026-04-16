@@ -74,7 +74,7 @@ from db_client import report_to_db_hls  # noqa: E402
 # ================= CONFIGURATION =================
 # 1. Full path to your pre-formatted image file on this machine
 #    Expected format: phone_detection_ch{ch_no}_exam{exam_id}_{timestamp}_{uuid}.jpg
-SOURCE_IMAGE_PATH = "/data/cctv_dev/cctv/phone_detection_ch85721_exam9_20260416_111001_f7a3c2d1-8b4e-4f9a-a1c5-3d7e6b2f0e90.jpg"
+SOURCE_IMAGE_PATH = "/data/cctv_dev/cctv/phone_detection_ch85721_exam9_20260416_112010_f7a3c2d1-8b4e-4f9a-a1c5-3d7e6b2f0e96.jpg"
 
 # 2. Detection type folder — used in DB image URL and detection_type column
 DETECTION_FOLDER = "phone_detection"

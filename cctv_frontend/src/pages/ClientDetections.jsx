@@ -86,6 +86,42 @@ const TYPE_ICONS = {
   default: CameraAlt,
 };
 
+const NewBadge = ({ addedAt, sx }) => {
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    if (!addedAt) return;
+    const diff = Date.now() - addedAt;
+    if (diff < 5000) {
+      setVisible(true);
+      const timer = setTimeout(() => setVisible(false), 5000 - diff);
+      return () => clearTimeout(timer);
+    } else {
+      setVisible(false);
+    }
+  }, [addedAt]);
+
+  if (!visible) return null;
+  return (
+    <Chip
+      label="NEW"
+      size="small"
+      sx={{
+        bgcolor: '#ef4444', color: '#fff', fontWeight: 800,
+        fontSize: '0.65rem', height: 20, zIndex: 20,
+        boxShadow: '0 0 8px rgba(239,68,68,0.6)',
+        animation: 'pulse 1.5s infinite ease-in-out',
+        '@keyframes pulse': {
+          '0%': { transform: 'scale(1)' },
+          '50%': { transform: 'scale(1.05)' },
+          '100%': { transform: 'scale(1)' }
+        },
+        ...sx
+      }}
+    />
+  );
+};
+
 function DetectionCard({ item, onClick, onRemove, isRemoving, removed }) {
   const meta = TYPE_META[item.type] || { label: item.type, color: '#94a3b8', bg: '#f1f5f9' };
   const [imgError, setImgError] = useState(false);
@@ -124,14 +160,9 @@ function DetectionCard({ item, onClick, onRemove, isRemoving, removed }) {
             sx={{ objectFit: 'cover' }}
           />
         )}
-        <Chip
-          label={meta.label}
-          size="small"
-          sx={{
-            position: 'absolute', top: 8, right: 8,
-            bgcolor: meta.color, color: '#fff',
-            fontWeight: 700, fontSize: '0.65rem',
-          }}
+        <NewBadge
+          addedAt={item.addedAt}
+          sx={{ position: 'absolute', top: 8, right: 8 }}
         />
         {invigilatorEventLabel && (
           <Chip
@@ -162,22 +193,32 @@ function DetectionCard({ item, onClick, onRemove, isRemoving, removed }) {
         )}
       </Box>
       <CardContent sx={{ p: 1, pb: '10px !important', mx: 2 }}>
-        <Typography
-          variant="h6"
-          fontWeight={600}
-          fontSize={14}
-          noWrap
-          sx={{
-            color: '#1e293b',
-            lineHeight: 1.5,
-            mb: 0.5,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap'
-          }}
-        >
-          {centerName}
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5, gap: 1 }}>
+          <Chip
+            label={meta.label}
+            size="small"
+            sx={{
+              bgcolor: meta.bg || '#f1f5f9', color: meta.color || '#64748b',
+              fontWeight: 700, fontSize: '0.65rem', height: 20,
+            }}
+          />
+          <Typography
+            variant="h6"
+            fontWeight={600}
+            fontSize={14}
+            noWrap
+            sx={{
+              color: '#1e293b',
+              lineHeight: 1.5,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              flex: 1
+            }}
+          >
+            {centerName}
+          </Typography>
+        </Box>
 
         <Box
           sx={{
@@ -600,21 +641,26 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, removingId, re
                 '&:hover': { bgcolor: isActive ? '#eff6ff' : '#f8fafc' },
               }}
             >
-              <Box
-                component="img"
-                src={listItem.image_url}
-                alt={listItem.camera_id}
-                sx={{
-                  width: { xs: 62, sm: 70, md: 70 },
-                  height: { xs: 62, sm: 70, md: 70 },
-                  flexShrink: 0,
-                  objectFit: 'cover',
-                  alignSelf: 'center',
-                  borderRadius: 1,
-                  my: 0.5, ml: 1, mr: 1.5,
-                }}
-                onError={(e) => { e.target.style.display = 'none'; }}
-              />
+              <Box sx={{ position: 'relative', display: 'flex', ml: 1, mr: 1.5, my: 0.5 }}>
+                <NewBadge
+                  addedAt={listItem.addedAt}
+                  sx={{ position: 'absolute', top: -4, left: -4, zIndex: 10, transform: 'scale(0.85)' }}
+                />
+                <Box
+                  component="img"
+                  src={listItem.image_url}
+                  alt={listItem.camera_id}
+                  sx={{
+                    width: { xs: 62, sm: 70, md: 70 },
+                    height: { xs: 62, sm: 70, md: 70 },
+                    flexShrink: 0,
+                    objectFit: 'cover',
+                    alignSelf: 'center',
+                    borderRadius: 1,
+                  }}
+                  onError={(e) => { e.target.style.display = 'none'; }}
+                />
+              </Box>
 
               <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
                 {(() => {
