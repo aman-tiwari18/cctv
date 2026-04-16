@@ -688,6 +688,32 @@ def list_detections(
     for r in results:
         counts[r["type"]] = counts.get(r["type"], 0) + 1
 
+    # Fetch pushed_to_client statuses for paginated items securely
+    uids_to_check = [item.get("uid") for item in paginated if item.get("uid")]
+    pushed_uids = set()
+    if uids_to_check:
+        try:
+            from scripts.detection.utils.db_client import _get_connection
+            conn = _get_connection()
+            with conn.cursor() as cur:
+                format_strings = ','.join(['%s'] * len(uids_to_check))
+                cur.execute(
+                    f"SELECT unique_id FROM camera_report_hls WHERE unique_id IN ({format_strings}) AND pushed_to_client = 1", 
+                    tuple(uids_to_check)
+                )
+                for row in cur.fetchall():
+                    if row.get("unique_id"):
+                        pushed_uids.add(row["unique_id"])
+            conn.close()
+        except Exception as e:
+            logger.error(f"Failed to fetch pushed uids for paginated data: {e}")
+
+    for item in paginated:
+        if item.get("uid") in pushed_uids:
+            item["pushed_to_client"] = 1
+        else:
+            item["pushed_to_client"] = 0
+
     return {
         "success": True,
         "total":   total,

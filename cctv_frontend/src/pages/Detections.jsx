@@ -271,6 +271,12 @@ function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onS
               textTransform: 'none',
               fontSize: 12,
               '&:hover': { bgcolor: isPushed ? '#94a3b8' : '#1e40af' },
+              '&.Mui-disabled': {
+                bgcolor: '#94a3b8',
+                color: '#ffffff',
+                cursor: 'not-allowed',
+                pointerEvents: 'auto'
+              }
             }}
           >
             {isLoading ? 'Pushing...' : (isPushed ? 'Pushed to client' : 'Push to client')}
@@ -377,7 +383,7 @@ const todayDate = formatDateDDMMYYYY(new Date());
 
 function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingToClient, pushedUids }) {
   const item = data[selectedIndex];
-  const isPushed = item ? pushedUids.has(item.uid) : false;
+  const isPushed = item ? (pushedUids.has(item.uid || item.id || item.image_url) || item.pushed_to_client === 1 || item.pushed_to_client === true) : false;
   const itemRefs = useRef([]);
 
   const goNext = useCallback(() => onSelect(Math.min(data.length - 1, selectedIndex + 1)), [data.length, selectedIndex, onSelect]);
@@ -629,6 +635,12 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
                         width: "180px",
                         borderRadius: 2, textTransform: 'none', fontSize: 14,
                         '&:hover': { bgcolor: isPushed ? '#94a3b8' : '#1e40af' },
+                        '&.Mui-disabled': {
+                          bgcolor: '#94a3b8',
+                          color: '#ffffff',
+                          cursor: 'not-allowed',
+                          pointerEvents: 'auto'
+                        }
                       }}
                     >
                       {copyingToClient ? 'Pushing...' : (isPushed ? 'Pushed to client' : 'Push to client')}
@@ -946,6 +958,15 @@ export default function Detections() {
   };
 
   const handleDownloadReport = useCallback(async () => {
+    if (!examFilter) {
+      alert("Please select an Exam from the top filter to generate the report.");
+      return;
+    }
+    if (!dateFilter) {
+      alert("Please select a Date from the top filter to generate the report.");
+      return;
+    }
+
     try {
       const params = {};
       if (typeFilter.length > 0) params.type = typeFilter.join(',');
@@ -968,7 +989,7 @@ export default function Detections() {
       console.error('Download report failed:', error);
       alert('Failed to download report.');
     }
-  }, [typeFilter, dateFilter, search, appliedStartTime, appliedEndTime]);
+  }, [typeFilter, dateFilter, search, examFilter, appliedStartTime, appliedEndTime]);
 
   useEffect(() => {
     setExportToExcel(() => exportToExcel);
@@ -1276,7 +1297,8 @@ export default function Detections() {
                 item={item}
                 onClick={setSelected}
                 onPushToClient={pushToClient}
-                copyingId={copyingId}
+                isPushing={copyingId === (item.uid || item.id || item.image_url)}
+                isPushed={pushedUids.has(item.uid || item.id || item.image_url) || item.pushed_to_client === 1 || item.pushed_to_client === true}
                 onSkip={handleSkipLocally}
               />
             </Grid>
