@@ -19,9 +19,9 @@ import ClientDetections from './pages/ClientDetections';
 const theme = createTheme({
   palette: {
     primary: {
-      main: '#2563eb',
+      main: '#3c81f6',
       light: '#dbeafe',
-      dark: '#1d4ed8',
+      dark: '#1e40af',
       contrastText: '#ffffff',
     },
     secondary: {
@@ -37,6 +37,10 @@ const theme = createTheme({
     text: {
       primary: '#0f172a',
       secondary: '#475569',
+    },
+    buttonrtsp: {
+      bg: '#a4b5fe',
+      text: '#384b91'
     },
     divider: 'rgba(71, 85, 105, 0.2)',
   },

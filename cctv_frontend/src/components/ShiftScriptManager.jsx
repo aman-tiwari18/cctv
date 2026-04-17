@@ -555,11 +555,11 @@ const ShiftScriptManager = ({
                     disabled={submitting || configuredCount === 0}
                     disableElevation
                     sx={{
-                        bgcolor: '#1d4ed8',
+                        bgcolor: 'primary.main',
                         fontWeight: 700,
                         borderRadius: 2,
                         px: 3,
-                        '&:hover': { bgcolor: '#1e40af' },
+                        '&:hover': { bgcolor: 'primary.dark' },
                         '&.Mui-disabled': { bgcolor: '#93c5fd', color: '#fff' },
                     }}
                 >

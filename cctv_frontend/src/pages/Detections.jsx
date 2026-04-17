@@ -3,7 +3,7 @@ import {
   Box, Card, CardMedia, CardContent, Typography, Chip,
   TextField, Select, MenuItem, FormControl, InputLabel,
   ToggleButtonGroup, ToggleButton, Pagination, TablePagination,
-  IconButton, Skeleton, Grid, Checkbox, Dialog, DialogContent,
+  IconButton, Skeleton, Grid, Checkbox, FormControlLabel, Dialog, DialogContent,
   InputAdornment, Button, Snackbar, Alert, LinearProgress,
 } from '@mui/material';
 import {
@@ -687,6 +687,7 @@ export default function Detections() {
   const [socketConnected, setSocketConnected] = useState(false);
   const [listSelectedIndex, setListSelectedIndex] = useState(0);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
+  const [allShifts, setAllShifts] = useState(false);
 
   const [selected, setSelected] = useState(null);
   const [selectedPaths, setSelectedPaths] = useState([]);
@@ -973,6 +974,7 @@ export default function Detections() {
       if (dateFilter) params.date = parseDateForQuery(dateFilter);
       if (search.trim()) params.search = search.trim();
       if (examFilter) params.exam_id = examFilter;
+      if (allShifts) params.all_shifts = 'true';
       if (appliedStartTime) params.start_time = appliedStartTime;
       if (appliedEndTime) params.end_time = appliedEndTime;
 
@@ -1098,6 +1100,19 @@ export default function Detections() {
             </Box>
           )}
         </Box>
+
+        <FormControlLabel
+          control={
+            <Checkbox
+              size="small"
+              checked={allShifts}
+              onChange={(e) => setAllShifts(e.target.checked)}
+              sx={{ color: '#94a3b8', '&.Mui-checked': { color: '#3c81f6' } }}
+            />
+          }
+          label={<Typography sx={{ fontSize: 13, color: '#64748b', fontWeight: 500 }}>All Shifts</Typography>}
+          sx={{ ml: 0.5, mr: 1 }}
+        />
 
         {/* Start Time */}
         <TextField

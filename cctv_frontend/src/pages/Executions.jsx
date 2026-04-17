@@ -251,7 +251,7 @@ const Executions = () => {
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3.5 }}>
               <Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5 }}>
-                  <Typography variant="h4" sx={{ fontWeight: 800, color: '#0f172a' }}>
+                  <Typography variant="h6" sx={{ fontWeight: 600, color: '#0f172a', fontSize: '1.5rem' }}>
                     {selectedExam ? `${selectedExam.exam_name} (${selectedExam.exam_body})` : 'Exam'}
                   </Typography>
                   {selectedExam && selectedExam.is_active === false && (
@@ -300,7 +300,7 @@ const Executions = () => {
                     onChange={(e) => setStatusFilter(e.target.value)}
                     sx={{ borderRadius: 2, fontSize: '0.85rem', bgcolor: '#fff' }}
                   >
-                    {STATUS_OPTIONS.map((s) => <MenuItem key={s} value={s}>{s === 'ALL' ? 'All Statuses' : s}</MenuItem>)}
+                    {STATUS_OPTIONS.map((s) => <MenuItem key={s} value={s}>{s === 'ALL' ? 'ALL' : s}</MenuItem>)}
                   </Select>
                 </FormControl>
 

@@ -194,14 +194,6 @@ function DetectionCard({ item, onClick, onRemove, isRemoving, removed }) {
       </Box>
       <CardContent sx={{ p: 1, pb: '10px !important', mx: 2 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5, gap: 1 }}>
-          <Chip
-            label={meta.label}
-            size="small"
-            sx={{
-              bgcolor: meta.bg || '#f1f5f9', color: meta.color || '#64748b',
-              fontWeight: 700, fontSize: '0.65rem', height: 20,
-            }}
-          />
           <Typography
             variant="h6"
             fontWeight={600}
@@ -218,6 +210,14 @@ function DetectionCard({ item, onClick, onRemove, isRemoving, removed }) {
           >
             {centerName}
           </Typography>
+          <Chip
+            label={meta.label}
+            size="small"
+            sx={{
+              bgcolor: meta.bg || '#f1f5f9', color: meta.color || '#64748b',
+              fontWeight: 700, fontSize: '0.65rem', height: 20,
+            }}
+          />
         </Box>
 
         <Box
@@ -940,6 +940,9 @@ const ClientDetections = () => {
 
     socket.on('client-detection:new', (item) => {
       const newItem = { ...item, image_url: `${API_BASE_1}${item.image_url || item.imageUrl}` };
+      // Always update header + sidebar totals
+      setUnfilteredCounts((prev) => ({ ...prev, [item.type]: (prev[item.type] || 0) + 1 }));
+      setAllCounts((prev) => ({ ...prev, [item.type]: (prev[item.type] || 0) + 1 }));
       setImages((prev) => {
         const key = buildImageKey(newItem);
         if (prev.some((existing) => buildImageKey(existing) === key)) return prev;
@@ -947,7 +950,6 @@ const ClientDetections = () => {
       });
       setTotal((prev) => prev + 1);
       setCounts((prev) => ({ ...prev, [item.type]: (prev[item.type] || 0) + 1 }));
-      setAllCounts((prev) => ({ ...prev, [item.type]: (prev[item.type] || 0) + 1 }));
     });
 
     socket.on('client-detection:remove', (payload) => {
@@ -961,7 +963,7 @@ const ClientDetections = () => {
     });
 
     return () => socket.disconnect();
-  }, [setAllCounts]);
+  }, [setAllCounts, setUnfilteredCounts, rowsPerPage]);
 
   const matchesFilters = useCallback((item) => {
     if (typeFilter.length > 0 && !typeFilter.includes(item.type)) return false;
@@ -1219,12 +1221,12 @@ const ClientDetections = () => {
             onClick={() => { setAppliedStartTime(startTime); setAppliedEndTime(endTime); }}
             disableElevation
             sx={{
-              bgcolor: '#1d4ed8',
+              bgcolor: '#3c81f6',
               height: 36, borderRadius: '8px', fontSize: 13, fontWeight: 600, textTransform: 'none', px: 2.5,
               '&:hover': { bgcolor: '#1e40af' }
             }}
           >
-            Apply
+            Search
           </Button>
         </Box>
       </Box>

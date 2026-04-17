@@ -257,7 +257,7 @@ const Shifts = () => {
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3.5 }}>
               <Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5 }}>
-                  <Typography variant="h4" sx={{ fontWeight: 800, color: '#0f172a' }}>
+                  <Typography variant="h6" sx={{ fontWeight: 600, color: '#0f172a', fontSize: '1.5rem' }}>
                     {selectedExam ? `${selectedExam.exam_name} (${selectedExam.exam_body})` : 'Exam'}
                   </Typography>
                   {selectedExam && selectedExam.is_active === false && (

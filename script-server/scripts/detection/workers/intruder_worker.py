@@ -4574,7 +4574,7 @@ import sys as _sys
 _utils_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'utils')
 if _utils_path not in _sys.path:
     _sys.path.insert(0, _utils_path)
-from db_client import report_to_db_hls  # noqa: E402
+from db_client import report_to_db_hls, report_to_db_rtsp  # noqa: E402
 
 
 # ================= LOGGING =================
@@ -4678,9 +4678,11 @@ def detect_intruder(frame, device_id: str, camera_no: str, save_folder: str, cam
                 _exam_id = str(os.environ.get("EXAM_ID", "0")).strip()
                 fname = f"intruder_ch{camera_no}_exam{_exam_id}_{ts}_{_uid}.jpg"
             else:
-                # RTSP: intruder_[device_id]_[camera_no]_[timestamp].jpg
+                # RTSP: intruder_[device_id]_[camera_no]_exam[exam_id]_[timestamp]_[uuid].jpg
+                _uid = str(uuid.uuid4())
+                _exam_id = str(os.environ.get("EXAM_ID", "0")).strip()
                 dev_id = camera_id_pk or device_id
-                fname = f"intruder_{dev_id}_{camera_no}_{ts}.jpg"
+                fname = f"intruder_{dev_id}_{camera_no}_exam{_exam_id}_{ts}_{_uid}.jpg"
             
             path = os.path.join(save_folder, fname)
             cv2.imwrite(path, frame)
@@ -4692,7 +4694,7 @@ def detect_intruder(frame, device_id: str, camera_no: str, save_folder: str, cam
                 f"💾 Saved → {path}"
             )
 
-            # --- Report to DB (HLS only) ---
+            # --- Report to DB ---
             if source_type == "HLS":
                 try:
                     report_to_db_hls(
@@ -4702,6 +4704,16 @@ def detect_intruder(frame, device_id: str, camera_no: str, save_folder: str, cam
                     )
                 except Exception as e:
                     logger.error(f"[IntruderWorker] DB Reporting Error: {e}")
+            else:
+                try:
+                    report_to_db_rtsp(
+                        device_id=str(dev_id),
+                        camera_no=str(camera_no),
+                        image_name=os.path.basename(path),
+                        folder="intruder_detection"
+                    )
+                except Exception as e:
+                    logger.error(f"[IntruderWorker] RTSP DB Reporting Error: {e}")
         elif intruder_detected:
             remaining = int(COOLDOWN_TIME - elapsed)
             logger.debug(

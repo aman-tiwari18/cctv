@@ -70,21 +70,21 @@ const Cameras = () => {
   const [viewingArchived, setViewingArchived] = useState(false);
   const [selectedExamId, setSelectedExamId] = useState(examIdParam || '');
 
-  /* ── Data ── */
+
   const [cameras, setCameras] = useState([]);
   const [examLinkType, setExamLinkType] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  /* ── Far-right filters ── */
+
   const [filterShiftId, setFilterShiftId] = useState('');
   const [filterExamDate, setFilterExamDate] = useState('');
 
-  /* ── Pagination ── */
+
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
 
-  /* ── Create / Edit dialog ── */
+
   const [openDialog, setOpenDialog] = useState(false);
   const [editingCamera, setEditingCamera] = useState(null);
   const [formData, setFormData] = useState(HLS_EMPTY);
@@ -192,7 +192,7 @@ const Cameras = () => {
     catch { alert('Failed to delete'); }
   };
 
-  /* ── Upload ── */
+
   const handleUpload = async () => {
     if (!uploadFile || !selectedExamId) { setUploadError('Select a file'); return; }
     setUploading(true); setUploadError('');
@@ -214,14 +214,11 @@ const Cameras = () => {
     catch { alert('Download failed'); }
   };
 
-  /* ════════════════════════════════════════════════════
-     RENDER
-  ═════════════════════════════════════════════════════ */
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
       <Box sx={{ display: 'flex', minHeight: 'calc(100vh - 120px)', bgcolor: '#f8fafc' }}>
 
-        {/* ════ LEFT SIDEBAR ════ */}
+
         <Box sx={{
           width: sidebarOpen ? 280 : 56, flexShrink: 0,
           borderRight: '1px solid #e8ecf1', bgcolor: '#fff',
@@ -245,8 +242,8 @@ const Cameras = () => {
                 onClick={() => setSidebarOpen(!sidebarOpen)}
                 sx={{
                   color: '#fff',
-                  bgcolor: '#2563eb',
-                  '&:hover': { bgcolor: '#1d4ed8' },
+                  bgcolor: 'primary.main',
+                  '&:hover': { bgcolor: 'primary.dark' },
                   borderRadius: 2,
                   width: 32,
                   height: 32,
@@ -335,7 +332,7 @@ const Cameras = () => {
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3.5, flexWrap: 'wrap', gap: 2 }}>
                 <Box>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5 }}>
-                    <Typography variant="h4" sx={{ fontWeight: 800, color: '#0f172a' }}>
+                    <Typography variant="h6" sx={{ fontWeight: 600, color: '#0f172a', fontSize: '1.5rem' }}>
                       {selectedExamData ? `${selectedExamData.exam_name} (${selectedExamData.exam_body})` : 'Cameras'}
                     </Typography>
                     {selectedExamData && (
@@ -344,7 +341,7 @@ const Cameras = () => {
                         size="small"
                         sx={{
                           fontWeight: 700, fontSize: '0.7rem', height: 20, borderRadius: '6px',
-                          bgcolor: isHLS ? '#1d4ed8' : '#dc4d00', color: '#fff'
+                          bgcolor: isHLS ? 'primary.main' : '#a4b5fe', color: isHLS ? '#fff' : '#384b91'
                         }}
                       />
                     )}
@@ -431,14 +428,14 @@ const Cameras = () => {
                   <Tooltip title="Download HLS Template">
                     <Button variant="outlined" size="small" startIcon={<TableChart />}
                       onClick={() => handleDownloadTemplate('hls')}
-                      sx={{ borderColor: '#1d4ed8', color: '#1d4ed8', '&:hover': { bgcolor: '#ecfeff' }, textTransform: 'none', fontWeight: 600 }}>
+                      sx={{ borderColor: 'primary.main', color: 'primary.main', '&:hover': { bgcolor: '#ecfeff' }, textTransform: 'none', fontWeight: 600 }}>
                       HLS
                     </Button>
                   </Tooltip>
                   <Tooltip title="Download RTSP Template">
                     <Button variant="outlined" size="small" startIcon={<TableChart />}
                       onClick={() => handleDownloadTemplate('rtsp')}
-                      sx={{ borderColor: '#a4b5fe', color: '#384b91', '&:hover': { bgcolor: '#f5f3ff' }, textTransform: 'none', fontWeight: 600 }}>
+                      sx={{ borderColor: 'buttonrtsp.bg', color: 'buttonrtsp.text', '&:hover': { bgcolor: '#f5f3ff' }, textTransform: 'none', fontWeight: 600 }}>
                       RTSP
                     </Button>
                   </Tooltip>

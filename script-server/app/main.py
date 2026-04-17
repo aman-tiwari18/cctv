@@ -697,13 +697,24 @@ def list_detections(
             conn = _get_connection()
             with conn.cursor() as cur:
                 format_strings = ','.join(['%s'] * len(uids_to_check))
-                cur.execute(
-                    f"SELECT unique_id FROM camera_report_hls WHERE unique_id IN ({format_strings}) AND pushed_to_client = 1", 
-                    tuple(uids_to_check)
-                )
-                for row in cur.fetchall():
-                    if row.get("unique_id"):
-                        pushed_uids.add(row["unique_id"])
+                
+                # Fetch from HLS
+                try:
+                    cur.execute(f"SELECT unique_id FROM camera_report_hls WHERE unique_id IN ({format_strings}) AND pushed_to_client = 1", tuple(uids_to_check))
+                    for row in cur.fetchall():
+                        if row.get("unique_id"):
+                            pushed_uids.add(row["unique_id"])
+                except Exception as e:
+                    logger.error(f"HLS pushed uids fetch failed: {e}")
+
+                # Fetch from RTSP
+                try:
+                    cur.execute(f"SELECT unique_id FROM camera_report_rtsp WHERE unique_id IN ({format_strings}) AND pushed_to_client = 1", tuple(uids_to_check))
+                    for row in cur.fetchall():
+                        if row.get("unique_id"):
+                            pushed_uids.add(row["unique_id"])
+                except Exception as e:
+                    logger.error(f"RTSP pushed uids fetch failed: {e}")
             conn.close()
         except Exception as e:
             logger.error(f"Failed to fetch pushed uids for paginated data: {e}")
@@ -775,16 +786,22 @@ async def copy_client_detections(payload: ClientDetectionCopyRequest):
                     failed.append({"relativePath": item.relativePath, "error": "No uid provided"})
                     continue
                 
+                table_name = "camera_report_rtsp" if item.source == "rtsp" else "camera_report_hls"
+                
                 # Update the DB
-                sql = "UPDATE camera_report_hls SET pushed_to_client = 1 WHERE unique_id = %s"
-                cur.execute(sql, (item.uid,))
+                try:
+                    sql = f"UPDATE {table_name} SET pushed_to_client = 1 WHERE unique_id = %s"
+                    cur.execute(sql, (item.uid,))
+                except Exception as e:
+                    failed.append({"uid": item.uid, "error": f"DB update failed on {table_name}: {e}"})
+                    continue
                 
                 if cur.rowcount == 0:
                     failed.append({"uid": item.uid, "error": f"uid {item.uid} not found"})
                     continue
                 
                 # Fetch row to reconstruct the socket payload
-                cur.execute("SELECT * FROM camera_report_hls WHERE unique_id = %s LIMIT 1", (item.uid,))
+                cur.execute(f"SELECT * FROM {table_name} WHERE unique_id = %s LIMIT 1", (item.uid,))
                 row = cur.fetchone()
                 
                 if row:
@@ -805,11 +822,11 @@ async def copy_client_detections(payload: ClientDetectionCopyRequest):
                         "relativePath": item.relativePath,
                         "id": row.get("id"),
                         "cameraName": row.get("camera_name"),
-                        "centerName": row.get("center_name"),
+                        "centerName": row.get("center_name", "") or row.get("centre_name", ""),
                         "city": row.get("city"),
                         "state": row.get("state"),
                         "tcCode": row.get("tc_code"),
-                        "category": row.get("camera_category"),
+                        "category": row.get("camera_category", ""),
                         "uid": row.get("unique_id"),
                     })
                     copied.append(copied_item)
@@ -845,9 +862,20 @@ def list_client_detections(
     conn = _get_connection()
     try:
         with conn.cursor() as cur:
-            query = "SELECT * FROM camera_report_hls WHERE pushed_to_client = 1 AND remove_from_client = 0 ORDER BY created_at DESC"
-            cur.execute(query)
-            db_rows = cur.fetchall()
+            db_rows = []
+            try:
+                cur.execute("SELECT * FROM camera_report_hls WHERE pushed_to_client = 1 AND remove_from_client = 0")
+                db_rows.extend(cur.fetchall())
+            except Exception as e:
+                logger.error(f"HLS Client Detections fetch failed: {e}")
+
+            try:
+                cur.execute("SELECT * FROM camera_report_rtsp WHERE pushed_to_client = 1 AND remove_from_client = 0")
+                db_rows.extend(cur.fetchall())
+            except Exception as e:
+                logger.error(f"RTSP Client Detections fetch failed: {e}")
+
+            db_rows.sort(key=lambda x: str(x.get("created_at", "")), reverse=True)
             
             for row in db_rows:
                 imageurl_full = str(row.get("imageurl", ""))
@@ -876,11 +904,11 @@ def list_client_detections(
                     "filename": filename,
                     "relativePath": f"{filename}",
                     "cameraName": row.get("camera_name"),
-                    "centerName": row.get("center_name"),
+                    "centerName": row.get("center_name", "") or row.get("centre_name", ""),
                     "city": row.get("city"),
                     "state": row.get("state"),
                     "tcCode": row.get("tc_code"),
-                    "category": row.get("camera_category"),
+                    "category": row.get("camera_category", ""),
                     "uid": row.get("unique_id"),
                     "_mtime": row.get("created_at").timestamp() if hasattr(row.get("created_at"), "timestamp") else 0,
                 })
@@ -939,8 +967,15 @@ async def remove_client_detection(payload: ClientDetectionRemoveRequest):
     conn = _get_connection()
     try:
         with conn.cursor() as cur:
-            sql = "UPDATE camera_report_hls SET remove_from_client = 1 WHERE unique_id = %s"
-            cur.execute(sql, (payload.uid,))
+            try:
+                sql_hls = "UPDATE camera_report_hls SET remove_from_client = 1 WHERE unique_id = %s"
+                cur.execute(sql_hls, (payload.uid,))
+            except Exception: pass
+            
+            try:
+                sql_rtsp = "UPDATE camera_report_rtsp SET remove_from_client = 1 WHERE unique_id = %s"
+                cur.execute(sql_rtsp, (payload.uid,))
+            except Exception: pass
         conn.commit()
         
         await sio.emit("client-detection:remove", {"uid": payload.uid, "success": True})

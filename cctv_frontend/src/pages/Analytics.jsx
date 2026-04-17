@@ -160,7 +160,6 @@ const Analytics = () => {
     }
   }, [availableDates]);
 
-  /* ── Helper: filter assignments for a shift by selected date ── */
   const getFilteredAssignments = (shiftId) => {
     const all = shiftAssignments[shiftId] || [];
     if (!selectedDate) return all;
@@ -170,9 +169,6 @@ const Analytics = () => {
   return (
     <Box sx={{ display: 'flex', minHeight: 'calc(100vh - 120px)', bgcolor: '#f8fafc' }}>
 
-      {/* ════════════════════════════════════
-          LEFT SIDEBAR — Exam List
-         ════════════════════════════════════ */}
       <Box
         sx={{
           width: 280,
@@ -279,9 +275,6 @@ const Analytics = () => {
         </Box>
       </Box>
 
-      {/* ════════════════════════════════════
-          RIGHT PANEL — Content
-         ════════════════════════════════════ */}
       <Box sx={{ flex: 1, p: 3.5, overflowY: 'auto' }}>
         {error && (
           <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError('')}>
@@ -330,13 +323,12 @@ const Analytics = () => {
             </Typography>
           </Box>
         ) : (
-          /* ── Exam detail ── */
+
           <>
-            {/* Title row + date filter */}
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3.5 }}>
               <Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5 }}>
-                  <Typography variant="h4" sx={{ fontWeight: 800, color: '#0f172a' }}>
+                  <Typography variant="h6" sx={{ fontWeight: 600, color: '#0f172a', fontSize: '1.5rem' }}>
                     {selectedExam ? `${selectedExam.exam_name} (${selectedExam.exam_body})` : 'Exam'}
                   </Typography>
                   {selectedExam && selectedExam.is_active === false && (
@@ -436,7 +428,7 @@ const Analytics = () => {
                           onClick={() => setOpenShiftDialogId(shift.id)}
                           disableElevation
                           sx={{
-                            bgcolor: '#3b82f6',
+                            bgcolor: 'primary.main',
                             color: '#fff',
                             fontWeight: 700,
                             fontSize: '0.75rem',
@@ -445,7 +437,7 @@ const Analytics = () => {
                             letterSpacing: '0.03em',
                             px: 2.5,
                             py: 0.8,
-                            '&:hover': { bgcolor: '#2563eb' },
+                            '&:hover': { bgcolor: 'primary.dark' },
                           }}
                         >
                           Add Script

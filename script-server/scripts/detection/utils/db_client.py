@@ -682,6 +682,12 @@ _IMAGE_BASE_URL = os.environ.get(
     "http://www.examscctvmonitoring.com/cctv_dev/serve-detection-images"
 )
 
+# Base URL for RTSP detection images
+_RTSP_IMAGE_BASE_URL = os.environ.get(
+    "DETECTION_RTSP_IMAGE_BASE_URL",
+    "http://examscctvmonitoring.com/cctv_dev/serve-rtsp-detection-images"
+)
+
 # Path to the shared log file (script-server/db_reports.log)
 _LOG_FILE = os.path.join(os.path.dirname(__file__), "../../db_reports.log")
 
@@ -802,6 +808,133 @@ def report_to_db_hls(ch_code: str, image_name: str, folder: str = "crowd_detecti
 
     except Exception as e:
         msg = f"[DB-REPORT] ❌ FATAL ERROR ({folder}): {e}\n"
+        logger.error(msg.strip())
+        try:
+            with open(_LOG_FILE, "a") as f:
+                f.write(msg)
+        except Exception:
+            pass
+        return False
+
+
+# ============================================================
+# 📝  RTSP DETECTION REPORTING
+# ============================================================
+
+def report_to_db_rtsp(device_id: str, camera_no: str, image_name: str, folder: str = "crowd_detection") -> bool:
+    """
+    Central RTSP detection reporter.
+
+    Looks up the camera row in camera_links_rtsp by device_id + camera_no,
+    and inserts one row into camera_report_rtsp.
+
+    Args:
+        device_id : RTSP device ID
+        camera_no : RTSP camera number
+        image_name: filename of the saved detection image (no path)
+        folder    : detection sub-folder name used in the image URL and
+                    stored as detection_type.
+
+    Returns:
+        True on success, False on any failure.
+    """
+    # Extract UUID from filename (relaxed regex to allow dummy tests)
+    _UUID_PATTERN = r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})'
+    uuid_match = re.search(_UUID_PATTERN, image_name, re.IGNORECASE)
+    unique_id = uuid_match.group(1) if uuid_match else None
+
+    # Handle potentially missing device/camera info if they weren't explicitly passed
+    if not device_id or not camera_no:
+        parts = image_name.split('_')
+        if len(parts) >= 4 and not device_id:
+            device_id = parts[1]
+        if len(parts) >= 4 and not camera_no:
+            camera_no = parts[2]
+
+    try:
+        with open(_LOG_FILE, "a") as f:
+            f.write(
+                f"\n--- [{folder}] RTSP Report Attempt: "
+                f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---\n"
+                f"Image: {image_name} | device_id: {device_id} | camera_no: {camera_no}\n"
+            )
+
+        exam_id  = os.environ.get("EXAM_ID")
+        shift_id = os.environ.get("SHIFT_ID")
+
+        if not exam_id:
+            msg = "[DB-REPORT-RTSP] ❌ ERROR: EXAM_ID not set in environment.\n"
+            logger.error(msg.strip())
+            with open(_LOG_FILE, "a") as f:
+                f.write(msg)
+            return False
+
+        # Parse timestamp from filename (format: YYYYMMDD_HHMMSS)
+        ts_m = re.search(r'(\d{8}_\d{6})', image_name)
+        if ts_m:
+            date_time = datetime.strptime(ts_m.group(1), "%Y%m%d_%H%M%S").strftime("%d/%m/%Y %H:%M:%S")
+        else:
+            date_time = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+
+        conn = _get_connection()
+        try:
+            with conn.cursor() as cur:
+                # Look up camera row
+                cur.execute(
+                    """
+                    SELECT * FROM camera_links_rtsp
+                    WHERE device_id = %s AND camera_no = %s AND exam_id = %s
+                    LIMIT 1
+                    """,
+                    (device_id, camera_no, exam_id),
+                )
+                cam = cur.fetchone()
+
+            if not cam:
+                msg = (
+                    f"[DB-REPORT-RTSP] ❌ Camera NOT found for "
+                    f"device_id={device_id}, camera_no={camera_no}, exam_id={exam_id}\n"
+                )
+                logger.error(msg.strip())
+                with open(_LOG_FILE, "a") as f:
+                    f.write(msg)
+                return False
+
+            camera_name      = cam.get('camera_name', '')
+            status_raw       = str(cam.get('status', '')).lower()
+            camera_status    = "Online" if status_raw == 'accessible' else "Offline"
+            image_url        = f"{_RTSP_IMAGE_BASE_URL}/{folder}/{image_name}"
+
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO camera_report_rtsp (
+                        exam_id, shift_id, city, center_name, camera_id,
+                        device_id, camera_no, camera_name, tc_code,
+                        state, camera_status, events, date_time,
+                        imageurl, detection_type, unique_id
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        cam.get('exam_id'), shift_id, cam.get('city'),
+                        cam.get('centre_name'), f"{device_id}_{camera_no}", device_id, camera_no,
+                        camera_name, cam.get('tc_code'), cam.get('state'),
+                        camera_status, 1, date_time, image_url, folder,
+                        unique_id,
+                    ),
+                )
+            conn.commit()
+            msg = f"[DB-REPORT-RTSP] ✅ SUCCESS: {folder} report inserted for device_id={device_id} unique_id={unique_id}\n"
+            logger.info(msg.strip())
+            with open(_LOG_FILE, "a") as f:
+                f.write(msg)
+            return True
+
+        finally:
+            conn.close()
+
+    except Exception as e:
+        msg = f"[DB-REPORT-RTSP] ❌ FATAL ERROR ({folder}): {e}\n"
         logger.error(msg.strip())
         try:
             with open(_LOG_FILE, "a") as f:

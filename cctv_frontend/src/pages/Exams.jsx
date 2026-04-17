@@ -43,6 +43,7 @@ import {
   DeleteOutline,
   AccessTime,
   AccessTimeOutlined,
+  StayPrimaryLandscape,
 } from '@mui/icons-material';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
@@ -326,11 +327,11 @@ const Exams = () => {
             fontSize: 13,
             fontWeight: 600,
             textTransform: 'none',
-            bgcolor: '#3c81f6',
+            bgcolor: 'primary.main',
             color: '#fff',
             px: 2,
             transition: 'all 0.2s ease',
-            '&:hover': { bgcolor: '#1e40af', transform: 'translateY(-1px)' },
+            '&:hover': { bgcolor: 'primary.dark', transform: 'translateY(-1px)' },
           }}
         >
           Add Exam
@@ -356,13 +357,12 @@ const Exams = () => {
                   height: '100%',
                   minHeight: 420,
                   maxWidth: 530,
-                  // minWidth: 420,
                   display: 'flex',
                   flexDirection: 'column'
                 }}
               >
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
-                  <Typography sx={{ fontWeight: 800, fontSize: '1.65rem', color: '#0f172a', lineHeight: 1.25, pr: 1, flex: 1 }}>
+                  <Typography sx={{ fontWeight: 600, fontSize: '1.5rem', color: '#0f172a', lineHeight: 1.25, pr: 1, flex: 1 }}>
                     {exam.exam_name}
                   </Typography>
                   <Chip
@@ -435,7 +435,7 @@ const Exams = () => {
                           color: '#3c81f6',
                           borderRadius: '12px',
                           fontWeight: 600,
-                          fontSize: '0.78rem',
+                          fontSize: '0.68rem',
                           border: '1px solid #e2e8f0',
                           height: 30,
                           px: 0.5,
