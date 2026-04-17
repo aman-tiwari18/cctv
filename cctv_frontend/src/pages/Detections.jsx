@@ -13,8 +13,6 @@ import {
   WarningAmber, ImageNotSupported, FlipCameraAndroid, SecurityUpdateWarning,
   VisibilityOff, PersonOff,
   ChevronLeft, ChevronRight, ViewList,
-  PersonAdd, KeyboardArrowDown,
-  ZoomIn, Fullscreen, VerifiedUser, FiberManualRecord,
   Check, Close as CloseIcon
 } from '@mui/icons-material';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
@@ -64,8 +62,13 @@ const NewBadge = ({ addedAt, sx }) => {
 
   useEffect(() => {
     if (!addedAt) return;
-    const diff = Date.now() - addedAt;
-    if (diff < 5000) {
+
+    const parsedTime = new Date(addedAt).getTime();
+    if (isNaN(parsedTime)) return; // safety check
+
+    const diff = Date.now() - parsedTime;
+
+    if (diff < 7000) {
       setVisible(true);
       const timer = setTimeout(() => setVisible(false), 5000 - diff);
       return () => clearTimeout(timer);
@@ -75,13 +78,18 @@ const NewBadge = ({ addedAt, sx }) => {
   }, [addedAt]);
 
   if (!visible) return null;
+
   return (
     <Chip
       label="NEW"
       size="small"
       sx={{
-        bgcolor: '#ef4444', color: '#fff', fontWeight: 800,
-        fontSize: '0.65rem', height: 20, zIndex: 20,
+        bgcolor: '#ef4444',
+        color: '#fff',
+        fontWeight: 800,
+        fontSize: '0.65rem',
+        height: 20,
+        zIndex: 20,
         boxShadow: '0 0 8px rgba(239,68,68,0.6)',
         animation: 'pulse 1.5s infinite ease-in-out',
         '@keyframes pulse': {
@@ -137,7 +145,7 @@ function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onS
           />
         )}
         <NewBadge
-          addedAt={item.addedAt}
+          addedAt={item.detectedAt}
           sx={{ position: 'absolute', top: 8, right: 8 }}
         />
         {invigilatorEventLabel && (
@@ -170,14 +178,6 @@ function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onS
       </Box>
       <CardContent sx={{ p: 1, pb: '10px !important', mx: 2 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5, gap: 1 }}>
-          <Chip
-            label={meta.label}
-            size="small"
-            sx={{
-              bgcolor: meta.bg || '#f1f5f9', color: meta.color || '#64748b',
-              fontWeight: 700, fontSize: '0.65rem', height: 20,
-            }}
-          />
           <Typography
             variant="h6"
             fontWeight={600}
@@ -194,6 +194,14 @@ function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onS
           >
             {centerName}
           </Typography>
+          <Chip
+            label={meta.label}
+            size="small"
+            sx={{
+              bgcolor: meta.bg || '#f1f5f9', color: meta.color || '#64748b',
+              fontWeight: 700, fontSize: '0.65rem', height: 20,
+            }}
+          />
         </Box>
 
         <Box
@@ -233,7 +241,7 @@ function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onS
       </CardContent>
 
       <Box sx={{ mx: 2, mb: 4, mt: 1 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'end', gap: 1.5 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'end', gap: 1.5, }}>
           {!isPushed && (
             <Button
               variant="outlined"
@@ -605,7 +613,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
                 </CardContent>
 
                 <Box sx={{ mt: 2.5 }}>
-                  <Box sx={{ display: 'flex', gap: 1.5 }}>
+                  <Box sx={{ display: 'flex', gap: 1.5, justifyContent: 'center' }}>
                     {!isPushed && (
                       <Button
                         variant="outlined"
@@ -667,6 +675,7 @@ export default function Detections() {
   const [data, setData] = useState([]);
   const [counts, setCounts] = useState({});
   const [total, setTotal] = useState(0);
+  const [clientTotal, setClientTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(50);
@@ -719,7 +728,7 @@ export default function Detections() {
     } catch (err) {
       console.error('Failed to fetch all counts:', err);
     }
-  }, [dateFilter, setAllCounts, setUnfilteredCounts, typeFilter.length]);
+  }, [dateFilter, setAllCounts, setUnfilteredCounts, typeFilter.length, setExamFilter]);
 
   useEffect(() => {
     fetchAllCounts();
@@ -751,6 +760,18 @@ export default function Detections() {
       if (appliedEndTime) params.append('end_time', appliedEndTime);
 
       const res = await axios.get(`${API_BASE_1}/detections?${params}`);
+
+      try {
+        const cParams = new URLSearchParams(params);
+        cParams.set('limit', '1');
+        const cRes = await axios.get(`${API_BASE_1}/client-detections?${cParams}`);
+        if (cRes.data.success) {
+          setClientTotal(cRes.data.total || 0);
+        }
+      } catch (err) {
+        console.error('Failed to fetch client total:', err);
+      }
+
       if (res.data.success) {
         setData(res.data.data);
         setTotal(res.data.total);
@@ -788,7 +809,7 @@ export default function Detections() {
       }
     }
     return true;
-  }, [typeFilter, dateFilter, search, appliedStartTime, appliedEndTime]);
+  }, [typeFilter, dateFilter, examFilter, search, appliedStartTime, appliedEndTime]);
 
   const filteredData = useMemo(() => data.filter(matchesFilters), [data, matchesFilters]);
 
@@ -855,6 +876,7 @@ export default function Detections() {
         items.forEach(itm => next.add(itm.uid || itm.id || itm.image_url));
         return next;
       });
+      setClientTotal((prev) => prev + items.length);
 
       setClientSnackbar({
         open: true,
@@ -1029,7 +1051,7 @@ export default function Detections() {
               '& input': { color: '#334155', '&::placeholder': { color: '#94a3b8', opacity: 1 } }
             }
           }}
-          sx={{ minWidth: 260, maxWidth: 600, flex: 1 }}
+          sx={{ minWidth: 200, maxWidth: 400, flex: 1 }}
         />
         <FormControl size="small" sx={{ minWidth: 150 }}>
           <InputLabel sx={{ fontSize: 14 }}>Exam</InputLabel>
@@ -1100,20 +1122,6 @@ export default function Detections() {
             </Box>
           )}
         </Box>
-
-        <FormControlLabel
-          control={
-            <Checkbox
-              size="small"
-              checked={allShifts}
-              onChange={(e) => setAllShifts(e.target.checked)}
-              sx={{ color: '#94a3b8', '&.Mui-checked': { color: '#3c81f6' } }}
-            />
-          }
-          label={<Typography sx={{ fontSize: 13, color: '#64748b', fontWeight: 500 }}>All Shifts</Typography>}
-          sx={{ ml: 0.5, mr: 1 }}
-        />
-
         {/* Start Time */}
         <TextField
           type="time"
@@ -1232,7 +1240,6 @@ export default function Detections() {
         </Box>
       </Box>
 
-      {/* ── Selected Type Chips + View Toggle ── */}
       <Box sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
         {typeFilter.map((key) => {
           const meta = TYPE_META[key] || { label: key, color: '#94a3b8', bg: '#f1f5f9' };
@@ -1253,7 +1260,10 @@ export default function Detections() {
             />
           );
         })}
-        <Box sx={{ ml: 'auto' }}>
+        <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Typography sx={{ fontSize: 13, fontWeight: 500, color: '#64748b' }}>
+            pushed images {clientTotal} / skipped images {Math.max(0, total - clientTotal)}
+          </Typography>
           <ToggleButtonGroup
             value={view} exclusive onChange={(_, v) => v && setView(v)} size="small"
             sx={{
@@ -1301,13 +1311,6 @@ export default function Detections() {
         <Grid container spacing={2}>
           {filteredData.map((item, i) => (
             <Grid item xs={12} sm={6} md={3} key={`${item.chNo}-${i}`}>
-              {/* <DetectionCard
-                item={item}
-                onClick={setSelected}
-                onPushToClient={pushToClient}
-                copyingToClient={copyingToClient}
-                onSkip={() => console.log('Skip from grid view - unsupported auto-advance')}
-              /> */}
               <DetectionCard
                 item={item}
                 onClick={setSelected}

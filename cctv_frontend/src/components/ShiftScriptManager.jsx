@@ -27,8 +27,7 @@ import {
     Add,
     Delete,
     CheckCircle,
-    Extension,          // fallback icon for unmapped scripts
-    // Script-type icons (matching Layout.jsx TYPE_META)
+    Extension,
     WarningAmber,
     Groups,
     PersonOff,

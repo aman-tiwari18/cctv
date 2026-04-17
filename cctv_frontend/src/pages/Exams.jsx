@@ -26,6 +26,8 @@ import {
   Checkbox,
   Snackbar,
   Paper,
+  Radio,
+  RadioGroup,
 } from '@mui/material';
 import {
   Add,
@@ -44,6 +46,7 @@ import {
   AccessTime,
   AccessTimeOutlined,
   StayPrimaryLandscape,
+  Close,
 } from '@mui/icons-material';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
@@ -501,165 +504,253 @@ const Exams = () => {
       )}
 
       {/* Create/Edit Dialog */}
-      <Dialog open={openDialog} onClose={handleCloseDialog} maxWidth="md" fullWidth>
-        <DialogTitle>{editingExam ? 'Edit Exam' : 'Create New Exam'}</DialogTitle>
-        <DialogContent>
-          {error && (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {error}
-            </Alert>
-          )}
+      <Dialog open={openDialog} onClose={handleCloseDialog} maxWidth="md" fullWidth PaperProps={{ sx: { borderRadius: 3, width: '100%', maxWidth: '750px' } }}>
+        <DialogTitle sx={{ m: 0, p: 2, pb: 1, fontWeight: 800, fontSize: '1.2rem', color: '#0f172a', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          {editingExam ? 'Edit Exam' : 'Create New Exam'}
+          <IconButton onClick={handleCloseDialog} size="small" sx={{ color: '#64748b' }}>
+            <Close fontSize="small" />
+          </IconButton>
+        </DialogTitle>
+        <Divider sx={{ mx: 0 }} />
 
-          {/* Basic Info Section */}
-          <Typography variant="subtitle2" color="primary" sx={{ mt: 1, mb: 0.5 }}>
-            Basic Information
-          </Typography>
+        <DialogContent sx={{ p: 3, pt: 1 }}>
+          {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+
+          {/* BASIC INFORMATION */}
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 2, mt: 1 }}>
+            <Box sx={{ width: 3, height: 14, bgcolor: '#3c81f6', mr: 1, borderRadius: 1 }} />
+            <Typography sx={{ fontWeight: 800, fontSize: '0.85rem', letterSpacing: '0.05em', color: '#1e293b' }}>
+              BASIC INFORMATION
+            </Typography>
+          </Box>
           <Grid container spacing={2}>
             <Grid item xs={12} sm={6}>
+              <Typography sx={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', mb: 0.5, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                Exam Name
+              </Typography>
               <TextField
                 fullWidth
-                label="Exam Name"
                 name="exam_name"
                 value={formData.exam_name}
                 onChange={handleChange}
-                margin="dense"
-                required
+                size="small"
+                InputProps={{ sx: { borderRadius: 2, bgcolor: '#f1f5f9', '& fieldset': { border: 'none' } } }}
               />
             </Grid>
             <Grid item xs={12} sm={6}>
+              <Typography sx={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', mb: 0.5, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                Exam Body
+              </Typography>
               <TextField
                 fullWidth
-                label="Exam Body"
                 name="exam_body"
                 value={formData.exam_body}
                 onChange={handleChange}
-                margin="dense"
-                required
-                placeholder="e.g., SSC, TCS, UPSC"
-              />
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
+                size="small"
                 select
-                label="Link Type"
-                name="link_type"
-                value={formData.link_type}
-                onChange={handleChange}
-                margin="dense"
-                required
+                InputProps={{ sx: { borderRadius: 2, bgcolor: '#f1f5f9', '& fieldset': { border: 'none' } } }}
               >
-                <MenuItem value="RTSP">RTSP</MenuItem>
-                <MenuItem value="HLS">HLS</MenuItem>
+                <MenuItem value="SSC">SSC</MenuItem>
+                <MenuItem value="TCS">TCS</MenuItem>
+                <MenuItem value="UPSC">UPSC</MenuItem>
+                <MenuItem value="IBPS">IBPS</MenuItem>
+                {formData.exam_body && !['SSC', 'TCS', 'UPSC', 'IBPS'].includes(formData.exam_body) && <MenuItem value={formData.exam_body}>{formData.exam_body}</MenuItem>}
               </TextField>
             </Grid>
-            <Grid item xs={12} sm={6}>
+
+            <Grid item xs={12}>
+              <Typography sx={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', mb: 0, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                Link Type
+              </Typography>
+              <RadioGroup row name="link_type" value={formData.link_type} onChange={handleChange}>
+                <FormControlLabel value="RTSP" control={<Radio size="small" sx={{ '&.Mui-checked': { color: '#3c81f6' } }} />} label={<Typography sx={{ fontSize: 13, fontWeight: 600, color: '#475569' }}>RTSP</Typography>} />
+                <FormControlLabel value="HLS" control={<Radio size="small" sx={{ '&.Mui-checked': { color: '#3c81f6' } }} />} label={<Typography sx={{ fontSize: 13, fontWeight: 600, color: '#475569' }}>HTTP</Typography>} />
+              </RadioGroup>
+            </Grid>
+
+            <Grid item xs={12}>
+              <Typography sx={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', mb: 0.5, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                Description
+              </Typography>
               <TextField
                 fullWidth
-                label="Description"
                 name="description"
                 value={formData.description}
                 onChange={handleChange}
-                margin="dense"
+                size="small"
                 multiline
-                rows={1}
+                rows={2}
+                placeholder="Enter requirements..."
+                InputProps={{ sx: { borderRadius: 2, bgcolor: '#f1f5f9', '& fieldset': { border: 'none' }, fontSize: '0.9rem' } }}
               />
             </Grid>
           </Grid>
 
-          <Divider sx={{ my: 2 }} />
-
-          {/* Date Range Section */}
-          <Typography variant="subtitle2" color="primary" sx={{ mb: 0.5 }}>
-            <CalendarMonth fontSize="small" sx={{ verticalAlign: 'middle', mr: 0.5 }} />
-            Exam Date Range
-          </Typography>
-          <Typography variant="caption" color="text.secondary" display="block" mb={1}>
-            Set the start and end dates for the exam period
-          </Typography>
+          {/* EXAM DATE RANGE */}
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 2, mt: 4 }}>
+            <Box sx={{ width: 3, height: 14, bgcolor: '#3c81f6', mr: 1, borderRadius: 1 }} />
+            <Typography sx={{ fontWeight: 800, fontSize: '0.85rem', letterSpacing: '0.05em', color: '#1e293b' }}>
+              EXAM DATE RANGE
+            </Typography>
+          </Box>
           <LocalizationProvider dateAdapter={AdapterDateFns}>
             <Grid container spacing={2}>
               <Grid item xs={12} sm={6}>
-                <DatePicker
-                  label="Start Date"
-                  value={parseDDMMYYYYToDate(formData.start_date)}
-                  onChange={(date) => setFormData({ ...formData, start_date: formatDateDDMMYYYY(date) })}
-                  inputFormat="dd-MM-yyyy"
-                  mask="__-__-____"
-                  renderInput={(params) => (
-                    <TextField fullWidth margin="dense" size="small" {...params} />
+                <Typography sx={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', mb: 0.5, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                  Start Date
+                </Typography>
+                <Box sx={{ position: 'relative' }}>
+                  <TextField
+                    type="date"
+                    size="small"
+                    fullWidth
+                    value={formData.start_date ? formData.start_date.split('-').reverse().join('-') : ''}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setFormData({ ...formData, start_date: val ? val.split('-').reverse().join('-') : '' });
+                    }}
+                    InputProps={{
+                      sx: {
+                        borderRadius: 2, bgcolor: '#f1f5f9', height: 38, fontSize: 14,
+                        color: 'transparent',
+                        paddingRight: '6px',
+                        '& fieldset': { border: 'none' },
+                        '&::-webkit-calendar-picker-indicator': { cursor: 'pointer', opacity: 0.6, '&:hover': { opacity: 1 } }
+                      }
+                    }}
+                  />
+                  {formData.start_date && (
+                    <Box sx={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 14, color: '#334155', pointerEvents: 'none' }}>
+                      {formData.start_date}
+                    </Box>
                   )}
-                />
+                  {!formData.start_date && (
+                    <Box sx={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 14, color: '#94a3b8', pointerEvents: 'none' }}>
+                      dd-mm-yyyy
+                    </Box>
+                  )}
+                </Box>
               </Grid>
               <Grid item xs={12} sm={6}>
-                <DatePicker
-                  label="End Date"
-                  value={parseDDMMYYYYToDate(formData.end_date)}
-                  onChange={(date) => setFormData({ ...formData, end_date: formatDateDDMMYYYY(date) })}
-                  inputFormat="dd-MM-yyyy"
-                  mask="__-__-____"
-                  renderInput={(params) => (
-                    <TextField fullWidth margin="dense" size="small" {...params} />
+                <Typography sx={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', mb: 0.5, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                  End Date
+                </Typography>
+                <Box sx={{ position: 'relative' }}>
+                  <TextField
+                    type="date"
+                    size="small"
+                    fullWidth
+                    value={formData.end_date ? formData.end_date.split('-').reverse().join('-') : ''}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setFormData({ ...formData, end_date: val ? val.split('-').reverse().join('-') : '' });
+                    }}
+                    InputProps={{
+                      sx: {
+                        borderRadius: 2, bgcolor: '#f1f5f9', height: 38, fontSize: 14,
+                        color: 'transparent',
+                        paddingRight: '6px',
+                        '& fieldset': { border: 'none' },
+                        '&::-webkit-calendar-picker-indicator': { cursor: 'pointer', opacity: 0.6, '&:hover': { opacity: 1 } }
+                      }
+                    }}
+                  />
+                  {formData.end_date && (
+                    <Box sx={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 14, color: '#334155', pointerEvents: 'none' }}>
+                      {formData.end_date}
+                    </Box>
                   )}
-                />
+                  {!formData.end_date && (
+                    <Box sx={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 14, color: '#94a3b8', pointerEvents: 'none' }}>
+                      dd-mm-yyyy
+                    </Box>
+                  )}
+                </Box>
               </Grid>
             </Grid>
           </LocalizationProvider>
 
-          <Divider sx={{ my: 2 }} />
-
-          {/* Skip Days Section */}
-          <Typography variant="subtitle2" color="primary" sx={{ mb: 0.5 }}>
-            <EventBusy fontSize="small" sx={{ verticalAlign: 'middle', mr: 0.5 }} />
-            Skip Days & Dates
-          </Typography>
-          <Typography variant="caption" color="text.secondary" display="block" mb={1}>
-            Select recurring days to skip and add specific dates to exclude
-          </Typography>
-
-          <FormControl component="fieldset">
-            <FormLabel component="legend" sx={{ fontSize: '0.85rem' }}>
+          {/* SKIP DAYS & DATES */}
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 2, mt: 4 }}>
+            <Box sx={{ width: 3, height: 14, bgcolor: '#3c81f6', mr: 1, borderRadius: 1 }} />
+            <Typography sx={{ fontWeight: 800, fontSize: '0.85rem', letterSpacing: '0.05em', color: '#1e293b' }}>
+              SKIP DAYS & DATES
+            </Typography>
+          </Box>
+          <Box mb={2}>
+            <Typography sx={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', mb: 1, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
               Skip Weekdays
-            </FormLabel>
-            <FormGroup row>
-              {ALL_DAYS.map((day) => (
-                <FormControlLabel
-                  key={day}
-                  control={
-                    <Checkbox
-                      checked={formData.skip_days.includes(day)}
-                      onChange={() => handleSkipDayToggle(day)}
-                      size="small"
-                    />
-                  }
-                  label={<Typography variant="body2">{day.substring(0, 3)}</Typography>}
-                />
-              ))}
-            </FormGroup>
-          </FormControl>
+            </Typography>
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              {ALL_DAYS.map((day) => {
+                const isSelected = formData.skip_days.includes(day);
+                return (
+                  <Box
+                    key={day}
+                    onClick={() => handleSkipDayToggle(day)}
+                    sx={{
+                      width: 28, height: 28, borderRadius: '50%',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      cursor: 'pointer',
+                      border: isSelected ? 'none' : '1px solid #cbd5e1',
+                      bgcolor: isSelected ? '#eff6ff' : 'transparent',
+                      color: isSelected ? '#3c81f6' : '#64748b',
+                      fontWeight: 700, fontSize: '0.75rem',
+                      transition: 'all 0.2s',
+                    }}
+                  >
+                    {day.substring(0, 1)}
+                  </Box>
+                )
+              })}
+            </Box>
+          </Box>
 
-          <Box mt={1.5}>
-            <Typography variant="body2" color="text.secondary" mb={0.5}>
+          <Box>
+            <Typography sx={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', mb: 0.5, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
               Skip Specific Dates
             </Typography>
             <Box display="flex" gap={1} alignItems="center" mb={1}>
-              <LocalizationProvider dateAdapter={AdapterDateFns}>
-                <DatePicker
-                  label="Skip Date"
-                  value={parseDDMMYYYYToDate(newSkipDate)}
-                  onChange={(date) => setNewSkipDate(formatDateDDMMYYYY(date))}
-                  inputFormat="dd-MM-yyyy"
-                  mask="__-__-____"
-                  renderInput={(params) => (
-                    <TextField size="small" sx={{ minWidth: 180 }} {...params} />
-                  )}
+              <Box sx={{ position: 'relative', flex: 1 }}>
+                <TextField
+                  type="date"
+                  size="small"
+                  fullWidth
+                  value={newSkipDate ? newSkipDate.split('-').reverse().join('-') : ''}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setNewSkipDate(val ? val.split('-').reverse().join('-') : '');
+                  }}
+                  InputProps={{
+                    sx: {
+                      borderRadius: 2, bgcolor: '#f1f5f9', height: 38, fontSize: 14,
+                      color: 'transparent',
+                      paddingRight: '6px',
+                      '& fieldset': { border: 'none' },
+                      '&::-webkit-calendar-picker-indicator': { cursor: 'pointer', opacity: 0.6, '&:hover': { opacity: 1 } }
+                    }
+                  }}
                 />
-              </LocalizationProvider>
+                {newSkipDate && (
+                  <Box sx={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 14, color: '#334155', pointerEvents: 'none' }}>
+                    {newSkipDate}
+                  </Box>
+                )}
+                {!newSkipDate && (
+                  <Box sx={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 14, color: '#94a3b8', pointerEvents: 'none' }}>
+                    Select date (dd-mm-yyyy)
+                  </Box>
+                )}
+              </Box>
               <Button
-                size="small"
-                variant="outlined"
+                variant="contained"
                 onClick={handleAddSkipDate}
                 disabled={!newSkipDate}
+                sx={{
+                  bgcolor: '#e2e8f0', color: '#3b82f6', fontWeight: 700, borderRadius: 2, px: 3, py: 1,
+                  boxShadow: 'none', '&:hover': { bgcolor: '#cbd5e1', boxShadow: 'none' },
+                  '&.Mui-disabled': { bgcolor: '#f1f5f9', color: '#94a3b8' }, textTransform: 'none'
+                }}
               >
                 Add
               </Button>
@@ -670,82 +761,92 @@ const Exams = () => {
                   key={date}
                   label={formatDate(date)}
                   size="small"
-                  color="error"
-                  variant="outlined"
+                  sx={{ bgcolor: '#f1f5f9', color: '#475569', fontWeight: 600, borderRadius: '8px' }}
                   onDelete={() => handleRemoveSkipDate(date)}
-                  deleteIcon={<Close fontSize="small" />}
+                  deleteIcon={<Close sx={{ color: '#94a3b8 !important', fontSize: '14px !important' }} />}
                 />
               ))}
-              {formData.skip_dates.length === 0 && (
-                <Typography variant="caption" color="text.secondary">
-                  No specific dates to skip
-                </Typography>
-              )}
             </Box>
           </Box>
 
-          <Divider sx={{ my: 2 }} />
-
-          {/* Shifts Section */}
-          <Typography variant="subtitle2" color="primary" sx={{ mb: 0.5 }}>
-            <AccessTime fontSize="small" sx={{ verticalAlign: 'middle', mr: 0.5 }} />
-            Exam Shifts
-          </Typography>
-          <Typography variant="caption" color="text.secondary" display="block" mb={1}>
-            Define shifts that will apply to every exam date
-          </Typography>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, mt: 4 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+              <Box sx={{ width: 3, height: 14, bgcolor: '#3c81f6', mr: 1, borderRadius: 1 }} />
+              <Typography sx={{ fontWeight: 800, fontSize: '0.85rem', letterSpacing: '0.05em', color: '#1e293b' }}>
+                EXAM SHIFTS
+              </Typography>
+            </Box>
+            <Button
+              onClick={addShift}
+              startIcon={<Add sx={{ fontSize: 16 }} />}
+              sx={{ color: '#3c81f6', fontWeight: 700, fontSize: '0.75rem', textTransform: 'none' }}
+            >
+              Add Shift
+            </Button>
+          </Box>
 
           {formData.shifts.map((shift, index) => (
-            <Paper
+            <Box
               key={index}
-              variant="outlined"
-              sx={{ p: 1.5, mb: 1.5, display: 'flex', gap: 2, alignItems: 'center' }}
+              sx={{ p: 1.5, mb: 1.5, bgcolor: '#f8fafc', borderRadius: 3, display: 'flex', gap: 2, alignItems: 'center' }}
             >
-              <TextField
-                label="Shift Name"
-                value={shift.shift_name}
-                onChange={(e) => handleShiftChange(index, 'shift_name', e.target.value)}
-                size="small"
-                sx={{ flex: 1 }}
-              />
-              <TextField
-                type="time"
-                label="Start Time"
-                value={shift.start_time}
-                onChange={(e) => handleShiftChange(index, 'start_time', e.target.value)}
-                InputLabelProps={{ shrink: true }}
-                size="small"
-                sx={{ width: 140 }}
-              />
-              <TextField
-                type="time"
-                label="End Time"
-                value={shift.end_time}
-                onChange={(e) => handleShiftChange(index, 'end_time', e.target.value)}
-                InputLabelProps={{ shrink: true }}
-                size="small"
-                sx={{ width: 140 }}
-              />
+              <Box sx={{ flex: 1 }}>
+                <Typography sx={{ fontSize: '0.7rem', fontWeight: 600, color: '#94a3b8', mb: 0.5, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                  Shift Name
+                </Typography>
+                <TextField
+                  value={shift.shift_name}
+                  onChange={(e) => handleShiftChange(index, 'shift_name', e.target.value)}
+                  size="small"
+                  fullWidth
+                  InputProps={{ sx: { borderRadius: 2, fontSize: '0.9rem', bgcolor: '#ffffff', '& fieldset': { border: 'none' } } }}
+                />
+              </Box>
+              <Box sx={{ width: 130 }}>
+                <Typography sx={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', mb: 0.5, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                  Start
+                </Typography>
+                <TextField
+                  type="time"
+                  value={shift.start_time}
+                  onChange={(e) => handleShiftChange(index, 'start_time', e.target.value)}
+                  size="small"
+                  fullWidth
+                  InputProps={{ sx: { borderRadius: 2, bgcolor: '#ffffff', fontSize: '0.8rem', '& fieldset': { border: 'none' } } }}
+                />
+              </Box>
+              <Box sx={{ width: 130 }}>
+                <Typography sx={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', mb: 0.5, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                  End
+                </Typography>
+                <TextField
+                  type="time"
+                  value={shift.end_time}
+                  onChange={(e) => handleShiftChange(index, 'end_time', e.target.value)}
+                  size="small"
+                  fullWidth
+                  InputProps={{ sx: { borderRadius: 2, fontSize: '0.8rem', bgcolor: '#ffffff', '& fieldset': { border: 'none' } } }}
+                />
+              </Box>
               <IconButton
                 onClick={() => removeShift(index)}
                 disabled={formData.shifts.length <= 1}
                 size="small"
-                color="error"
+                sx={{ color: '#ef4444', mt: 2 }}
               >
-                <Delete fontSize="small" />
+                <DeleteOutline fontSize="small" />
               </IconButton>
-            </Paper>
+            </Box>
           ))}
-          <Button startIcon={<Add />} onClick={addShift} size="small">
-            Add Shift
-          </Button>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCloseDialog}>Cancel</Button>
-          <Button onClick={handleSubmit} variant="contained">
+        <Box sx={{ p: 3, pt: 2, display: 'flex', justifyContent: 'flex-end', gap: 2, bgcolor: '#f8fafc', borderBottomLeftRadius: 12, borderBottomRightRadius: 12 }}>
+          <Button onClick={handleCloseDialog} sx={{ color: '#475569', fontWeight: 700, textTransform: 'none', fontSize: 13 }}>
+            Cancel
+          </Button>
+          <Button onClick={handleSubmit} variant="contained" sx={{ bgcolor: '#3c81f6', color: '#fff', fontWeight: 700, borderRadius: 2, px: 4, textTransform: 'none', fontSize: 13, boxShadow: 'none', '&:hover': { bgcolor: '#2563eb', boxShadow: 'none' } }}>
             {editingExam ? 'Update' : 'Create'}
           </Button>
-        </DialogActions>
+        </Box>
       </Dialog>
 
       {/* Snackbar notifications */}

@@ -190,17 +190,16 @@ exports.downloadReport = async (req, res) => {
         ];
         const SHIFT_WIDTHS = [15, 30, 15, 35, 15, 12, 28, 16, 15];
 
-        // ── 7. Shift Sheets (Shift 1, 2, 3) ──────────────────────────────────
-        [0, 1, 2].forEach(idx => {
-            const shiftMeta = shifts[idx];
-            const shiftId = shiftMeta ? shiftMeta.id : null;
+        // ── 7. Shift Sheets (Shift 1, 2, 3...) ──────────────────────────────────
+        shifts.forEach((shiftMeta, idx) => {
+            const shiftId = shiftMeta.id;
             const sheetName = `Shift ${idx + 1}`;
 
             let sheetData = [];
 
             if (isRTSP) {
                 // For RTSP, every camera uploaded applies to all shifts
-                // So we always show Shift 1, 2, and 3 sheets.
+                // So we always show all shifts scheduled for this exam.
 
                 // Show ALL master cameras for RTSP in this shift
                 sheetData = masterCameras.map(cam => {
@@ -236,9 +235,9 @@ exports.downloadReport = async (req, res) => {
                 });
 
             } else {
-                // HLS: load all master cameras, map detections if any found
-                // If allShifts is true, ignore c.shift_id filter and show all masterCameras in every shift
-                const shiftCams = allShifts ? masterCameras : masterCameras.filter(c => c.shift_id === shiftId);
+                // HLS: load ALL master cameras for this exam in every generated shift sheet
+                // Matching the RTSP pattern ("jaise rtsp m ho rha h")
+                const shiftCams = masterCameras;
 
                 sheetData = shiftCams.map(cam => {
                     const agg = (aggregated[shiftId] || {})[cam.ch_code];
@@ -313,20 +312,28 @@ exports.downloadReport = async (req, res) => {
 
         // ── 9. Analysis Sheet ─────────────────────────────────────────────────
         const analysisData = [];
-
         let cumulativeOnline = 0;
+        let totalDurationMinutes = 0;
 
-        [0, 1, 2].forEach(idx => {
-            const shiftMeta = shifts[idx];
-            const shiftId = shiftMeta ? shiftMeta.id : -1;
+        const parseTimeToMinutes = (t) => {
+            if (!t) return 0;
+            const [h, m] = t.split(':').map(Number);
+            return (h * 60) + m;
+        };
 
-            if (isRTSP) {
-                // Respecting user requirement: always show all shifts for RTSP analysis
-            } else if (!shiftsWithData.has(shiftId) && !allShifts) {
-                return;
+        shifts.forEach((shiftMeta, idx) => {
+            const shiftId = shiftMeta.id;
+
+            // Calculate duration for this shift
+            if (shiftMeta && shiftMeta.start_time && shiftMeta.end_time) {
+                let diff = parseTimeToMinutes(shiftMeta.end_time) - parseTimeToMinutes(shiftMeta.start_time);
+                if (diff < 0) diff += 1440; // Handle overnight shifts
+                totalDurationMinutes += diff;
             }
 
-            const shiftCams = (isRTSP || allShifts) ? masterCameras : masterCameras.filter(c => c.shift_id === shiftId);
+            // In analysis, we show stats for every scheduled shift
+            // Show all master cameras for the exam in every shift (RTSP parity)
+            const shiftCams = masterCameras;
             const shiftDets = detections.filter(d => d.shift_id === shiftId);
 
             const total = shiftCams.length;
@@ -362,11 +369,13 @@ exports.downloadReport = async (req, res) => {
             detections.filter(d => (d.camera_status || '').toLowerCase() === 'online').map(d => d.ch_code)
         ).size;
 
+        const totalHours = (totalDurationMinutes / 60).toFixed(1);
+
         analysisData.push(['OVERALL SUMMARY', '']);
         analysisData.push(['Total Unique Cameras Online Today', uniqueOnline]);
         analysisData.push(['Total Online Cameras (Sum of Shifts)', cumulativeOnline]);
         analysisData.push(['Total Detections (All Shifts)', detections.length]);
-        analysisData.push([`Total Shift Duration`, `${shifts.length} shift(s) × 1.5 hours`]);
+        analysisData.push(['Total Scheduled Duration (Active Shifts)', `${totalHours} hours`]);
 
         const analysisWs = XLSX.utils.aoa_to_sheet(analysisData);
         analysisWs['!cols'] = [{ wch: 40 }, { wch: 20 }];

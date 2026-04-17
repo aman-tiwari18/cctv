@@ -911,6 +911,7 @@ def list_client_detections(
                     "category": row.get("camera_category", ""),
                     "uid": row.get("unique_id"),
                     "_mtime": row.get("created_at").timestamp() if hasattr(row.get("created_at"), "timestamp") else 0,
+                    "updated_at": row.get("updated_at").timestamp() if hasattr(row.get("updated_at"), "timestamp") else 0,
                 })
 
                 if date and not item["date"].startswith(date):

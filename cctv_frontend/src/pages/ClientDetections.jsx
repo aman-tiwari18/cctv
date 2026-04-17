@@ -161,7 +161,7 @@ function DetectionCard({ item, onClick, onRemove, isRemoving, removed }) {
           />
         )}
         <NewBadge
-          addedAt={item.addedAt}
+          addedAt={item.updated_at}
           sx={{ position: 'absolute', top: 8, right: 8 }}
         />
         {invigilatorEventLabel && (
