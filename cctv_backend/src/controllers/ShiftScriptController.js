@@ -150,7 +150,7 @@ exports.assignScript = async (req, res) => {
  * Bulk assign scripts to a shift
  */
 exports.bulkAssign = async (req, res) => {
-    const { scripts } = req.body;
+    const { scripts, date_from, date_to, specific_dates, all_days } = req.body;
     const shift_id = req.params.shiftId;
 
     if (!Array.isArray(scripts) || scripts.length === 0) {
@@ -176,11 +176,38 @@ exports.bulkAssign = async (req, res) => {
         });
     }
 
-    const assignableDates = getAssignableDates(exam);
-    if (assignableDates.length === 0) {
+    const allAssignableDates = getAssignableDates(exam);
+    if (allAssignableDates.length === 0) {
         return res.status(400).json({
             success: false,
             message: "No assignable dates found. Please set exam start_date/end_date and verify skip_days/skip_dates.",
+        });
+    }
+
+    // Determine which dates to schedule for
+    let targetDates;
+    if (all_days || (!date_from && !date_to && !specific_dates)) {
+        // No filter = all exam dates
+        targetDates = allAssignableDates;
+    } else if (Array.isArray(specific_dates) && specific_dates.length > 0) {
+        // Specific dates array
+        const valid = new Set(allAssignableDates);
+        targetDates = specific_dates.map(toDateOnly).filter((d) => d && valid.has(d));
+    } else {
+        // Date range filter
+        const from = toDateOnly(date_from);
+        const to = toDateOnly(date_to);
+        targetDates = allAssignableDates.filter((d) => {
+            if (from && d < from) return false;
+            if (to && d > to) return false;
+            return true;
+        });
+    }
+
+    if (targetDates.length === 0) {
+        return res.status(400).json({
+            success: false,
+            message: "No valid dates in the selected range.",
         });
     }
 
@@ -205,7 +232,7 @@ exports.bulkAssign = async (req, res) => {
         where: {
             shift_id,
             script_id: { [Op.in]: prepared.map((s) => s.script_id) },
-            assignment_date: { [Op.in]: assignableDates },
+            assignment_date: { [Op.in]: targetDates },
         },
         raw: true,
     });
@@ -216,7 +243,7 @@ exports.bulkAssign = async (req, res) => {
 
     const assignments = [];
     for (const s of prepared) {
-        for (const date of assignableDates) {
+        for (const date of targetDates) {
             const key = `${s.script_id}::${date}`;
             if (existingKeySet.has(key)) continue;
 
@@ -237,12 +264,12 @@ exports.bulkAssign = async (req, res) => {
 
     res.status(201).json({
         success: true,
-        message: `Successfully created ${assignments.length} assignment(s) across ${assignableDates.length} date(s).`,
+        message: `Successfully created ${assignments.length} assignment(s) across ${targetDates.length} date(s).`,
         count: assignments.length,
         data: {
             created: assignments.length,
             skippedExisting: existingAssignments.length,
-            validDates: assignableDates.length,
+            validDates: targetDates.length,
             validScripts: prepared.length,
         },
     });
@@ -350,7 +377,7 @@ exports.updateAssignment = async (req, res) => {
 
 
 /**
- * Delete shift-script assignment (soft delete)
+ * Delete shift-script assignment (single row)
  */
 exports.deleteAssignment = async (req, res) => {
     await ShiftScriptAssignment.destroy(
@@ -360,5 +387,55 @@ exports.deleteAssignment = async (req, res) => {
     res.json({
         success: true,
         message: "Assignment deleted successfully",
+    });
+};
+
+
+/**
+ * Bulk-delete assignments for a script on a shift, scoped by date range
+ * Body: { script_id, shift_id, all_days?, date_from?, date_to? }
+ */
+exports.bulkDelete = async (req, res) => {
+    let { script_id, shift_id, all_days, date_from, date_to } = req.body;
+
+    if (!script_id || !shift_id) {
+        return res.status(400).json({
+            success: false,
+            message: "script_id and shift_id are required",
+        });
+    }
+
+    // If script_id is a string that is NOT a number, it might be a technical identifier (like 'phone').
+    // We should resolve it to the primary key (id).
+    if (typeof script_id === "string" && isNaN(Number(script_id))) {
+        const found = await Script.findOne({ where: { script_id } });
+        if (found) {
+            script_id = found.id;
+        } else {
+            return res.status(404).json({ success: false, message: `Script identifier '${script_id}' not found.` });
+        }
+    }
+
+    const where = { script_id, shift_id };
+
+    if (!all_days && (date_from || date_to)) {
+        const from = toDateOnly(date_from);
+        const to = toDateOnly(date_to);
+        if (from && to) {
+            where.assignment_date = { [Op.between]: [from, to] };
+        } else if (from) {
+            where.assignment_date = { [Op.gte]: from };
+        } else if (to) {
+            where.assignment_date = { [Op.lte]: to };
+        }
+    }
+    // if all_days is true or no date filter → delete all rows for this script+shift
+
+    const deleted = await ShiftScriptAssignment.destroy({ where });
+
+    res.json({
+        success: true,
+        message: `Deleted ${deleted} assignment(s) successfully.`,
+        deleted,
     });
 };

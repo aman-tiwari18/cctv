@@ -8,10 +8,14 @@ import {
   CircularProgress,
   Alert,
   IconButton,
+  Dialog,
+  DialogContent,
   FormControl,
   InputLabel,
   Select,
   MenuItem,
+  ToggleButton,
+  ToggleButtonGroup,
   Badge,
 } from '@mui/material';
 import {
@@ -21,9 +25,14 @@ import {
   Description as DescriptionIcon,
   Add,
   Close,
+  CalendarMonth,
+  ChevronLeft,
+  DeleteOutline,
+  Analytics as AnalyticsIcon
 } from '@mui/icons-material';
 import { examsAPI, shiftScriptsAPI } from '../services/api';
 import ShiftScriptManager from '../components/ShiftScriptManager';
+import { ExamsSvgIcon } from '../components/ExamsSvgIcon'
 
 /* ── Script chip colors keyed by script_id (exact TYPE_META from Detections.jsx) ── */
 const SCRIPT_COLORS = {
@@ -68,6 +77,17 @@ const Analytics = () => {
   /* ── Archived Exams Toggle ── */
   const [viewingArchived, setViewingArchived] = useState(false);
 
+  /* ── Delete Confirmation Dialog ── */
+  const [deleteDialog, setDeleteDialog] = useState({ open: false, assignment: null });
+  const [allDays, setAllDays] = useState(true);
+  /* ── Date range picker state ── */
+  const [showDateRangePicker, setShowDateRangePicker] = useState(false);
+  const [pickerStart, setPickerStart] = useState('');
+  const [pickerEnd, setPickerEnd] = useState('');
+  const [appliedDateRange, setAppliedDateRange] = useState({ start: '', end: '' });
+  /* ── Calendar nav ── */
+  const [calMonth, setCalMonth] = useState(() => new Date());
+
   useEffect(() => {
     loadExams();
   }, [viewingArchived]);
@@ -77,6 +97,11 @@ const Analytics = () => {
       loadShifts();
       setShiftAssignments({});
       setSelectedDate('');
+      // reset date scheduling
+      setAllDays(true);
+      setAppliedDateRange({ start: '', end: '' });
+      setPickerStart('');
+      setPickerEnd('');
     } else {
       setShifts([]);
       setShiftAssignments({});
@@ -120,22 +145,36 @@ const Analytics = () => {
     loadShifts();
   };
 
-  const handleDeleteAssignment = async (assignmentId) => {
-    if (window.confirm('Are you sure you want to remove this script assignment?')) {
-      try {
-        await shiftScriptsAPI.delete(assignmentId);
-        handleRefresh();
-      } catch (error) {
-        alert('Failed to delete assignment');
+  const handleDeleteConfirm = async () => {
+    if (!deleteDialog.assignment) return;
+    try {
+      const { shift_id } = deleteDialog.assignment;
+      // Use the numeric DB primary key (script_id on the assignment row),
+      // NOT the technical string identifier (Script.script_id like 'phone').
+      const numericScriptId = deleteDialog.assignment.script_id || deleteDialog.assignment.script?.id;
+
+      if (!shift_id || !numericScriptId) {
+        alert('Could not determine shift or script ID. Please try again.');
+        return;
       }
+
+      await shiftScriptsAPI.bulkDelete({
+        shift_id,
+        script_id: numericScriptId,
+        ...dateOptions
+      });
+
+      handleRefresh();
+      setDeleteDialog({ open: false, assignment: null });
+    } catch (error) {
+      console.error('Delete error:', error);
+      alert('Failed to delete assignments: ' + (error?.response?.data?.message || error.message));
     }
   };
 
   const handleAssignmentsReady = useCallback((shiftId, assignmentList) => {
     setShiftAssignments((prev) => ({ ...prev, [shiftId]: assignmentList }));
   }, []);
-
-  const selectedExam = exams.find((e) => String(e.id) === String(selectedExamId));
 
   /* ── Collect all available dates across every shift ── */
   const availableDates = useMemo(() => {
@@ -162,9 +201,87 @@ const Analytics = () => {
 
   const getFilteredAssignments = (shiftId) => {
     const all = shiftAssignments[shiftId] || [];
+    // When allDays — show all
+    if (allDays) return all;
+    // When a range is applied, filter chips to only dates in range
+    if (appliedDateRange.start) {
+      const from = appliedDateRange.start;
+      const to = appliedDateRange.end || appliedDateRange.start;
+      return all.filter((a) => a.assignment_date >= from && a.assignment_date <= to);
+    }
+    // Fallback: filter by selectedDate
     if (!selectedDate) return all;
     return all.filter((a) => a.assignment_date === selectedDate);
   };
+
+  /* ── Exam date range helpers ── */
+  const selectedExam = exams.find((e) => String(e.id) === String(selectedExamId));
+
+  // API returns dates as yyyy-MM-dd — parse directly
+  const parseExamDate = (dateStr) => {
+    if (!dateStr) return null;
+    const d = new Date(`${dateStr}T00:00:00`);
+    return isNaN(d.getTime()) ? null : d;
+  };
+
+  const examStartDate = selectedExam ? parseExamDate(selectedExam.start_date) : null;
+  const examEndDate = selectedExam ? parseExamDate(selectedExam.end_date) : null;
+
+  const fmtDate = (d) => {
+    if (!d) return '';
+    return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  };
+
+  /* ── Calendar helpers ── */
+  const calYear = calMonth.getFullYear();
+  const calMonthIdx = calMonth.getMonth();
+  const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const DAY_LABELS = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+
+  const getCalDays = () => {
+    const firstDay = new Date(calYear, calMonthIdx, 1).getDay();
+    const daysInMonth = new Date(calYear, calMonthIdx + 1, 0).getDate();
+    const days = [];
+    for (let i = 0; i < firstDay; i++) days.push(null);
+    for (let d = 1; d <= daysInMonth; d++) days.push(new Date(calYear, calMonthIdx, d));
+    return days;
+  };
+
+  const handleCalDayClick = (day) => {
+    if (!day) return;
+    const iso = day.toISOString().split('T')[0];
+    if (!pickerStart || (pickerStart && pickerEnd)) {
+      setPickerStart(iso);
+      setPickerEnd('');
+    } else {
+      if (iso < pickerStart) {
+        setPickerEnd(pickerStart);
+        setPickerStart(iso);
+      } else {
+        setPickerEnd(iso);
+      }
+    }
+  };
+
+  const isInRange = (day) => {
+    if (!day || !pickerStart) return false;
+    const iso = day.toISOString().split('T')[0];
+    if (pickerEnd) return iso >= pickerStart && iso <= pickerEnd;
+    return iso === pickerStart;
+  };
+
+  const isRangeStart = (day) => day && day.toISOString().split('T')[0] === pickerStart;
+  const isRangeEnd = (day) => day && pickerEnd && day.toISOString().split('T')[0] === pickerEnd;
+
+  /* ── dateOptions passed to ShiftScriptManager ── */
+  const dateOptions = useMemo(() => {
+    if (allDays) return { all_days: true };
+    if (appliedDateRange.start && appliedDateRange.end)
+      return { date_from: appliedDateRange.start, date_to: appliedDateRange.end };
+    if (appliedDateRange.start)
+      return { specific_dates: [appliedDateRange.start] };
+    return { all_days: true };
+  }, [allDays, appliedDateRange]);
 
   return (
     <Box sx={{ display: 'flex', minHeight: 'calc(100vh - 120px)', bgcolor: '#f8fafc' }}>
@@ -183,7 +300,7 @@ const Analytics = () => {
         {/* Header */}
         <Box sx={{ px: 2.5, pt: 2.5, pb: 1.5 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <DescriptionIcon sx={{ fontSize: 18, color: '#64748b' }} />
+            <ExamsSvgIcon sx={{ fontSize: 18, color: '#64748b' }} />
             <Typography
               sx={{
                 fontSize: '0.72rem',
@@ -311,7 +428,7 @@ const Analytics = () => {
                 mb: 3,
               }}
             >
-              <DescriptionIcon sx={{ fontSize: 40, color: '#3b82f6' }} />
+              <AnalyticsIcon sx={{ fontSize: 40, color: '#3b82f6' }} />
             </Box>
             <Typography variant="h5" sx={{ fontWeight: 700, color: '#1e293b', mb: 1.5 }}>
               Select an exam from the list
@@ -325,55 +442,281 @@ const Analytics = () => {
         ) : (
 
           <>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3.5 }}>
-              <Box>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5 }}>
-                  <Typography variant="h6" sx={{ fontWeight: 600, color: '#0f172a', fontSize: '1.5rem' }}>
-                    {selectedExam ? `${selectedExam.exam_name} (${selectedExam.exam_body})` : 'Exam'}
-                  </Typography>
-                  {selectedExam && selectedExam.is_active === false && (
-                    <Chip label="Archived" size="small" color="error" variant="filled" sx={{ fontWeight: 600, height: 24, fontSize: '0.7rem' }} />
-                  )}
-                </Box>
-                <Typography sx={{ fontSize: '0.9rem', color: '#64748b', mt: 0.5 }}>
-                  Managing shifts and monitoring scripts for {selectedExam?.exam_name || 'this exam'}.
+            {/* ── Single-row header: exam name left, date range + toggles right ── */}
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2, mb: 3 }}>
+
+              {/* LEFT: Exam title */}
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                <Typography variant="h6" sx={{ fontWeight: 700, color: '#0f172a', fontSize: '1.35rem' }}>
+                  {selectedExam ? `${selectedExam.exam_name} (${selectedExam.exam_body})` : 'Exam'}
                 </Typography>
+                {selectedExam && selectedExam.is_active === false && (
+                  <Chip label="Archived" size="small" color="error" variant="filled" sx={{ fontWeight: 600, height: 24, fontSize: '0.7rem' }} />
+                )}
               </Box>
 
+              {/* RIGHT: Date range pill + iOS toggle + optional date range picker trigger */}
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexShrink: 0 }}>
-                {availableDates.length > 0 && (
-                  <FormControl size="small" sx={{ minWidth: 180 }}>
-                    <InputLabel id="global-date-label">Assignment Date</InputLabel>
-                    <Select
-                      labelId="global-date-label"
-                      value={selectedDate}
-                      label="Assignment Date"
-                      onChange={(e) => setSelectedDate(e.target.value)}
-                      sx={{
-                        borderRadius: 2,
-                        fontSize: '0.85rem',
-                        bgcolor: '#fff',
-                      }}
-                    >
-                      {availableDates.map((date) => (
-                        <MenuItem key={date} value={date}>
-                          {formatDateLabel(date)}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
+                {/* Exam date range – always shown */}
+                {selectedExam && (examStartDate || examEndDate) && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.7, px: 1.5, py: 0.5, borderRadius: 2, bgcolor: '#f1f5f9' }}>
+                    <CalendarMonth sx={{ fontSize: 14, color: '#94a3b8' }} />
+                    <Typography sx={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 500, whiteSpace: 'nowrap' }}>
+                      {fmtDate(examStartDate)} &mdash; {fmtDate(examEndDate)}
+                    </Typography>
+                  </Box>
                 )}
-                {/* <IconButton
-                  onClick={handleRefresh}
+
+                {/* iOS-style toggle switch */}
+                <Box
+                  onClick={() => {
+                    const next = !allDays;
+                    setAllDays(next);
+                    if (!next) setShowDateRangePicker(true);
+                    else setAppliedDateRange({ start: '', end: '' });
+                  }}
                   sx={{
-                    bgcolor: '#f1f5f9',
-                    '&:hover': { bgcolor: '#e2e8f0' },
+                    width: 44, height: 24, borderRadius: 12, cursor: 'pointer',
+                    bgcolor: allDays ? '#3b82f6' : '#cbd5e1',
+                    position: 'relative', transition: 'background 0.2s ease',
+                    flexShrink: 0,
                   }}
                 >
-                  <Refresh sx={{ fontSize: 20, color: '#64748b' }} />
-                </IconButton> */}
+                  <Box sx={{
+                    position: 'absolute',
+                    width: 18, height: 18,
+                    bgcolor: '#fff',
+                    borderRadius: '50%',
+                    top: 3,
+                    left: allDays ? 23 : 3,
+                    transition: 'left 0.2s ease',
+                    boxShadow: '0 1px 4px rgba(0,0,0,0.25)',
+                  }} />
+                </Box>
+                <Typography
+                  onClick={() => {
+                    const next = !allDays;
+                    setAllDays(next);
+                    if (!next) setShowDateRangePicker(true);
+                    else setAppliedDateRange({ start: '', end: '' });
+                  }}
+                  sx={{ fontSize: '0.85rem', fontWeight: 600, color: '#334155', cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}
+                >
+                  All Days
+                </Typography>
+
+                {/* Date range picker trigger — only shown when toggle is OFF */}
+                {!allDays && (
+                  <Box
+                    onClick={() => setShowDateRangePicker(true)}
+                    sx={{
+                      display: 'flex', alignItems: 'center', gap: 0.6,
+                      px: 1.5, py: 0.5, borderRadius: 2, cursor: 'pointer',
+                      bgcolor: appliedDateRange.start ? '#eff6ff' : '#f1f5f9',
+                      border: appliedDateRange.start ? '1px solid #bfdbfe' : '1px solid #e2e8f0',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    <CalendarMonth sx={{ fontSize: 14, color: '#3b82f6' }} />
+                    <Typography sx={{ fontSize: '0.8rem', fontWeight: 600, color: '#3b82f6', whiteSpace: 'nowrap' }}>
+                      {appliedDateRange.start
+                        ? `${appliedDateRange.start}${appliedDateRange.end && appliedDateRange.end !== appliedDateRange.start ? ` → ${appliedDateRange.end}` : ''}`
+                        : 'Pick range'
+                      }
+                    </Typography>
+                    {appliedDateRange.start && (
+                      <Close
+                        onClick={(e) => { e.stopPropagation(); setAllDays(true); setAppliedDateRange({ start: '', end: '' }); }}
+                        sx={{ fontSize: 13, color: '#94a3b8', ml: 0.5, '&:hover': { color: '#475569' } }}
+                      />
+                    )}
+                  </Box>
+                )}
               </Box>
             </Box>
+
+            {/* ── Date Range Picker Dialog ── */}
+            <Dialog open={showDateRangePicker} onClose={() => setShowDateRangePicker(false)} PaperProps={{ sx: { borderRadius: 4, p: 0, minWidth: 360 } }}>
+              <DialogContent sx={{ p: 3, pb: 2 }}>
+                {/* Start / Finish inputs */}
+                <Box sx={{ display: 'flex', gap: 2, mb: 2.5 }}>
+                  <Box sx={{ flex: 1 }}>
+                    <Typography sx={{ fontSize: '0.6rem', fontWeight: 800, color: '#64748b', mb: 0.5, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Start Date</Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, bgcolor: '#f8fafc', borderRadius: 2, px: 1.5, py: 1, border: '1px solid #e2e8f0' }}>
+                      <CalendarMonth sx={{ fontSize: 16, color: '#3b82f6' }} />
+                      <Typography sx={{ fontSize: 14, color: pickerStart ? '#1e293b' : '#94a3b8' }}>
+                        {pickerStart || 'Select'}
+                      </Typography>
+                    </Box>
+                  </Box>
+                  <Box sx={{ flex: 1 }}>
+                    <Typography sx={{ fontSize: '0.6rem', fontWeight: 800, color: '#64748b', mb: 0.5, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Finish Date</Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, bgcolor: '#f8fafc', borderRadius: 2, px: 1.5, py: 1, border: '1px solid #e2e8f0' }}>
+                      <CalendarMonth sx={{ fontSize: 16, color: '#3b82f6' }} />
+                      <Typography sx={{ fontSize: 14, color: pickerEnd ? '#1e293b' : '#94a3b8' }}>
+                        {pickerEnd || 'Select'}
+                      </Typography>
+                    </Box>
+                  </Box>
+                </Box>
+
+                {/* Month nav */}
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
+                  <IconButton size="small" onClick={() => setCalMonth(new Date(calYear, calMonthIdx - 1, 1))}>
+                    <ChevronLeft sx={{ fontSize: 20 }} />
+                  </IconButton>
+                  <Typography sx={{ fontWeight: 800, fontSize: '1rem', color: '#1e293b' }}>
+                    {MONTH_NAMES[calMonthIdx]} {calYear}
+                  </Typography>
+                  <IconButton size="small" onClick={() => setCalMonth(new Date(calYear, calMonthIdx + 1, 1))}>
+                    <ChevronRight sx={{ fontSize: 20 }} />
+                  </IconButton>
+                </Box>
+
+                {/* Day labels */}
+                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', mb: 0.5 }}>
+                  {DAY_LABELS.map((l) => (
+                    <Typography key={l} sx={{ textAlign: 'center', fontSize: '0.7rem', fontWeight: 700, color: '#94a3b8', py: 0.5 }}>{l}</Typography>
+                  ))}
+                </Box>
+
+                {/* Days grid */}
+                <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 0 }}>
+                  {getCalDays().map((day, i) => {
+                    const inRange = isInRange(day);
+                    const isStart = isRangeStart(day);
+                    const isEnd = isRangeEnd(day);
+                    return (
+                      <Box
+                        key={i}
+                        onClick={() => handleCalDayClick(day)}
+                        sx={{
+                          textAlign: 'center', py: 0.7, cursor: day ? 'pointer' : 'default',
+                          bgcolor: inRange ? '#eff6ff' : 'transparent',
+                          borderRadius: isStart ? '50% 0 0 50%' : isEnd ? '0 50% 50% 0' : 0,
+                          position: 'relative',
+                        }}
+                      >
+                        {day && (
+                          <Box sx={{
+                            width: 34, height: 34, borderRadius: '50%', mx: 'auto',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            bgcolor: (isStart || isEnd) ? '#3b82f6' : 'transparent',
+                            color: (isStart || isEnd) ? '#fff' : inRange ? '#3b82f6' : '#334155',
+                            fontWeight: (isStart || isEnd) ? 800 : inRange ? 600 : 400,
+                            fontSize: 14,
+                            transition: 'all 0.1s',
+                            '&:hover': { bgcolor: (isStart || isEnd) ? '#2563eb' : '#dbeafe' },
+                          }}>
+                            {day.getDate()}
+                          </Box>
+                        )}
+                      </Box>
+                    );
+                  })}
+                </Box>
+
+                {/* Actions */}
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 2.5, pt: 2, borderTop: '1px solid #f1f5f9' }}>
+                  <Button
+                    onClick={() => { setPickerStart(''); setPickerEnd(''); setShowDateRangePicker(false); }}
+                    sx={{ color: '#64748b', fontWeight: 600, textTransform: 'none', fontSize: 14 }}
+                  >Cancel</Button>
+                  <Button
+                    variant="contained"
+                    disabled={!pickerStart}
+                    onClick={() => {
+                      setAppliedDateRange({ start: pickerStart, end: pickerEnd || pickerStart });
+                      setAllDays(false);
+                      setShowDateRangePicker(false);
+                    }}
+                    sx={{ bgcolor: '#3b82f6', fontWeight: 700, borderRadius: 2.5, px: 4, textTransform: 'none', fontSize: 14, boxShadow: 'none', '&:hover': { bgcolor: '#2563eb', boxShadow: 'none' } }}
+                  >Apply</Button>
+                </Box>
+              </DialogContent>
+            </Dialog>
+
+            {/* ── Delete Confirmation Dialog: Premium Redesign ── */}
+            <Dialog
+              open={deleteDialog.open}
+              onClose={() => setDeleteDialog({ open: false, assignment: null })}
+              PaperProps={{
+                sx: {
+                  borderRadius: 5,
+                  p: 0,
+                  maxWidth: 420,
+                  width: '100%',
+                  overflow: 'hidden'
+                }
+              }}
+            >
+              <DialogContent sx={{ p: 4, textAlign: 'center' }}>
+                {/* Trash Icon Circle */}
+                <Box sx={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: '50%',
+                  bgcolor: '#fee2e2',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  mx: 'auto',
+                  mb: 2
+                }}>
+                  <DeleteOutline sx={{ fontSize: 32, color: '#dc2626' }} />
+                </Box>
+
+                <Typography variant="h6" sx={{ fontWeight: 800, color: '#1e293b', mb: 1 }}>
+                  Remove Script?
+                </Typography>
+
+                <Typography sx={{ color: '#333', fontSize: '0.95rem', lineHeight: 1.3, mb: 1 }}>
+                  Are you sure you want to remove <Box component="span" sx={{ fontWeight: 700, color: '#888' }}>{deleteDialog.assignment?.script?.name || 'this script'}</Box>?
+                  <Box component="span" sx={{ display: 'block', mt: 1, fontSize: '0.75rem', color: '#888', mb: 4 }}>
+                    This action will cancel all scheduled executions and delete the script from the active repository
+                  </Box>
+                </Typography>
+
+                {/* Actions Row */}
+                <Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
+                  <Button
+                    fullWidth
+                    onClick={() => setDeleteDialog({ open: false, assignment: null })}
+                    sx={{
+                      color: '#475569',
+                      fontWeight: 700,
+                      bgcolor: '#f1f5f9',
+                      py: 1.3,
+                      borderRadius: 3,
+                      textTransform: 'none',
+                      fontSize: '0.9rem',
+                      '&:hover': { bgcolor: '#e2e8f0' }
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="contained"
+                    fullWidth
+                    disableElevation
+                    onClick={handleDeleteConfirm}
+                    sx={{
+                      fontWeight: 700,
+                      bgcolor: '#2563eb',
+                      color: '#fff',
+                      py: 1.3,
+                      borderRadius: 3,
+                      textTransform: 'none',
+                      fontSize: '0.9rem',
+                      boxShadow: '0 4px 14px 0 rgba(37, 99, 235, 0.39)',
+                      '&:hover': { bgcolor: '#1d4ed8', boxShadow: '0 6px 20px rgba(37, 99, 235, 0.23)' }
+                    }}
+                  >
+                    OK
+                  </Button>
+                </Box>
+              </DialogContent>
+            </Dialog>
 
             {/* Shift cards */}
             {shifts.length > 0 ? (
@@ -444,60 +787,71 @@ const Analytics = () => {
                         </Button>
                       </Box>
 
-                      {/* Script chips — show ALL for selected date */}
-                      {filteredAssignments.length > 0 && (
-                        <Box sx={{ display: 'flex', gap: 1, mt: 2, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-                          {filteredAssignments.map((assignment, i) => {
-                            const name = assignment.script?.name || 'Unknown';
-                            const scriptId = assignment.script?.script_id || '';
-                            const chipColor = SCRIPT_COLORS[scriptId] || DEFAULT_CHIP_COLOR;
-                            const startT = assignment.custom_start_time
-                              ? assignment.custom_start_time.substring(0, 5)
-                              : null;
-                            const endT = assignment.custom_end_time
-                              ? assignment.custom_end_time.substring(0, 5)
-                              : null;
-                            const timeLabel = startT && endT ? `${startT} – ${endT}` : '';
+                      {/* Script chips — deduplicated by script_id */}
+                      {filteredAssignments.length > 0 && (() => {
+                        // Show only unique scripts (first occurrence per script root ID)
+                        const seen = new Set();
+                        const unique = filteredAssignments.filter((a) => {
+                          // Use the numeric database ID as the unique key
+                          const key = a.script_id || a.script?.id || a.id;
+                          if (seen.has(key)) return false;
+                          seen.add(key);
+                          return true;
+                        });
+                        return (
+                          <Box sx={{ display: 'flex', gap: 1, mt: 2, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                            {unique.map((assignment, i) => {
+                              const name = assignment.script?.name || 'Unknown';
+                              const technicalId = assignment.script?.script_id || '';
+                              const chipColor = SCRIPT_COLORS[technicalId] || DEFAULT_CHIP_COLOR;
+                              const startT = assignment.custom_start_time
+                                ? assignment.custom_start_time.substring(0, 5)
+                                : null;
+                              const endT = assignment.custom_end_time
+                                ? assignment.custom_end_time.substring(0, 5)
+                                : null;
+                              const timeLabel = startT && endT ? `${startT} – ${endT}` : '';
 
-                            return (
-                              <Chip
-                                key={assignment.id || i}
-                                label={
-                                  <Box sx={{ textAlign: 'center', lineHeight: 1.3 }}>
-                                    <Box sx={{ fontWeight: 700, fontSize: '0.8rem' }}>{name}</Box>
-                                    {timeLabel && (
-                                      <Box sx={{ fontWeight: 500, fontSize: '0.68rem', opacity: 0.85, mt: '2px', color: '#333' }}>
-                                        {timeLabel}
-                                      </Box>
-                                    )}
-                                  </Box>
-                                }
-                                size="medium"
-                                onDelete={() => handleDeleteAssignment(assignment.id)}
-                                sx={{
-                                  position: 'relative',
-                                  bgcolor: chipColor.bg,
-                                  color: '#777',
-                                  height: 'auto',
-                                  py: 0.8,
-                                  borderRadius: '16px',
-                                  '& .MuiChip-label': { pl: 2, pr: 3.5 },
-                                  '& .MuiChip-deleteIcon': {
-                                    position: 'absolute',
-                                    top: '8px',
-                                    right: '8px',
-                                    margin: 0,
+                              return (
+                                <Chip
+                                  key={technicalId || i}
+                                  label={
+                                    <Box sx={{ textAlign: 'center', lineHeight: 1.3 }}>
+                                      <Box sx={{ fontWeight: 700, fontSize: '0.8rem' }}>{name}</Box>
+                                      {timeLabel && (
+                                        <Box sx={{ fontWeight: 500, fontSize: '0.68rem', opacity: 0.85, mt: '2px', color: '#333' }}>
+                                          {timeLabel}
+                                        </Box>
+                                      )}
+                                    </Box>
+                                  }
+                                  size="medium"
+                                  onDelete={() => setDeleteDialog({ open: true, assignment })}
+                                  sx={{
+                                    position: 'relative',
+                                    bgcolor: chipColor.bg,
                                     color: '#777',
-                                    fontSize: 16,
-                                    '&:hover': { color: chipColor.color, filter: 'brightness(0.8)' }
-                                  },
-                                  mt: 1.5, // add a bit of top margin to separate rows
-                                }}
-                              />
-                            );
-                          })}
-                        </Box>
-                      )}
+                                    height: 'auto',
+                                    py: 0.8,
+                                    borderRadius: '16px',
+                                    '& .MuiChip-label': { pl: 2, pr: 3.5 },
+                                    '& .MuiChip-deleteIcon': {
+                                      position: 'absolute',
+                                      top: '8px',
+                                      right: '8px',
+                                      margin: 0,
+                                      color: '#777',
+                                      fontSize: 16,
+                                      '&:hover': { color: chipColor.color, filter: 'brightness(0.8)' }
+                                    },
+                                    mt: 1.5,
+                                  }}
+                                />
+                              );
+                            })}
+                          </Box>
+                        );
+                      })()}
 
                       {/* ShiftScriptManager — dialog-only mode */}
                       <ShiftScriptManager
@@ -508,6 +862,7 @@ const Analytics = () => {
                         onCloseDialog={() => setOpenShiftDialogId(null)}
                         onScriptNamesReady={(assignments) => handleAssignmentsReady(shift.id, assignments)}
                         renderInline={false}
+                        dateOptions={dateOptions}
                       />
                     </Box>
                   );

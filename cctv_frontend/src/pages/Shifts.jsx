@@ -18,6 +18,7 @@ import {
   Schedule as ScheduleIcon,
 } from '@mui/icons-material';
 import { examsAPI } from '../services/api';
+import { ExamsSvgIcon } from '../components/ExamsSvgIcon'
 
 /* ── Format yyyy-mm-dd → dd-mm-yyyy ── */
 const formatDateLabel = (v) => {
@@ -122,7 +123,7 @@ const Shifts = () => {
         {/* Header */}
         <Box sx={{ px: 2.5, pt: 2.5, pb: 1.5 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <ScheduleIcon sx={{ fontSize: 18, color: '#64748b' }} />
+            <ExamsSvgIcon sx={{ fontSize: 18, color: '#64748b' }} />
             <Typography
               sx={{
                 fontSize: '0.72rem',

@@ -14,11 +14,10 @@ import {
 } from '@mui/icons-material';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import AssignmentIcon from '@mui/icons-material/Assignment';
-import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { camerasAPI, examsAPI } from '../services/api';
-
+import { ExamsSvgIcon } from '../components/ExamsSvgIcon'
 
 const truncate = (str, n = 40) =>
   str && str.length > n ? str.slice(0, n) + '…' : str;
@@ -229,8 +228,8 @@ const Cameras = () => {
           {/* Sidebar header + collapse toggle */}
           <Box sx={{ px: sidebarOpen ? 2.5 : 1, pt: 2.5, pb: 1.5, display: 'flex', alignItems: 'center', justifyContent: sidebarOpen ? 'space-between' : 'center' }}>
             {sidebarOpen && (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <CameraAltIcon sx={{ fontSize: 17, color: '#64748b' }} />
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {/* <ExamsSvgIcon sx={{ fontSize: 17, color: '#64748b' }} /> */}
                 <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#334155' }}>
                   {viewingArchived ? 'Archived Exams' : 'Available Exams'}
                 </Typography>

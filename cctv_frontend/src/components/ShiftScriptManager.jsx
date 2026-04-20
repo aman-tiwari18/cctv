@@ -169,6 +169,7 @@ const ShiftScriptManager = ({
     openDialog: externalOpenDialog,
     onCloseDialog: externalOnCloseDialog,
     onScriptNamesReady,
+    dateOptions = {},
 }) => {
     const [assignments, setAssignments] = useState([]);
     const [scripts, setScripts] = useState([]);
@@ -332,7 +333,7 @@ const ShiftScriptManager = ({
         }
         setSubmitting(true); setError('');
         try {
-            await shiftScriptsAPI.bulkAssign(shift.id, toAssign);
+            await shiftScriptsAPI.bulkAssign(shift.id, toAssign, dateOptions);
             handleCloseDialog();
             loadAssignments();
             if (onUpdate) onUpdate();

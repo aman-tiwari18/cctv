@@ -101,9 +101,10 @@ export const shiftScriptsAPI = {
     getByShift: (shiftId, params) => api.get(`/shifts/${shiftId}/scripts`, { params }),
     getByExam: (examId, params) => api.get(`/exams/${examId}/shift-scripts`, { params }),
     assign: (shiftId, scriptData) => api.post(`/shifts/${shiftId}/scripts`, scriptData),
-    bulkAssign: (shiftId, scripts) => api.post(`/shifts/${shiftId}/scripts/bulk`, { scripts }),
+    bulkAssign: (shiftId, scripts, dateOptions = {}) => api.post(`/shifts/${shiftId}/scripts/bulk`, { scripts, ...dateOptions }),
     update: (id, data) => api.put(`/shift-scripts/${id}`, data),
-    delete: (id) => api.delete(`/shift-scripts/${id}`)
+    delete: (id) => api.delete(`/shift-scripts/${id}`),
+    bulkDelete: (payload) => api.post(`/shift-scripts/bulk-delete`, payload),
 };
 
 export const reportAPI = {

@@ -47,4 +47,11 @@ router.delete(
     asyncHandler(ShiftScriptController.deleteAssignment)
 );
 
+router.post(
+    "/shift-scripts/bulk-delete",
+    authenticate,
+    authorize("ADMIN", "OPERATOR"),
+    asyncHandler(ShiftScriptController.bulkDelete)
+);
+
 module.exports = router;

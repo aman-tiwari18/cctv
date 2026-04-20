@@ -9,10 +9,11 @@ import {
 } from '@mui/material';
 import {
   Visibility, Refresh, Stop, FiberManualRecord, ChevronRight,
-  PlayCircle as PlayCircleIcon,
+  PlayCircle as PlayCircleIcon, Slideshow
 } from '@mui/icons-material';
 import { format } from 'date-fns';
 import { executionsAPI, examsAPI } from '../services/api';
+import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
 import axios from 'axios';
 
 /* ── Status chip colour map ────────────────────────────────── */
@@ -171,9 +172,6 @@ const Executions = () => {
     } finally { setCancelling(false); }
   };
 
-  /* ════════════════════════════════════════════════════
-     RENDER
-  ═════════════════════════════════════════════════════ */
   return (
     <Box sx={{ display: 'flex', minHeight: 'calc(100vh - 120px)', bgcolor: '#f8fafc' }}>
 
@@ -185,7 +183,7 @@ const Executions = () => {
         {/* Section header */}
         <Box sx={{ px: 2.5, pt: 2.5, pb: 1.5 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <PlayCircleIcon sx={{ fontSize: 18, color: '#64748b' }} />
+            <ExamsSvgIcon sx={{ fontSize: 18, color: '#64748b' }} />
             <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#334155' }}>
               {viewingArchived ? 'Archived Exams' : 'Available Exams'}
             </Typography>
@@ -238,7 +236,7 @@ const Executions = () => {
           /* Empty state */
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 'calc(100vh - 200px)', textAlign: 'center', px: 4 }}>
             <Box sx={{ width: 96, height: 96, borderRadius: '50%', bgcolor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 3 }}>
-              <PlayCircleIcon sx={{ fontSize: 40, color: '#3b82f6' }} />
+              <Slideshow sx={{ fontSize: 40, color: '#3b82f6' }} />
             </Box>
             <Typography variant="h5" sx={{ fontWeight: 700, color: '#1e293b', mb: 1.5 }}>Select an exam to view executions</Typography>
             <Typography sx={{ fontSize: '0.92rem', color: '#64748b', maxWidth: 420, lineHeight: 1.6 }}>
