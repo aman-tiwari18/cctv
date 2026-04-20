@@ -196,7 +196,7 @@ const ShiftScriptManager = ({
         } else {
             setSelectedDate('');
         }
-    }, [shift]);
+    }, [shift, dateOptions]);
 
     /* Auto-select date */
     useEffect(() => {

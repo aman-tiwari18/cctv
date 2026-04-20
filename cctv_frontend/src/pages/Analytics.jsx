@@ -143,6 +143,8 @@ const Analytics = () => {
 
   const handleRefresh = () => {
     loadShifts();
+    // Clear assignments to force re-fetch
+    setShiftAssignments({});
   };
 
   const handleDeleteConfirm = async () => {
@@ -194,7 +196,8 @@ const Analytics = () => {
       return;
     }
     if (!selectedDate || !availableDates.includes(selectedDate)) {
-      const today = new Date().toISOString().split('T')[0];
+      const now = new Date();
+      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
       setSelectedDate(availableDates.includes(today) ? today : availableDates[0]);
     }
   }, [availableDates]);
@@ -238,6 +241,14 @@ const Analytics = () => {
   const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const DAY_LABELS = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
 
+  /* Helper to convert Date to yyyy-MM-dd without timezone issues */
+  const toDateString = (date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   const getCalDays = () => {
     const firstDay = new Date(calYear, calMonthIdx, 1).getDay();
     const daysInMonth = new Date(calYear, calMonthIdx + 1, 0).getDate();
@@ -249,7 +260,7 @@ const Analytics = () => {
 
   const handleCalDayClick = (day) => {
     if (!day) return;
-    const iso = day.toISOString().split('T')[0];
+    const iso = toDateString(day);
     if (!pickerStart || (pickerStart && pickerEnd)) {
       setPickerStart(iso);
       setPickerEnd('');
@@ -265,13 +276,13 @@ const Analytics = () => {
 
   const isInRange = (day) => {
     if (!day || !pickerStart) return false;
-    const iso = day.toISOString().split('T')[0];
+    const iso = toDateString(day);
     if (pickerEnd) return iso >= pickerStart && iso <= pickerEnd;
     return iso === pickerStart;
   };
 
-  const isRangeStart = (day) => day && day.toISOString().split('T')[0] === pickerStart;
-  const isRangeEnd = (day) => day && pickerEnd && day.toISOString().split('T')[0] === pickerEnd;
+  const isRangeStart = (day) => day && toDateString(day) === pickerStart;
+  const isRangeEnd = (day) => day && pickerEnd && toDateString(day) === pickerEnd;
 
   /* ── dateOptions passed to ShiftScriptManager ── */
   const dateOptions = useMemo(() => {
@@ -282,6 +293,14 @@ const Analytics = () => {
       return { specific_dates: [appliedDateRange.start] };
     return { all_days: true };
   }, [allDays, appliedDateRange]);
+
+  /* ── Trigger refresh when date options change ── */
+  useEffect(() => {
+    if (selectedExamId && shifts.length > 0) {
+      // Clear assignments to force re-fetch with new date options
+      setShiftAssignments({});
+    }
+  }, [dateOptions, selectedExamId, shifts.length]);
 
   return (
     <Box sx={{ display: 'flex', minHeight: 'calc(100vh - 120px)', bgcolor: '#f8fafc' }}>
@@ -520,7 +539,7 @@ const Analytics = () => {
                     <CalendarMonth sx={{ fontSize: 14, color: '#3b82f6' }} />
                     <Typography sx={{ fontSize: '0.8rem', fontWeight: 600, color: '#3b82f6', whiteSpace: 'nowrap' }}>
                       {appliedDateRange.start
-                        ? `${appliedDateRange.start}${appliedDateRange.end && appliedDateRange.end !== appliedDateRange.start ? ` → ${appliedDateRange.end}` : ''}`
+                        ? `${formatDateLabel(appliedDateRange.start)}${appliedDateRange.end && appliedDateRange.end !== appliedDateRange.start ? ` → ${formatDateLabel(appliedDateRange.end)}` : ''}`
                         : 'Pick range'
                       }
                     </Typography>
@@ -545,7 +564,7 @@ const Analytics = () => {
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, bgcolor: '#f8fafc', borderRadius: 2, px: 1.5, py: 1, border: '1px solid #e2e8f0' }}>
                       <CalendarMonth sx={{ fontSize: 16, color: '#3b82f6' }} />
                       <Typography sx={{ fontSize: 14, color: pickerStart ? '#1e293b' : '#94a3b8' }}>
-                        {pickerStart || 'Select'}
+                        {pickerStart ? formatDateLabel(pickerStart) : 'Select'}
                       </Typography>
                     </Box>
                   </Box>
@@ -554,7 +573,7 @@ const Analytics = () => {
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, bgcolor: '#f8fafc', borderRadius: 2, px: 1.5, py: 1, border: '1px solid #e2e8f0' }}>
                       <CalendarMonth sx={{ fontSize: 16, color: '#3b82f6' }} />
                       <Typography sx={{ fontSize: 14, color: pickerEnd ? '#1e293b' : '#94a3b8' }}>
-                        {pickerEnd || 'Select'}
+                        {pickerEnd ? formatDateLabel(pickerEnd) : 'Select'}
                       </Typography>
                     </Box>
                   </Box>
