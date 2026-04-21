@@ -835,10 +835,12 @@ export default function Detections() {
 
     socket.on('detection:new', (newItem) => {
       setLiveAlert(newItem);
+      // Always update header + sidebar totals
+      setUnfilteredCounts((prev) => ({ ...prev, [newItem.type]: (prev[newItem.type] || 0) + 1 }));
+      setAllCounts((prev) => ({ ...prev, [newItem.type]: (prev[newItem.type] || 0) + 1 }));
       if (!matchesFilters(newItem)) return;
       setTotal((prev) => prev + 1);
       setCounts((prev) => ({ ...prev, [newItem.type]: (prev[newItem.type] || 0) + 1 }));
-      setAllCounts((prev) => ({ ...prev, [newItem.type]: (prev[newItem.type] || 0) + 1 }));
       if (page === 1) {
         setData((prev) => {
           if (prev.some((existing) => existing.image_url === newItem.image_url)) return prev;
@@ -848,7 +850,7 @@ export default function Detections() {
     });
 
     return () => socket.disconnect();
-  }, [matchesFilters, page, setAllCounts, rowsPerPage]);
+  }, [matchesFilters, page, setAllCounts, setUnfilteredCounts, rowsPerPage]);
 
   const handlePageChange = (_, pg) => {
     setPage(pg);
