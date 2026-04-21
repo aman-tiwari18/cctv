@@ -169,16 +169,16 @@ exports.uploadCameras = async (req, res) => {
                 validRecords.push({
                     exam_id: examId,
                     centre_name: pick(row, "Centre Name", "center_name", "centre_name", "TC Name", "TC NAME", "Tc_name"),
-                    tc_code:      pick(row, "TC Code", "tc_code", "TC_CODE", "TC code"),
-                    city:         pick(row, "City", "city", "CITY"),
-                    state:        pick(row, "State", "state", "STATE"),
-                    camera_name:  pick(row, "Camera Name", "camera_name", "LAN and Lab Name", "LAN & Lab Name"),
-                    ch_code:      chCode,
+                    tc_code: pick(row, "TC Code", "tc_code", "TC_CODE", "TC code"),
+                    city: pick(row, "City", "city", "CITY"),
+                    state: pick(row, "State", "state", "STATE"),
+                    camera_name: pick(row, "Camera Name", "camera_name", "LAN and Lab Name", "LAN & Lab Name"),
+                    ch_code: chCode,
                     cctv_url,
                     camera_category: pick(row, "Camera Category", "camera_category", "camera category"),
-                    classification:  pick(row, "Classification", "classification") || null,
+                    classification: pick(row, "Classification", "classification") || null,
                     exam_date: examDate || null,
-                    shift_id:  shiftId  || null,
+                    shift_id: shiftId || null,
                     is_active: true,
                 });
             } else {
@@ -240,10 +240,10 @@ exports.uploadCameras = async (req, res) => {
 
         await Model.bulkCreate(recordsToInsert);
         // Cleanup temp file
-        try { fs.unlinkSync(req.file.path); } catch (_) {}
+        try { fs.unlinkSync(req.file.path); } catch (_) { }
 
         const skipped = linkType === "HLS" ? validRecords.length - recordsToInsert.length : 0;
-        const message = skipped > 0 
+        const message = skipped > 0
             ? `Successfully uploaded ${recordsToInsert.length} cameras. Skipped ${skipped} duplicate ch_code entries.`
             : `Successfully uploaded ${recordsToInsert.length} cameras.`;
 
@@ -310,11 +310,11 @@ exports.createCamera = async (req, res) => {
 };
 
 /**
- * Get By Exam (with optional shift/date filter for HLS and pagination)
+ * Get By Exam (with optional shift/date filter for HLS, search, and pagination)
  */
 exports.getByExam = async (req, res) => {
     const { examId } = req.params;
-    const { is_active = true, shift_id, exam_date, page = 1, limit = 50 } = req.query;
+    const { is_active = true, shift_id, exam_date, search, page = 1, limit = 50 } = req.query;
     const { Model, linkType } = await getModelByExam(examId);
 
     const where = {
@@ -329,25 +329,90 @@ exports.getByExam = async (req, res) => {
         }
     }
 
+    // Add search functionality
+    if (search && search.trim()) {
+        const searchTerm = `%${search.trim()}%`;
+        where[Op.or] = [
+            { centre_name: { [Op.like]: searchTerm } },
+            { state: { [Op.like]: searchTerm } },
+            { city: { [Op.like]: searchTerm } },
+            { tc_code: { [Op.like]: searchTerm } },
+            { camera_name: { [Op.like]: searchTerm } },
+        ];
+
+        // Add device_id for RTSP
+        if (linkType === "RTSP") {
+            where[Op.or].push({ device_id: { [Op.like]: searchTerm } });
+        }
+
+        // Add ch_code for HLS
+        if (linkType === "HLS") {
+            where[Op.or].push({ ch_code: { [Op.like]: searchTerm } });
+        }
+    }
+
     const parsedLimit = parseInt(limit, 10) || 50;
     const parsedPage = parseInt(page, 10) || 1;
     const offset = (parsedPage - 1) * parsedLimit;
 
-    const result = await Model.findAndCountAll({ 
-        where, 
+    const result = await Model.findAndCountAll({
+        where,
         order: [["created_at", "DESC"]],
         limit: parsedLimit,
         offset: offset
     });
 
-    res.json({ 
-        success: true, 
+    // Calculate status counts (Accessible vs Not Accessible)
+    const statusCountsWhere = {
+        exam_id: examId,
+        is_active: is_active === "true" || is_active === true,
+    };
+
+    if (linkType === "HLS") {
+        const hlsScope = buildHlsCameraScope({ shiftId: shift_id, examDate: exam_date });
+        if (hlsScope.length > 0) {
+            statusCountsWhere[Op.and] = hlsScope;
+        }
+    }
+
+    // Get counts for each status
+    const accessibleCount = await Model.count({
+        where: {
+            ...statusCountsWhere,
+            status: 'Accessible'
+        }
+    });
+
+    const notAccessibleCount = await Model.count({
+        where: {
+            ...statusCountsWhere,
+            status: 'Not Accessible'
+        }
+    });
+
+    const unknownCount = await Model.count({
+        where: {
+            ...statusCountsWhere,
+            [Op.or]: [
+                { status: null },
+                { status: { [Op.notIn]: ['Accessible', 'Not Accessible'] } }
+            ]
+        }
+    });
+
+    res.json({
+        success: true,
         totalCount: result.count,
         count: result.rows.length,
         totalPages: Math.ceil(result.count / parsedLimit),
         currentPage: parsedPage,
-        linkType, 
-        data: result.rows 
+        linkType,
+        statusCounts: {
+            accessible: accessibleCount,
+            notAccessible: notAccessibleCount,
+            unknown: unknownCount
+        },
+        data: result.rows
     });
 };
 

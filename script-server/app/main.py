@@ -12,6 +12,8 @@ from pathlib import Path
 from urllib.parse import quote
 from typing import Optional, List
 import socketio
+import requests
+import json
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -834,6 +836,16 @@ async def copy_client_detections(payload: ClientDetectionCopyRequest):
                     try:
                         await sio.emit("client-detection:new", copied_item)
                         logger.info(f"Emitted client-detection:new for {item.uid}")
+                                                
+                        # Trigger SMS Alert via Node.js Backend
+                        try:
+                            # Payload: { "uid": str, "source": str }
+                            sms_payload = {"uid": item.uid, "source": item.source}
+                            sms_url = f"{MAIN_BACKEND_URL}/sms/send-push-alert"
+                            logger.info(f"Triggering SMS alert on Node.js: {sms_url}")
+                            requests.post(sms_url, json=sms_payload, timeout=5)
+                        except Exception as sms_err:
+                            logger.error(f"Failed to trigger SMS alert via Node.js: {sms_err}")
                     except Exception as e:
                         logger.warning(f"Failed to emit client detection socket event: {e}")
         conn.commit()

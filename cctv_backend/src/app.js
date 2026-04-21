@@ -14,6 +14,7 @@ const executionRoutes = require('./routes/executions');
 const shiftScriptRoutes = require('./routes/shiftScripts');
 const scriptRoutes = require('./routes/scripts');
 const reportRoutes = require('./routes/report');
+const smsRoutes = require('./routes/smsRoutes');
 
 const path = require('path');
 
@@ -57,6 +58,7 @@ app.use(`${BASE}/api/exams`, examRoutes);
 app.use(`${BASE}/api/executions`, executionRoutes);
 app.use(`${BASE}/api/scripts`, scriptRoutes);
 app.use(`${BASE}/api/report`, reportRoutes);
+app.use(`${BASE}/api/sms`, smsRoutes);
 
 // ==========================
 // Frontend (optional)

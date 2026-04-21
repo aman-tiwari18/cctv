@@ -1,15 +1,15 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Box, Paper, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, Typography, Chip, CircularProgress,
   IconButton, Dialog, DialogTitle, DialogContent, DialogActions,
   Button, Tooltip, Alert, Snackbar, FormControl, InputLabel,
-  Select, MenuItem,
+  Select, MenuItem, TextField, InputAdornment, TableSortLabel,
 } from '@mui/material';
 import {
   Visibility, Refresh, Stop, FiberManualRecord, ChevronRight,
-  PlayCircle as PlayCircleIcon, Slideshow
+  PlayCircle as PlayCircleIcon, Slideshow, Search
 } from '@mui/icons-material';
 import { format } from 'date-fns';
 import { executionsAPI, examsAPI } from '../services/api';
@@ -71,6 +71,11 @@ const Executions = () => {
   /* ── Execution data ── */
   const [executions, setExecutions] = useState([]);
   const [loading, setLoading] = useState(false);
+
+  /* ── Search & Sort ── */
+  const [searchQuery, setSearchQuery] = useState('');
+  const [orderBy, setOrderBy] = useState('');
+  const [order, setOrder] = useState('desc');
 
   /* ── Filters (right-panel, far right) ── */
   const [selectedDate, setSelectedDate] = useState('');
@@ -138,11 +143,64 @@ const Executions = () => {
   }, [availableDates.join(',')]);
 
   /* ── Filter rows ── */
-  const visibleRows = executions.filter((e) => {
-    const dateOk = !selectedDate || e.assignment_date === selectedDate;
-    const statusOk = statusFilter === 'ALL' || e.status === statusFilter;
-    return dateOk && statusOk;
-  });
+  const visibleRows = useMemo(() => {
+    let filtered = executions.filter((e) => {
+      const dateOk = !selectedDate || e.assignment_date === selectedDate;
+      const statusOk = statusFilter === 'ALL' || e.status === statusFilter;
+
+      // Search filter
+      let searchOk = true;
+      if (searchQuery.trim()) {
+        const q = searchQuery.trim().toLowerCase();
+        const haystack = [
+          e.script?.name,
+          e.shift?.shift_name,
+          e.status,
+          String(e.id),
+        ].filter(Boolean).join(' ').toLowerCase();
+        searchOk = haystack.includes(q);
+      }
+
+      return dateOk && statusOk && searchOk;
+    });
+
+    // Apply sorting
+    if (orderBy) {
+      filtered.sort((a, b) => {
+        let aVal = a[orderBy];
+        let bVal = b[orderBy];
+
+        // Handle nested properties
+        if (orderBy === 'script_name') {
+          aVal = a.script?.name || '';
+          bVal = b.script?.name || '';
+        } else if (orderBy === 'shift_name') {
+          aVal = a.shift?.shift_name || '';
+          bVal = b.shift?.shift_name || '';
+        }
+
+        // Handle null/undefined
+        if (aVal == null) aVal = '';
+        if (bVal == null) bVal = '';
+
+        // String comparison
+        if (typeof aVal === 'string') aVal = aVal.toLowerCase();
+        if (typeof bVal === 'string') bVal = bVal.toLowerCase();
+
+        if (aVal < bVal) return order === 'asc' ? -1 : 1;
+        if (aVal > bVal) return order === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+
+    return filtered;
+  }, [executions, selectedDate, statusFilter, searchQuery, orderBy, order]);
+
+  const handleRequestSort = (property) => {
+    const isAsc = orderBy === property && order === 'asc';
+    setOrder(isAsc ? 'desc' : 'asc');
+    setOrderBy(property);
+  };
 
   const runningCount = executions.filter((e) => e.status === 'RUNNING').length;
   const selectedExam = exams.find((e) => String(e.id) === String(selectedExamId));
@@ -270,8 +328,33 @@ const Executions = () => {
                 </Typography>
               </Box>
 
-              {/* Far-right: Date + Status filters + Refresh */}
+              {/* Far-right: Search + Date + Status filters */}
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexShrink: 0 }}>
+                {/* Search */}
+                <TextField
+                  size="small"
+                  placeholder="Search script, shift..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <Search sx={{ fontSize: 18, color: '#94a3b8' }} />
+                      </InputAdornment>
+                    ),
+                    sx: {
+                      borderRadius: '8px',
+                      bgcolor: '#f8fafc',
+                      height: 40,
+                      fontSize: 14,
+                      '& fieldset': { border: '1px solid #e2e8f0' },
+                      '&:hover fieldset': { borderColor: '#cbd5e1 !important' },
+                      '& input': { color: '#334155', '&::placeholder': { color: '#94a3b8', opacity: 1 } }
+                    }
+                  }}
+                  sx={{ minWidth: 260, maxWidth: 300 }}
+                />
+
                 {availableDates.length > 0 && (
                   <FormControl size="small" sx={{ minWidth: 165 }}>
                     <InputLabel id="exec-date-label">Execution Date</InputLabel>
@@ -280,7 +363,7 @@ const Executions = () => {
                       value={selectedDate}
                       label="Execution Date"
                       onChange={(e) => setSelectedDate(e.target.value)}
-                      sx={{ borderRadius: 2, fontSize: '0.85rem', bgcolor: '#fff' }}
+                      sx={{ borderRadius: 2, fontSize: '0.85rem', bgcolor: '#fff', height: 40 }}
                     >
                       {availableDates.map((d) => (
                         <MenuItem key={d} value={d}>{formatDateLabel(d)}</MenuItem>
@@ -296,7 +379,7 @@ const Executions = () => {
                     value={statusFilter}
                     label="Status"
                     onChange={(e) => setStatusFilter(e.target.value)}
-                    sx={{ borderRadius: 2, fontSize: '0.85rem', bgcolor: '#fff' }}
+                    sx={{ borderRadius: 2, fontSize: '0.85rem', bgcolor: '#fff', height: 40 }}
                   >
                     {STATUS_OPTIONS.map((s) => <MenuItem key={s} value={s}>{s === 'ALL' ? 'ALL' : s}</MenuItem>)}
                   </Select>
@@ -313,13 +396,61 @@ const Executions = () => {
                 <Table>
                   <TableHead sx={{ bgcolor: '#f8fafc' }}>
                     <TableRow>
-                      <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b' }}>ID</TableCell>
-                      <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b' }}>Script</TableCell>
-                      <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b' }}>Shift</TableCell>
-                      <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b' }}>Status</TableCell>
-                      <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b' }}>Started At</TableCell>
-                      <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b' }}>Completed At</TableCell>
-                      <TableCell align="right" sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b' }}>Actions</TableCell>
+                      <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 80 }}>
+                        <TableSortLabel
+                          active={orderBy === 'id'}
+                          direction={orderBy === 'id' ? order : 'asc'}
+                          onClick={() => handleRequestSort('id')}
+                        >
+                          ID
+                        </TableSortLabel>
+                      </TableCell>
+                      <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 150 }}>
+                        <TableSortLabel
+                          active={orderBy === 'script_name'}
+                          direction={orderBy === 'script_name' ? order : 'asc'}
+                          onClick={() => handleRequestSort('script_name')}
+                        >
+                          Script
+                        </TableSortLabel>
+                      </TableCell>
+                      <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 120 }}>
+                        <TableSortLabel
+                          active={orderBy === 'shift_name'}
+                          direction={orderBy === 'shift_name' ? order : 'asc'}
+                          onClick={() => handleRequestSort('shift_name')}
+                        >
+                          Shift
+                        </TableSortLabel>
+                      </TableCell>
+                      <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 120 }}>
+                        <TableSortLabel
+                          active={orderBy === 'status'}
+                          direction={orderBy === 'status' ? order : 'asc'}
+                          onClick={() => handleRequestSort('status')}
+                        >
+                          Status
+                        </TableSortLabel>
+                      </TableCell>
+                      <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 150 }}>
+                        <TableSortLabel
+                          active={orderBy === 'started_at'}
+                          direction={orderBy === 'started_at' ? order : 'asc'}
+                          onClick={() => handleRequestSort('started_at')}
+                        >
+                          Started At
+                        </TableSortLabel>
+                      </TableCell>
+                      <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 150 }}>
+                        <TableSortLabel
+                          active={orderBy === 'completed_at'}
+                          direction={orderBy === 'completed_at' ? order : 'asc'}
+                          onClick={() => handleRequestSort('completed_at')}
+                        >
+                          Completed At
+                        </TableSortLabel>
+                      </TableCell>
+                      <TableCell align="right" sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 100 }}>Actions</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>

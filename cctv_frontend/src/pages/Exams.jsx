@@ -564,7 +564,7 @@ const Exams = () => {
               </Typography>
               <RadioGroup row name="link_type" value={formData.link_type} onChange={handleChange}>
                 <FormControlLabel value="RTSP" control={<Radio size="small" sx={{ '&.Mui-checked': { color: '#3c81f6' } }} />} label={<Typography sx={{ fontSize: 13, fontWeight: 600, color: '#475569' }}>RTSP</Typography>} />
-                <FormControlLabel value="HLS" control={<Radio size="small" sx={{ '&.Mui-checked': { color: '#3c81f6' } }} />} label={<Typography sx={{ fontSize: 13, fontWeight: 600, color: '#475569' }}>HTTP</Typography>} />
+                <FormControlLabel value="HLS" control={<Radio size="small" sx={{ '&.Mui-checked': { color: '#3c81f6' } }} />} label={<Typography sx={{ fontSize: 13, fontWeight: 600, color: '#475569' }}>HLS</Typography>} />
               </RadioGroup>
             </Grid>
 

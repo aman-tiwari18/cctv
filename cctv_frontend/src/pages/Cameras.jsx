@@ -1,15 +1,15 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Box, Button, Paper, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, Typography, IconButton, Dialog, DialogTitle,
   DialogContent, DialogActions, TextField, MenuItem, Chip,
   CircularProgress, Alert, Tooltip, Divider, Stack, TablePagination,
-  FormControl, InputLabel, Select,
+  FormControl, InputLabel, Select, InputAdornment, TableSortLabel,
 } from '@mui/material';
 import {
   Add, Edit, Delete, Upload, CloudUpload, Download,
-  TableChart, ChevronRight,
+  TableChart, ChevronRight, Search,
   Videocam as VideocamIcon
 } from '@mui/icons-material';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
@@ -73,7 +73,13 @@ const Cameras = () => {
   const [cameras, setCameras] = useState([]);
   const [examLinkType, setExamLinkType] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [statusCounts, setStatusCounts] = useState({ accessible: 0, notAccessible: 0, unknown: 0 });
 
+  /* ── Search & Sort ── */
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+  const [orderBy, setOrderBy] = useState('');
+  const [order, setOrder] = useState('asc');
 
   const [filterShiftId, setFilterShiftId] = useState('');
   const [filterExamDate, setFilterExamDate] = useState('');
@@ -108,18 +114,29 @@ const Cameras = () => {
     } catch (e) { console.error(e); }
   };
 
+  /* ── Debounce search query ── */
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 500); // 500ms delay
+
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
 
   useEffect(() => {
     if (selectedExamId) { loadCameras(); }
     else { setCameras([]); setTotalCount(0); }
     setFilterShiftId('');
     setFilterExamDate('');
+    setSearchQuery('');
+    setDebouncedSearchQuery('');
     setPage(0);
   }, [selectedExamId]);
 
   useEffect(() => {
     if (selectedExamId) loadCameras();
-  }, [page, rowsPerPage, filterShiftId, filterExamDate]);
+  }, [page, rowsPerPage, filterShiftId, filterExamDate, debouncedSearchQuery]);
 
   const loadCameras = useCallback(async () => {
     if (!selectedExamId) return;
@@ -128,18 +145,58 @@ const Cameras = () => {
       const params = { is_active: true, page: page + 1, limit: rowsPerPage };
       if (filterShiftId) params.shift_id = filterShiftId;
       if (filterExamDate) params.exam_date = parseDDMMYYYYToISO(filterExamDate);
+      if (debouncedSearchQuery.trim()) params.search = debouncedSearchQuery.trim();
       const res = await camerasAPI.getByExam(selectedExamId, params);
       setCameras(res.data.data || []);
       setTotalCount(res.data.totalCount || (res.data.data || []).length);
       setExamLinkType(res.data.linkType);
+      setStatusCounts(res.data.statusCounts || { accessible: 0, notAccessible: 0, unknown: 0 });
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }, [selectedExamId, page, rowsPerPage, filterShiftId, filterExamDate]);
+  }, [selectedExamId, page, rowsPerPage, filterShiftId, filterExamDate, debouncedSearchQuery]);
 
   /* ── Derived ── */
   const selectedExamData = exams.find((e) => String(e.id) === String(selectedExamId));
   const isHLS = examLinkType === 'HLS' || selectedExamData?.link_type?.toUpperCase() === 'HLS';
   const shifts = selectedExamData?.examShifts || [];
+
+  /* ── Sorting logic ── */
+  const handleRequestSort = (property) => {
+    const isAsc = orderBy === property && order === 'asc';
+    setOrder(isAsc ? 'desc' : 'asc');
+    setOrderBy(property);
+  };
+
+  const sortedCameras = React.useMemo(() => {
+    if (!orderBy) return cameras;
+
+    const comparator = (a, b) => {
+      let aVal = a[orderBy];
+      let bVal = b[orderBy];
+
+      // Handle nested properties
+      if (orderBy === 'shift_name') {
+        const shiftA = shifts.find(s => s.id === a.shift_id);
+        const shiftB = shifts.find(s => s.id === b.shift_id);
+        aVal = shiftA?.shift_name || '';
+        bVal = shiftB?.shift_name || '';
+      }
+
+      // Handle null/undefined
+      if (aVal == null) aVal = '';
+      if (bVal == null) bVal = '';
+
+      // String comparison
+      if (typeof aVal === 'string') aVal = aVal.toLowerCase();
+      if (typeof bVal === 'string') bVal = bVal.toLowerCase();
+
+      if (aVal < bVal) return order === 'asc' ? -1 : 1;
+      if (aVal > bVal) return order === 'asc' ? 1 : -1;
+      return 0;
+    };
+
+    return [...cameras].sort(comparator);
+  }, [cameras, orderBy, order, shifts]);
 
   /* ── Create / Edit ── */
   const handleOpenDialog = (camera = null) => {
@@ -328,7 +385,7 @@ const Cameras = () => {
           ) : (
             <>
               {/* ── Title row ── */}
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3.5, flexWrap: 'wrap', gap: 2 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2, flexWrap: 'wrap', gap: 2 }}>
                 <Box>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5 }}>
                     <Typography variant="h6" sx={{ fontWeight: 600, color: '#0f172a', fontSize: '1.5rem' }}>
@@ -355,6 +412,36 @@ const Cameras = () => {
 
                 {/* Far-right: filters + action buttons */}
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap', flexShrink: 0 }}>
+                  {/* Search */}
+                  <TextField
+                    size="small"
+                    placeholder="Search center, state..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <Search sx={{ fontSize: 18, color: '#94a3b8' }} />
+                        </InputAdornment>
+                      ),
+                      endAdornment: searchQuery !== debouncedSearchQuery && (
+                        <InputAdornment position="end">
+                          <CircularProgress size={16} sx={{ color: '#94a3b8' }} />
+                        </InputAdornment>
+                      ),
+                      sx: {
+                        borderRadius: '8px',
+                        bgcolor: '#f8fafc',
+                        height: 40,
+                        fontSize: 14,
+                        '& fieldset': { border: '1px solid #e2e8f0' },
+                        '&:hover fieldset': { borderColor: '#cbd5e1 !important' },
+                        '& input': { color: '#334155', '&::placeholder': { color: '#94a3b8', opacity: 1 } }
+                      }
+                    }}
+                    sx={{ minWidth: 260, maxWidth: 300 }}
+                  />
+
                   {/* HLS filters */}
                   {isHLS && (
                     <>
@@ -445,13 +532,92 @@ const Cameras = () => {
                     Upload Excel
                   </Button>
 
-                  <Button variant="contained" startIcon={<Add />}
-                    onClick={() => handleOpenDialog()}
-                    sx={{ textTransform: 'none', fontWeight: 600 }}>
-                    Add Camera
-                  </Button>
                 </Box>
               </Box>
+
+              {cameras.length > 0 && cameras.some(cam => cam.status !== null && cam.status !== undefined) && (
+                <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap', justifyContent: 'end' }}>
+
+                  <Box sx={{
+                    height: 30,
+                    px: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 1,
+                    borderRadius: 2,
+                    border: '1px solid #3c81f6',
+                  }}>
+                    <Box sx={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: '50%',
+                    }} />
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Typography sx={{ fontSize: '0.75rem', color: 'primary.main', fontWeight: 600 }}>
+                        Accessible
+                      </Typography>
+                      <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, color: 'primary.main' }}>
+                        {statusCounts.accessible}
+                      </Typography>
+                    </Box>
+                  </Box>
+
+                  <Box sx={{
+                    height: 30,
+                    px: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1,
+                    borderRadius: 2,
+                    border: '1px solid #333',
+                  }}>
+                    <Box sx={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: '50%',
+                    }} />
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Typography sx={{ fontSize: '0.75rem', color: '#777', fontWeight: 600 }}>
+                        Not Accessible
+                      </Typography>
+                      <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, color: '#777' }}>
+                        {statusCounts.notAccessible}
+                      </Typography>
+                    </Box>
+                  </Box>
+
+                  {/* Unknown */}
+                  {statusCounts.unknown > 0 && (
+                    <Box sx={{
+                      px: 2,
+                      height: 30,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 1.1,
+                      borderRadius: 2,
+                      border: '1px solid #e5e7eb',
+                      bgcolor: '#f9fafb'
+                    }}>
+                      <Box sx={{
+                        width: 6,
+                        height: 6,
+                        borderRadius: '50%',
+                        bgcolor: '#9ca3af'
+                      }} />
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Typography sx={{ fontSize: '0.75rem', color: '#4b5563', fontWeight: 600 }}>
+                          Unknown
+                        </Typography>
+                        <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, color: '#6b7280' }}>
+                          {statusCounts.unknown}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  )}
+
+                </Box>
+              )}
 
               {/* Upload result alert */}
               {uploadResult && (
@@ -463,7 +629,7 @@ const Cameras = () => {
               {/* ── Table ── */}
               {loading ? (
                 <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}><CircularProgress /></Box>
-              ) : cameras.length > 0 ? (
+              ) : sortedCameras.length > 0 ? (
                 <>
                   <TableContainer component={Paper} sx={{ borderRadius: 2.5, border: '1px solid #e8ecf1', boxShadow: 'none' }}>
                     <Table size="small">
@@ -471,32 +637,160 @@ const Cameras = () => {
                         <TableRow>
                           {isHLS ? (
                             <>
-                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b' }}>Centre Name</TableCell>
-                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b' }}>TC Code</TableCell>
-                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b' }}>State</TableCell>
-                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b' }}>Camera / Lab</TableCell>
-                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b' }}>Ch Code</TableCell>
-                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b' }}>Category</TableCell>
-                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b' }}>Classification</TableCell>
-                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b' }}>Exam Date</TableCell>
-                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b' }}>Shift</TableCell>
+                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 180 }}>
+                                <TableSortLabel
+                                  active={orderBy === 'centre_name'}
+                                  direction={orderBy === 'centre_name' ? order : 'asc'}
+                                  onClick={() => handleRequestSort('centre_name')}
+                                >
+                                  Centre Name
+                                </TableSortLabel>
+                              </TableCell>
+                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 100 }}>
+                                <TableSortLabel
+                                  active={orderBy === 'tc_code'}
+                                  direction={orderBy === 'tc_code' ? order : 'asc'}
+                                  onClick={() => handleRequestSort('tc_code')}
+                                >
+                                  TC Code
+                                </TableSortLabel>
+                              </TableCell>
+                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 120 }}>
+                                <TableSortLabel
+                                  active={orderBy === 'state'}
+                                  direction={orderBy === 'state' ? order : 'asc'}
+                                  onClick={() => handleRequestSort('state')}
+                                >
+                                  State
+                                </TableSortLabel>
+                              </TableCell>
+                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 150 }}>
+                                <TableSortLabel
+                                  active={orderBy === 'camera_name'}
+                                  direction={orderBy === 'camera_name' ? order : 'asc'}
+                                  onClick={() => handleRequestSort('camera_name')}
+                                >
+                                  Camera / Lab
+                                </TableSortLabel>
+                              </TableCell>
+                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 100 }}>
+                                <TableSortLabel
+                                  active={orderBy === 'ch_code'}
+                                  direction={orderBy === 'ch_code' ? order : 'asc'}
+                                  onClick={() => handleRequestSort('ch_code')}
+                                >
+                                  Ch Code
+                                </TableSortLabel>
+                              </TableCell>
+                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 120 }}>
+                                <TableSortLabel
+                                  active={orderBy === 'camera_category'}
+                                  direction={orderBy === 'camera_category' ? order : 'asc'}
+                                  onClick={() => handleRequestSort('camera_category')}
+                                >
+                                  Category
+                                </TableSortLabel>
+                              </TableCell>
+                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 120 }}>
+                                <TableSortLabel
+                                  active={orderBy === 'classification'}
+                                  direction={orderBy === 'classification' ? order : 'asc'}
+                                  onClick={() => handleRequestSort('classification')}
+                                >
+                                  Classification
+                                </TableSortLabel>
+                              </TableCell>
+                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 110 }}>
+                                <TableSortLabel
+                                  active={orderBy === 'exam_date'}
+                                  direction={orderBy === 'exam_date' ? order : 'asc'}
+                                  onClick={() => handleRequestSort('exam_date')}
+                                >
+                                  Exam Date
+                                </TableSortLabel>
+                              </TableCell>
+                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 100 }}>
+                                <TableSortLabel
+                                  active={orderBy === 'shift_name'}
+                                  direction={orderBy === 'shift_name' ? order : 'asc'}
+                                  onClick={() => handleRequestSort('shift_name')}
+                                >
+                                  Shift
+                                </TableSortLabel>
+                              </TableCell>
                             </>
                           ) : (
                             <>
-                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b' }}>Device ID</TableCell>
-                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b' }}>Camera No</TableCell>
-                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b' }}>TC Code</TableCell>
-                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b' }}>Camera Name</TableCell>
-                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b' }}>Centre Name</TableCell>
-                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b' }}>State</TableCell>
-                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b' }}>Classification</TableCell>
+                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 120 }}>
+                                <TableSortLabel
+                                  active={orderBy === 'device_id'}
+                                  direction={orderBy === 'device_id' ? order : 'asc'}
+                                  onClick={() => handleRequestSort('device_id')}
+                                >
+                                  Device ID
+                                </TableSortLabel>
+                              </TableCell>
+                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 100 }}>
+                                <TableSortLabel
+                                  active={orderBy === 'camera_no'}
+                                  direction={orderBy === 'camera_no' ? order : 'asc'}
+                                  onClick={() => handleRequestSort('camera_no')}
+                                >
+                                  Camera No
+                                </TableSortLabel>
+                              </TableCell>
+                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 100 }}>
+                                <TableSortLabel
+                                  active={orderBy === 'tc_code'}
+                                  direction={orderBy === 'tc_code' ? order : 'asc'}
+                                  onClick={() => handleRequestSort('tc_code')}
+                                >
+                                  TC Code
+                                </TableSortLabel>
+                              </TableCell>
+                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 150 }}>
+                                <TableSortLabel
+                                  active={orderBy === 'camera_name'}
+                                  direction={orderBy === 'camera_name' ? order : 'asc'}
+                                  onClick={() => handleRequestSort('camera_name')}
+                                >
+                                  Camera Name
+                                </TableSortLabel>
+                              </TableCell>
+                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 180 }}>
+                                <TableSortLabel
+                                  active={orderBy === 'centre_name'}
+                                  direction={orderBy === 'centre_name' ? order : 'asc'}
+                                  onClick={() => handleRequestSort('centre_name')}
+                                >
+                                  Centre Name
+                                </TableSortLabel>
+                              </TableCell>
+                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 120 }}>
+                                <TableSortLabel
+                                  active={orderBy === 'state'}
+                                  direction={orderBy === 'state' ? order : 'asc'}
+                                  onClick={() => handleRequestSort('state')}
+                                >
+                                  State
+                                </TableSortLabel>
+                              </TableCell>
+                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 120 }}>
+                                <TableSortLabel
+                                  active={orderBy === 'classification'}
+                                  direction={orderBy === 'classification' ? order : 'asc'}
+                                  onClick={() => handleRequestSort('classification')}
+                                >
+                                  Classification
+                                </TableSortLabel>
+                              </TableCell>
                             </>
                           )}
-                          <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b' }}>CCTV URL</TableCell>
+                          <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 250 }}>CCTV URL</TableCell>
                         </TableRow>
                       </TableHead>
                       <TableBody>
-                        {cameras.map((cam) => (
+                        {sortedCameras.map((cam) => (
                           <TableRow key={cam.id} hover sx={{ '&:hover': { bgcolor: '#f8fafc' } }}>
                             {isHLS ? (
                               <>
@@ -529,7 +823,7 @@ const Cameras = () => {
                                 <TableCell sx={{ fontSize: '0.85rem' }}>{cam.classification || '-'}</TableCell>
                               </>
                             )}
-                            <TableCell sx={{ maxWidth: 220 }}>
+                            <TableCell sx={{ maxWidth: 250 }}>
                               <Tooltip title={cam.cctv_url || cam.url}>
                                 <Typography variant="caption" sx={{ fontFamily: 'monospace', wordBreak: 'break-all', fontSize: '0.75rem' }}>
                                   {truncate(cam.cctv_url || cam.url, 45)}
@@ -560,64 +854,6 @@ const Cameras = () => {
           )}
         </Box>
 
-        {/* ── Create / Edit Dialog ── */}
-        <Dialog open={openDialog} onClose={() => setOpenDialog(false)} maxWidth="sm" fullWidth>
-          <DialogTitle>{editingCamera ? 'Edit Camera' : 'Add Camera'}</DialogTitle>
-          <DialogContent>
-            {formError && <Alert severity="error" sx={{ mb: 2 }}>{formError}</Alert>}
-            {isHLS ? (
-              <>
-                <TextField fullWidth label="Centre Name" value={formData.centre_name || ''} onChange={(e) => setFormData({ ...formData, centre_name: e.target.value })} margin="dense" size="small" />
-                <TextField fullWidth label="TC Code" value={formData.tc_code || ''} onChange={(e) => setFormData({ ...formData, tc_code: e.target.value })} margin="dense" size="small" />
-                <Box display="flex" gap={1}>
-                  <TextField fullWidth label="City" value={formData.city || ''} onChange={(e) => setFormData({ ...formData, city: e.target.value })} margin="dense" size="small" />
-                  <TextField fullWidth label="State" value={formData.state || ''} onChange={(e) => setFormData({ ...formData, state: e.target.value })} margin="dense" size="small" />
-                </Box>
-                <TextField fullWidth label="Camera / Lab Name" value={formData.camera_name || ''} onChange={(e) => setFormData({ ...formData, camera_name: e.target.value })} margin="dense" size="small" />
-                <TextField fullWidth label="Ch Code" value={formData.ch_code || ''} onChange={(e) => setFormData({ ...formData, ch_code: e.target.value })} margin="dense" size="small" />
-                <TextField fullWidth label="CCTV URL" value={formData.cctv_url || ''} onChange={(e) => setFormData({ ...formData, cctv_url: e.target.value })} margin="dense" size="small" required />
-                <TextField fullWidth label="Camera Category" value={formData.camera_category || ''} onChange={(e) => setFormData({ ...formData, camera_category: e.target.value })} margin="dense" size="small" />
-                <TextField fullWidth label="Classification" value={formData.classification || ''} onChange={(e) => setFormData({ ...formData, classification: e.target.value })} margin="dense" size="small" />
-                <DatePicker
-                  label="Exam Date"
-                  value={parseDDMMYYYYToDate(formData.exam_date)}
-                  onChange={(date) => setFormData({ ...formData, exam_date: formatDateDDMMYYYY(date) })}
-                  inputFormat="dd-MM-yyyy"
-                  renderInput={(params) => <TextField {...params} fullWidth margin="dense" size="small" />}
-                />
-                <TextField select fullWidth label="Shift (blank = all shifts)" value={formData.shift_id || ''}
-                  onChange={(e) => setFormData({ ...formData, shift_id: e.target.value })}
-                  margin="dense" size="medium"
-                  SelectProps={{
-                    displayEmpty: true, renderValue: (value) => {
-                      if (!value) return 'All shifts';
-                      return shifts.find((s) => String(s.id) === String(value))?.shift_name || `#${value}`;
-                    }
-                  }}>
-                  <MenuItem value="">All shifts</MenuItem>
-                  {shifts.map((s) => <MenuItem key={s.id} value={s.id}>{s.shift_name}</MenuItem>)}
-                </TextField>
-              </>
-            ) : (
-              <>
-                <TextField fullWidth label="Device ID" value={formData.device_id || ''} onChange={(e) => setFormData({ ...formData, device_id: e.target.value })} margin="dense" size="small" required />
-                <TextField fullWidth label="TC Code" value={formData.tc_code || ''} onChange={(e) => setFormData({ ...formData, tc_code: e.target.value })} margin="dense" size="small" />
-                <TextField fullWidth label="Camera Name" value={formData.camera_name || ''} onChange={(e) => setFormData({ ...formData, camera_name: e.target.value })} margin="dense" size="small" required />
-                <TextField fullWidth label="Centre Name" value={formData.centre_name || ''} onChange={(e) => setFormData({ ...formData, centre_name: e.target.value })} margin="dense" size="small" />
-                <Box display="flex" gap={1}>
-                  <TextField fullWidth label="City" value={formData.city || ''} onChange={(e) => setFormData({ ...formData, city: e.target.value })} margin="dense" size="small" />
-                  <TextField fullWidth label="State" value={formData.state || ''} onChange={(e) => setFormData({ ...formData, state: e.target.value })} margin="dense" size="small" />
-                </Box>
-                <TextField fullWidth label="CCTV URL" value={formData.cctv_url || ''} onChange={(e) => setFormData({ ...formData, cctv_url: e.target.value })} margin="dense" size="small" required />
-                <TextField fullWidth label="Classification" value={formData.classification || ''} onChange={(e) => setFormData({ ...formData, classification: e.target.value })} margin="dense" size="small" />
-              </>
-            )}
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setOpenDialog(false)}>Cancel</Button>
-            <Button onClick={handleSubmit} variant="contained">{editingCamera ? 'Save Changes' : 'Add Camera'}</Button>
-          </DialogActions>
-        </Dialog>
 
         {/* ── Upload Dialog ── */}
         <Dialog open={openUpload} onClose={() => setOpenUpload(false)} maxWidth="sm" fullWidth
