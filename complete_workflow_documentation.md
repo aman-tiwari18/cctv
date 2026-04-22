@@ -614,34 +614,3 @@ graph TB
 | `tampering` | Camera Tampering | Detects blur/blockage/tampering | HLS | camera_tampering_worker.py |
 | `blind_spot` | Blind Spot Detection | Detects blind spots and static issues | HLS | blind_spot_worker.py |
 
-### Environment Variables Reference
-
-#### Backend (.env)
-```env
-PORT=3000
-DB_HOST=localhost
-DB_USER=root
-DB_PASSWORD=your_password
-DB_NAME=cctv_monitoring
-JWT_SECRET=your_secret_key
-SCHEDULER_CHECK_INTERVAL=*/1 * * * *
-EXECUTION_PREP_TIME_MINUTES=5
-```
-
-#### Script Server (.env)
-```env
-MAIN_BACKEND_URL=http://localhost:3000/cctv_analytics/api
-API_KEY=your_api_key
-POLL_INTERVAL_MS=30000
-LOOKAHEAD_MINUTES=3
-GRACE_MINUTES=30
-SCRIPTS_DIR=./scripts
-MAX_CONCURRENT_SCRIPTS=10
-HTTP_PORT=8000
-```
-
----
-
-**Document Version**: 1.0  
-**Last Updated**: 2026-04-22  
-**Maintained By**: CCTV Analytics Team
