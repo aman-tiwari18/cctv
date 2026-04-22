@@ -477,10 +477,10 @@ const Exams = () => {
                       sx={{ color: '#64748b', '&:hover': { bgcolor: '#f1f5f9' } }}>
                       <EditOutlined sx={{ fontSize: 20 }} />
                     </IconButton>
-                    <IconButton size="small" onClick={() => handleDelete(exam.id)}
+                    {/* <IconButton size="small" onClick={() => handleDelete(exam.id)}
                       sx={{ color: '#64748b', '&:hover': { bgcolor: '#f1f5f9' } }}>
                       <DeleteOutline sx={{ fontSize: 20 }} />
-                    </IconButton>
+                    </IconButton> */}
                   </Box>
                 </Box>
               </Box>
