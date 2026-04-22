@@ -37,12 +37,12 @@ import { ExamsSvgIcon } from '../components/ExamsSvgIcon'
 /* ── Script chip colors keyed by script_id (exact TYPE_META from Detections.jsx) ── */
 const SCRIPT_COLORS = {
   proximity: { bg: '#e5f5ed', color: '#5cb88a' },
-  crowd: { bg: '#fce4ec', color: '#e24d7b' },
+  crowd: { bg: '#faf3f8ff', color: '#e24d7b' },
   crowd_five: { bg: '#fce8e6', color: '#e06050' },
   crowd_zero: { bg: '#edeaf3', color: '#6b5b95' },
   server: { bg: '#f3ebe4', color: '#a0623d' },
-  intruder: { bg: '#fce4ea', color: '#d94466' },
-  entry_exit: { bg: '#e0f0f0', color: '#1d7a7d' },
+  intruder: { bg: '#e8e8ceff', color: '#d94466' },
+  entry_exit: { bg: '#e0e7e7ff', color: '#1d7a7d' },
   phone: { bg: '#e8ece5', color: '#465a38' },
   blind_spot: { bg: '#f3f2e4', color: '#b0a850' },
   invigilator: { bg: '#e0f7fa', color: '#00bfcf' },

@@ -1077,6 +1077,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # === Configuration ===
 # Get current directory (scripts/detection/)
 DETECTION_ROOT = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.abspath(os.path.join(DETECTION_ROOT, '../..'))
 SAVE_FOLDER = os.path.join(DETECTION_ROOT, "results/tcs_detections/zero_person_detection")
 os.makedirs(SAVE_FOLDER, exist_ok=True)
 COOLDOWN_TIME = 240  # 4 minutes between saves - optimized for 25 alerts/min

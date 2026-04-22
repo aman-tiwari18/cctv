@@ -1894,7 +1894,8 @@ def camera_tampering_worker(frame_queue):
                         folder="camera_tampering_detection"
                     )
                 except Exception as e:
-                    logger.error(f"[TamperingWorker] RTSP DB Reporting Error: {e}")        except Exception as e:
+                    logger.error(f"[TamperingWorker] RTSP DB Reporting Error: {e}")
+        except Exception as e:
             logger.error(f"[TamperingWorker] Processing error: {e}")
         finally:
             del frame

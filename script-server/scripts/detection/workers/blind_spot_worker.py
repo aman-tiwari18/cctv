@@ -4342,6 +4342,7 @@ import uuid
 import torch
 import pymysql
 import re
+import logging
 
 # Fix threading/BLAS errors (same as crowd detection)
 torch.backends.mkldnn.enabled = False

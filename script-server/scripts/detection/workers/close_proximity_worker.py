@@ -1916,16 +1916,15 @@ def main():
     if not exam_id: return
     
     from scripts.detection.utils.db_client import get_hls_cameras
+    rows = get_hls_cameras(int(exam_id), -1, time.strftime("%Y-%m-%d"))
+    close_proximity_worker_hls(rows)
+
 # ================= DB REPORTING =================
 import sys as _sys
 _utils_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'utils')
 if _utils_path not in _sys.path:
     _sys.path.insert(0, _utils_path)
 from db_client import report_to_db_hls  # noqa: E402
-
-
-    rows = get_hls_cameras(int(exam_id), -1, time.strftime("%Y-%m-%d"))
-    close_proximity_worker_hls(rows)
 
 if __name__ == "__main__":
     main()
