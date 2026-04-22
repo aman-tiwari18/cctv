@@ -27,9 +27,126 @@ Content-Type: application/json
     "user": {
       "id": 1,
       "username": "admin",
+      "email": "admin@example.com",
+      "full_name": "Admin User",
+      "phone": "+919999999999",
+      "company_name": "CDIS",
+      "verified": true,
+      "verified_date": "2026-04-22T10:30:00.000Z",
       "role": "ADMIN"
     }
   }
+}
+```
+
+### Public Signup (No Authentication Required)
+```http
+POST /auth/signup
+Content-Type: application/json
+
+{
+  "name": "John Doe",
+  "email": "john@example.com",
+  "phone": "+919876543210",
+  "password": "password123",
+  "companyName": "ABC Company"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Account created successfully. Please verify your email and phone.",
+  "data": {
+    "id": 5,
+    "email": "john@example.com",
+    "phone": "+919876543210",
+    "full_name": "John Doe",
+    "company_name": "ABC Company",
+    "verified": false
+  }
+}
+```
+
+### Send OTP (No Authentication Required)
+```http
+POST /auth/send-otp
+Content-Type: application/json
+
+{
+  "identifier": "john@example.com",
+  "type": "email"
+}
+```
+
+**Parameters:**
+- `identifier`: Email address or phone number
+- `type`: Either "email" or "phone"
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "OTP sent to your email"
+}
+```
+
+### Verify OTP (No Authentication Required)
+```http
+POST /auth/verify-otp
+Content-Type: application/json
+
+{
+  "identifier": "john@example.com",
+  "otp": "123456",
+  "type": "email"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Email verified successfully"
+}
+```
+
+### Forgot Password (No Authentication Required)
+```http
+POST /auth/forgot-password
+Content-Type: application/json
+
+{
+  "email": "john@example.com"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "If the email exists, a password reset OTP has been sent"
+}
+```
+
+### Reset Password (No Authentication Required)
+```http
+POST /auth/reset-password
+Content-Type: application/json
+
+{
+  "email": "john@example.com",
+  "otp": "123456",
+  "newPassword": "newpassword123"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Password reset successfully"
 }
 ```
 
@@ -44,9 +161,46 @@ Content-Type: application/json
   "email": "operator@example.com",
   "password": "password123",
   "full_name": "John Doe",
+  "phone": "+919876543210",
+  "company_name": "ABC Company",
   "role": "OPERATOR"
 }
 ```
+
+### Get Current User
+```http
+GET /auth/me
+Authorization: Bearer <token>
+```
+
+### Update Profile
+```http
+PUT /auth/profile
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "full_name": "John Updated",
+  "phone": "+919999999999",
+  "company_name": "New Company"
+}
+```
+
+### Verify User (Admin Only)
+```http
+PUT /auth/verify/:userId
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "verified": true,
+  "role": "OPERATOR"
+}
+```
+
+**Parameters:**
+- `verified` (optional): Boolean to set verification status
+- `role` (optional): One of "ADMIN", "OPERATOR", "VIEWER"
 
 ## Exams
 

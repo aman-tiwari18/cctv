@@ -6,6 +6,8 @@ import { AuthProvider } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import Layout from './components/Layout';
 import Login from './pages/Login';
+import Register from './pages/Register';
+import ForgotPassword from './pages/ForgotPassword';
 import Dashboard from './pages/Dashboard';
 import Exams from './pages/Exams';
 import Cameras from './pages/Cameras';
@@ -14,6 +16,7 @@ import Analytics from './pages/Analytics';
 import Executions from './pages/Executions';
 import Detections from './pages/Detections';
 import ClientDetections from './pages/ClientDetections';
+import ClientDetectionDashboard from './pages/ClientDetectionDashboard';
 
 // Create Material-UI theme
 const theme = createTheme({
@@ -103,6 +106,8 @@ function App() {
         {/* <BrowserRouter> */}
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route
             path="/"
             element={
@@ -119,6 +124,7 @@ function App() {
             <Route path="executions" element={<Executions />} />
             <Route path="detections" element={<Detections />} />
             <Route path="client-detections" element={<ClientDetections />} />
+            <Route path="client-dashboard" element={<ClientDetectionDashboard />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

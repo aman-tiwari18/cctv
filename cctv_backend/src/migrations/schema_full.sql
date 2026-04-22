@@ -21,6 +21,10 @@ CREATE TABLE IF NOT EXISTS users (
   email         VARCHAR(255) NOT NULL UNIQUE,
   password_hash VARCHAR(255) NOT NULL,
   full_name     VARCHAR(255),
+  phone         VARCHAR(20) COMMENT 'Contact phone number',
+  company_name  VARCHAR(255) COMMENT 'Company or organization name',
+  verified      BOOLEAN DEFAULT FALSE COMMENT 'Account verification status',
+  verified_date DATETIME NULL COMMENT 'Date and time when account was verified',
   role          ENUM('ADMIN', 'OPERATOR', 'VIEWER') DEFAULT 'VIEWER',
   is_active     BOOLEAN DEFAULT TRUE,
   last_login    TIMESTAMP NULL,
@@ -28,7 +32,9 @@ CREATE TABLE IF NOT EXISTS users (
   updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_username (username),
   INDEX idx_email    (email),
-  INDEX idx_role     (role)
+  INDEX idx_role     (role),
+  INDEX idx_verified (verified),
+  INDEX idx_company_name (company_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Default admin user  (password: admin123 — change immediately)

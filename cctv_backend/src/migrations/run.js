@@ -10,7 +10,7 @@ const runMigrations = async () => {
     try {
         logger.info('Starting database migrations...');
 
-        const migrationFile = path.join(__dirname, 'schema_full.sql');
+        const migrationFile = path.join(__dirname, '017_add_user_verification_fields.sql');
         const sql = fs.readFileSync(migrationFile, 'utf8');
 
         // Remove comments and split by semicolons
@@ -25,8 +25,10 @@ const runMigrations = async () => {
             try {
                 await sequelize.query(statement);
             } catch (error) {
-                // Ignore "already exists" / "duplicate column" errors
-                if (!error.message.includes('already exists') && !error.message.includes('Duplicate column')) {
+                // Ignore "already exists" / "duplicate column" / "duplicate key" errors
+                if (!error.message.includes('already exists') && 
+                    !error.message.includes('Duplicate column') &&
+                    !error.message.includes('Duplicate key')) {
                     throw error;
                 }
                 logger.info(`Skipped (already applied): ${statement.substring(0, 60)}...`);

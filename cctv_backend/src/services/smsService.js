@@ -69,6 +69,12 @@ const SMS_TEMPLATES = {
         templateId: process.env.SMS_TEMPLATE_INVIGILATOR,
         getMessage: (data) =>
             `Invigilator not moving in ${data.center_name || 'Center'} at ${formatTime(data.time)}. TC Code: ${data.tc_code || 'N/A'} - SSC`
+    },
+
+    otp: {
+        templateId: process.env.SMS_TEMPLATE_OTP,
+        getMessage: (data) =>
+            `Your OTP for CCTV Analysis verification is ${data.otp}. Valid for 5 minutes. Do not share with anyone. - SSC`
     }
 };
 
@@ -160,8 +166,45 @@ async function sendAlertSMS(detectionType, metadata) {
     }
 }
 
+/**
+ * 📱 Send OTP SMS
+ */
+async function sendOTPSMS(phoneNumber, otp) {
+    try {
+        const template = SMS_TEMPLATES.otp;
+        
+        // Check if OTP template is configured
+        if (!template || !template.templateId || template.templateId === 'undefined') {
+            logger.warn('OTP SMS template not configured in .env - SMS will be skipped');
+            logger.info(`OTP for ${phoneNumber}: ${otp} (SMS skipped - configure SMS_TEMPLATE_OTP in .env)`);
+            
+            // Return success but log that SMS was skipped
+            return { 
+                success: true, 
+                skipped: true,
+                message: 'OTP SMS template not configured. Please add SMS_TEMPLATE_OTP to .env file.' 
+            };
+        }
+
+        const message = template.getMessage({ otp });
+        const result = await sendSMS(phoneNumber, message, template.templateId);
+        
+        if (result.success) {
+            logger.info(`OTP SMS sent to ${phoneNumber}`);
+            return { success: true };
+        } else {
+            logger.error(`Failed to send OTP SMS to ${phoneNumber}`);
+            return { success: false, message: 'Failed to send OTP SMS' };
+        }
+    } catch (error) {
+        logger.error(`Error sending OTP SMS: ${error.message}`);
+        return { success: false, message: 'Error sending OTP SMS' };
+    }
+}
+
 module.exports = {
     sendAlertSMS,
     sendSMS,
+    sendOTPSMS,
     SMS_TEMPLATES
 };

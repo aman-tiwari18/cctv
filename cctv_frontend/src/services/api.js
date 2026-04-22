@@ -34,7 +34,14 @@ api.interceptors.response.use(
 
 export const authAPI = {
     login: (credentials) => api.post('/auth/login', credentials),
-    getCurrentUser: () => api.get('/auth/me')
+    getCurrentUser: () => api.get('/auth/me'),
+    signup: (userData) => api.post('/auth/signup', userData),
+    sendOTP: (data) => api.post('/auth/send-otp', data),
+    verifyOTP: (data) => api.post('/auth/verify-otp', data),
+    sendRegistrationOTP: (data) => api.post('/auth/send-registration-otp', data),
+    verifyRegistrationOTP: (data) => api.post('/auth/verify-registration-otp', data),
+    forgotPassword: (data) => api.post('/auth/forgot-password', data),
+    resetPassword: (data) => api.post('/auth/reset-password', data)
 };
 
 export const examsAPI = {
@@ -112,6 +119,11 @@ export const reportAPI = {
         params: params,
         responseType: 'blob'
     })
+};
+
+export const clientDashboardAPI = {
+    getStats: () => api.get('/client-dashboard/stats'),
+    getExamBodyDetails: (examBody, params) => api.get(`/client-dashboard/exam-body/${examBody}/details`, { params })
 };
 
 export default api;
