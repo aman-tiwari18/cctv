@@ -602,17 +602,17 @@ graph TB
 |-------------|------|-------------|-----------|---------------|
 | `phone` | Phone Detection | Detects mobile phone usage | RTSP/HLS | phone_worker.py |
 | `crowd` | Crowd Detection | Detects crowding | RTSP/HLS | crowd_worker.py |
-| `crowd_zero` | Zero Person Detection | Detects empty rooms | HLS | crowd_zero_det_worker.py |
-| `crowd_five` | Low Person Count (<5) | Detects low occupancy | HLS | crowd_five_det_worker.py |
+| `crowd_zero` | Zero Person Detection | Detects empty rooms | RTSP/HLS | crowd_zero_det_worker.py |
+| `crowd_five` | Low Person Count (<5) | Detects low occupancy | RTSP/HLS | crowd_five_det_worker.py |
 | `server` | Server Room Detection | Detects unauthorized access | RTSP/HLS | server_room_worker.py |
 | `intruder` | Intruder Detection | Detects unauthorized persons | RTSP/HLS | intruder_worker.py |
 | `entry_exit` | Entry/Exit Tracking | Tracks movement patterns | RTSP/HLS | entry_exit_worker.py |
 | `proximity` | Proximity Detection | Detects close proximity violations | RTSP/HLS | close_proximity_worker.py |
 | `invigilator` | Invigilator Tracking | Tracks invigilator presence | RTSP/HLS | invigilator_worker.py |
 | `vision` | Scene Classification | Classifies camera scenes (Qwen3-VL) | RTSP/HLS | vision_classification.py |
-| `inversion` | Camera Inversion | Detects rotated/inverted cameras | HLS | camera_inversion_worker.py |
-| `tampering` | Camera Tampering | Detects blur/blockage/tampering | HLS | camera_tampering_worker.py |
-| `blind_spot` | Blind Spot Detection | Detects blind spots and static issues | HLS | blind_spot_worker.py |
+| `inversion` | Camera Inversion | Detects rotated/inverted cameras | RTSP/HLS | camera_inversion_worker.py |
+| `tampering` | Camera Tampering | Detects blur/blockage/tampering | RTSP/HLS | camera_tampering_worker.py |
+| `blind_spot` | Blind Spot Detection | Detects blind spots and static issues | RTSP/HLS | blind_spot_worker.py |
 
 
 
