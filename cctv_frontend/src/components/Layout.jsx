@@ -23,15 +23,10 @@ import {
 import {
   Menu as MenuIcon,
   Dashboard,
-  School,
-  Videocam,
-  Schedule,
   Analytics,
-  PlayCircle,
   Logout,
   Slideshow,
   AccountCircle,
-  CameraAlt,
   Visibility,
   ExpandLess,
   ExpandMore,
@@ -46,15 +41,15 @@ import {
   FlipCameraAndroid,
   SecurityUpdateWarning,
   Download,
-  TableChart,
   TrendingUp,
+  VerifiedUser,
 } from '@mui/icons-material';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import { useAuth } from '../contexts/AuthContext';
-import { reportAPI } from '../services/api';
 import { DetectionCountsProvider, useDetectionCounts } from '../contexts/DetectionCountsContext';
 import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
 import { CustomSvgIcon } from './DetectionSvgIcon';
+import { ShiftSvgIcon } from './ShiftSvgIcon';
 
 const DRAWER_WIDTH = 260;
 const APPBAR_HEIGHT = 64;
@@ -93,8 +88,8 @@ const menuItems = [
   { text: 'Dashboard', icon: <Dashboard />, path: '/' },
   { text: 'Exams', icon: <ExamsSvgIcon />, path: '/exams' },
   { text: 'Cameras', icon: <CameraAltIcon />, path: '/cameras' },
-  { text: 'Shifts', icon: <Schedule />, path: '/shifts' },
-  { text: 'Schedule Scripts', icon: <Analytics />, path: '/analytics' },
+  { text: 'Shifts', icon: <ShiftSvgIcon />, path: '/shifts' },
+  { text: 'Schedule Analysis', icon: <Analytics />, path: '/analytics' },
   { text: 'Executions', icon: <Slideshow />, path: '/executions' },
   { text: 'Detections', icon: <CustomSvgIcon />, path: '/detections', hasSubItems: true },
   { text: 'Client Detections', icon: <Visibility />, path: '/client-detections', hasSubItems: true },
@@ -299,7 +294,7 @@ function LayoutInner() {
   const location = useLocation();
   const { user, logout } = useAuth();
 
-  const { allCounts, unfilteredCounts, exportToExcel, downloadConsolidatedReport } = useDetectionCounts();
+  const { unfilteredCounts, exportToExcel, downloadConsolidatedReport } = useDetectionCounts();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState(null);
 
@@ -307,8 +302,14 @@ function LayoutInner() {
     ? viewerMenuItems 
     : menuItems.filter(item => item.text !== 'Client Detections' && item.text !== 'Client Dashboard');
 
+  // Allow certain paths that are not in menu (like user-verification)
+  const allowedPaths = ['/user-verification'];
+
   useEffect(() => {
-    if (!filteredMenuItems.some((item) => item.path === location.pathname)) {
+    const isAllowedPath = allowedPaths.includes(location.pathname);
+    const isInMenu = filteredMenuItems.some((item) => item.path === location.pathname);
+    
+    if (!isInMenu && !isAllowedPath) {
       navigate(user?.role === 'VIEWER' ? '/client-dashboard' : '/');
     }
   }, [location.pathname, user]);
@@ -323,8 +324,9 @@ function LayoutInner() {
     navigate('/login');
   };
 
-  const currentPageTitle =
-    filteredMenuItems.find((item) => item.path === location.pathname)?.text || '';
+  const currentPageTitle = location.pathname === '/user-verification' 
+    ? 'User Verification'
+    : (filteredMenuItems.find((item) => item.path === location.pathname)?.text || '');
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh' }}>
@@ -358,7 +360,7 @@ function LayoutInner() {
 
           {(location.pathname === '/detections' || location.pathname === '/client-detections') && (
             <Chip
-              label={`TOTAL DETECTIONS  ${Object.values(unfilteredCounts).reduce((a, b) => a + b, 0).toLocaleString()}`}
+              label={`TOTAL DETECTIONS | ${Object.values(unfilteredCounts).reduce((a, b) => a + b, 0).toLocaleString()}`}
               variant="outlined"
               sx={{
                 ml: 2,
@@ -439,9 +441,23 @@ function LayoutInner() {
           <Box>
             <Typography variant="body2" fontWeight={600}>{user?.username}</Typography>
             <Typography variant="caption" color="text.secondary">{user?.role}</Typography>
+            {user?.role !== 'ADMIN' && user?.company_name && (
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
+                {user.company_name}
+              </Typography>
+            )}
           </Box>
         </MenuItem>
         <Divider />
+        {user?.role === 'ADMIN' && (
+          <>
+            <MenuItem onClick={() => { navigate('/user-verification'); setAnchorEl(null); }}>
+              <VerifiedUser sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
+              Verify Users
+            </MenuItem>
+            <Divider />
+          </>
+        )}
         <MenuItem onClick={handleLogout} sx={{ color: '#ef4444' }}>
           <Logout sx={{ mr: 1, fontSize: 18 }} />
           Logout

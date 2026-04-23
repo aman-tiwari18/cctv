@@ -1,11 +1,12 @@
 const jwt = require('jsonwebtoken');
 const logger = require('../utils/logger');
+const { query } = require('../config/database');
 const dotenv = require('dotenv')
 require('dotenv').config();
 /**
  * Verify JWT token and attach user to request
  */
-const authenticate = (req, res, next) => {
+const authenticate = async (req, res, next) => {
     try {
         // Check for API key first (for script-server)
         const apiKey = req.headers['x-api-key'];
@@ -34,11 +35,25 @@ const authenticate = (req, res, next) => {
         // Verify token
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-        // Attach user info to request
+        // Fetch full user data from database to get company_name
+        const users = await query(
+            'SELECT id, username, role, company_name FROM users WHERE id = ?',
+            [decoded.id]
+        );
+
+        if (!users || users.length === 0) {
+            return res.status(401).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+
+        // Attach full user info to request
         req.user = {
-            id: decoded.id,
-            username: decoded.username,
-            role: decoded.role
+            id: users[0].id,
+            username: users[0].username,
+            role: users[0].role,
+            company_name: users[0].company_name
         };
 
         next();

@@ -8,51 +8,63 @@ import {
   CircularProgress,
   Paper,
   Chip,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  TextField,
-  InputAdornment,
+  FormControl,
+  Select,
+  MenuItem,
+  LinearProgress,
 } from '@mui/material';
 import {
-  ExpandMore,
-  School,
+  Description,
   Videocam,
   Schedule,
-  Warning,
-  CheckCircle,
-  Cancel,
   Event,
   TrendingUp,
 } from '@mui/icons-material';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { clientDashboardAPI } from '../services/api';
-
-const TYPE_META = {
-  proximity: { label: 'Close Proximity', color: '#5cb88a' },
-  crowd: { label: 'Crowd Detection', color: '#e24d7b' },
-  crowd_five: { label: 'Crowd < 5', color: '#e06050' },
-  crowd_zero: { label: 'Zero Person', color: '#6b5b95' },
-  server: { label: 'Server Room', color: '#a0623d' },
-  intruder: { label: 'Intruder', color: '#d94466' },
-  entry_exit: { label: 'Entry/Exit', color: '#1d7a7d' },
-  phone: { label: 'Phone', color: '#465a38' },
-  blind_spot: { label: 'Blind Spot', color: '#b0a850' },
-  invigilator: { label: 'Invigilator', color: '#00bfcf' },
-  inversion: { label: 'Camera Inversion', color: '#7a86b4' },
-  tamper: { label: 'Camera Tampering', color: '#00c8d4' },
-};
+import { useAuth } from '../contexts/AuthContext';
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4'];
 
-const StatCard = ({ title, value, icon, color, subtitle }) => (
-  <Card elevation={0} sx={{ height: '100%', borderRadius: 3, border: '1px solid #e2e8f0' }}>
+const CATEGORY_COLORS = {
+  people: '#3b82f6',
+  movement: '#ef4444',
+  camera: '#f59e0b',
+};
+
+// Script type to category mapping (from ShiftScriptManager)
+const SCRIPT_CATEGORY_MAP = {
+  proximity: 'people',
+  crowd: 'people',
+  crowd_five: 'people',
+  crowd_zero: 'people',
+  invigilator: 'people',
+  phone: 'people',
+  server: 'people',
+  intruder: 'people',
+  entry_exit: 'movement',
+  inversion: 'camera',
+  tamper: 'camera',
+  blind_spot: 'camera',
+};
+
+const DETECTION_TYPE_LABELS = {
+  proximity: 'Close Proximity',
+  crowd: 'Crowd Detection',
+  crowd_five: 'Crowd < 5',
+  crowd_zero: 'Zero Person',
+  server: 'Server Room',
+  intruder: 'Intruder',
+  entry_exit: 'Entry/Exit',
+  phone: 'Phone',
+  blind_spot: 'Blind Spot',
+  invigilator: 'Invigilator',
+  inversion: 'Camera Inversion',
+  tamper: 'Camera Tampering',
+};
+
+const StatCard = ({ title, value, icon, color }) => (
+  <Card elevation={0} sx={{ height: '100%', borderRadius: 3, border: '1px solid #e2e8f0', boxShadow: 'none' }}>
     <CardContent sx={{ p: 2.5 }}>
       <Box display="flex" justifyContent="space-between" alignItems="flex-start">
         <Box flex={1}>
@@ -71,11 +83,6 @@ const StatCard = ({ title, value, icon, color, subtitle }) => (
           <Typography variant="h4" fontWeight={700} sx={{ mt: 0.5, color: '#0f172a' }}>
             {value}
           </Typography>
-          {subtitle && (
-            <Typography variant="caption" sx={{ color: '#94a3b8', mt: 0.5, display: 'block' }}>
-              {subtitle}
-            </Typography>
-          )}
         </Box>
         <Box
           sx={{
@@ -95,65 +102,34 @@ const StatCard = ({ title, value, icon, color, subtitle }) => (
 );
 
 const ClientDetectionDashboard = () => {
-  const [dashboardData, setDashboardData] = useState([]);
+  const { user } = useAuth();
+  const [dashboardData, setDashboardData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [expanded, setExpanded] = useState(false);
-  const [dateFilter, setDateFilter] = useState('');
+  const [selectedExam, setSelectedExam] = useState('all');
+  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [selectedScriptExam, setSelectedScriptExam] = useState('all');
+  const [selectedDate, setSelectedDate] = useState('all');
 
   useEffect(() => {
     loadDashboardData();
   }, []);
 
+  // Reset date when exam selection changes
+  useEffect(() => {
+    setSelectedDate('all');
+  }, [selectedScriptExam]);
+
   const loadDashboardData = async () => {
     try {
       setLoading(true);
       const response = await clientDashboardAPI.getStats();
-      console.log('[ClientDashboard Frontend] API Response:', response.data);
-      setDashboardData(response.data.data || []);
-      
-      if (!response.data.data || response.data.data.length === 0) {
-        console.log('[ClientDashboard Frontend] No data received. Message:', response.data.message);
-      }
+      console.log('[ClientDashboard] API Response:', response.data);
+      setDashboardData(response.data.data);
     } catch (error) {
-      console.error('[ClientDashboard Frontend] Error loading dashboard data:', error);
-      console.error('[ClientDashboard Frontend] Error details:', error.response?.data);
+      console.error('[ClientDashboard] Error loading dashboard data:', error);
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleAccordionChange = (panel) => (event, isExpanded) => {
-    setExpanded(isExpanded ? panel : false);
-  };
-
-  // Calculate overall statistics
-  const overallStats = dashboardData.reduce(
-    (acc, item) => ({
-      total_exams: acc.total_exams + item.stats.total_exams,
-      total_cameras: acc.total_cameras + item.stats.total_cameras,
-      total_shifts: acc.total_shifts + item.stats.total_shifts,
-      total_detections: acc.total_detections + item.stats.total_detections,
-      accessible_cameras: acc.accessible_cameras + item.stats.camera_status.accessible,
-      not_accessible_cameras: acc.not_accessible_cameras + item.stats.camera_status.not_accessible,
-    }),
-    {
-      total_exams: 0,
-      total_cameras: 0,
-      total_shifts: 0,
-      total_detections: 0,
-      accessible_cameras: 0,
-      not_accessible_cameras: 0,
-    }
-  );
-
-  const formatDateDDMMYYYY = (dateStr) => {
-    if (!dateStr) return '';
-    const date = new Date(dateStr);
-    if (Number.isNaN(date.getTime())) return '';
-    const dd = String(date.getDate()).padStart(2, '0');
-    const mm = String(date.getMonth() + 1).padStart(2, '0');
-    const yyyy = date.getFullYear();
-    return `${dd}-${mm}-${yyyy}`;
   };
 
   if (loading) {
@@ -164,314 +140,609 @@ const ClientDetectionDashboard = () => {
     );
   }
 
+  if (!dashboardData) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh">
+        <Typography variant="h6" color="text.secondary">
+          No data available
+        </Typography>
+      </Box>
+    );
+  }
+
+  // Helper functions
+  const formatDate = (dateStr) => {
+    if (!dateStr) return '';
+    const date = new Date(dateStr);
+    const dd = String(date.getDate()).padStart(2, '0');
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const yyyy = date.getFullYear();
+    return `${dd}-${mm}-${yyyy}`;
+  };
+  
+  const formatTime = (timeStr) => {
+    if (!timeStr) return '';
+    return timeStr.substring(0, 5); // HH:MM
+  };
+
+  // Get all available scripts from backend
+  const allAvailableScripts = dashboardData.all_scripts || [];
+
+  // Prepare detection distribution data
+  const detectionData = dashboardData.detection_distribution || [];
+  
+  // Filter by selected category
+  const filteredDetectionData = selectedCategory === 'all' 
+    ? detectionData 
+    : detectionData.filter(item => SCRIPT_CATEGORY_MAP[item.type] === selectedCategory);
+  
+  const totalDetections = filteredDetectionData.reduce((sum, item) => sum + item.count, 0);
+  
+  // Group detections by type for pie chart with accuracy
+  const pieData = filteredDetectionData.map(item => ({
+    name: DETECTION_TYPE_LABELS[item.type] || item.type,
+    value: parseFloat(item.accuracy) || 0,
+    count: item.count,
+    pushed_count: item.pushed_count,
+    removed_count: item.removed_count,
+    type: item.type,
+    category: SCRIPT_CATEGORY_MAP[item.type] || 'camera',
+    color: CATEGORY_COLORS[SCRIPT_CATEGORY_MAP[item.type]] || '#94a3b8',
+  }));
+
+  // Calculate average accuracy for center display
+  const avgAccuracy = pieData.length > 0 
+    ? (pieData.reduce((sum, item) => sum + item.value, 0) / pieData.length).toFixed(1)
+    : 0;
+
+  // Prepare exam status data
+  const examStatus = dashboardData.exam_status || { completed: 0, in_progress: 0, pending: 0 };
+  const totalExamTasks = examStatus.completed + examStatus.in_progress + examStatus.pending;
+
+  // Prepare script distribution data - organize by script instead of by shift
+  const scriptDistribution = dashboardData.script_distribution || [];
+  
+  // Filter by selected exam and date
+  const filteredScriptDistribution = scriptDistribution.filter(shift => {
+    if (selectedScriptExam !== 'all' && shift.exam_id !== parseInt(selectedScriptExam)) return false;
+    if (selectedDate !== 'all') {
+      const hasMatchingDate = shift.scripts.some(s => s.assignment_date === selectedDate);
+      if (!hasMatchingDate) return false;
+    }
+    return true;
+  });
+  
+  // Get all scheduled scripts with their details
+  const scheduledScripts = filteredScriptDistribution.flatMap(shift => 
+    (selectedDate === 'all' 
+      ? shift.scripts 
+      : shift.scripts.filter(s => s.assignment_date === selectedDate)
+    ).map(script => ({
+      ...script,
+      shift_name: shift.shift_name,
+      exam_name: shift.exam_name,
+    }))
+  );
+  
+  // Group scripts by script_name and count occurrences per shift
+  const scriptShiftMap = {};
+  scheduledScripts.forEach(script => {
+    if (!scriptShiftMap[script.script_name]) {
+      scriptShiftMap[script.script_name] = {
+        script_name: script.script_name,
+        script_type: script.script_type,
+        shifts: {},
+        total: 0,
+      };
+    }
+    const shiftKey = script.shift_name;
+    if (!scriptShiftMap[script.script_name].shifts[shiftKey]) {
+      scriptShiftMap[script.script_name].shifts[shiftKey] = {
+        count: 0,
+        time_range: null,
+      };
+    }
+    scriptShiftMap[script.script_name].shifts[shiftKey].count++;
+    scriptShiftMap[script.script_name].shifts[shiftKey].time_range = 
+      `${formatTime(script.custom_start_time)} - ${formatTime(script.custom_end_time)}`;
+    scriptShiftMap[script.script_name].total++;
+  });
+  
+  // Get unique shift names for columns
+  const uniqueShifts = [...new Set(scheduledScripts.map(s => s.shift_name))].sort();
+  
+  // Create data for horizontal bar chart (one row per script) - only scheduled scripts
+  const scriptBarData = Object.values(scriptShiftMap).map(scriptData => {
+    const script = allAvailableScripts.find(s => s.name === scriptData.script_name);
+    const category = SCRIPT_CATEGORY_MAP[script?.script_id || scriptData.script_type] || 'camera';
+    
+    const row = {
+      script_name: scriptData.script_name,
+      category: category,
+      color: CATEGORY_COLORS[category],
+      total: scriptData.total,
+    };
+    
+    // Add shift columns
+    uniqueShifts.forEach(shift => {
+      row[shift] = scriptData.shifts[shift]?.count || 0;
+      row[`${shift}_time`] = scriptData.shifts[shift]?.time_range || '';
+    });
+    
+    return row;
+  });
+
+  // Get available dates from backend
+  const availableDates = dashboardData.exam_dates || [];
+  
+  // Get date range for selected exam
+  const getDateRangeForExam = () => {
+    if (selectedScriptExam === 'all') {
+      return availableDates;
+    }
+    
+    const selectedExamData = (dashboardData.exams || []).find(e => e.id === parseInt(selectedScriptExam));
+    if (!selectedExamData || !selectedExamData.start_date || !selectedExamData.end_date) {
+      return availableDates;
+    }
+    
+    // Generate dates between start_date and end_date
+    const dates = [];
+    const start = new Date(selectedExamData.start_date);
+    const end = new Date(selectedExamData.end_date);
+    const current = new Date(start);
+    
+    while (current <= end) {
+      dates.push(current.toISOString().split('T')[0]);
+      current.setDate(current.getDate() + 1);
+    }
+    
+    return dates;
+  };
+  
+  const filteredDates = getDateRangeForExam();
+  
+  // Get date range label for dropdown
+  const getDateRangeLabel = () => {
+    if (selectedScriptExam === 'all') {
+      return 'All Dates';
+    }
+    
+    const selectedExamData = (dashboardData.exams || []).find(e => e.id === parseInt(selectedScriptExam));
+    if (!selectedExamData || !selectedExamData.start_date || !selectedExamData.end_date) {
+      return 'All Dates';
+    }
+    
+    return `${formatDate(selectedExamData.start_date)} to ${formatDate(selectedExamData.end_date)}`;
+  };
+
   return (
     <Box>
-      <Typography variant="body2" color="text.secondary" mb={3} sx={{ fontSize: '0.9rem' }}>
-        Client-wise detection analytics grouped by examination body
-      </Typography>
+      {/* Header */}
+      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+        <Box>
+          <Typography variant="h5" fontWeight={700} sx={{ color: '#0f172a', mb: 0.5 }}>
+            Dashboard
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.9rem' }}>
+            {user?.role === 'ADMIN' 
+              ? 'Deep-dive analysis of behavioral triggers and crowd patterns.'
+              : user?.company_name === 'EY'
+              ? 'Analytics for SSC and TCS exams'
+              : `Analytics for ${user?.company_name || 'your company'}`
+            }
+          </Typography>
+        </Box>
+        <Chip
+          icon={<Schedule sx={{ fontSize: 16 }} />}
+          label="Last 24 Hours"
+          sx={{
+            bgcolor: '#f8fafc',
+            border: '1px solid #e2e8f0',
+            fontWeight: 600,
+            fontSize: '0.85rem',
+          }}
+        />
+      </Box>
 
-      {/* Overall Statistics */}
-      <Grid container spacing={2.5} mb={3}>
+      {/* Top Stats Cards */}
+      <Grid container spacing={2.5} mb={4}>
         <Grid item xs={12} sm={6} md={3}>
           <StatCard
-            title="Total Exam Bodies"
-            value={dashboardData.length}
-            icon={<School />}
+            title="Active Exams"
+            value={dashboardData.active_exams || 0}
+            icon={<Event />}
             color="#3b82f6"
           />
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
           <StatCard
-            title="Total Active Exams"
-            value={overallStats.total_exams}
-            icon={<Event />}
-            color="#10b981"
+            title="Total Shifts"
+            value={dashboardData.total_shifts || 0}
+            icon={<Schedule />}
+            color="#8b5cf6"
           />
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
           <StatCard
-            title="Total Cameras"
-            value={overallStats.total_cameras}
+            title="Total Camera"
+            value={dashboardData.total_cameras || 0}
             icon={<Videocam />}
-            color="#f59e0b"
-            subtitle={`${overallStats.accessible_cameras} accessible`}
+            color="#06b6d4"
           />
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
           <StatCard
-            title="Total Detections"
-            value={overallStats.total_detections.toLocaleString()}
-            icon={<Warning />}
-            color="#ef4444"
+            title="Total Detection"
+            value={(dashboardData.total_detections || 0).toLocaleString()}
+            icon={<TrendingUp />}
+            color="#10b981"
           />
         </Grid>
       </Grid>
 
-      {/* Exam Body Breakdown */}
-      <Paper elevation={0} sx={{ p: 3, borderRadius: 3, border: '1px solid #e2e8f0', mb: 3 }}>
-        <Typography variant="h6" fontWeight={700} sx={{ mb: 2, color: '#0f172a' }}>
-          Exam Body Breakdown
-        </Typography>
-
-        {dashboardData.length === 0 ? (
-          <Box textAlign="center" py={8}>
-            <School sx={{ fontSize: 64, color: '#cbd5e1', mb: 2 }} />
-            <Typography variant="h6" color="text.secondary" gutterBottom>
-              No Client Data Available
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              No active exams found with exam_body data. Please ensure exams are created with exam_body values.
-            </Typography>
-          </Box>
-        ) : (
-          dashboardData.map((item, index) => (
-            <Accordion
-              key={item.exam_body}
-              expanded={expanded === item.exam_body}
-              onChange={handleAccordionChange(item.exam_body)}
-              elevation={0}
-              sx={{
-                mb: 1,
-                border: '1px solid #e2e8f0',
-                borderRadius: '12px !important',
-                '&:before': { display: 'none' },
-                '&.Mui-expanded': { margin: '0 0 8px 0 !important' },
-              }}
-            >
-              <AccordionSummary
-                expandIcon={<ExpandMore />}
-                sx={{
-                  borderRadius: '12px',
-                  '&.Mui-expanded': { borderRadius: '12px 12px 0 0' },
-                }}
-              >
-                <Box display="flex" alignItems="center" justifyContent="space-between" width="100%" pr={2}>
-                  <Box display="flex" alignItems="center" gap={2}>
-                    <Box
-                      sx={{
-                        width: 40,
-                        height: 40,
-                        borderRadius: '50%',
-                        bgcolor: `${COLORS[index % COLORS.length]}18`,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}
-                    >
-                      <School sx={{ fontSize: 20, color: COLORS[index % COLORS.length] }} />
-                    </Box>
-                    <Box>
-                      <Typography variant="h6" fontWeight={600} sx={{ fontSize: '1rem' }}>
-                        {item.exam_body}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {item.stats.total_exams} exam{item.stats.total_exams !== 1 ? 's' : ''} • {item.stats.total_cameras} cameras
-                      </Typography>
-                    </Box>
-                  </Box>
-                  <Box display="flex" gap={2} alignItems="center">
-                    <Chip
-                      label={`${item.stats.total_detections.toLocaleString()} detections`}
-                      size="small"
-                      sx={{
-                        bgcolor: '#fef2f2',
-                        color: '#ef4444',
-                        fontWeight: 600,
-                        fontSize: '0.75rem',
-                      }}
-                    />
-                  </Box>
-                </Box>
-              </AccordionSummary>
-              <AccordionDetails sx={{ pt: 2, pb: 3 }}>
-                <Grid container spacing={3}>
-                  {/* Exams List */}
-                  <Grid item xs={12} md={6}>
-                    <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1.5, color: '#64748b', textTransform: 'uppercase', fontSize: '0.75rem' }}>
-                      Active Exams
-                    </Typography>
-                    <TableContainer>
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow>
-                            <TableCell sx={{ fontWeight: 700, fontSize: '0.75rem', color: '#64748b' }}>Exam Name</TableCell>
-                            <TableCell sx={{ fontWeight: 700, fontSize: '0.75rem', color: '#64748b' }}>Type</TableCell>
-                            <TableCell sx={{ fontWeight: 700, fontSize: '0.75rem', color: '#64748b' }}>Duration</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {item.exams.map((exam) => (
-                            <TableRow key={exam.id} hover>
-                              <TableCell sx={{ fontSize: '0.85rem' }}>{exam.name}</TableCell>
-                              <TableCell>
-                                <Chip
-                                  label={exam.link_type || 'N/A'}
-                                  size="small"
-                                  sx={{
-                                    height: 20,
-                                    fontSize: '0.7rem',
-                                    fontWeight: 600,
-                                    bgcolor: exam.link_type === 'HLS' ? '#dbeafe' : '#f3e8ff',
-                                    color: exam.link_type === 'HLS' ? '#1e40af' : '#6b21a8',
-                                  }}
-                                />
-                              </TableCell>
-                              <TableCell sx={{ fontSize: '0.85rem' }}>
-                                {exam.start_date && exam.end_date
-                                  ? `${formatDateDDMMYYYY(exam.start_date)} - ${formatDateDDMMYYYY(exam.end_date)}`
-                                  : 'N/A'}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                  </Grid>
-
-                  {/* Statistics */}
-                  <Grid item xs={12} md={6}>
-                    <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1.5, color: '#64748b', textTransform: 'uppercase', fontSize: '0.75rem' }}>
-                      Statistics Overview
-                    </Typography>
-                    <Grid container spacing={2}>
-                      <Grid item xs={6}>
-                        <Paper elevation={0} sx={{ p: 2, bgcolor: '#f8fafc', borderRadius: 2 }}>
-                          <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem', fontWeight: 600 }}>
-                            Total Shifts
-                          </Typography>
-                          <Typography variant="h5" fontWeight={700} sx={{ mt: 0.5 }}>
-                            {item.stats.total_shifts}
-                          </Typography>
-                        </Paper>
-                      </Grid>
-                      <Grid item xs={6}>
-                        <Paper elevation={0} sx={{ p: 2, bgcolor: '#f0fdf4', borderRadius: 2 }}>
-                          <Typography variant="caption" sx={{ fontSize: '0.7rem', fontWeight: 600, color: '#16a34a' }}>
-                            Accessible
-                          </Typography>
-                          <Typography variant="h5" fontWeight={700} sx={{ mt: 0.5, color: '#16a34a' }}>
-                            {item.stats.camera_status.accessible}
-                          </Typography>
-                        </Paper>
-                      </Grid>
-                      <Grid item xs={6}>
-                        <Paper elevation={0} sx={{ p: 2, bgcolor: '#fef2f2', borderRadius: 2 }}>
-                          <Typography variant="caption" sx={{ fontSize: '0.7rem', fontWeight: 600, color: '#dc2626' }}>
-                            Not Accessible
-                          </Typography>
-                          <Typography variant="h5" fontWeight={700} sx={{ mt: 0.5, color: '#dc2626' }}>
-                            {item.stats.camera_status.not_accessible}
-                          </Typography>
-                        </Paper>
-                      </Grid>
-                      <Grid item xs={6}>
-                        <Paper elevation={0} sx={{ p: 2, bgcolor: '#f1f5f9', borderRadius: 2 }}>
-                          <Typography variant="caption" sx={{ fontSize: '0.7rem', fontWeight: 600, color: '#64748b' }}>
-                            Unknown Status
-                          </Typography>
-                          <Typography variant="h5" fontWeight={700} sx={{ mt: 0.5, color: '#64748b' }}>
-                            {item.stats.camera_status.unknown}
-                          </Typography>
-                        </Paper>
-                      </Grid>
-                    </Grid>
-
-                    {/* Detection Types */}
-                    {Object.keys(item.stats.detection_counts).length > 0 && (
-                      <Box mt={2}>
-                        <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1, color: '#64748b', textTransform: 'uppercase', fontSize: '0.75rem' }}>
-                          Detection Types
-                        </Typography>
-                        <Box display="flex" flexWrap="wrap" gap={1}>
-                          {Object.entries(item.stats.detection_counts).map(([type, count]) => {
-                            const meta = TYPE_META[type] || { label: type, color: '#94a3b8' };
-                            return (
-                              <Chip
-                                key={type}
-                                label={`${meta.label}: ${count}`}
-                                size="small"
-                                sx={{
-                                  bgcolor: `${meta.color}18`,
-                                  color: meta.color,
-                                  fontWeight: 600,
-                                  fontSize: '0.7rem',
-                                }}
-                              />
-                            );
-                          })}
-                        </Box>
-                      </Box>
-                    )}
-                  </Grid>
-                </Grid>
-              </AccordionDetails>
-            </Accordion>
-          ))
-        )}
-      </Paper>
-
-      {/* Detection Distribution Chart */}
-      {dashboardData.length > 0 && (
-        <Grid container spacing={3}>
-          <Grid item xs={12} md={6}>
-            <Paper elevation={0} sx={{ p: 3, borderRadius: 3, border: '1px solid #e2e8f0', height: 400 }}>
-              <Typography variant="h6" fontWeight={700} sx={{ mb: 2, color: '#0f172a' }}>
-                Detections by Exam Body
+      {/* Middle Section: Detection Distribution & Exam Status */}
+      <Grid container spacing={3} mb={4}>
+        {/* Detection Distribution */}
+        <Grid item xs={12} md={7}>
+          <Paper elevation={0} sx={{ p: 3, borderRadius: 3, border: '1px solid #e2e8f0', height: '100%', boxShadow: 'none' }}>
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+              <Typography variant="h6" fontWeight={700} sx={{ color: '#0f172a' }}>
+                Detection Distribution
               </Typography>
-              <ResponsiveContainer width="100%" height="85%">
+              <Box display="flex" gap={1}>
+                <FormControl size="small" sx={{ minWidth: 150 }}>
+                  <Select
+                    value={selectedExam}
+                    onChange={(e) => setSelectedExam(e.target.value)}
+                    sx={{ fontSize: '0.85rem' }}
+                  >
+                    <MenuItem value="all">All Exams</MenuItem>
+                    {(dashboardData.exams || []).map(exam => (
+                      <MenuItem key={exam.id} value={exam.id}>{exam.name}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <FormControl size="small" sx={{ minWidth: 150 }}>
+                  <Select
+                    value={selectedCategory}
+                    onChange={(e) => setSelectedCategory(e.target.value)}
+                    sx={{ fontSize: '0.85rem' }}
+                  >
+                    <MenuItem value="all">All Categories</MenuItem>
+                    <MenuItem value="people">People</MenuItem>
+                    <MenuItem value="movement">Movement</MenuItem>
+                    <MenuItem value="camera">Camera</MenuItem>
+                  </Select>
+                </FormControl>
+              </Box>
+            </Box>
+
+            <Box display="flex" alignItems="center" justifyContent="center" position="relative" height={300}>
+              <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
-                    data={dashboardData.map((item, index) => ({
-                      name: item.exam_body,
-                      value: item.stats.total_detections,
-                      color: COLORS[index % COLORS.length],
-                    }))}
+                    data={pieData}
                     cx="50%"
                     cy="50%"
-                    labelLine={false}
-                    label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
-                    outerRadius={100}
-                    fill="#8884d8"
+                    innerRadius={80}
+                    outerRadius={120}
+                    paddingAngle={2}
                     dataKey="value"
                   >
-                    {dashboardData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    {pieData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
                     ))}
                   </Pie>
                   <Tooltip />
                 </PieChart>
               </ResponsiveContainer>
-            </Paper>
-          </Grid>
+              
+              {/* Center Text */}
+              <Box
+                position="absolute"
+                top="50%"
+                left="50%"
+                sx={{ transform: 'translate(-50%, -50%)' }}
+                textAlign="center"
+              >
+                <Typography variant="h3" fontWeight={700} sx={{ color: '#0f172a' }}>
+                  {avgAccuracy}%
+                </Typography>
+                <Typography variant="caption" sx={{ color: '#64748b', textTransform: 'uppercase', fontSize: '0.7rem' }}>
+                  Avg Accuracy
+                </Typography>
+              </Box>
+            </Box>
 
-          <Grid item xs={12} md={6}>
-            <Paper elevation={0} sx={{ p: 3, borderRadius: 3, border: '1px solid #e2e8f0', height: 400 }}>
-              <Typography variant="h6" fontWeight={700} sx={{ mb: 2, color: '#0f172a' }}>
-                Cameras by Exam Body
-              </Typography>
-              <ResponsiveContainer width="100%" height="85%">
-                <BarChart
-                  data={dashboardData.map((item) => ({
-                    name: item.exam_body,
-                    cameras: item.stats.total_cameras,
-                    accessible: item.stats.camera_status.accessible,
-                    not_accessible: item.stats.camera_status.not_accessible,
-                  }))}
-                  margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                  <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#94a3b8' }} />
-                  <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} />
-                  <Tooltip />
-                  <Legend />
-                  <Bar dataKey="accessible" fill="#10b981" name="Accessible" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="not_accessible" fill="#ef4444" name="Not Accessible" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </Paper>
-          </Grid>
+            {/* Legend */}
+            <Box display="flex" flexDirection="column" gap={1.5} mt={2} maxHeight={120} sx={{ overflowY: 'auto' }}>
+              {pieData.map((item, index) => (
+                <Box key={index} display="flex" alignItems="center" justifyContent="space-between" gap={2}>
+                  <Box display="flex" alignItems="center" gap={1}>
+                    <Box
+                      sx={{
+                        width: 12,
+                        height: 12,
+                        borderRadius: '50%',
+                        bgcolor: item.color,
+                        flexShrink: 0,
+                      }}
+                    />
+                    <Typography variant="body2" sx={{ fontSize: '0.85rem', color: '#64748b' }}>
+                      {item.name}
+                    </Typography>
+                  </Box>
+                  <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 700, color: '#0f172a' }}>
+                    {item.value}%
+                  </Typography>
+                </Box>
+              ))}
+            </Box>
+          </Paper>
         </Grid>
-      )}
+
+        {/* All Exam Status */}
+        <Grid item xs={12} md={5}>
+          <Paper elevation={0} sx={{ p: 3, borderRadius: 3, border: '1px solid #e2e8f0', height: '100%', boxShadow: 'none' }}>
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+              <Typography variant="h6" fontWeight={700} sx={{ color: '#0f172a' }}>
+                All Exam Status
+              </Typography>
+              <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem' }}>
+                TOTAL: {totalExamTasks}
+              </Typography>
+            </Box>
+
+            <Box display="flex" flexDirection="column" gap={3}>
+              {/* Completed */}
+              <Box>
+                <Box display="flex" justifyContent="space-between" mb={1}>
+                  <Typography variant="body2" fontWeight={600} sx={{ fontSize: '0.85rem' }}>
+                    Completed
+                  </Typography>
+                  <Typography variant="body2" fontWeight={600} sx={{ fontSize: '0.85rem', color: '#3b82f6' }}>
+                    {examStatus.completed}/{totalExamTasks}
+                  </Typography>
+                </Box>
+                <LinearProgress
+                  variant="determinate"
+                  value={totalExamTasks > 0 ? (examStatus.completed / totalExamTasks) * 100 : 0}
+                  sx={{
+                    height: 16,
+                    borderRadius: 8,
+                    bgcolor: '#e2e8f0',
+                    '& .MuiLinearProgress-bar': {
+                      bgcolor: '#3b82f6',
+                      borderRadius: 8,
+                    },
+                  }}
+                />
+              </Box>
+
+              {/* In Progress */}
+              <Box>
+                <Box display="flex" justifyContent="space-between" mb={1}>
+                  <Typography variant="body2" fontWeight={600} sx={{ fontSize: '0.85rem' }}>
+                    In Progress
+                  </Typography>
+                  <Typography variant="body2" fontWeight={600} sx={{ fontSize: '0.85rem', color: '#f59e0b' }}>
+                    {examStatus.in_progress}/{totalExamTasks}
+                  </Typography>
+                </Box>
+                <LinearProgress
+                  variant="determinate"
+                  value={totalExamTasks > 0 ? (examStatus.in_progress / totalExamTasks) * 100 : 0}
+                  sx={{
+                    height: 16,
+                    borderRadius: 8,
+                    bgcolor: '#e2e8f0',
+                    '& .MuiLinearProgress-bar': {
+                      bgcolor: '#f59e0b',
+                      borderRadius: 8,
+                    },
+                  }}
+                />
+              </Box>
+
+              {/* Pending */}
+              <Box>
+                <Box display="flex" justifyContent="space-between" mb={1}>
+                  <Typography variant="body2" fontWeight={600} sx={{ fontSize: '0.85rem' }}>
+                    Pending
+                  </Typography>
+                  <Typography variant="body2" fontWeight={600} sx={{ fontSize: '0.85rem', color: '#64748b' }}>
+                    {examStatus.pending}/{totalExamTasks}
+                  </Typography>
+                </Box>
+                <LinearProgress
+                  variant="determinate"
+                  value={totalExamTasks > 0 ? (examStatus.pending / totalExamTasks) * 100 : 0}
+                  sx={{
+                    height: 16,
+                    borderRadius: 8,
+                    bgcolor: '#e2e8f0',
+                    '& .MuiLinearProgress-bar': {
+                      bgcolor: '#94a3b8',
+                      borderRadius: 8,
+                    },
+                  }}
+                />
+              </Box>
+            </Box>
+          </Paper>
+        </Grid>
+      </Grid>
+
+      {/* Bottom Section: Script Distribution */}
+      <Paper elevation={0} sx={{ p: 3, borderRadius: 3, border: '1px solid #e2e8f0', boxShadow: 'none' }}>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+          <Typography variant="h6" fontWeight={700} sx={{ color: '#0f172a' }}>
+            Script Distribution
+          </Typography>
+          <Box display="flex" gap={1}>
+            <FormControl size="small" sx={{ minWidth: 150 }}>
+              <Select
+                value={selectedScriptExam}
+                onChange={(e) => setSelectedScriptExam(e.target.value)}
+                sx={{ fontSize: '0.85rem' }}
+              >
+                <MenuItem value="all">All Exams</MenuItem>
+                {(dashboardData.exams || []).map(exam => (
+                  <MenuItem key={exam.id} value={exam.id}>{exam.name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl size="small" sx={{ minWidth: 150 }}>
+              <Select
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                sx={{ fontSize: '0.85rem' }}
+                displayEmpty
+              >
+                <MenuItem value="all">{getDateRangeLabel()}</MenuItem>
+                {filteredDates.map(date => (
+                  <MenuItem key={date} value={date}>{formatDate(date)}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Box>
+        </Box>
+
+        {/* Shift Headers */}
+        {uniqueShifts.length > 0 && (
+          <Box display="flex" mb={2}>
+            <Box sx={{ width: 200, flexShrink: 0 }} />
+            <Box display="flex" flex={1} gap={2} justifyContent="space-around">
+              {uniqueShifts.map((shift, index) => (
+                <Typography 
+                  key={index} 
+                  variant="caption" 
+                  sx={{ 
+                    fontWeight: 700, 
+                    color: '#64748b', 
+                    textTransform: 'uppercase',
+                    fontSize: '0.7rem',
+                    textAlign: 'center',
+                    flex: 1,
+                  }}
+                >
+                  {shift}
+                </Typography>
+              ))}
+            </Box>
+          </Box>
+        )}
+
+        {/* Script Rows */}
+        <Box sx={{ maxHeight: 500, overflowY: 'auto' }}>
+          {scriptBarData.map((script, index) => (
+            <Box 
+              key={index} 
+              display="flex" 
+              alignItems="center" 
+              mb={1.5}
+            >
+              {/* Script Name */}
+              <Box 
+                sx={{ 
+                  width: 200, 
+                  flexShrink: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1,
+                }}
+              >
+                <Box
+                  sx={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: '50%',
+                    bgcolor: script.color,
+                    flexShrink: 0,
+                  }}
+                />
+                <Typography 
+                  sx={{ 
+                    fontSize: '0.8rem', 
+                    color: '#475569', 
+                    fontWeight: 500,
+                  }}
+                >
+                  {script.script_name}
+                </Typography>
+              </Box>
+
+              {/* Shift Boxes */}
+              <Box display="flex" flex={1} gap={2} justifyContent="space-around">
+                {uniqueShifts.map((shift, shiftIndex) => {
+                  const count = script[shift] || 0;
+                  const timeRange = script[`${shift}_time`] || '';
+                  const hasValue = count > 0;
+                  
+                  return (
+                    <Box 
+                      key={shiftIndex}
+                      sx={{
+                        flex: 1,
+                        minHeight: 50,
+                        bgcolor: hasValue ? script.color : '#f1f5f9',
+                        borderRadius: 2,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        p: 1,
+                        position: 'relative',
+                      }}
+                    >
+                      {hasValue && (
+                        <>
+                          <Typography 
+                            sx={{ 
+                              fontSize: '0.65rem', 
+                              color: '#fff',
+                              fontWeight: 600,
+                              mb: 0.3,
+                            }}
+                          >
+                            {timeRange}
+                          </Typography>
+                          {/* <Typography 
+                            sx={{ 
+                              fontSize: '0.75rem', 
+                              color: '#fff',
+                              fontWeight: 700,
+                            }}
+                          >
+                            {count}
+                          </Typography> */}
+                        </>
+                      )}
+                    </Box>
+                  );
+                })}
+              </Box>
+            </Box>
+          ))}
+        </Box>
+
+        {scriptBarData.length === 0 && (
+          <Box display="flex" alignItems="center" justifyContent="center" py={8}>
+            <Typography variant="body2" color="text.secondary">
+              No scripts available
+            </Typography>
+          </Box>
+        )}
+
+        {uniqueShifts.length === 0 && scriptBarData.length > 0 && (
+          <Box display="flex" alignItems="center" justifyContent="center" py={8}>
+            <Typography variant="body2" color="text.secondary">
+              No script assignments for the selected filters
+            </Typography>
+          </Box>
+        )}
+      </Paper>
     </Box>
   );
 };

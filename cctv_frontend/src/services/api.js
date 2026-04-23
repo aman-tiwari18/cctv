@@ -41,7 +41,10 @@ export const authAPI = {
     sendRegistrationOTP: (data) => api.post('/auth/send-registration-otp', data),
     verifyRegistrationOTP: (data) => api.post('/auth/verify-registration-otp', data),
     forgotPassword: (data) => api.post('/auth/forgot-password', data),
-    resetPassword: (data) => api.post('/auth/reset-password', data)
+    resetPassword: (data) => api.post('/auth/reset-password', data),
+    getAllUsers: (params) => api.get('/auth/users', { params }),
+    verifyUser: (userId, data) => api.put(`/auth/verify/${userId}`, data),
+    getAvailableCompanies: () => api.get('/auth/companies')
 };
 
 export const examsAPI = {
@@ -50,6 +53,7 @@ export const examsAPI = {
     create: (examData) => api.post('/exams', examData),
     update: (id, examData) => api.put(`/exams/${id}`, examData),
     delete: (id) => api.delete(`/exams/${id}`),
+    getDetectionCount: (id) => api.get(`/exams/${id}/detections/count`),
 };
 
 export const camerasAPI = {

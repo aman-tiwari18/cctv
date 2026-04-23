@@ -697,6 +697,7 @@ export default function Detections() {
   const [listSelectedIndex, setListSelectedIndex] = useState(0);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [allShifts, setAllShifts] = useState(false);
+  const [keyboardHintShown, setKeyboardHintShown] = useState(false);
 
   const [selected, setSelected] = useState(null);
   const [selectedPaths, setSelectedPaths] = useState([]);
@@ -1267,7 +1268,22 @@ export default function Detections() {
             pushed images {clientTotal} / skipped images {Math.max(0, total - clientTotal)}
           </Typography>
           <ToggleButtonGroup
-            value={view} exclusive onChange={(_, v) => v && setView(v)} size="small"
+            value={view} 
+            exclusive 
+            onChange={(_, v) => {
+              if (v) {
+                setView(v);
+                if (v === 'list' && !keyboardHintShown) {
+                  setClientSnackbar({
+                    open: true,
+                    message: '💡 Keyboard shortcuts: ↑↓ Navigate | → Push | ← Skip',
+                    severity: 'info'
+                  });
+                  setKeyboardHintShown(true);
+                }
+              }
+            }} 
+            size="small"
             sx={{
               bgcolor: '#ffffff',
               border: '0.5px solid #e2e8f0',

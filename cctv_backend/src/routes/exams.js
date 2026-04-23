@@ -40,4 +40,11 @@ router.delete(
     asyncHandler(ExamController.deleteExam)
 );
 
+// Get detection count for an exam
+router.get(
+    "/:id/detections/count",
+    authenticate,
+    asyncHandler(ExamController.getDetectionCount)
+);
+
 module.exports = router;

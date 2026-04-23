@@ -817,10 +817,21 @@ const Analytics = () => {
                           seen.add(key);
                           return true;
                         });
+                        
+                        // Sort by start time
+                        const sorted = unique.sort((a, b) => {
+                          const timeA = a.custom_start_time || shift.start_time || '';
+                          const timeB = b.custom_start_time || shift.start_time || '';
+                          return timeA.localeCompare(timeB);
+                        });
+                        
                         return (
-                          <Box sx={{ display: 'flex', gap: 1, mt: 2, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-                            {unique.map((assignment, i) => {
-                              const name = assignment.script?.name || 'Unknown';
+                          <Box sx={{ display: 'flex', gap: 1, mt: 2, flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'flex-start' }}>
+                            {sorted.map((assignment, i) => {
+                              // Remove "detection" keyword from name
+                              const rawName = assignment.script?.name || 'Unknown';
+                              const name = rawName.replace(/\s*detection\s*/gi, '').trim();
+                              
                               const technicalId = assignment.script?.script_id || '';
                               const chipColor = SCRIPT_COLORS[technicalId] || DEFAULT_CHIP_COLOR;
                               const startT = assignment.custom_start_time
@@ -835,7 +846,7 @@ const Analytics = () => {
                                 <Chip
                                   key={technicalId || i}
                                   label={
-                                    <Box sx={{ textAlign: 'center', lineHeight: 1.3 }}>
+                                    <Box sx={{ textAlign: 'left', lineHeight: 1.3, minWidth: 80 }}>
                                       <Box sx={{ fontWeight: 700, fontSize: '0.8rem' }}>{name}</Box>
                                       {timeLabel && (
                                         <Box sx={{ fontWeight: 500, fontSize: '0.68rem', opacity: 0.85, mt: '2px', color: '#333' }}>
@@ -851,9 +862,12 @@ const Analytics = () => {
                                     bgcolor: chipColor.bg,
                                     color: '#777',
                                     height: 'auto',
+                                    minWidth: 180,
                                     py: 0.8,
+                                    alignItems : 'start',
+                                    display : 'flex',
                                     borderRadius: '16px',
-                                    '& .MuiChip-label': { pl: 2, pr: 3.5 },
+                                    '& .MuiChip-label': { pl: 2, pr: 3.5, width: '100%' },
                                     '& .MuiChip-deleteIcon': {
                                       position: 'absolute',
                                       top: '8px',

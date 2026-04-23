@@ -55,6 +55,8 @@ exports.createExam = async (req, res) => {
 
 exports.getAllExams = async (req, res) => {
     const { is_active, exam_body } = req.query;
+    const userCompanyName = req.user?.company_name;
+    const userRole = req.user?.role;
 
     const where = {};
 
@@ -63,6 +65,17 @@ exports.getAllExams = async (req, res) => {
 
     if (exam_body)
         where.exam_body = exam_body;
+
+    // Apply company-based filtering for non-admin users
+    if (userRole !== 'ADMIN' && userCompanyName) {
+        if (userCompanyName === 'EY') {
+            // EY users see both SSC and TCS exams
+            where.exam_body = ['SSC', 'TCS'];
+        } else {
+            // Other users see only their company's exams
+            where.exam_body = userCompanyName;
+        }
+    }
 
     const exams = await Exam.findAll({
         where,
@@ -213,4 +226,64 @@ exports.deleteExam = async (req, res) => {
         success: true,
         message: "Exam deleted successfully",
     });
+};
+
+exports.getDetectionCount = async (req, res) => {
+    const examId = req.params.id;
+
+    const exam = await Exam.findByPk(examId);
+
+    if (!exam) {
+        return res.status(404).json({
+            success: false,
+            message: "Exam not found",
+        });
+    }
+
+    const linkType = (exam.link_type || "").toUpperCase();
+    let detectionCount = 0;
+
+    try {
+        if (linkType === "HLS") {
+            // Count from camera_report_hls table
+            const [results] = await sequelize.query(
+                `SELECT COUNT(DISTINCT id) as count 
+                 FROM camera_report_hls 
+                 WHERE exam_id = :examId`,
+                {
+                    replacements: { examId },
+                    type: sequelize.QueryTypes.SELECT,
+                }
+            );
+            detectionCount = results?.count || 0;
+        } else if (linkType === "RTSP") {
+            // Count from camera_report_rtsp table
+            const [results] = await sequelize.query(
+                `SELECT COUNT(DISTINCT id) as count 
+                 FROM camera_report_rtsp 
+                 WHERE exam_id = :examId`,
+                {
+                    replacements: { examId },
+                    type: sequelize.QueryTypes.SELECT,
+                }
+            );
+            detectionCount = results?.count || 0;
+        }
+
+        res.json({
+            success: true,
+            data: {
+                exam_id: examId,
+                link_type: linkType,
+                detection_count: parseInt(detectionCount, 10),
+            },
+        });
+    } catch (error) {
+        console.error("Error counting detections:", error);
+        res.status(500).json({
+            success: false,
+            message: "Failed to count detections",
+            error: error.message,
+        });
+    }
 };

@@ -137,4 +137,17 @@ router.post(
     asyncHandler(AuthController.resetPassword)
 );
 
+// Get all users endpoint (Admin only)
+router.get(
+    "/users",
+    authenticate,
+    asyncHandler(AuthController.getAllUsers)
+);
+
+// Get available companies endpoint (Public - for registration)
+router.get(
+    "/companies",
+    asyncHandler(AuthController.getAvailableCompanies)
+);
+
 module.exports = router;

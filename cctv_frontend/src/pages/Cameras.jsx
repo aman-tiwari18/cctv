@@ -10,7 +10,9 @@ import {
 import {
   Add, Edit, Delete, Upload, CloudUpload, Download,
   TableChart, ChevronRight, Search,
-  Videocam as VideocamIcon
+  Videocam as VideocamIcon,
+  KeyboardArrowLeft,
+  KeyboardArrowRight,
 } from '@mui/icons-material';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import AssignmentIcon from '@mui/icons-material/Assignment';
@@ -18,6 +20,7 @@ import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { camerasAPI, examsAPI } from '../services/api';
 import { ExamsSvgIcon } from '../components/ExamsSvgIcon'
+
 
 const truncate = (str, n = 40) =>
   str && str.length > n ? str.slice(0, n) + '…' : str;
@@ -264,6 +267,14 @@ const Cameras = () => {
     finally { setUploading(false); }
   };
 
+  const handleCloseUploadDialog = () => {
+    setOpenUpload(false);
+    setUploadFile(null);
+    setUploadShiftId('');
+    setUploadDate('');
+    setUploadError('');
+  };
+
   const handleDownloadTemplate = async (type) => {
     if (!selectedExamId) return;
     try { await camerasAPI.downloadTemplate(selectedExamId, type); }
@@ -285,8 +296,8 @@ const Cameras = () => {
           {/* Sidebar header + collapse toggle */}
           <Box sx={{ px: sidebarOpen ? 2.5 : 1, pt: 2.5, pb: 1.5, display: 'flex', alignItems: 'center', justifyContent: sidebarOpen ? 'space-between' : 'center' }}>
             {sidebarOpen && (
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                {/* <ExamsSvgIcon sx={{ fontSize: 17, color: '#64748b' }} /> */}
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap:1 }}>
+                <ExamsSvgIcon sx={{ fontSize: 17, color: '#64748b' }} />
                 <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#334155' }}>
                   {viewingArchived ? 'Archived Exams' : 'Available Exams'}
                 </Typography>
@@ -305,7 +316,11 @@ const Cameras = () => {
                   height: 32,
                 }}
               >
-                <ExamsSvgIcon sx={{ fontSize: 20 }} />
+                {sidebarOpen ? (
+                  <KeyboardArrowLeft sx={{ fontSize: 20 }} />
+                ) : (
+                  <KeyboardArrowRight sx={{ fontSize: 20 }} />
+                )}
               </IconButton>
             </Tooltip>
           </Box>
@@ -336,14 +351,22 @@ const Cameras = () => {
                         <ChevronRight sx={{ fontSize: 20, color: active ? '#3b82f6' : '#94a3b8', flexShrink: 0 }} />
                       </>
                     ) : (
-                      /* Collapsed: show AssignmentIcon — blue box if active, plain icon if inactive */
+                      /* Collapsed: show first letter of exam name in a styled box */
                       <Box sx={{
                         width: 34, height: 34, borderRadius: 2,
-                        bgcolor: active ? '#2563eb' : 'transparent',
+                        bgcolor: active ? '#2563eb' : '#f1f5f9',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         transition: 'background 0.15s',
+                        border: active ? 'none' : '1px solid #e2e8f0',
                       }}>
-                        <AssignmentIcon sx={{ fontSize: 18, color: active ? '#fff' : '#94a3b8' }} />
+                        <Typography sx={{ 
+                          fontSize: '0.9rem', 
+                          fontWeight: 700, 
+                          color: active ? '#fff' : '#64748b',
+                          textTransform: 'uppercase'
+                        }}>
+                          {exam.exam_name.charAt(0)}
+                        </Typography>
                       </Box>
                     )}
                   </Box>
@@ -512,14 +535,14 @@ const Cameras = () => {
                   )}
 
                   <Tooltip title="Download HLS Template">
-                    <Button variant="outlined" size="small" startIcon={<TableChart />}
+                    <Button variant="outlined" size="small" startIcon={<Download />}
                       onClick={() => handleDownloadTemplate('hls')}
                       sx={{ borderColor: 'primary.main', color: 'primary.main', '&:hover': { bgcolor: '#ecfeff' }, textTransform: 'none', fontWeight: 600 }}>
                       HLS
                     </Button>
                   </Tooltip>
                   <Tooltip title="Download RTSP Template">
-                    <Button variant="outlined" size="small" startIcon={<TableChart />}
+                    <Button variant="outlined" size="small" startIcon={<Download />}
                       onClick={() => handleDownloadTemplate('rtsp')}
                       sx={{ borderColor: 'buttonrtsp.bg', color: 'buttonrtsp.text', '&:hover': { bgcolor: '#f5f3ff' }, textTransform: 'none', fontWeight: 600 }}>
                       RTSP
@@ -527,7 +550,7 @@ const Cameras = () => {
                   </Tooltip>
 
                   <Button variant="outlined" startIcon={<CloudUpload />}
-                    onClick={() => { setOpenUpload(true); setUploadError(''); }}
+                    onClick={() => { setOpenUpload(true); setUploadError(''); setUploadFile(null); setUploadShiftId(''); setUploadDate(''); }}
                     sx={{ textTransform: 'none', fontWeight: 600 }}>
                     Upload Excel
                   </Button>
@@ -856,7 +879,7 @@ const Cameras = () => {
 
 
         {/* ── Upload Dialog ── */}
-        <Dialog open={openUpload} onClose={() => setOpenUpload(false)} maxWidth="sm" fullWidth
+        <Dialog open={openUpload} onClose={handleCloseUploadDialog} maxWidth="sm" fullWidth
           PaperProps={{ sx: { overflow: 'visible', minHeight: 380 } }}
           sx={{ '& .MuiDialog-container': { alignItems: 'flex-start', pt: 10 } }}>
           <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -900,15 +923,23 @@ const Cameras = () => {
           </DialogContent>
           <DialogActions sx={{ justifyContent: 'space-between', px: 3, pb: 2 }}>
             <Box display="flex" gap={1}>
-              <Tooltip title="Download blank HLS template">
-                <Button size="small" startIcon={<Download />} onClick={() => handleDownloadTemplate('hls')} sx={{ color: '#06b6d4' }}>HLS Template</Button>
+              <Tooltip title="Download HLS Template">
+                <Button variant="outlined" size="small" startIcon={<Download />}
+                  onClick={() => handleDownloadTemplate('hls')}
+                  sx={{ borderColor: 'primary.main', color: 'primary.main', '&:hover': { bgcolor: '#ecfeff' }, textTransform: 'none', fontWeight: 600 }}>
+                  HLS
+                </Button>
               </Tooltip>
-              <Tooltip title="Download blank RTSP template">
-                <Button size="small" startIcon={<Download />} onClick={() => handleDownloadTemplate('rtsp')} sx={{ color: '#8b5cf6' }}>RTSP Template</Button>
+              <Tooltip title="Download RTSP Template">
+                <Button variant="outlined" size="small" startIcon={<Download />}
+                  onClick={() => handleDownloadTemplate('rtsp')}
+                  sx={{ borderColor: 'buttonrtsp.bg', color: 'buttonrtsp.text', '&:hover': { bgcolor: '#f5f3ff' }, textTransform: 'none', fontWeight: 600 }}>
+                  RTSP
+                </Button>
               </Tooltip>
             </Box>
             <Box display="flex" gap={1}>
-              <Button onClick={() => setOpenUpload(false)}>Cancel</Button>
+              <Button onClick={handleCloseUploadDialog}>Cancel</Button>
               <Button variant="contained" onClick={handleUpload} disabled={!uploadFile || uploading}
                 startIcon={uploading ? <CircularProgress size={16} /> : <CloudUpload />}>
                 {uploading ? 'Uploading…' : 'Upload'}

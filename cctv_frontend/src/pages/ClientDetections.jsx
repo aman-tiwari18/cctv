@@ -864,6 +864,7 @@ const ClientDetections = () => {
   const [selected, setSelected] = useState(null);
   const [removedUids, setRemovedUids] = useState(new Set());
   const [removingId, setRemovingId] = useState(null);
+  const [keyboardHintShown, setKeyboardHintShown] = useState(false);
 
   // Fetch unfiltered counts once for sidebar
   const fetchAllCounts = useCallback(async () => {
@@ -1254,7 +1255,22 @@ const ClientDetections = () => {
         })}
         <Box sx={{ ml: 'auto' }}>
           <ToggleButtonGroup
-            value={view} exclusive onChange={(_, v) => v && setView(v)} size="small"
+            value={view} 
+            exclusive 
+            onChange={(_, v) => {
+              if (v) {
+                setView(v);
+                if (v === 'list' && !keyboardHintShown) {
+                  setSnackbar({
+                    open: true,
+                    message: '💡 Keyboard shortcuts: ↑↓ Navigate detections',
+                    severity: 'info'
+                  });
+                  setKeyboardHintShown(true);
+                }
+              }
+            }} 
+            size="small"
             sx={{
               bgcolor: '#ffffff',
               border: '0.5px solid #e2e8f0',

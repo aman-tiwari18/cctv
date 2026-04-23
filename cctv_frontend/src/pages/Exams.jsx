@@ -40,18 +40,18 @@ import {
   CalendarTodayOutlined,
   VideocamOutlined,
   LayersOutlined,
-  Schedule,
   EditOutlined,
   DeleteOutline,
   AccessTime,
-  AccessTimeOutlined,
   StayPrimaryLandscape,
   Close,
 } from '@mui/icons-material';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
+import ReportProblemIcon from '@mui/icons-material/ReportProblem';
+import { ShiftSvgIcon } from '../components/ShiftSvgIcon';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { examsAPI } from '../services/api';
+import { examsAPI, shiftScriptsAPI } from '../services/api';
 
 const ALL_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -75,6 +75,7 @@ const Exams = () => {
   const [error, setError] = useState('');
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [newSkipDate, setNewSkipDate] = useState('');
+  const [examCounts, setExamCounts] = useState({}); // Store script and detection counts
 
   useEffect(() => {
     loadExams();
@@ -83,7 +84,62 @@ const Exams = () => {
   const loadExams = async () => {
     try {
       const response = await examsAPI.getAll({ is_active: true });
-      setExams(response.data.data);
+      const examsList = response.data.data;
+      setExams(examsList);
+      
+      // Fetch counts for each exam
+      const countsPromises = examsList.map(async (exam) => {
+        try {
+          // Fetch script counts for all shifts
+          let totalScripts = 0;
+          if (exam.examShifts && exam.examShifts.length > 0) {
+            const scriptCountPromises = exam.examShifts.map(async (shift) => {
+              try {
+                const scriptResponse = await shiftScriptsAPI.getByShift(shift.id);
+                return scriptResponse.data?.data?.length || 0;
+              } catch (err) {
+                console.error(`Error fetching scripts for shift ${shift.id}:`, err);
+                return 0;
+              }
+            });
+            const scriptCounts = await Promise.all(scriptCountPromises);
+            totalScripts = scriptCounts.reduce((sum, count) => sum + count, 0);
+          }
+          
+          // Fetch detection count
+          let detectionCount = 0;
+          try {
+            const detectionResponse = await examsAPI.getDetectionCount(exam.id);
+            detectionCount = detectionResponse.data?.data?.detection_count || 0;
+          } catch (err) {
+            console.error(`Error fetching detections for exam ${exam.id}:`, err);
+          }
+          
+          return {
+            examId: exam.id,
+            scriptCount: totalScripts,
+            detectionCount: detectionCount,
+          };
+        } catch (err) {
+          console.error(`Error fetching counts for exam ${exam.id}:`, err);
+          return {
+            examId: exam.id,
+            scriptCount: 0,
+            detectionCount: 0,
+          };
+        }
+      });
+      
+      const counts = await Promise.all(countsPromises);
+      const countsMap = counts.reduce((acc, item) => {
+        acc[item.examId] = {
+          scripts: item.scriptCount,
+          detections: item.detectionCount,
+        };
+        return acc;
+      }, {});
+      
+      setExamCounts(countsMap);
     } catch (error) {
       console.error('Error loading exams:', error);
     } finally {
@@ -160,11 +216,24 @@ const Exams = () => {
     const validDate = /^\d{4}-\d{2}-\d{2}$/.test(parsedDate);
     if (!validDate || formData.skip_dates.includes(parsedDate)) return;
 
+    // Validate skip date is within exam date range
+    if (formData.start_date && formData.end_date) {
+      const skipDate = new Date(parsedDate);
+      const startDate = parseDDMMYYYYToDate(formData.start_date);
+      const endDate = parseDDMMYYYYToDate(formData.end_date);
+      
+      if (skipDate < startDate || skipDate > endDate) {
+        setError('Skip date must be within the exam date range');
+        return;
+      }
+    }
+
     setFormData((prev) => ({
       ...prev,
       skip_dates: [...prev.skip_dates, parsedDate].sort(),
     }));
     setNewSkipDate('');
+    setError('');
   };
 
   const handleRemoveSkipDate = (date) => {
@@ -178,6 +247,17 @@ const Exams = () => {
   const handleShiftChange = (index, field, value) => {
     const newShifts = [...formData.shifts];
     newShifts[index] = { ...newShifts[index], [field]: value };
+    
+    // Real-time validation for shift times
+    if (field === 'start_time' || field === 'end_time') {
+      const shift = newShifts[index];
+      if (shift.start_time && shift.end_time && shift.start_time >= shift.end_time) {
+        setError(`${shift.shift_name}: Start time must be before end time`);
+      } else {
+        setError('');
+      }
+    }
+    
     setFormData({ ...formData, shifts: newShifts });
   };
 
@@ -198,6 +278,51 @@ const Exams = () => {
   };
 
   const handleSubmit = async () => {
+    // Validation
+    if (!formData.exam_name.trim()) {
+      setError('Exam name is required');
+      return;
+    }
+    if (!formData.exam_body) {
+      setError('Exam body is required');
+      return;
+    }
+    if (!formData.start_date || !formData.end_date) {
+      setError('Start date and end date are required');
+      return;
+    }
+
+    // Validate start date is not after end date
+    const startDate = parseDDMMYYYYToDate(formData.start_date);
+    const endDate = parseDDMMYYYYToDate(formData.end_date);
+    if (startDate > endDate) {
+      setError('Start date cannot be after end date');
+      return;
+    }
+
+    // Validate shifts
+    if (formData.shifts.length === 0) {
+      setError('At least one shift is required');
+      return;
+    }
+
+    for (let i = 0; i < formData.shifts.length; i++) {
+      const shift = formData.shifts[i];
+      if (!shift.shift_name.trim()) {
+        setError(`Shift ${i + 1}: Name is required`);
+        return;
+      }
+      if (!shift.start_time || !shift.end_time) {
+        setError(`Shift ${i + 1}: Start time and end time are required`);
+        return;
+      }
+      // Validate shift start time is before end time
+      if (shift.start_time >= shift.end_time) {
+        setError(`Shift ${i + 1}: Start time must be before end time`);
+        return;
+      }
+    }
+
     try {
       const payload = {
         ...formData,
@@ -346,6 +471,12 @@ const Exams = () => {
           const dateInfo = getExamDateInfo(exam);
           const isHLS = exam.link_type === 'HLS';
           const isActive = exam.is_active !== false;
+          
+          // Check if exam is currently live
+          const now = new Date();
+          const examStart = exam.start_date ? new Date(exam.start_date) : null;
+          const examEnd = exam.end_date ? new Date(exam.end_date) : null;
+          const isLive = examStart && examEnd && now >= examStart && now <= examEnd;
 
           return (
             <Grid item xs={12} sm={6} md={3} key={exam.id} >
@@ -368,15 +499,30 @@ const Exams = () => {
                   <Typography sx={{ fontWeight: 600, fontSize: '1.5rem', color: '#0f172a', lineHeight: 1.25, pr: 1, flex: 1 }}>
                     {exam.exam_name}
                   </Typography>
-                  <Chip
-                    label={exam.link_type}
-                    size="small"
-                    sx={{
-                      fontWeight: 800, fontSize: '0.75rem', height: 26, px: 0.5,
-                      borderRadius: '16px', flexShrink: 0,
-                      bgcolor: isHLS ? '#3c81f6' : '#e0e7ff', color: isHLS ? '#fff' : '#3c81f6',
-                    }}
-                  />
+                  <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
+                    <Chip
+                      label={exam.link_type}
+                      size="small"
+                      sx={{
+                        fontWeight: 800, fontSize: '0.75rem', height: 26, px: 0.5,
+                        borderRadius: '16px', flexShrink: 0,
+                        bgcolor: isHLS ? '#3c81f6' : '#e0e7ff', color: isHLS ? '#fff' : '#3c81f6',
+                      }}
+                    />
+                    {isLive && (
+                      <Chip
+                        icon={<Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: '#10b981', animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite', '@keyframes pulse': { '0%, 100%': { opacity: 1 }, '50%': { opacity: 0.5 } } }} />}
+                        label="LIVE"
+                        size="small"
+                        sx={{
+                          fontWeight: 800, fontSize: '0.7rem', height: 26, px: 1,
+                          borderRadius: '16px', flexShrink: 0,
+                          bgcolor: '#fff', color: '#06875eff',
+                          '& .MuiChip-icon': { ml: 0.5 }
+                        }}
+                      />
+                    )}
+                  </Box>
                 </Box>
 
                 <Typography sx={{ fontSize: '0.8rem', fontWeight: 500, letterSpacing: '0.01em', textTransform: 'uppercase', color: '#94a3b8', mb: 1 }}>
@@ -431,7 +577,7 @@ const Exams = () => {
                     {exam.examShifts.map((shift) => (
                       <Chip
                         key={shift.id}
-                        icon={<AccessTimeOutlined sx={{ fontSize: '15px !important' }} />}
+                        icon={<ShiftSvgIcon sx={{ fontSize: '15px !important' }} />}
                         label={`${shift.shift_name} (${shift.start_time?.substring(0, 5)} - ${shift.end_time?.substring(0, 5)})`}
                         sx={{
                           bgcolor: '#fff',
@@ -452,23 +598,46 @@ const Exams = () => {
                 <Box sx={{ flex: 1 }} />
 
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 2, pt: 2 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                     <Box
                       onClick={() => navigate(`/cameras?exam=${exam.id}`)}
-                      sx={{ display: 'flex', alignItems: 'center', gap: 0.8, cursor: 'pointer', '&:hover': { opacity: 0.75 } }}
+                      sx={{ display: 'flex', alignItems: 'center', gap: 0.8, cursor: 'pointer', '&:hover': { opacity: 0.75,  color : '#3c81f6'} }}
                     >
-                      <CameraAltIcon sx={{ fontSize: 20, color: '#64748b' }} />
-                      <Typography sx={{ fontSize: '0.9rem', fontWeight: 800, color: '#475569' }}>
-                        {String(exam.camera_count || 0).padStart(2, '0')}
+                      <CameraAltIcon sx={{ fontSize: 20, color: '#8b929cff' }} />
+                      <Typography sx={{ fontSize: '0.8rem', fontWeight: 500, color: '#475569','&:hover': {   color : '#3c81f6'} }}>
+                       {String(exam.camera_count || 0).padStart(2, '0')}
                       </Typography>
                     </Box>
                     <Box
                       onClick={() => navigate(`/shifts?exam=${exam.id}`)}
-                      sx={{ display: 'flex', alignItems: 'center', gap: 0.8, cursor: 'pointer', '&:hover': { opacity: 0.75 } }}
+                      sx={{ display: 'flex', alignItems: 'center', gap: 0.8, cursor: 'pointer', '&:hover': { opacity: 0.75, color : '#3c81f6' } }}
                     >
-                      <Schedule sx={{ fontSize: 18, color: '#64748b' }} />
-                      <Typography sx={{ fontSize: '0.9rem', fontWeight: 800, color: '#64748b' }}>
+                       <ShiftSvgIcon sx={{ fontSize: 20, color: '#8b929cff' }} />
+
+                      <Typography sx={{ fontSize: '0.8rem', fontWeight: 600, color: '#333' ,'&:hover': {   color : '#3c81f6'} }}>
                         {String(exam.examShifts?.length || 0).padStart(2, '0')}
+                      </Typography>
+                    </Box>
+                    <Box
+                      onClick={() => navigate(`/analytics?exam=${exam.id}`)}
+                      sx={{ display: 'flex', alignItems: 'center', gap: 0.8, cursor: 'pointer', '&:hover': { opacity: 0.75, color : '#3c81f6' } }}
+                    >
+                      <Analytics sx={{ fontSize: 20, color: '#8b929cff' }} />
+
+
+                      <Typography sx={{ fontSize: '0.8rem', fontWeight: 600, color: '#333' ,'&:hover': {   color : '#3c81f6'} }}>
+                     {String(examCounts[exam.id]?.scripts || 0).padStart(2, '0')}
+                      </Typography>
+                    </Box>
+                    <Box
+                      onClick={() => navigate(`/detections?exam=${exam.id}`)}
+                      sx={{ display: 'flex', alignItems: 'center', gap: 0.8, cursor: 'pointer', '&:hover': { opacity: 0.75, color : '#3c81f6' } }}
+                    >
+                      <ReportProblemIcon sx={{ fontSize: 20, color: '#8b929cff' }} />
+
+
+                      <Typography sx={{ fontSize: '0.8rem', fontWeight: 600, color: '#333' ,'&:hover': {   color : '#3c81f6'} }}>
+                     {String(examCounts[exam.id]?.detections || 0).padStart(2, '0')}
                       </Typography>
                     </Box>
                   </Box>
@@ -550,11 +719,11 @@ const Exams = () => {
                 select
                 InputProps={{ sx: { borderRadius: 2, bgcolor: '#f1f5f9', '& fieldset': { border: 'none' } } }}
               >
-                <MenuItem value="SSC">SSC</MenuItem>
-                <MenuItem value="TCS">TCS</MenuItem>
-                <MenuItem value="UPSC">UPSC</MenuItem>
-                <MenuItem value="IBPS">IBPS</MenuItem>
-                {formData.exam_body && !['SSC', 'TCS', 'UPSC', 'IBPS'].includes(formData.exam_body) && <MenuItem value={formData.exam_body}>{formData.exam_body}</MenuItem>}
+                <MenuItem value="EY">EY(Ernst & Young)</MenuItem>
+                <MenuItem value="SSC">SSC(Staff Selection Commission)</MenuItem>
+                <MenuItem value="TCS">TCS(Tata Consultancy Services)</MenuItem>
+                {/* <MenuItem value="CDIS">CDIS</MenuItem> */}
+                {formData.exam_body && !['EY', 'SSC', 'TCS', 'CDIS'].includes(formData.exam_body) && <MenuItem value={formData.exam_body}>{formData.exam_body}</MenuItem>}
               </TextField>
             </Grid>
 
@@ -607,7 +776,17 @@ const Exams = () => {
                     value={formData.start_date ? formData.start_date.split('-').reverse().join('-') : ''}
                     onChange={(e) => {
                       const val = e.target.value;
-                      setFormData({ ...formData, start_date: val ? val.split('-').reverse().join('-') : '' });
+                      const newStartDate = val ? val.split('-').reverse().join('-') : '';
+                      setFormData({ ...formData, start_date: newStartDate });
+                      
+                      // Clear error if dates are now valid
+                      if (newStartDate && formData.end_date) {
+                        const start = parseDDMMYYYYToDate(newStartDate);
+                        const end = parseDDMMYYYYToDate(formData.end_date);
+                        if (start <= end) {
+                          setError('');
+                        }
+                      }
                     }}
                     InputProps={{
                       sx: {
@@ -643,7 +822,20 @@ const Exams = () => {
                     value={formData.end_date ? formData.end_date.split('-').reverse().join('-') : ''}
                     onChange={(e) => {
                       const val = e.target.value;
-                      setFormData({ ...formData, end_date: val ? val.split('-').reverse().join('-') : '' });
+                      const newEndDate = val ? val.split('-').reverse().join('-') : '';
+                      setFormData({ ...formData, end_date: newEndDate });
+                      
+                      // Clear error if dates are now valid
+                      if (formData.start_date && newEndDate) {
+                        const start = parseDDMMYYYYToDate(formData.start_date);
+                        const end = parseDDMMYYYYToDate(newEndDate);
+                        if (start <= end) {
+                          setError('');
+                        }
+                      }
+                    }}
+                    inputProps={{
+                      min: formData.start_date ? formData.start_date.split('-').reverse().join('-') : undefined
                     }}
                     InputProps={{
                       sx: {
@@ -679,7 +871,7 @@ const Exams = () => {
           </Box>
           <Box mb={2}>
             <Typography sx={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', mb: 1, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-              Skip Weekdays
+              Skip days
             </Typography>
             <Box sx={{ display: 'flex', gap: 1 }}>
               {ALL_DAYS.map((day) => {
@@ -721,6 +913,11 @@ const Exams = () => {
                     const val = e.target.value;
                     setNewSkipDate(val ? val.split('-').reverse().join('-') : '');
                   }}
+                  inputProps={{
+                    min: formData.start_date ? formData.start_date.split('-').reverse().join('-') : undefined,
+                    max: formData.end_date ? formData.end_date.split('-').reverse().join('-') : undefined
+                  }}
+                  disabled={!formData.start_date || !formData.end_date}
                   InputProps={{
                     sx: {
                       borderRadius: 2, bgcolor: '#f1f5f9', height: 38, fontSize: 14,
@@ -738,14 +935,14 @@ const Exams = () => {
                 )}
                 {!newSkipDate && (
                   <Box sx={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 14, color: '#94a3b8', pointerEvents: 'none' }}>
-                    Select date (dd-mm-yyyy)
+                    {!formData.start_date || !formData.end_date ? 'Set exam dates first' : 'Select date (dd-mm-yyyy)'}
                   </Box>
                 )}
               </Box>
               <Button
                 variant="contained"
                 onClick={handleAddSkipDate}
-                disabled={!newSkipDate}
+                disabled={!newSkipDate || !formData.start_date || !formData.end_date}
                 sx={{
                   bgcolor: '#e2e8f0', color: '#3b82f6', fontWeight: 700, borderRadius: 2, px: 3, py: 1,
                   boxShadow: 'none', '&:hover': { bgcolor: '#cbd5e1', boxShadow: 'none' },

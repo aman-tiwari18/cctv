@@ -17,6 +17,7 @@ import Executions from './pages/Executions';
 import Detections from './pages/Detections';
 import ClientDetections from './pages/ClientDetections';
 import ClientDetectionDashboard from './pages/ClientDetectionDashboard';
+import UserVerification from './pages/UserVerification';
 
 // Create Material-UI theme
 const theme = createTheme({
@@ -125,6 +126,7 @@ function App() {
             <Route path="detections" element={<Detections />} />
             <Route path="client-detections" element={<ClientDetections />} />
             <Route path="client-dashboard" element={<ClientDetectionDashboard />} />
+            <Route path="user-verification" element={<UserVerification />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

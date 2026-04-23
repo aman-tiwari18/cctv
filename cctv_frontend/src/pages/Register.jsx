@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link as RouterLink } from 'react-router-dom';
 import {
   Box,
@@ -10,6 +10,9 @@ import {
   Link,
   CircularProgress,
   InputAdornment,
+  FormControl,
+  Select,
+  MenuItem,
 } from '@mui/material';
 import { CheckCircle, PersonOutline, EmailOutlined, PhoneOutlined, BusinessOutlined } from '@mui/icons-material';
 import { authAPI } from '../services/api';
@@ -35,10 +38,30 @@ const Register = () => {
     emailSent: false,
     phoneSent: false,
   });
+  const [availableCompanies, setAvailableCompanies] = useState([]);
+  const [loadingCompanies, setLoadingCompanies] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
   const [userId, setUserId] = useState(null);
+
+  // Fetch available companies on component mount
+  useEffect(() => {
+    fetchAvailableCompanies();
+  }, []);
+
+  const fetchAvailableCompanies = async () => {
+    try {
+      setLoadingCompanies(true);
+      const response = await authAPI.getAvailableCompanies();
+      setAvailableCompanies(response.data.data || []);
+    } catch (err) {
+      console.error('Error fetching companies:', err);
+      setError('Failed to load available companies');
+    } finally {
+      setLoadingCompanies(false);
+    }
+  };
 
   const handleChange = (e) => {
     setFormData({
@@ -429,34 +452,58 @@ const Register = () => {
 
             <Box mb={4}>
               <Typography sx={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', letterSpacing: 0.5, textTransform: 'uppercase', mb: 1, px: 0.5 }}>
-                Company Name (Optional)
+                Company Name *
               </Typography>
-              <TextField
-                fullWidth
-                name="companyName"
-                placeholder="Enter your company name"
-                value={formData.companyName}
-                onChange={handleChange}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <BusinessOutlined sx={{ color: '#9ca3af', fontSize: 20, ml: 0.5 }} />
-                    </InputAdornment>
-                  ),
-                  sx: {
-                    bgcolor: '#f4f6f8',
-                    borderRadius: '10px',
-                    '& fieldset': { border: 'none' },
-                    input: { py: 1.5, px: 0, fontSize: 14, color: '#374151' }
-                  }
-                }}
-              />
+              {loadingCompanies ? (
+                <Box display="flex" alignItems="center" justifyContent="center" py={2}>
+                  <CircularProgress size={20} />
+                  <Typography sx={{ ml: 1, fontSize: 13, color: '#6b7280' }}>
+                    Loading companies...
+                  </Typography>
+                </Box>
+              ) : availableCompanies.length === 0 ? (
+                <Alert severity="warning" sx={{ borderRadius: 2 }}>
+                  No companies available. Please contact administrator.
+                </Alert>
+              ) : (
+                <FormControl fullWidth>
+                  <Select
+                    name="companyName"
+                    value={formData.companyName}
+                    onChange={handleChange}
+                    displayEmpty
+                    required
+                    startAdornment={
+                      <InputAdornment position="start">
+                        <BusinessOutlined sx={{ color: '#9ca3af', fontSize: 20, ml: 0.5 }} />
+                      </InputAdornment>
+                    }
+                    sx={{
+                      bgcolor: '#f4f6f8',
+                      borderRadius: '10px',
+                      '& fieldset': { border: 'none' },
+                      '& .MuiSelect-select': { py: 1.5, px: 0, fontSize: 14, color: '#374151' },
+                    }}
+                  >
+                    <MenuItem value="" disabled>
+                      <Typography sx={{ color: '#9ca3af', fontSize: 14 }}>
+                        Select your company
+                      </Typography>
+                    </MenuItem>
+                    {availableCompanies.map((company) => (
+                      <MenuItem key={company} value={company}>
+                        {company}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              )}
             </Box>
 
             <Button
               fullWidth
               onClick={handleContinueToPassword}
-              disabled={!verification.emailVerified || !verification.phoneVerified || loading}
+              disabled={!verification.emailVerified || !verification.phoneVerified || !formData.companyName || loading}
               sx={{
                 py: 1.5,
                 mb: 3,

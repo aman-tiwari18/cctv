@@ -36,6 +36,14 @@ exports.login = async (req, res) => {
         });
     }
 
+    // Check if user is verified
+    if (!user.verified) {
+        return res.status(401).json({
+            success: false,
+            message: "Your account is pending verification. Please contact an administrator.",
+        });
+    }
+
     // Update last login
     await query("UPDATE users SET last_login = NOW() WHERE id = ?", [user.id]);
 
@@ -326,8 +334,8 @@ exports.signup = async (req, res) => {
             });
         }
 
-        // Generate username from email
-        const username = email.split('@')[0] + '_' + Date.now();
+        // Use email as username
+        const username = email;
 
         // Hash password
         const salt = await bcrypt.genSalt(10);
@@ -729,6 +737,84 @@ exports.resetPassword = async (req, res) => {
         res.status(500).json({
             success: false,
             message: "Failed to reset password",
+        });
+    }
+};
+
+/**
+ * Get All Users (Admin only)
+ */
+exports.getAllUsers = async (req, res) => {
+    try {
+        // Only admins can view all users
+        if (req.user.role !== "ADMIN") {
+            return res.status(403).json({
+                success: false,
+                message: "Only admins can view all users",
+            });
+        }
+
+        const { verified, role, search } = req.query;
+        
+        let whereClause = "WHERE 1=1";
+        const params = [];
+
+        // Filter by verification status
+        if (verified !== undefined) {
+            whereClause += " AND verified = ?";
+            params.push(verified === 'true');
+        }
+
+        // Filter by role
+        if (role) {
+            whereClause += " AND role = ?";
+            params.push(role);
+        }
+
+        // Search by name or email
+        if (search) {
+            whereClause += " AND (full_name LIKE ? OR email LIKE ?)";
+            params.push(`%${search}%`, `%${search}%`);
+        }
+
+        const users = await query(
+            `SELECT id, username, email, full_name, phone, company_name, verified, verified_date, role, last_login, created_at 
+             FROM users ${whereClause} 
+             ORDER BY created_at DESC`,
+            params
+        );
+
+        res.json({
+            success: true,
+            data: users,
+        });
+    } catch (error) {
+        logger.error("Get all users error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Failed to fetch users",
+        });
+    }
+};
+
+/**
+ * Get Available Companies (from exam_body)
+ * Public endpoint - no authentication required for registration
+ */
+exports.getAvailableCompanies = async (req, res) => {
+    try {
+        // Fixed list of available companies
+        const companyList = ['EY', 'SSC', 'TCS', 'CDIS'];
+
+        res.json({
+            success: true,
+            data: companyList,
+        });
+    } catch (error) {
+        logger.error("Get available companies error:", error);
+        res.status(500).json({
+            success: false,
+            message: "Failed to fetch available companies",
         });
     }
 };

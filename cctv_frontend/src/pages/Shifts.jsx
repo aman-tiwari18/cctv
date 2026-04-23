@@ -19,6 +19,7 @@ import {
 } from '@mui/icons-material';
 import { examsAPI } from '../services/api';
 import { ExamsSvgIcon } from '../components/ExamsSvgIcon'
+import { ShiftSvgIcon } from '../components/ShiftSvgIcon';
 
 /* ── Format yyyy-mm-dd → dd-mm-yyyy ── */
 const formatDateLabel = (v) => {
@@ -243,7 +244,7 @@ const Shifts = () => {
                 display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 3,
               }}
             >
-              <ScheduleIcon sx={{ fontSize: 40, color: '#3b82f6' }} />
+              <ShiftSvgIcon sx={{ fontSize: 40, color: '#3b82f6' }} />
             </Box>
             <Typography variant="h5" sx={{ fontWeight: 700, color: '#1e293b', mb: 1.5 }}>
               Select an exam from the list
