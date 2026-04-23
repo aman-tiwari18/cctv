@@ -61,10 +61,10 @@ graph TB
     WORKERS --> HLS
     WORKERS -->|Report Results| API
     LOGMGR -.->|Store Logs| RUNNER
-    
-    style MASTER fill:#e1f8dc,stroke:#1b4d3e,stroke-width:3px
-    style POLLER fill:#d4f1f4,stroke:#05445e,stroke-width:2px
-    style GPU fill:#ffd1dc,stroke:#ff69b4,stroke-width:2px
+
+    style MASTER fill:#2d6a4f,color:#ffffff,stroke:#1b4d3e,stroke-width:3px
+    style POLLER fill:#1a5276,color:#ffffff,stroke:#154360,stroke-width:2px
+    style GPU fill:#6d4c41,color:#ffffff,stroke:#4e342e,stroke-width:2px
 ```
 
 ---
@@ -223,12 +223,12 @@ graph TB
         REPORT --> BACKEND_DB[(camera_report_hls camera_report_rtsp)]
         SAVE --> SOCKET[Socket.IO Live Updates]
     end
-    
-    style RTSP_PROD fill:#fff2cc,stroke:#d6b656,stroke-width:2px
-    style THREADS1 fill:#fff2cc,stroke:#d6b656,stroke-width:2px
-    style GPU1 fill:#ffd1dc,stroke:#ff69b4,stroke-width:2px
-    style GPU2 fill:#ffd1dc,stroke:#ff69b4,stroke-width:2px
-    style START fill:#e1f8dc,stroke:#1b4d3e,stroke-width:3px
+
+    style RTSP_PROD fill:#7d6608,color:#ffffff,stroke:#6d5800,stroke-width:2px
+    style THREADS1 fill:#7d6608,color:#ffffff,stroke:#6d5800,stroke-width:2px
+    style GPU1 fill:#6d4c41,color:#ffffff,stroke:#4e342e,stroke-width:2px
+    style GPU2 fill:#6d4c41,color:#ffffff,stroke:#4e342e,stroke-width:2px
+    style START fill:#2d6a4f,color:#ffffff,stroke:#1b4d3e,stroke-width:3px
 ```
 
 ### RTSP vs HLS Strategy
@@ -316,11 +316,11 @@ flowchart TD
     COMPLETE --> PERSIST[Persist Results result_data images]
     
     PERSIST --> END([Assignment Complete])
-    
-    style EXAM fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
-    style CRON fill:#fff3e0,stroke:#f57c00,stroke-width:2px
-    style EXECUTE fill:#e8f5e9,stroke:#388e3c,stroke-width:2px
-    style COMPLETE fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+
+    style EXAM fill:#1a5276,color:#ffffff,stroke:#154360,stroke-width:2px
+    style CRON fill:#7d6608,color:#ffffff,stroke:#6d5800,stroke-width:2px
+    style EXECUTE fill:#2d6a4f,color:#ffffff,stroke:#1b4d3e,stroke-width:2px
+    style COMPLETE fill:#4a235a,color:#ffffff,stroke:#3b1a4a,stroke-width:2px
 ```
 
 ### Assignment Status Lifecycle
@@ -390,9 +390,9 @@ graph LR
         COPY --> FLAG[UPDATE pushed_to_client = 1]
         COPY --> MOVE[Copy to client_selected_images]
     end
-    
-    style INFER fill:#ffd1dc,stroke:#ff69b4,stroke-width:2px
-    style EMIT fill:#d4f1f4,stroke:#05445e,stroke-width:2px
+
+    style INFER fill:#6d4c41,color:#ffffff,stroke:#4e342e,stroke-width:2px
+    style EMIT fill:#1a5276,color:#ffffff,stroke:#154360,stroke-width:2px
 ```
 
 ### Vision Classification Persistence
@@ -485,9 +485,9 @@ graph TB
     EXEC_M --> DB
     
     EXEC --> SCRIPT_SRV
-    
-    style SCHED fill:#fff3e0,stroke:#f57c00,stroke-width:2px
-    style SCRIPT_SRV fill:#e1f8dc,stroke:#1b4d3e,stroke-width:2px
+
+    style SCHED fill:#7d6608,color:#ffffff,stroke:#6d5800,stroke-width:2px
+    style SCRIPT_SRV fill:#2d6a4f,color:#ffffff,stroke:#1b4d3e,stroke-width:2px
 ```
 
 ### Script Server Architecture
@@ -547,10 +547,10 @@ graph TB
     WORKERS --> RESULTS
     WATCH --> RESULTS
     WATCH --> SOCKET
-    
-    style POLLER fill:#d4f1f4,stroke:#05445e,stroke-width:2px
-    style MASTER fill:#e1f8dc,stroke:#1b4d3e,stroke-width:3px
-    style SOCKET fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+
+    style POLLER fill:#1a5276,color:#ffffff,stroke:#154360,stroke-width:2px
+    style MASTER fill:#2d6a4f,color:#ffffff,stroke:#1b4d3e,stroke-width:3px
+    style SOCKET fill:#7d6608,color:#ffffff,stroke:#6d5800,stroke-width:2px
 ```
 
 ---
@@ -614,3 +614,8 @@ graph TB
 | `tampering` | Camera Tampering | Detects blur/blockage/tampering | HLS | camera_tampering_worker.py |
 | `blind_spot` | Blind Spot Detection | Detects blind spots and static issues | HLS | blind_spot_worker.py |
 
+
+
+**Document Version**: 1.0  
+**Last Updated**: 2026-04-22  
+**Maintained By**: CCTV Analytics Team
