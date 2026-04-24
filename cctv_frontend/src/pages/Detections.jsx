@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Box, Card, CardMedia, CardContent, Typography, Chip,
   TextField, Select, MenuItem, FormControl, InputLabel,
@@ -455,7 +456,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
             >
               <Box sx={{ position: 'relative', display: 'flex', ml: 1, mr: 1.5, my: 0.5 }}>
                 <NewBadge
-                  addedAt={listItem.addedAt}
+                  addedAt={listItem.detectedAt}
                   sx={{ position: 'absolute', top: -4, left: -4, zIndex: 10, transform: 'scale(0.85)' }}
                 />
                 <Box
@@ -671,6 +672,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
 
 export default function Detections() {
   const { setAllCounts, setUnfilteredCounts, typeFilter, setTypeFilter, setExportToExcel, setDownloadConsolidatedReport } = useDetectionCounts();
+  const [searchParams] = useSearchParams();
 
   const [data, setData] = useState([]);
   const [counts, setCounts] = useState({});
@@ -740,10 +742,16 @@ export default function Detections() {
       const response = await examsAPI.getAll({ is_active: true });
       const examList = Array.isArray(response?.data?.data) ? response.data.data : [];
       setExams(examList);
+      
+      // Set exam filter from URL params if present
+      const examIdFromUrl = searchParams.get('exam_id');
+      if (examIdFromUrl && examList.some(exam => String(exam.id) === examIdFromUrl)) {
+        setExamFilter(examIdFromUrl);
+      }
     } catch (err) {
       console.error('Failed to load exams:', err);
     }
-  }, []);
+  }, [searchParams]);
 
   useEffect(() => {
     loadExams();

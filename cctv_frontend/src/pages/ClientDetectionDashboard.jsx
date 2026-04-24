@@ -12,19 +12,36 @@ import {
   Select,
   MenuItem,
   LinearProgress,
+  IconButton,
+  Menu,
 } from '@mui/material';
 import {
-  Description,
   Videocam,
   Schedule,
   Event,
   TrendingUp,
+  WarningAmber,
+  Groups,
+  PersonOff,
+  Dns,
+  DirectionsWalk,
+  MeetingRoom,
+  Smartphone,
+  VisibilityOff,
+  Visibility,
+  FlipCameraAndroid,
+  SecurityUpdateWarning,
+  Download,
 } from '@mui/icons-material';
-import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { clientDashboardAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import { useDetectionCounts } from '../contexts/DetectionCountsContext';
+import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
+import { CustomSvgIcon } from '../components/DetectionSvgIcon';
+import { ShiftSvgIcon } from '../components/ShiftSvgIcon';
+import CameraAltIcon from '@mui/icons-material/CameraAlt';
 
-const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4'];
 
 const CATEGORY_COLORS = {
   people: '#3b82f6',
@@ -32,7 +49,6 @@ const CATEGORY_COLORS = {
   camera: '#f59e0b',
 };
 
-// Script type to category mapping (from ShiftScriptManager)
 const SCRIPT_CATEGORY_MAP = {
   proximity: 'people',
   crowd: 'people',
@@ -45,7 +61,43 @@ const SCRIPT_CATEGORY_MAP = {
   entry_exit: 'movement',
   inversion: 'camera',
   tamper: 'camera',
+  tampering: 'camera',
   blind_spot: 'camera',
+  vision: 'camera',
+};
+
+const SCRIPT_COLORS = {
+  proximity: { bg: '#e5f5ed', color: '#5cb88a' },
+  crowd: { bg: '#e9e3f8ff', color: '#e24d7b' },
+  crowd_five: { bg: '#fce8e6', color: '#e06050' },
+  crowd_zero: { bg: '#edeaf3', color: '#6b5b95' },
+  server: { bg: '#f3ebe4', color: '#a0623d' },
+  intruder: { bg: '#f0dfefff', color: '#d94466' },
+  entry_exit: { bg: '#e0f0f0', color: '#1d7a7d' },
+  phone: { bg: '#e8ece5', color: '#465a38' },
+  blind_spot: { bg: '#f3f2e4', color: '#b0a850' },
+  invigilator: { bg: '#cce8fcff', color: '#00bfcf' },
+  inversion: { bg: '#eceef5', color: '#7a86b4' },
+  tampering: { bg: '#e9f9ffff', color: '#00c8d4' },
+  tamper: { bg: '#e9f9ffff', color: '#00c8d4' },
+  vision: { bg: '#dbeafe', color: '#3b82f6' },
+};
+
+const SCRIPT_ICONS = {
+  proximity: WarningAmber,
+  crowd: Groups,
+  crowd_five: Groups,
+  crowd_zero: PersonOff,
+  server: Dns,
+  intruder: DirectionsWalk,
+  entry_exit: MeetingRoom,
+  phone: Smartphone,
+  blind_spot: VisibilityOff,
+  invigilator: Visibility,
+  inversion: FlipCameraAndroid,
+  tampering: SecurityUpdateWarning,
+  tamper: SecurityUpdateWarning,
+  vision: Visibility,
 };
 
 const DETECTION_TYPE_LABELS = {
@@ -61,13 +113,15 @@ const DETECTION_TYPE_LABELS = {
   invigilator: 'Invigilator',
   inversion: 'Camera Inversion',
   tamper: 'Camera Tampering',
+  tampering: 'Camera Tampering',
+  vision: 'Vision Detection',
 };
 
 const StatCard = ({ title, value, icon, color }) => (
   <Card elevation={0} sx={{ height: '100%', borderRadius: 3, border: '1px solid #e2e8f0', boxShadow: 'none' }}>
-    <CardContent sx={{ p: 2.5 }}>
-      <Box display="flex" justifyContent="space-between" alignItems="flex-start">
-        <Box flex={1}>
+    <CardContent sx={{ p: 0, height: '100%', '&:last-child': { pb: 0 } }}>
+      <Box display="flex" justifyContent="space-between" alignItems="stretch" height="100%">
+        <Box flex={1} display="flex" flexDirection="column" justifyContent="center" sx={{ p: 2 }}>
           <Typography
             variant="caption"
             sx={{
@@ -80,21 +134,32 @@ const StatCard = ({ title, value, icon, color }) => (
           >
             {title}
           </Typography>
-          <Typography variant="h4" fontWeight={700} sx={{ mt: 0.5, color: '#0f172a' }}>
+          <Typography variant="h5" fontWeight={700} sx={{ mt: 0.5, color: '#0f172a' }}>
             {value}
           </Typography>
         </Box>
         <Box
           sx={{
-            backgroundColor: `${color}18`,
-            borderRadius: 2,
-            p: 1.2,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
+            pr: 2,
+            py: 2,
           }}
         >
-          {React.cloneElement(icon, { sx: { fontSize: 28, color } })}
+          <Box
+            sx={{
+              backgroundColor: `${color}18`,
+              borderRadius: 2,
+              width: 70,
+              height: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            {React.cloneElement(icon, { sx: { fontSize: 40, color } })}
+          </Box>
         </Box>
       </Box>
     </CardContent>
@@ -103,32 +168,106 @@ const StatCard = ({ title, value, icon, color }) => (
 
 const ClientDetectionDashboard = () => {
   const { user } = useAuth();
+  const { unfilteredCounts } = useDetectionCounts();
   const [dashboardData, setDashboardData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedExam, setSelectedExam] = useState('all');
+  const [selectedShift, setSelectedShift] = useState('all');
+  const [selectedCameraDate, setSelectedCameraDate] = useState('all');
   const [selectedCategory, setSelectedCategory] = useState('all');
+  const [selectedDetectionExam, setSelectedDetectionExam] = useState('all');
   const [selectedScriptExam, setSelectedScriptExam] = useState('all');
   const [selectedDate, setSelectedDate] = useState('all');
+  const [timeRange, setTimeRange] = useState('24h');
+  const [cameraAccessibility, setCameraAccessibility] = useState(null);
+  const [cameraLoading, setCameraLoading] = useState(false);
+  const [availableShifts, setAvailableShifts] = useState([]);
+  const [availableCameraDates, setAvailableCameraDates] = useState([]);
+  const [downloadMenuAnchor, setDownloadMenuAnchor] = useState(null);
+
+  // Calculate live total detections from context
+  const liveDetectionCount = Object.values(unfilteredCounts).reduce((sum, count) => sum + count, 0);
 
   useEffect(() => {
     loadDashboardData();
-  }, []);
+  }, [timeRange]); // Reload when time range changes
 
-  // Reset date when exam selection changes
+  // Set default exam to first available exam when data loads
   useEffect(() => {
-    setSelectedDate('all');
-  }, [selectedScriptExam]);
+    if (dashboardData?.exams && dashboardData.exams.length > 0 && selectedScriptExam === 'all') {
+      setSelectedScriptExam(dashboardData.exams[0].id);
+    }
+  }, [dashboardData]);
+
+  // Get date range for selected exam - show only today or first day
+  const getDefaultDateForExam = () => {
+    const today = new Date().toISOString().split('T')[0];
+    const availableDates = dashboardData?.exam_dates || [];
+    
+    if (selectedScriptExam === 'all') {
+      // For "All Exams", check if today is in any exam's date range
+      const todayInRange = availableDates.includes(today);
+      return todayInRange ? today : (availableDates[0] || 'all');
+    }
+    
+    const selectedExamData = (dashboardData?.exams || []).find(e => e.id === parseInt(selectedScriptExam));
+    if (!selectedExamData || !selectedExamData.start_date || !selectedExamData.end_date) {
+      return 'all';
+    }
+    
+    const start = new Date(selectedExamData.start_date);
+    const end = new Date(selectedExamData.end_date);
+    const todayDate = new Date(today);
+    
+    // If today is within the exam date range, return today
+    if (todayDate >= start && todayDate <= end) {
+      return today;
+    }
+    
+    // Otherwise return the first day of the exam
+    return selectedExamData.start_date;
+  };
+
+  // Set default date when exam changes
+  useEffect(() => {
+    const defaultDate = getDefaultDateForExam();
+    setSelectedDate(defaultDate);
+  }, [selectedScriptExam, dashboardData]);
+
+  useEffect(() => {
+    loadCameraAccessibility();
+  }, [selectedExam, selectedShift, selectedCameraDate]);
 
   const loadDashboardData = async () => {
     try {
       setLoading(true);
-      const response = await clientDashboardAPI.getStats();
+      const response = await clientDashboardAPI.getStats(timeRange);
       console.log('[ClientDashboard] API Response:', response.data);
       setDashboardData(response.data.data);
     } catch (error) {
       console.error('[ClientDashboard] Error loading dashboard data:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadCameraAccessibility = async () => {
+    try {
+      setCameraLoading(true);
+      const params = {};
+      if (selectedExam !== 'all') params.exam_id = selectedExam;
+      if (selectedShift !== 'all') params.shift_id = selectedShift;
+      if (selectedCameraDate !== 'all') params.exam_date = selectedCameraDate;
+
+      const response = await clientDashboardAPI.getCameraAccessibility(params);
+      console.log('[CameraAccessibility] API Response:', response.data);
+      setCameraAccessibility(response.data.data);
+      setAvailableShifts(response.data.data.available_shifts || []);
+      setAvailableCameraDates(response.data.data.available_dates || []);
+    } catch (error) {
+      console.error('[CameraAccessibility] Error:', error);
+    } finally {
+      setCameraLoading(false);
     }
   };
 
@@ -171,12 +310,24 @@ const ClientDetectionDashboard = () => {
   // Prepare detection distribution data
   const detectionData = dashboardData.detection_distribution || [];
   
-  // Filter by selected category
-  const filteredDetectionData = selectedCategory === 'all' 
-    ? detectionData 
-    : detectionData.filter(item => SCRIPT_CATEGORY_MAP[item.type] === selectedCategory);
+  // Filter by selected exam first
+  const examFilteredDetectionData = selectedDetectionExam === 'all'
+    ? detectionData
+    : detectionData.filter(item => {
+        // Find which exams have this detection type
+        const examHasDetection = (dashboardData.exams || []).some(exam => {
+          if (exam.id !== parseInt(selectedDetectionExam)) return false;
+          // Check if this exam has detections of this type
+          // This is a simplified check - you may need to adjust based on your data structure
+          return true;
+        });
+        return examHasDetection;
+      });
   
-  const totalDetections = filteredDetectionData.reduce((sum, item) => sum + item.count, 0);
+  // Then filter by selected category
+  const filteredDetectionData = selectedCategory === 'all' 
+    ? examFilteredDetectionData 
+    : examFilteredDetectionData.filter(item => SCRIPT_CATEGORY_MAP[item.type] === selectedCategory);
   
   // Group detections by type for pie chart with accuracy
   const pieData = filteredDetectionData.map(item => ({
@@ -254,12 +405,20 @@ const ClientDetectionDashboard = () => {
   // Create data for horizontal bar chart (one row per script) - only scheduled scripts
   const scriptBarData = Object.values(scriptShiftMap).map(scriptData => {
     const script = allAvailableScripts.find(s => s.name === scriptData.script_name);
-    const category = SCRIPT_CATEGORY_MAP[script?.script_id || scriptData.script_type] || 'camera';
+    const scriptId = script?.script_id || scriptData.script_type;
+    const category = SCRIPT_CATEGORY_MAP[scriptId] || 'camera';
+    
+    // Use actual script color from SCRIPT_COLORS (main color for dot, bg for boxes)
+    const scriptMainColor = SCRIPT_COLORS[scriptId]?.color || CATEGORY_COLORS[category];
+    const scriptBgColor = SCRIPT_COLORS[scriptId]?.bg || '#f1f5f9';
+    const ScriptIcon = SCRIPT_ICONS[scriptId] || null;
     
     const row = {
       script_name: scriptData.script_name,
       category: category,
-      color: CATEGORY_COLORS[category],
+      color: scriptMainColor, // for the dot indicator
+      bgColor: scriptBgColor, // for the shift boxes
+      icon: ScriptIcon, // for the icon before name
       total: scriptData.total,
     };
     
@@ -316,6 +475,32 @@ const ClientDetectionDashboard = () => {
     return `${formatDate(selectedExamData.start_date)} to ${formatDate(selectedExamData.end_date)}`;
   };
 
+  // Handle camera accessibility download
+  const handleDownloadCameraAccessibility = (event) => {
+    setDownloadMenuAnchor(event.currentTarget);
+  };
+
+  const handleCloseDownloadMenu = () => {
+    setDownloadMenuAnchor(null);
+  };
+
+  const handleDownloadOption = async (type) => {
+    try {
+      const params = {
+        type, // 'accessible', 'non_accessible', or 'all'
+      };
+      if (selectedExam !== 'all') params.exam_id = selectedExam;
+      if (selectedShift !== 'all') params.shift_id = selectedShift;
+      if (selectedCameraDate !== 'all') params.exam_date = selectedCameraDate;
+
+      await clientDashboardAPI.downloadCameraAccessibility(params);
+    } catch (error) {
+      console.error('[CameraAccessibility] Download error:', error);
+    } finally {
+      handleCloseDownloadMenu();
+    }
+  };
+
   return (
     <Box>
       {/* Header */}
@@ -333,25 +518,35 @@ const ClientDetectionDashboard = () => {
             }
           </Typography>
         </Box>
-        <Chip
-          icon={<Schedule sx={{ fontSize: 16 }} />}
-          label="Last 24 Hours"
-          sx={{
-            bgcolor: '#f8fafc',
-            border: '1px solid #e2e8f0',
-            fontWeight: 600,
-            fontSize: '0.85rem',
-          }}
-        />
+        {/* <FormControl size="small" sx={{ minWidth: 150 }}>
+          <Select
+            value={timeRange}
+            onChange={(e) => setTimeRange(e.target.value)}
+            startAdornment={<Schedule sx={{ fontSize: 16, mr: 0.5, color: '#64748b' }} />}
+            sx={{
+              bgcolor: '#f8fafc',
+              border: '1px solid #e2e8f0',
+              fontWeight: 600,
+              fontSize: '0.85rem',
+              '& .MuiOutlinedInput-notchedOutline': { border: 'none' },
+            }}
+          >
+            <MenuItem value="24h">Last 24 Hours</MenuItem>
+            <MenuItem value="7d">Last 7 Days</MenuItem>
+            <MenuItem value="30d">Last 30 Days</MenuItem>
+            <MenuItem value="90d">Last 3 Months</MenuItem>
+            <MenuItem value="all">All Time</MenuItem>
+          </Select>
+        </FormControl> */}
       </Box>
 
       {/* Top Stats Cards */}
-      <Grid container spacing={2.5} mb={4}>
+      <Grid container spacing={2} mb={3}>
         <Grid item xs={12} sm={6} md={3}>
           <StatCard
             title="Active Exams"
             value={dashboardData.active_exams || 0}
-            icon={<Event />}
+            icon={<ExamsSvgIcon />}
             color="#3b82f6"
           />
         </Grid>
@@ -359,131 +554,289 @@ const ClientDetectionDashboard = () => {
           <StatCard
             title="Total Shifts"
             value={dashboardData.total_shifts || 0}
-            icon={<Schedule />}
-            color="#8b5cf6"
+            icon={<ShiftSvgIcon />}
+            color="#3b82f6"
           />
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
           <StatCard
             title="Total Camera"
             value={dashboardData.total_cameras || 0}
-            icon={<Videocam />}
-            color="#06b6d4"
+            icon={<CameraAltIcon />}
+            color="#3b82f6"
           />
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
           <StatCard
             title="Total Detection"
-            value={(dashboardData.total_detections || 0).toLocaleString()}
-            icon={<TrendingUp />}
-            color="#10b981"
+            value={liveDetectionCount.toLocaleString()}
+            icon={<CustomSvgIcon />}
+            color="#3b82f6"
           />
         </Grid>
       </Grid>
 
-      {/* Middle Section: Detection Distribution & Exam Status */}
-      <Grid container spacing={3} mb={4}>
-        {/* Detection Distribution */}
-        <Grid item xs={12} md={7}>
+      {/* First Row: Camera Accessibility & Exam Status */}
+      <Grid container spacing={3} mb={3}>
+        {/* Camera Accessibility */}
+        <Grid item xs={12} md={5}>
           <Paper elevation={0} sx={{ p: 3, borderRadius: 3, border: '1px solid #e2e8f0', height: '100%', boxShadow: 'none' }}>
             <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-              <Typography variant="h6" fontWeight={700} sx={{ color: '#0f172a' }}>
-                Detection Distribution
-              </Typography>
-              <Box display="flex" gap={1}>
-                <FormControl size="small" sx={{ minWidth: 150 }}>
-                  <Select
-                    value={selectedExam}
-                    onChange={(e) => setSelectedExam(e.target.value)}
-                    sx={{ fontSize: '0.85rem' }}
-                  >
-                    <MenuItem value="all">All Exams</MenuItem>
-                    {(dashboardData.exams || []).map(exam => (
-                      <MenuItem key={exam.id} value={exam.id}>{exam.name}</MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-                <FormControl size="small" sx={{ minWidth: 150 }}>
-                  <Select
-                    value={selectedCategory}
-                    onChange={(e) => setSelectedCategory(e.target.value)}
-                    sx={{ fontSize: '0.85rem' }}
-                  >
-                    <MenuItem value="all">All Categories</MenuItem>
-                    <MenuItem value="people">People</MenuItem>
-                    <MenuItem value="movement">Movement</MenuItem>
-                    <MenuItem value="camera">Camera</MenuItem>
-                  </Select>
-                </FormControl>
+              <Box>
+                <Typography variant="h6" fontWeight={700} sx={{ color: '#0f172a' }}>
+                  Camera Accessibility
+                </Typography>
+                <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+                  Live operational status monitoring
+                </Typography>
               </Box>
-            </Box>
-
-            <Box display="flex" alignItems="center" justifyContent="center" position="relative" height={300}>
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={pieData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={80}
-                    outerRadius={120}
-                    paddingAngle={2}
-                    dataKey="value"
-                  >
-                    {pieData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                </PieChart>
-              </ResponsiveContainer>
-              
-              {/* Center Text */}
               <Box
-                position="absolute"
-                top="50%"
-                left="50%"
-                sx={{ transform: 'translate(-50%, -50%)' }}
-                textAlign="center"
+                onClick={handleDownloadCameraAccessibility}
+                sx={{
+                  bgcolor: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 2,
+                  px: 2,
+                  py: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1,
+                  cursor: 'pointer',
+                  '&:hover': { bgcolor: '#f1f5f9' },
+                }}
               >
-                <Typography variant="h3" fontWeight={700} sx={{ color: '#0f172a' }}>
-                  {avgAccuracy}%
-                </Typography>
-                <Typography variant="caption" sx={{ color: '#64748b', textTransform: 'uppercase', fontSize: '0.7rem' }}>
-                  Avg Accuracy
+                <Download sx={{ fontSize: 18, color: '#64748b' }} />
+                <Typography variant="body2" sx={{ fontSize: '0.85rem', color: '#64748b', fontWeight: 600 }}>
+                  Download
                 </Typography>
               </Box>
+              <Menu
+                anchorEl={downloadMenuAnchor}
+                open={Boolean(downloadMenuAnchor)}
+                onClose={handleCloseDownloadMenu}
+                anchorOrigin={{
+                  vertical: 'bottom',
+                  horizontal: 'right',
+                }}
+                transformOrigin={{
+                  vertical: 'top',
+                  horizontal: 'right',
+                }}
+                PaperProps={{
+                  sx: {
+                    maxHeight: 200,
+                    overflowY: 'auto',
+                  }
+                }}
+              >
+                <MenuItem onClick={() => handleDownloadOption('accessible')}>
+                  <Box display="flex" alignItems="center" gap={1}>
+                    <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#10b981' }} />
+                    <Typography variant="body2">Download Accessible</Typography>
+                  </Box>
+                </MenuItem>
+                <MenuItem onClick={() => handleDownloadOption('non_accessible')}>
+                  <Box display="flex" alignItems="center" gap={1}>
+                    <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#ef4444' }} />
+                    <Typography variant="body2">Download Non-accessible</Typography>
+                  </Box>
+                </MenuItem>
+                <MenuItem onClick={() => handleDownloadOption('all')}>
+                  <Box display="flex" alignItems="center" gap={1}>
+                    <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#64748b' }} />
+                    <Typography variant="body2">Download All</Typography>
+                  </Box>
+                </MenuItem>
+              </Menu>
             </Box>
 
-            {/* Legend */}
-            <Box display="flex" flexDirection="column" gap={1.5} mt={2} maxHeight={120} sx={{ overflowY: 'auto' }}>
-              {pieData.map((item, index) => (
-                <Box key={index} display="flex" alignItems="center" justifyContent="space-between" gap={2}>
-                  <Box display="flex" alignItems="center" gap={1}>
-                    <Box
-                      sx={{
-                        width: 12,
-                        height: 12,
-                        borderRadius: '50%',
-                        bgcolor: item.color,
-                        flexShrink: 0,
-                      }}
-                    />
-                    <Typography variant="body2" sx={{ fontSize: '0.85rem', color: '#64748b' }}>
-                      {item.name}
+            <Box display="flex" gap={1} mb={3}>
+              <FormControl size="small" sx={{ flex: 1 }}>
+                <Typography variant="caption" sx={{ color: '#64748b', mb: 0.5, textTransform: 'uppercase', fontSize: '0.65rem', fontWeight: 600 }}>
+                  EXAM
+                </Typography>
+                <Select
+                  value={selectedExam}
+                  onChange={(e) => {
+                    setSelectedExam(e.target.value);
+                    setSelectedShift('all');
+                    setSelectedCameraDate('all');
+                  }}
+                  sx={{ fontSize: '0.85rem', bgcolor: '#f8fafc' }}
+                  MenuProps={{
+                    PaperProps: {
+                      sx: {
+                        maxHeight: 250,
+                        overflowY: 'auto',
+                      }
+                    }
+                  }}
+                >
+                  <MenuItem value="all">All Exams</MenuItem>
+                  {(dashboardData?.exams || []).map(exam => (
+                    <MenuItem key={exam.id} value={exam.id}>{exam.name}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl size="small" sx={{ flex: 1 }}>
+                <Typography variant="caption" sx={{ color: '#64748b', mb: 0.5, textTransform: 'uppercase', fontSize: '0.65rem', fontWeight: 600 }}>
+                  SHIFT
+                </Typography>
+                <Select
+                  value={selectedShift}
+                  onChange={(e) => setSelectedShift(e.target.value)}
+                  sx={{ fontSize: '0.85rem', bgcolor: '#f8fafc' }}
+                  disabled={selectedExam === 'all'}
+                  MenuProps={{
+                    PaperProps: {
+                      sx: {
+                        maxHeight: 250,
+                        overflowY: 'auto',
+                      }
+                    }
+                  }}
+                >
+                  <MenuItem value="all">All Shifts</MenuItem>
+                  {availableShifts.map(shift => (
+                    <MenuItem key={shift.id} value={shift.id}>{shift.shift_name}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              <FormControl size="small" sx={{ flex: 1 }}>
+                <Typography variant="caption" sx={{ color: '#64748b', mb: 0.5, textTransform: 'uppercase', fontSize: '0.65rem', fontWeight: 600 }}>
+                  DATE
+                </Typography>
+                <Select
+                  value={selectedCameraDate}
+                  onChange={(e) => setSelectedCameraDate(e.target.value)}
+                  sx={{ fontSize: '0.85rem', bgcolor: '#f8fafc' }}
+                  disabled={selectedExam === 'all'}
+                  MenuProps={{
+                    PaperProps: {
+                      sx: {
+                        maxHeight: 250,
+                        overflowY: 'auto',
+                      }
+                    }
+                  }}
+                >
+                  <MenuItem value="all">All Dates</MenuItem>
+                  {availableCameraDates.map(date => (
+                    <MenuItem key={date} value={date}>{formatDate(date)}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Box>
+
+            {cameraLoading ? (
+              <Box display="flex" justifyContent="center" alignItems="center" height={250}>
+                <CircularProgress />
+              </Box>
+            ) : (
+              <>
+                <Box display="flex" alignItems="center" justifyContent="center" position="relative" height={250}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={[
+                          { name: 'Accessible', value: cameraAccessibility?.accessible_percent || 0, color: '#10b981' },
+                          { name: 'Non-accessible', value: cameraAccessibility?.non_accessible_percent || 0, color: '#ef4444' }
+                        ]}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={70}
+                        outerRadius={100}
+                        paddingAngle={0}
+                        dataKey="value"
+                        startAngle={90}
+                        endAngle={450}
+                      >
+                        <Cell fill="#10b981" />
+                        <Cell fill="#ef4444" />
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  
+                  <Box
+                    position="absolute"
+                    top="50%"
+                    left="50%"
+                    sx={{ transform: 'translate(-50%, -50%)' }}
+                    textAlign="center"
+                  >
+                    <Typography variant="h5" fontWeight={700} sx={{ color: '#0f172a' }}>
+                      {cameraAccessibility?.total_cameras || 0}
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: '#64748b', textTransform: 'uppercase', fontSize: '0.7rem', fontWeight: 600 }}>
+                      TOTAL UNITS
                     </Typography>
                   </Box>
-                  <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 700, color: '#0f172a' }}>
-                    {item.value}%
-                  </Typography>
                 </Box>
-              ))}
-            </Box>
+
+                <Grid container spacing={2} mt={1}>
+                  <Grid item xs={6}>
+                    <Box
+                      sx={{
+                        bgcolor: '#f0fdf4',
+                        borderRadius: 2,
+                        p: 2,
+                        border: '1px solid #bbf7d0',
+                      }}
+                    >
+                      <Box display="flex" alignItems="center" gap={1} mb={0.5}>
+                        <Box
+                          sx={{
+                            width: 12,
+                            height: 12,
+                            borderRadius: '50%',
+                            bgcolor: '#10b981',
+                          }}
+                        />
+                        <Typography variant="body2" fontWeight={600} sx={{ color: '#10b981', fontSize: '0.85rem' }}>
+                          Accessible
+                        </Typography>
+                      </Box>
+                      <Typography variant="body2" sx={{ color: '#059669', fontSize: '0.85rem', fontWeight: 600 }}>
+                        {cameraAccessibility?.accessible || 0} Units ({cameraAccessibility?.accessible_percent || 0}%)
+                      </Typography>
+                    </Box>
+                  </Grid>
+                  <Grid item xs={6}>
+                    <Box
+                      sx={{
+                        bgcolor: '#fef2f2',
+                        borderRadius: 2,
+                        p: 2,
+                        border: '1px solid #fecaca',
+                      }}
+                    >
+                      <Box display="flex" alignItems="center" gap={1} mb={0.5}>
+                        <Box
+                          sx={{
+                            width: 12,
+                            height: 12,
+                            borderRadius: '50%',
+                            bgcolor: '#ef4444',
+                          }}
+                        />
+                        <Typography variant="body2" fontWeight={600} sx={{ color: '#ef4444', fontSize: '0.85rem' }}>
+                          Non-accessible
+                        </Typography>
+                      </Box>
+                      <Typography variant="body2" sx={{ color: '#dc2626', fontSize: '0.85rem', fontWeight: 600 }}>
+                        {cameraAccessibility?.non_accessible || 0} Units ({cameraAccessibility?.non_accessible_percent || 0}%)
+                      </Typography>
+                    </Box>
+                  </Grid>
+                </Grid>
+              </>
+            )}
           </Paper>
         </Grid>
 
-        {/* All Exam Status */}
-        <Grid item xs={12} md={5}>
+        {/* Exam Status */}
+        <Grid item xs={12} md={7}>
           <Paper elevation={0} sx={{ p: 3, borderRadius: 3, border: '1px solid #e2e8f0', height: '100%', boxShadow: 'none' }}>
             <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
               <Typography variant="h6" fontWeight={700} sx={{ color: '#0f172a' }}>
@@ -494,8 +847,7 @@ const ClientDetectionDashboard = () => {
               </Typography>
             </Box>
 
-            <Box display="flex" flexDirection="column" gap={3}>
-              {/* Completed */}
+            <Box display="flex" flexDirection="column" gap={4}>
               <Box>
                 <Box display="flex" justifyContent="space-between" mb={1}>
                   <Typography variant="body2" fontWeight={600} sx={{ fontSize: '0.85rem' }}>
@@ -509,7 +861,7 @@ const ClientDetectionDashboard = () => {
                   variant="determinate"
                   value={totalExamTasks > 0 ? (examStatus.completed / totalExamTasks) * 100 : 0}
                   sx={{
-                    height: 16,
+                    height: 24,
                     borderRadius: 8,
                     bgcolor: '#e2e8f0',
                     '& .MuiLinearProgress-bar': {
@@ -520,7 +872,6 @@ const ClientDetectionDashboard = () => {
                 />
               </Box>
 
-              {/* In Progress */}
               <Box>
                 <Box display="flex" justifyContent="space-between" mb={1}>
                   <Typography variant="body2" fontWeight={600} sx={{ fontSize: '0.85rem' }}>
@@ -534,7 +885,7 @@ const ClientDetectionDashboard = () => {
                   variant="determinate"
                   value={totalExamTasks > 0 ? (examStatus.in_progress / totalExamTasks) * 100 : 0}
                   sx={{
-                    height: 16,
+                    height: 24,
                     borderRadius: 8,
                     bgcolor: '#e2e8f0',
                     '& .MuiLinearProgress-bar': {
@@ -545,7 +896,6 @@ const ClientDetectionDashboard = () => {
                 />
               </Box>
 
-              {/* Pending */}
               <Box>
                 <Box display="flex" justifyContent="space-between" mb={1}>
                   <Typography variant="body2" fontWeight={600} sx={{ fontSize: '0.85rem' }}>
@@ -559,7 +909,7 @@ const ClientDetectionDashboard = () => {
                   variant="determinate"
                   value={totalExamTasks > 0 ? (examStatus.pending / totalExamTasks) * 100 : 0}
                   sx={{
-                    height: 16,
+                    height: 24,
                     borderRadius: 8,
                     bgcolor: '#e2e8f0',
                     '& .MuiLinearProgress-bar': {
@@ -574,9 +924,12 @@ const ClientDetectionDashboard = () => {
         </Grid>
       </Grid>
 
-      {/* Bottom Section: Script Distribution */}
-      <Paper elevation={0} sx={{ p: 3, borderRadius: 3, border: '1px solid #e2e8f0', boxShadow: 'none' }}>
-        <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+      {/* Second Row: Script Distribution & Detection Distribution */}
+      <Grid container spacing={3}>
+        {/* Script Distribution */}
+        <Grid item xs={12} md={7}>
+          <Paper elevation={0} sx={{ p: 3, borderRadius: 3, border: '1px solid #e2e8f0', height: '100%', boxShadow: 'none' }}>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
           <Typography variant="h6" fontWeight={700} sx={{ color: '#0f172a' }}>
             Script Distribution
           </Typography>
@@ -586,6 +939,14 @@ const ClientDetectionDashboard = () => {
                 value={selectedScriptExam}
                 onChange={(e) => setSelectedScriptExam(e.target.value)}
                 sx={{ fontSize: '0.85rem' }}
+                MenuProps={{
+                  PaperProps: {
+                    sx: {
+                      maxHeight: 250,
+                      overflowY: 'auto',
+                    }
+                  }
+                }}
               >
                 <MenuItem value="all">All Exams</MenuItem>
                 {(dashboardData.exams || []).map(exam => (
@@ -598,11 +959,20 @@ const ClientDetectionDashboard = () => {
                 value={selectedDate}
                 onChange={(e) => setSelectedDate(e.target.value)}
                 sx={{ fontSize: '0.85rem' }}
-                displayEmpty
+                MenuProps={{
+                  PaperProps: {
+                    sx: {
+                      maxHeight: 250,
+                      overflowY: 'auto',
+                    }
+                  }
+                }}
               >
-                <MenuItem value="all">{getDateRangeLabel()}</MenuItem>
-                {filteredDates.map(date => (
-                  <MenuItem key={date} value={date}>{formatDate(date)}</MenuItem>
+                <MenuItem value="all">All Dates</MenuItem>
+                {filteredDates.map((date, index) => (
+                  <MenuItem key={index} value={date}>
+                    {formatDate(date)}
+                  </MenuItem>
                 ))}
               </Select>
             </FormControl>
@@ -635,7 +1005,7 @@ const ClientDetectionDashboard = () => {
         )}
 
         {/* Script Rows */}
-        <Box sx={{ maxHeight: 500, overflowY: 'auto' }}>
+        <Box sx={{ maxHeight: 380, overflowY: 'auto' }}>
           {scriptBarData.map((script, index) => (
             <Box 
               key={index} 
@@ -653,15 +1023,9 @@ const ClientDetectionDashboard = () => {
                   gap: 1,
                 }}
               >
-                <Box
-                  sx={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: '50%',
-                    bgcolor: script.color,
-                    flexShrink: 0,
-                  }}
-                />
+                {script.icon && React.createElement(script.icon, {
+                  sx: { fontSize: 16, color: script.color, flexShrink: 0 }
+                })}
                 <Typography 
                   sx={{ 
                     fontSize: '0.8rem', 
@@ -669,7 +1033,7 @@ const ClientDetectionDashboard = () => {
                     fontWeight: 500,
                   }}
                 >
-                  {script.script_name}
+                  {script.script_name.replace(/\s*detection\s*/gi, '').trim()}
                 </Typography>
               </Box>
 
@@ -686,7 +1050,7 @@ const ClientDetectionDashboard = () => {
                       sx={{
                         flex: 1,
                         minHeight: 50,
-                        bgcolor: hasValue ? script.color : '#f1f5f9',
+                        bgcolor: hasValue ? script.bgColor : '#f1f5f9',
                         borderRadius: 2,
                         display: 'flex',
                         flexDirection: 'column',
@@ -694,6 +1058,7 @@ const ClientDetectionDashboard = () => {
                         justifyContent: 'center',
                         p: 1,
                         position: 'relative',
+                        border: hasValue ? `1px solid ${script.color}20` : '1px solid transparent',
                       }}
                     >
                       {hasValue && (
@@ -701,22 +1066,13 @@ const ClientDetectionDashboard = () => {
                           <Typography 
                             sx={{ 
                               fontSize: '0.65rem', 
-                              color: '#fff',
-                              fontWeight: 600,
+                              color: script.color,
+                              fontWeight: 700,
                               mb: 0.3,
                             }}
                           >
                             {timeRange}
                           </Typography>
-                          {/* <Typography 
-                            sx={{ 
-                              fontSize: '0.75rem', 
-                              color: '#fff',
-                              fontWeight: 700,
-                            }}
-                          >
-                            {count}
-                          </Typography> */}
                         </>
                       )}
                     </Box>
@@ -742,7 +1098,122 @@ const ClientDetectionDashboard = () => {
             </Typography>
           </Box>
         )}
-      </Paper>
+          </Paper>
+        </Grid>
+
+        {/* Detection Distribution */}
+        <Grid item xs={12} md={5}>
+          <Paper elevation={0} sx={{ p: 3, borderRadius: 3, border: '1px solid #e2e8f0', height: '100%', boxShadow: 'none' }}>
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+              <Typography variant="h6" fontWeight={700} sx={{ color: '#0f172a' }}>
+                Detection Distribution
+              </Typography>
+              <Box display="flex" gap={1}>
+                <FormControl size="small" sx={{ minWidth: 120 }}>
+                  <Select
+                    value={selectedDetectionExam}
+                    onChange={(e) => setSelectedDetectionExam(e.target.value)}
+                    sx={{ fontSize: '0.85rem' }}
+                    MenuProps={{
+                      PaperProps: {
+                        sx: {
+                          maxHeight: 250,
+                          overflowY: 'auto',
+                        }
+                      }
+                    }}
+                  >
+                    <MenuItem value="all">All Exams</MenuItem>
+                    {(dashboardData.exams || []).map(exam => (
+                      <MenuItem key={exam.id} value={exam.id}>{exam.name}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <FormControl size="small" sx={{ minWidth: 120 }}>
+                  <Select
+                    value={selectedCategory}
+                    onChange={(e) => setSelectedCategory(e.target.value)}
+                    sx={{ fontSize: '0.85rem' }}
+                    MenuProps={{
+                      PaperProps: {
+                        sx: {
+                          maxHeight: 250,
+                          overflowY: 'auto',
+                        }
+                      }
+                    }}
+                  >
+                    <MenuItem value="all">All Categories</MenuItem>
+                    <MenuItem value="people">People</MenuItem>
+                    <MenuItem value="movement">Movement</MenuItem>
+                    <MenuItem value="camera">Camera</MenuItem>
+                  </Select>
+                </FormControl>
+              </Box>
+            </Box>
+
+            <Box display="flex" alignItems="center" justifyContent="center" position="relative" height={240}>
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={pieData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={65}
+                    outerRadius={100}
+                    paddingAngle={2}
+                    dataKey="value"
+                  >
+                    {pieData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+              
+              <Box
+                position="absolute"
+                top="50%"
+                left="50%"
+                sx={{ transform: 'translate(-50%, -50%)' }}
+                textAlign="center"
+              >
+                <Typography variant="h3" fontWeight={700} sx={{ color: '#0f172a' }}>
+                  {avgAccuracy}%
+                </Typography>
+                <Typography variant="caption" sx={{ color: '#64748b', textTransform: 'uppercase', fontSize: '0.7rem' }}>
+                  Avg Accuracy
+                </Typography>
+              </Box>
+            </Box>
+
+            <Box display="flex" flexDirection="column" gap={1.5} mt={2} maxHeight={140} sx={{ overflowY: 'auto' }}>
+              {pieData.map((item, index) => (
+                <Box key={index} display="flex" alignItems="center" justifyContent="space-between" gap={2}>
+                  <Box display="flex" alignItems="center" gap={1}>
+                    <Box
+                      sx={{
+                        width: 12,
+                        height: 12,
+                        borderRadius: '50%',
+                        bgcolor: item.color,
+                        flexShrink: 0,
+                      }}
+                    />
+                    <Typography variant="body2" sx={{ fontSize: '0.85rem', color: '#64748b' }}>
+                      {item.name}
+                    </Typography>
+                  </Box>
+                  <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 700, color: '#0f172a' }}>
+                    {item.value}%
+                  </Typography>
+                </Box>
+              ))}
+            </Box>
+          </Paper>
+        </Grid>
+      </Grid>
     </Box>
   );
 };

@@ -630,7 +630,7 @@ const Exams = () => {
                       </Typography>
                     </Box>
                     <Box
-                      onClick={() => navigate(`/detections?exam=${exam.id}`)}
+                      onClick={() => navigate(`/detections?exam_id=${exam.id}`)}
                       sx={{ display: 'flex', alignItems: 'center', gap: 0.8, cursor: 'pointer', '&:hover': { opacity: 0.75, color : '#3c81f6' } }}
                     >
                       <ReportProblemIcon sx={{ fontSize: 20, color: '#8b929cff' }} />

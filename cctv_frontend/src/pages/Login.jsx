@@ -13,6 +13,7 @@ import {
 } from '@mui/material';
 import { PersonOutline, LockOutlined, VisibilityOutlined, VisibilityOffOutlined, Security } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
+import CameraIcon from '../components/CameraIcon';
 
 const Login = () => {
   const navigate = useNavigate();
@@ -72,7 +73,7 @@ const Login = () => {
           bgcolor: 'white',
         }}
       >
-        <Security sx={{ fontSize: 28, color: '#3b82f6' }} />
+        <CameraIcon sx={{ fontSize: 28, color: '#3b82f6' }} />
       </Paper>
 
       <Paper

@@ -322,7 +322,7 @@ const Shifts = () => {
                           alignItems: 'center', justifyContent: 'center', flexShrink: 0,
                         }}
                       >
-                        <AccessTime sx={{ fontSize: 26, color: '#64748b' }} />
+                        <ShiftSvgIcon sx={{ fontSize: 26, color: '#64748b' }} />
                       </Box>
                       <Box>
                         <Typography sx={{ fontWeight: 700, fontSize: '1rem', color: '#0f172a' }}>

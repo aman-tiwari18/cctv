@@ -50,6 +50,7 @@ import { DetectionCountsProvider, useDetectionCounts } from '../contexts/Detecti
 import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
 import { CustomSvgIcon } from './DetectionSvgIcon';
 import { ShiftSvgIcon } from './ShiftSvgIcon';
+import CameraIcon from './CameraIcon';
 
 const DRAWER_WIDTH = 260;
 const APPBAR_HEIGHT = 64;
@@ -93,13 +94,13 @@ const menuItems = [
   { text: 'Executions', icon: <Slideshow />, path: '/executions' },
   { text: 'Detections', icon: <CustomSvgIcon />, path: '/detections', hasSubItems: true },
   { text: 'Client Detections', icon: <Visibility />, path: '/client-detections', hasSubItems: true },
-  { text: 'Client Dashboard', icon: <TrendingUp />, path: '/client-dashboard' },
+  { text: 'Client Dashboard', icon: <Dashboard />, path: '/client-dashboard' },
 ];
 
 // Menu items for VIEWER role (reordered with Client Dashboard first)
 const viewerMenuItems = [
-  { text: 'Dashboard', icon: <TrendingUp />, path: '/client-dashboard' }, // Renamed and reordered
-  { text: 'Client Detections', icon: <Visibility />, path: '/client-detections', hasSubItems: true },
+  { text: 'Dashboard', icon: <Dashboard />, path: '/client-dashboard' }, // Renamed and reordered
+  { text: 'Detections', icon: <CustomSvgIcon />, path: '/client-detections', hasSubItems: true },
 ];
 
 /* ── Detection Sub-Items (multi-select) ── */
@@ -204,7 +205,7 @@ function SidebarContent({ items, currentPath, onNavigate }) {
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
-          <CameraAltIcon sx={{ mr: 1, color: '#2563eb' }} />
+          <CameraIcon sx={{ mr: 1, color: '#2563eb' }} />
           <Typography variant="h6" fontWeight={700} color="#0f172a" noWrap>
             CCTV Monitor
           </Typography>

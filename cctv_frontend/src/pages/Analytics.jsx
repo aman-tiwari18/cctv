@@ -33,21 +33,23 @@ import {
 import { examsAPI, shiftScriptsAPI } from '../services/api';
 import ShiftScriptManager from '../components/ShiftScriptManager';
 import { ExamsSvgIcon } from '../components/ExamsSvgIcon'
+import { ShiftSvgIcon } from '../components/ShiftSvgIcon';
 
 /* ── Script chip colors keyed by script_id (exact TYPE_META from Detections.jsx) ── */
 const SCRIPT_COLORS = {
   proximity: { bg: '#e5f5ed', color: '#5cb88a' },
-  crowd: { bg: '#faf3f8ff', color: '#e24d7b' },
+  crowd: { bg: '#e9e3f8ff', color: '#e24d7b' },
   crowd_five: { bg: '#fce8e6', color: '#e06050' },
   crowd_zero: { bg: '#edeaf3', color: '#6b5b95' },
   server: { bg: '#f3ebe4', color: '#a0623d' },
-  intruder: { bg: '#e8e8ceff', color: '#d94466' },
-  entry_exit: { bg: '#e0e7e7ff', color: '#1d7a7d' },
+  intruder: { bg: '#f0dfefff', color: '#d94466' },
+  entry_exit: { bg: '#e0f0f0', color: '#1d7a7d' },
   phone: { bg: '#e8ece5', color: '#465a38' },
   blind_spot: { bg: '#f3f2e4', color: '#b0a850' },
-  invigilator: { bg: '#e0f7fa', color: '#00bfcf' },
+  invigilator: { bg: '#cce8fcff', color: '#00bfcf' },
   inversion: { bg: '#eceef5', color: '#7a86b4' },
-  tamper: { bg: '#e0f8fa', color: '#00c8d4' },
+  tampering: { bg: '#e9f9ffff', color: '#00c8d4' },
+  vision : { bg: '#dbeafe', color: '#3b82f6' }
 };
 const DEFAULT_CHIP_COLOR = { bg: '#dbeafe', color: '#3b82f6' };
 
@@ -755,10 +757,8 @@ const Analytics = () => {
                         '&:hover': { boxShadow: '0 4px 16px rgba(0,0,0,0.06)' },
                       }}
                     >
-                      {/* Top row: icon + name + time  |  + ADD SCRIPT */}
                       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                          {/* Same icon for all shifts */}
                           <Box
                             sx={{
                               width: 48,
@@ -771,7 +771,7 @@ const Analytics = () => {
                               flexShrink: 0,
                             }}
                           >
-                            <AccessTime sx={{ fontSize: 28, color: '#64748b' }} />
+                            <ShiftSvgIcon sx={{ fontSize: 28, color: '#64748b' }} />
                           </Box>
 
                           <Box>

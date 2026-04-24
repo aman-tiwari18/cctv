@@ -16,6 +16,7 @@ const scriptRoutes = require('./routes/scripts');
 const reportRoutes = require('./routes/report');
 const smsRoutes = require('./routes/smsRoutes');
 const clientDashboardRoutes = require('./routes/clientDashboard');
+const dashboardRoutes = require('./routes/dashboard');
 
 const path = require('path');
 
@@ -61,6 +62,7 @@ app.use(`${BASE}/api/scripts`, scriptRoutes);
 app.use(`${BASE}/api/report`, reportRoutes);
 app.use(`${BASE}/api/sms`, smsRoutes);
 app.use(`${BASE}/api/client-dashboard`, clientDashboardRoutes);
+app.use(`${BASE}/api/dashboard`, dashboardRoutes);
 
 // ==========================
 // Frontend (optional)

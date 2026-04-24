@@ -126,8 +126,29 @@ export const reportAPI = {
 };
 
 export const clientDashboardAPI = {
-    getStats: () => api.get('/client-dashboard/stats'),
+    getStats: (timeRange = '24h') => api.get('/client-dashboard/stats', { params: { timeRange } }),
+    getCameraAccessibility: (params) => api.get('/client-dashboard/camera-accessibility', { params }),
+    downloadCameraAccessibility: async (params) => {
+        const response = await api.get('/client-dashboard/camera-accessibility/download', {
+            params,
+            responseType: 'blob',
+        });
+        const url = window.URL.createObjectURL(new Blob([response.data]));
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        const filename = `Camera_Accessibility_${params.type}_${new Date().toISOString().split('T')[0]}.xlsx`;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+    },
     getExamBodyDetails: (examBody, params) => api.get(`/client-dashboard/exam-body/${examBody}/details`, { params })
+};
+
+export const dashboardAPI = {
+    getAdminStats: (timeRange = '24h') => api.get('/dashboard/admin-stats', { params: { timeRange } })
 };
 
 export default api;

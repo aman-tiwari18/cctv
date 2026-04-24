@@ -7,6 +7,10 @@ import {
   Box,
   CircularProgress,
   Paper,
+  FormControl,
+  Select,
+  MenuItem,
+  LinearProgress,
 } from '@mui/material';
 import {
   Assignment,
@@ -18,24 +22,72 @@ import {
   Autorenew,
   MoreHoriz,
   InfoOutlined,
-  Schedule
+  Schedule,
+  WarningAmber,
+  Groups,
+  PersonOff,
+  Dns,
+  DirectionsWalk,
+  MeetingRoom,
+  Smartphone,
+  VisibilityOff,
+  Visibility,
+  FlipCameraAndroid,
+  SecurityUpdateWarning,
 } from '@mui/icons-material';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
-import { examsAPI, executionsAPI } from '../services/api';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts';
+import { examsAPI, executionsAPI, dashboardAPI } from '../services/api';
 import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
+import { CustomSvgIcon } from '../components/DetectionSvgIcon';
+import { ShiftSvgIcon } from '../components/ShiftSvgIcon';
+import CameraAltIcon from '@mui/icons-material/CameraAlt';
+import { useDetectionCounts } from '../contexts/DetectionCountsContext';
+
+const CATEGORY_COLORS = {
+  people: '#3b82f6',
+  movement: '#ef4444',
+  camera: '#f59e0b',
+};
+
+const SCRIPT_CATEGORY_MAP = {
+  proximity: 'people',
+  crowd: 'people',
+  crowd_five: 'people',
+  crowd_zero: 'people',
+  invigilator: 'people',
+  phone: 'people',
+  server: 'people',
+  intruder: 'people',
+  entry_exit: 'movement',
+  inversion: 'camera',
+  tamper: 'camera',
+  tampering: 'camera',
+  blind_spot: 'camera',
+  vision: 'camera',
+};
+
+const DETECTION_TYPE_LABELS = {
+  proximity: 'Close Proximity',
+  crowd: 'Crowd Detection',
+  crowd_five: 'Crowd < 5',
+  crowd_zero: 'Zero Person',
+  server: 'Server Room',
+  intruder: 'Intruder',
+  entry_exit: 'Entry/Exit',
+  phone: 'Phone',
+  blind_spot: 'Blind Spot',
+  invigilator: 'Invigilator',
+  inversion: 'Camera Inversion',
+  tamper: 'Camera Tampering',
+  tampering: 'Camera Tampering',
+  vision: 'Vision Detection',
+};
 
 const StatCard = ({ title, value, icon, color, loading }) => (
-  <Card
-    elevation={0}
-    sx={{
-      height: '100%',
-      borderRadius: 3,
-      boxShadow: 'none',
-    }}
-  >
-    <CardContent sx={{ p: 2.5, '&:last-child': { pb: 2.5 } }}>
-      <Box display="flex" justifyContent="space-between" alignItems="flex-start">
-        <Box>
+  <Card elevation={0} sx={{ height: '100%', borderRadius: 3, border: '1px solid #e2e8f0', boxShadow: 'none' }}>
+    <CardContent sx={{ p: 0, height: '100%', '&:last-child': { pb: 0 } }}>
+      <Box display="flex" justifyContent="space-between" alignItems="stretch" height="100%">
+        <Box flex={1} display="flex" flexDirection="column" justifyContent="center" sx={{ p: 2 }}>
           <Typography
             variant="caption"
             sx={{
@@ -48,21 +100,32 @@ const StatCard = ({ title, value, icon, color, loading }) => (
           >
             {title}
           </Typography>
-          <Typography variant="h4" fontWeight={700} sx={{ mt: 0.5, color: '#0f172a' }}>
+          <Typography variant="h5" fontWeight={700} sx={{ mt: 0.5, color: '#0f172a' }}>
             {loading ? <CircularProgress size={24} /> : value}
           </Typography>
         </Box>
         <Box
           sx={{
-            backgroundColor: `${color}18`,
-            borderRadius: 2,
-            p: 1.2,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
+            pr: 2,
+            py: 2,
           }}
         >
-          {React.cloneElement(icon, { sx: { fontSize: 28, color } })}
+          <Box
+            sx={{
+              backgroundColor: `${color}18`,
+              borderRadius: 2,
+              width: 70,
+              height: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            {React.cloneElement(icon, { sx: { fontSize: 40, color } })}
+          </Box>
         </Box>
       </Box>
     </CardContent>
@@ -97,34 +160,42 @@ const EXECUTION_DETAIL_ITEMS = [
 ];
 
 const Dashboard = () => {
+  const { unfilteredCounts } = useDetectionCounts();
   const [stats, setStats] = useState({
     exams: 0,
     upcomingShifts: 0,
+    totalCameras: 0,
     executions: null,
+    detectionDistribution: [],
+    examStatus: { completed: 0, in_progress: 0, pending: 0 },
   });
   const [loading, setLoading] = useState(true);
+  const [timeRange, setTimeRange] = useState('24h');
+  const [selectedCategory, setSelectedCategory] = useState('all');
+
+  // Calculate live total detections from context
+  const liveDetectionCount = Object.values(unfilteredCounts).reduce((sum, count) => sum + count, 0);
 
   useEffect(() => {
     loadDashboardData();
-  }, []);
+  }, [timeRange]);
 
   const loadDashboardData = async () => {
     try {
-      const [examsRes, executionsRes] = await Promise.all([
-        examsAPI.getAll({ is_active: true }),
+      const [adminStatsRes, executionsRes] = await Promise.all([
+        dashboardAPI.getAdminStats(timeRange),
         executionsAPI.getStatistics(),
       ]);
 
-      // Count total shifts across all exams
-      const totalShifts = examsRes.data.data.reduce(
-        (sum, exam) => sum + (exam.examShifts?.length || 0),
-        0
-      );
+      const adminData = adminStatsRes.data.data;
 
       setStats({
-        exams: examsRes.data.count,
-        upcomingShifts: totalShifts,
+        exams: adminData.active_exams || 0,
+        upcomingShifts: adminData.total_shifts || 0,
+        totalCameras: adminData.total_cameras || 0,
         executions: executionsRes.data.data,
+        detectionDistribution: adminData.detection_distribution || [],
+        examStatus: adminData.exam_status || { completed: 0, in_progress: 0, pending: 0 },
       });
     } catch (error) {
       console.error('Error loading dashboard data:', error);
@@ -132,6 +203,28 @@ const Dashboard = () => {
       setLoading(false);
     }
   };
+
+  // Filter detection data by category
+  const filteredDetectionData = selectedCategory === 'all' 
+    ? stats.detectionDistribution 
+    : stats.detectionDistribution.filter(item => SCRIPT_CATEGORY_MAP[item.type] === selectedCategory);
+  
+  // Prepare pie chart data
+  const pieData = filteredDetectionData.map(item => ({
+    name: DETECTION_TYPE_LABELS[item.type] || item.type,
+    value: parseFloat(item.accuracy) || 0,
+    count: item.count,
+    type: item.type,
+    category: SCRIPT_CATEGORY_MAP[item.type] || 'camera',
+    color: CATEGORY_COLORS[SCRIPT_CATEGORY_MAP[item.type]] || '#94a3b8',
+  }));
+
+  // Calculate average accuracy
+  const avgAccuracy = pieData.length > 0 
+    ? (pieData.reduce((sum, item) => sum + item.value, 0) / pieData.length).toFixed(1)
+    : 0;
+
+  const totalExamTasks = stats.examStatus.completed + stats.examStatus.in_progress + stats.examStatus.pending;
 
   const executionData = stats.executions
     ? [
@@ -144,18 +237,41 @@ const Dashboard = () => {
 
   return (
     <Box>
-      <Typography variant="body2" color="text.secondary" mb={3} sx={{ fontSize: '0.9rem' }}>
-        Real-time surveillance execution metrics
-      </Typography>
+      {/* Header with Time Range Selector */}
+      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+        <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.9rem' }}>
+          Real-time surveillance execution metrics
+        </Typography>
+        {/* <FormControl size="small" sx={{ minWidth: 150 }}>
+          <Select
+            value={timeRange}
+            onChange={(e) => setTimeRange(e.target.value)}
+            startAdornment={<Schedule sx={{ fontSize: 16, mr: 0.5, color: '#64748b' }} />}
+            sx={{
+              bgcolor: '#f8fafc',
+              border: '1px solid #e2e8f0',
+              fontWeight: 600,
+              fontSize: '0.85rem',
+              '& .MuiOutlinedInput-notchedOutline': { border: 'none' },
+            }}
+          >
+            <MenuItem value="24h">Last 24 Hours</MenuItem>
+            <MenuItem value="7d">Last 7 Days</MenuItem>
+            <MenuItem value="30d">Last 30 Days</MenuItem>
+            <MenuItem value="90d">Last 3 Months</MenuItem>
+            <MenuItem value="all">All Time</MenuItem>
+          </Select>
+        </FormControl> */}
+      </Box>
 
-      <Grid container spacing={2.5}>
+      <Grid container spacing={2} mb={3}>
         {/* Stats Cards */}
         <Grid item xs={12} sm={6} md={3}>
           <StatCard
             title="Active Exams"
             value={stats.exams}
             icon={<ExamsSvgIcon />}
-            color="#3b6cf5"
+            color="#3b82f6"
             loading={loading}
           />
         </Grid>
@@ -163,32 +279,212 @@ const Dashboard = () => {
           <StatCard
             title="Total Shifts"
             value={stats.upcomingShifts}
-            icon={<Schedule />}
-            color="#3b6cf5"
+            icon={<ShiftSvgIcon />}
+            color="#3b82f6"
             loading={loading}
           />
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
           <StatCard
-            title="Total Executions"
-            value={stats.executions?.total || 0}
-            icon={<Slideshow />}
-            color="#3b6cf5"
+            title="Total Camera"
+            value={stats.totalCameras}
+            icon={<CameraAltIcon />}
+            color="#3b82f6"
             loading={loading}
           />
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
           <StatCard
-            title="Success Rate"
-            value={
-              stats.executions?.total
-                ? `${Math.round((stats.executions.completed / stats.executions.total) * 100)}%`
-                : '0%'
-            }
-            icon={<Percent />}
-            color="#3b6cf5"
+            title="Total Detection"
+            value={liveDetectionCount.toLocaleString()}
+            icon={<CustomSvgIcon />}
+            color="#3b82f6"
             loading={loading}
           />
+        </Grid>
+
+        {/* Detection Distribution & Exam Status */}
+        <Grid item xs={12} md={7}>
+          <Paper elevation={0} sx={{ p: 3, borderRadius: 3, border: '1px solid #e2e8f0', height: '100%', boxShadow: 'none' }}>
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+              <Typography variant="h6" fontWeight={700} sx={{ color: '#0f172a' }}>
+                Detection Distribution
+              </Typography>
+              <FormControl size="small" sx={{ minWidth: 150 }}>
+                <Select
+                  value={selectedCategory}
+                  onChange={(e) => setSelectedCategory(e.target.value)}
+                  sx={{ fontSize: '0.85rem' }}
+                >
+                  <MenuItem value="all">All Categories</MenuItem>
+                  <MenuItem value="people">People</MenuItem>
+                  <MenuItem value="movement">Movement</MenuItem>
+                  <MenuItem value="camera">Camera</MenuItem>
+                </Select>
+              </FormControl>
+            </Box>
+
+            {loading ? (
+              <Box display="flex" justifyContent="center" alignItems="center" height={240}>
+                <CircularProgress />
+              </Box>
+            ) : (
+              <>
+                <Box display="flex" alignItems="center" justifyContent="center" position="relative" height={240}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={pieData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={65}
+                        outerRadius={100}
+                        paddingAngle={2}
+                        dataKey="value"
+                      >
+                        {pieData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  
+                  <Box
+                    position="absolute"
+                    top="50%"
+                    left="50%"
+                    sx={{ transform: 'translate(-50%, -50%)' }}
+                    textAlign="center"
+                  >
+                    <Typography variant="h3" fontWeight={700} sx={{ color: '#0f172a' }}>
+                      {avgAccuracy}%
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: '#64748b', textTransform: 'uppercase', fontSize: '0.7rem' }}>
+                      Avg Accuracy
+                    </Typography>
+                  </Box>
+                </Box>
+
+                <Box display="flex" flexDirection="column" gap={1.5} mt={2} maxHeight={140} sx={{ overflowY: 'auto' }}>
+                  {pieData.map((item, index) => (
+                    <Box key={index} display="flex" alignItems="center" justifyContent="space-between" gap={2}>
+                      <Box display="flex" alignItems="center" gap={1}>
+                        <Box
+                          sx={{
+                            width: 12,
+                            height: 12,
+                            borderRadius: '50%',
+                            bgcolor: item.color,
+                            flexShrink: 0,
+                          }}
+                        />
+                        <Typography variant="body2" sx={{ fontSize: '0.85rem', color: '#64748b' }}>
+                          {item.name}
+                        </Typography>
+                      </Box>
+                      <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 700, color: '#0f172a' }}>
+                        {item.value}%
+                      </Typography>
+                    </Box>
+                  ))}
+                </Box>
+              </>
+            )}
+          </Paper>
+        </Grid>
+
+        <Grid item xs={12} md={5}>
+          <Paper elevation={0} sx={{ p: 3, borderRadius: 3, border: '1px solid #e2e8f0', height: '100%', boxShadow: 'none' }}>
+            <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+              <Typography variant="h6" fontWeight={700} sx={{ color: '#0f172a' }}>
+                All Exam Status
+              </Typography>
+              <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem' }}>
+                TOTAL: {totalExamTasks}
+              </Typography>
+            </Box>
+
+            {loading ? (
+              <Box display="flex" justifyContent="center" alignItems="center" height={200}>
+                <CircularProgress />
+              </Box>
+            ) : (
+              <Box display="flex" flexDirection="column" gap={4}>
+                <Box>
+                  <Box display="flex" justifyContent="space-between" mb={1}>
+                    <Typography variant="body2" fontWeight={600} sx={{ fontSize: '0.85rem' }}>
+                      Completed
+                    </Typography>
+                    <Typography variant="body2" fontWeight={600} sx={{ fontSize: '0.85rem', color: '#3b82f6' }}>
+                      {stats.examStatus.completed}/{totalExamTasks}
+                    </Typography>
+                  </Box>
+                  <LinearProgress
+                    variant="determinate"
+                    value={totalExamTasks > 0 ? (stats.examStatus.completed / totalExamTasks) * 100 : 0}
+                    sx={{
+                      height: 24,
+                      borderRadius: 8,
+                      bgcolor: '#e2e8f0',
+                      '& .MuiLinearProgress-bar': {
+                        bgcolor: '#3b82f6',
+                        borderRadius: 8,
+                      },
+                    }}
+                  />
+                </Box>
+
+                <Box>
+                  <Box display="flex" justifyContent="space-between" mb={1}>
+                    <Typography variant="body2" fontWeight={600} sx={{ fontSize: '0.85rem' }}>
+                      In Progress
+                    </Typography>
+                    <Typography variant="body2" fontWeight={600} sx={{ fontSize: '0.85rem', color: '#f59e0b' }}>
+                      {stats.examStatus.in_progress}/{totalExamTasks}
+                    </Typography>
+                  </Box>
+                  <LinearProgress
+                    variant="determinate"
+                    value={totalExamTasks > 0 ? (stats.examStatus.in_progress / totalExamTasks) * 100 : 0}
+                    sx={{
+                      height: 24,
+                      borderRadius: 8,
+                      bgcolor: '#e2e8f0',
+                      '& .MuiLinearProgress-bar': {
+                        bgcolor: '#f59e0b',
+                        borderRadius: 8,
+                      },
+                    }}
+                  />
+                </Box>
+
+                <Box>
+                  <Box display="flex" justifyContent="space-between" mb={1}>
+                    <Typography variant="body2" fontWeight={600} sx={{ fontSize: '0.85rem' }}>
+                      Pending
+                    </Typography>
+                    <Typography variant="body2" fontWeight={600} sx={{ fontSize: '0.85rem', color: '#64748b' }}>
+                      {stats.examStatus.pending}/{totalExamTasks}
+                    </Typography>
+                  </Box>
+                  <LinearProgress
+                    variant="determinate"
+                    value={totalExamTasks > 0 ? (stats.examStatus.pending / totalExamTasks) * 100 : 0}
+                    sx={{
+                      height: 24,
+                      borderRadius: 8,
+                      bgcolor: '#e2e8f0',
+                      '& .MuiLinearProgress-bar': {
+                        bgcolor: '#94a3b8',
+                        borderRadius: 8,
+                      },
+                    }}
+                  />
+                </Box>
+              </Box>
+            )}
+          </Paper>
         </Grid>
 
         {/* Execution Status Chart */}
