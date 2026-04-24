@@ -1,26 +1,30 @@
 const nodemailer = require('nodemailer');
 const logger = require('../utils/logger');
 
-/**
- * Email Service
- * Handles sending emails using nodemailer
- */
 
-// Check if SMTP credentials are configured
 const isEmailConfigured = () => {
-    return process.env.SMTP_USER && 
-           process.env.SMTP_PASS && 
-           process.env.SMTP_USER !== 'your_email@gmail.com' &&
-           process.env.SMTP_PASS !== 'your_app_password_here';
+    const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env;
+
+    if (!SMTP_HOST || !SMTP_PORT || !SMTP_USER || !SMTP_PASS) {
+        logger.warn('Missing SMTP configuration');
+        return false;
+    }
+
+    if (!SMTP_USER.includes('@')) {
+        logger.warn('Invalid SMTP_USER format');
+        return false;
+    }
+
+    return true;
 };
 
-// Create transporter only if configured
+
 let transporter = null;
 if (isEmailConfigured()) {
     transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST || 'smtp.gmail.com',
-        port: process.env.SMTP_PORT || 587,
-        secure: false, // true for 465, false for other ports
+        host: "smtp.cc.iitk.ac.in",
+        port: 25,
+        secure: false,
         auth: {
             user: process.env.SMTP_USER,
             pass: process.env.SMTP_PASS
@@ -28,16 +32,14 @@ if (isEmailConfigured()) {
     });
 }
 
-/**
- * Send OTP email
- */
+
 async function sendOTPEmail(email, otp, purpose = 'verification') {
     try {
         // Check if email is configured
         if (!isEmailConfigured()) {
             logger.warn('Email service not configured - Email will be skipped');
             logger.info(`OTP for ${email}: ${otp} (Email skipped - configure SMTP in .env)`);
-            
+
             return {
                 success: true,
                 skipped: true,
@@ -45,10 +47,10 @@ async function sendOTPEmail(email, otp, purpose = 'verification') {
             };
         }
 
-        const subject = purpose === 'reset' 
+        const subject = purpose === 'reset'
             ? 'Password Reset OTP - CCTV Analysis System'
             : 'Email Verification OTP - CCTV Analysis System';
-        
+
         const html = `
             <!DOCTYPE html>
             <html>
@@ -112,10 +114,10 @@ async function sendOTPEmail(email, otp, purpose = 'verification') {
                     <div class="content">
                         <h2>${purpose === 'reset' ? 'Password Reset Request' : 'Email Verification'}</h2>
                         <p>Hello,</p>
-                        <p>${purpose === 'reset' 
-                            ? 'You have requested to reset your password. Use the OTP below to proceed:' 
-                            : 'Thank you for registering with CCTV Analysis System. Use the OTP below to verify your email address:'
-                        }</p>
+                        <p>${purpose === 'reset'
+                ? 'You have requested to reset your password. Use the OTP below to proceed:'
+                : 'Thank you for registering with CCTV Analysis System. Use the OTP below to verify your email address:'
+            }</p>
                         
                         <div class="otp-box">
                             <div class="otp-code">${otp}</div>
@@ -145,17 +147,17 @@ async function sendOTPEmail(email, otp, purpose = 'verification') {
 
         const info = await transporter.sendMail(mailOptions);
         logger.info(`OTP email sent to ${email}: ${info.messageId}`);
-        
+
         return {
             success: true,
             messageId: info.messageId
         };
     } catch (error) {
         logger.error('Error sending OTP email:', error);
-        
+
         // Log OTP for testing if email fails
         logger.info(`OTP for ${email}: ${otp} (Email failed - check logs above for error)`);
-        
+
         return {
             success: true,
             skipped: true,

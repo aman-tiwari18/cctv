@@ -198,7 +198,7 @@ exports.verifyUser = async (req, res) => {
     if (verified !== undefined) {
         updates.push("verified = ?");
         values.push(verified);
-        
+
         // Set verified_date if verifying, null if unverifying
         updates.push("verified_date = ?");
         values.push(verified ? new Date() : null);
@@ -497,6 +497,7 @@ exports.sendRegistrationOTP = async (req, res) => {
 
         // Generate and store OTP
         const otp = generateOTP();
+        console.log("otppppppppppppppppppppppppppppppppppppppppppppppppppppp", otp)
         storeOTP(identifier, otp, `registration_${type}`);
 
         // Send OTP
@@ -505,7 +506,7 @@ exports.sendRegistrationOTP = async (req, res) => {
         } else {
             const result = await sendOTPSMS(identifier, otp);
             if (!result.success && !result.skipped) {
-                return res.status(500).json({
+                return res.status(200).json({
                     success: false,
                     message: result.message || "Failed to send OTP SMS",
                 });
@@ -755,7 +756,7 @@ exports.getAllUsers = async (req, res) => {
         }
 
         const { verified, role, search } = req.query;
-        
+
         let whereClause = "WHERE 1=1";
         const params = [];
 

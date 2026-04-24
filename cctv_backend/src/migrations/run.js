@@ -10,7 +10,7 @@ const runMigrations = async () => {
     try {
         logger.info('Starting database migrations...');
 
-        const migrationFile = path.join(__dirname, '018_add_client_push_fields_to_reports.sql');
+        const migrationFile = path.join(__dirname, '017_add_user_verification_fields.sql');
         const sql = fs.readFileSync(migrationFile, 'utf8');
 
         // Remove comments and split by semicolons
@@ -27,7 +27,7 @@ const runMigrations = async () => {
                 logger.info(`✓ Executed: ${statement.substring(0, 60)}...`);
             } catch (error) {
                 // Ignore "already exists" / "duplicate column" / "duplicate key" errors
-                if (error.message.includes('Duplicate column name') || 
+                if (error.message.includes('Duplicate column name') ||
                     error.message.includes('Duplicate key name') ||
                     error.message.includes('already exists') ||
                     error.message.includes('Unknown column') ||
