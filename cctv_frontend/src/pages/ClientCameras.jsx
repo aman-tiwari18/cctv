@@ -14,6 +14,7 @@ import {
   TableContainer,
   TableHead,
   TablePagination,
+  TableRow,
   TableSortLabel,
   TextField,
   InputAdornment,
