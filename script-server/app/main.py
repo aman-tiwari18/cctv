@@ -627,7 +627,10 @@ def list_detections(
     limit: int = 50,
 ):
     rows = []
-    folders = {type: DETECTION_FOLDERS[type]} if type and type in DETECTION_FOLDERS else DETECTION_FOLDERS
+    
+    # Handle comma-separated type query
+    selected_types = type.split(',') if type else []
+    folders = {k: v for k, v in DETECTION_FOLDERS.items() if k in selected_types} if selected_types else DETECTION_FOLDERS
 
     def _scan_dir(base_dir: Path, origin: str):
         for type_key, folder_name in folders.items():
@@ -899,7 +902,7 @@ def list_client_detections(
                 
                 if source and source != source_part:
                     continue
-                if type and type != type_key:
+                if type and type_key not in type.split(','):
                     continue
 
                 item = parse_detection_filename(
