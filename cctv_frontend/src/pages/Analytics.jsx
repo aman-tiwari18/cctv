@@ -242,6 +242,7 @@ const Analytics = () => {
   const calMonthIdx = calMonth.getMonth();
   const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
   const DAY_LABELS = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+  const DAY_NAMES_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
   /* Helper to convert Date to yyyy-MM-dd without timezone issues */
   const toDateString = (date) => {
@@ -249,6 +250,16 @@ const Analytics = () => {
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
+  };
+
+  const skipDaysSet = useMemo(() => new Set(selectedExam ? (selectedExam.skip_days || []) : []), [selectedExam]);
+  const skipDatesSet = useMemo(() => new Set(selectedExam ? (selectedExam.skip_dates || []) : []), [selectedExam]);
+
+  const isDaySkipped = (day) => {
+    if (!day) return false;
+    const iso = toDateString(day);
+    const dayName = DAY_NAMES_FULL[day.getDay()];
+    return skipDaysSet.has(dayName) || skipDatesSet.has(iso);
   };
 
   const getCalDays = () => {
@@ -261,7 +272,7 @@ const Analytics = () => {
   };
 
   const handleCalDayClick = (day) => {
-    if (!day) return;
+    if (!day || isDaySkipped(day)) return;
     const iso = toDateString(day);
     if (!pickerStart || (pickerStart && pickerEnd)) {
       setPickerStart(iso);
@@ -604,15 +615,16 @@ const Analytics = () => {
                 {/* Days grid */}
                 <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 0 }}>
                   {getCalDays().map((day, i) => {
-                    const inRange = isInRange(day);
-                    const isStart = isRangeStart(day);
-                    const isEnd = isRangeEnd(day);
+                    const skipped = isDaySkipped(day);
+                    const inRange = isInRange(day) && !skipped;
+                    const isStart = isRangeStart(day) && !skipped;
+                    const isEnd = isRangeEnd(day) && !skipped;
                     return (
                       <Box
                         key={i}
                         onClick={() => handleCalDayClick(day)}
                         sx={{
-                          textAlign: 'center', py: 0.7, cursor: day ? 'pointer' : 'default',
+                          textAlign: 'center', py: 0.7, cursor: day ? (skipped ? 'not-allowed' : 'pointer') : 'default',
                           bgcolor: inRange ? '#eff6ff' : 'transparent',
                           borderRadius: isStart ? '50% 0 0 50%' : isEnd ? '0 50% 50% 0' : 0,
                           position: 'relative',
@@ -623,11 +635,12 @@ const Analytics = () => {
                             width: 34, height: 34, borderRadius: '50%', mx: 'auto',
                             display: 'flex', alignItems: 'center', justifyContent: 'center',
                             bgcolor: (isStart || isEnd) ? '#3b82f6' : 'transparent',
-                            color: (isStart || isEnd) ? '#fff' : inRange ? '#3b82f6' : '#334155',
+                            color: skipped ? '#cbd5e1' : ((isStart || isEnd) ? '#fff' : inRange ? '#3b82f6' : '#334155'),
                             fontWeight: (isStart || isEnd) ? 800 : inRange ? 600 : 400,
+                            textDecoration: skipped ? 'line-through' : 'none',
                             fontSize: 14,
                             transition: 'all 0.1s',
-                            '&:hover': { bgcolor: (isStart || isEnd) ? '#2563eb' : '#dbeafe' },
+                            '&:hover': { bgcolor: skipped ? 'transparent' : ((isStart || isEnd) ? '#2563eb' : '#dbeafe') },
                           }}>
                             {day.getDate()}
                           </Box>
@@ -636,6 +649,11 @@ const Analytics = () => {
                     );
                   })}
                 </Box>
+                {selectedExam && (skipDaysSet.size > 0 || skipDatesSet.size > 0) && (
+                   <Typography sx={{ fontSize: '0.7rem', color: '#94a3b8', textAlign: 'center', mt: 1 }}>
+                     Dates disabled per exam skip schedule.
+                   </Typography>
+                )}
 
                 {/* Actions */}
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 2.5, pt: 2, borderTop: '1px solid #f1f5f9' }}>

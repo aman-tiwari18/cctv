@@ -1248,10 +1248,10 @@ const ClientDetectionDashboard = () => {
                 sx={{ transform: 'translate(-50%, -50%)' }}
                 textAlign="center"
               >
-                <Typography variant="h3" fontWeight={700} sx={{ color: '#0f172a' }}>
+                <Typography variant="h4" fontWeight={800} sx={{ color: '#0f172a', fontSize: '1.75rem' }}>
                   {avgAccuracy}%
                 </Typography>
-                <Typography variant="caption" sx={{ color: '#64748b', textTransform: 'uppercase', fontSize: '0.7rem' }}>
+                <Typography variant="caption" sx={{ color: '#64748b', textTransform: 'uppercase', fontSize: '0.65rem', fontWeight: 600, letterSpacing: '0.05em' }}>
                   Avg Accuracy
                 </Typography>
               </Box>

@@ -111,7 +111,13 @@ exports.getPending = async (req, res) => {
     const windowEnd   = new Date(now.getTime() + lookaheadMins  * 60 * 1000);
     const windowStartStr = toTimeStr(windowStart); // e.g. "11:28:05"
     const windowEndStr   = toTimeStr(windowEnd);   // e.g. "12:01:05"
-    const todayStr       = now.toISOString().split("T")[0];
+    // Use LOCAL date (IST), NOT UTC date. toISOString() gives UTC which is 5h30m behind IST —
+    // between 00:00–05:30 IST this would return yesterday's date and miss all early-morning assignments.
+    const todayStr = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, "0"),
+        String(now.getDate()).padStart(2, "0"),
+    ].join("-");
 
     const rows = await sequelize.query(`
         SELECT
