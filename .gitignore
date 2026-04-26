@@ -82,3 +82,13 @@ script-server/scripts/frames/*
 script-server/results/*
 script-server/scripts/models/*
 script-server/scripts/yolo11n.pt
+
+# Ignore all environment files across all folders
+.env
+.env.*
+!.env.example
+
+# Ignore virtual environments if any
+env/
+venv/
+.venv/

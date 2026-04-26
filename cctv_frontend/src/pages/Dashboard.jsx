@@ -41,7 +41,12 @@ import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
 import { CustomSvgIcon } from '../components/DetectionSvgIcon';
 import { ShiftSvgIcon } from '../components/ShiftSvgIcon';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
+import axios from 'axios';
+import { io } from 'socket.io-client';
+import { API_BASE_1, SOCKET_URL, SOCKET_PATH } from '../constants/data';
+import { useAuth } from '../contexts/AuthContext';
 import { useDetectionCounts } from '../contexts/DetectionCountsContext';
+import { useNavigate } from 'react-router-dom';
 
 const CATEGORY_COLORS = {
   people: '#3b82f6',
@@ -83,8 +88,17 @@ const DETECTION_TYPE_LABELS = {
   vision: 'Vision Detection',
 };
 
-const StatCard = ({ title, value, icon, color, loading }) => (
-  <Card elevation={0} sx={{ height: '100%', borderRadius: 3, border: '1px solid #e2e8f0', boxShadow: 'none' }}>
+const StatCard = ({ title, value, icon, color, loading, onClick }) => (
+  <Card
+    elevation={0}
+    onClick={onClick}
+    sx={{
+      height: '100%', borderRadius: 3, border: '1px solid #e2e8f0', boxShadow: 'none',
+      cursor: onClick ? 'pointer' : 'default',
+      transition: 'all 0.18s ease',
+      '&:hover': onClick ? { boxShadow: '0 4px 20px rgba(59,130,246,0.12)', borderColor: '#3b82f6' } : {},
+    }}
+  >
     <CardContent sx={{ p: 0, height: '100%', '&:last-child': { pb: 0 } }}>
       <Box display="flex" justifyContent="space-between" alignItems="stretch" height="100%">
         <Box flex={1} display="flex" flexDirection="column" justifyContent="center" sx={{ p: 2 }}>
@@ -160,6 +174,7 @@ const EXECUTION_DETAIL_ITEMS = [
 ];
 
 const Dashboard = () => {
+  const navigate = useNavigate();
   const { unfilteredCounts } = useDetectionCounts();
   const [stats, setStats] = useState({
     exams: 0,
@@ -173,8 +188,53 @@ const Dashboard = () => {
   const [timeRange, setTimeRange] = useState('24h');
   const [selectedCategory, setSelectedCategory] = useState('all');
 
-  // Calculate live total detections from context
-  const liveDetectionCount = Object.values(unfilteredCounts).reduce((sum, count) => sum + count, 0);
+  const [localLiveCount, setLocalLiveCount] = useState(0);
+
+  // Initial fetch for count and socket connection
+  useEffect(() => {
+    let mounted = true;
+
+    // Fetch initial base count
+    axios.get(`${API_BASE_1}/detections?page=1&limit=1`)
+      .then(res => {
+        if (mounted && res.data && res.data.counts) {
+          const total = Object.values(res.data.counts).reduce((a, b) => a + b, 0);
+          setLocalLiveCount(total);
+        }
+      })
+      .catch(err => console.error('Dashboard count fetch error:', err));
+
+    // Connect to WebSockets for live bumping without heavy re-renders
+    const resolvedPath = SOCKET_PATH || '/cctv_dev/socket.io';
+    const socket = io(SOCKET_URL, {
+      path: resolvedPath,
+      transports: ['polling'],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+    });
+
+    let batchCount = 0;
+    let syncInterval;
+
+    socket.on('connect', () => {
+      syncInterval = setInterval(() => {
+        if (batchCount > 0) {
+          setLocalLiveCount(prev => prev + batchCount);
+          batchCount = 0;
+        }
+      }, 2000); // Batch DOM updates every 2 seconds to prevent browser lockup
+    });
+
+    socket.on('detection:new', () => {
+      batchCount += 1;
+    });
+
+    return () => {
+      mounted = false;
+      clearInterval(syncInterval);
+      socket.disconnect();
+    };
+  }, []);
 
   useEffect(() => {
     loadDashboardData();
@@ -268,11 +328,12 @@ const Dashboard = () => {
         {/* Stats Cards */}
         <Grid item xs={12} sm={6} md={3}>
           <StatCard
-            title="Active Exams"
+            title="All Exams"
             value={stats.exams}
             icon={<ExamsSvgIcon />}
             color="#3b82f6"
             loading={loading}
+            onClick={() => navigate('/exams')}
           />
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
@@ -282,24 +343,27 @@ const Dashboard = () => {
             icon={<ShiftSvgIcon />}
             color="#3b82f6"
             loading={loading}
+            onClick={() => navigate('/shifts')}
           />
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
           <StatCard
-            title="Total Camera"
+            title="Total Cameras"
             value={stats.totalCameras}
             icon={<CameraAltIcon />}
             color="#3b82f6"
             loading={loading}
+            onClick={() => navigate('/cameras')}
           />
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
           <StatCard
-            title="Total Detection"
-            value={liveDetectionCount.toLocaleString()}
+            title="Total Detections"
+            value={localLiveCount.toLocaleString()}
             icon={<CustomSvgIcon />}
             color="#3b82f6"
             loading={loading}
+            onClick={() => navigate('/detections')}
           />
         </Grid>
 

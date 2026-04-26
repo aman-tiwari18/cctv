@@ -1,388 +1,493 @@
--- ============================================================
--- CCTV Exam Monitoring System — Full Database Schema
--- Updated: 2026-03-23
--- Based on Current Sequelize Models
--- Run this ONCE on a fresh database to create everything.
--- DB Engine: MySQL 8+ / MariaDB 10.5+
--- ============================================================
+-- MySQL dump 10.13  Distrib 8.0.45, for Linux (x86_64)
+--
+-- Host: localhost    Database: cctv_monitoring
+-- ------------------------------------------------------
+-- Server version	8.0.45-0ubuntu0.24.04.1
 
-CREATE DATABASE IF NOT EXISTS cctv_monitoring
-  CHARACTER SET utf8mb4
-  COLLATE utf8mb4_unicode_ci;
+/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
+/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
+/*!50503 SET NAMES utf8mb4 */;
+/*!40103 SET @OLD_TIME_ZONE=@@TIME_ZONE */;
+/*!40103 SET TIME_ZONE='+00:00' */;
+/*!40014 SET @OLD_UNIQUE_CHECKS=@@UNIQUE_CHECKS, UNIQUE_CHECKS=0 */;
+/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;
+/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;
+/*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
 
-USE cctv_monitoring;
+--
+-- Table structure for table `analytics_tasks`
+--
 
--- ============================================================
--- Table: users
--- ============================================================
-CREATE TABLE IF NOT EXISTS users (
-  id            INT AUTO_INCREMENT PRIMARY KEY,
-  username      VARCHAR(100) NOT NULL UNIQUE,
-  email         VARCHAR(255) NOT NULL UNIQUE,
-  password_hash VARCHAR(255) NOT NULL,
-  full_name     VARCHAR(255),
-  phone         VARCHAR(20) COMMENT 'Contact phone number',
-  company_name  VARCHAR(255) COMMENT 'Company or organization name',
-  verified      BOOLEAN DEFAULT FALSE COMMENT 'Account verification status',
-  verified_date DATETIME NULL COMMENT 'Date and time when account was verified',
-  role          ENUM('ADMIN', 'OPERATOR', 'VIEWER') DEFAULT 'VIEWER',
-  is_active     BOOLEAN DEFAULT TRUE,
-  last_login    TIMESTAMP NULL,
-  created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  INDEX idx_username (username),
-  INDEX idx_email    (email),
-  INDEX idx_role     (role),
-  INDEX idx_verified (verified),
-  INDEX idx_company_name (company_name)
+DROP TABLE IF EXISTS `analytics_tasks`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `analytics_tasks` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `exam_id` int NOT NULL,
+  `task_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `description` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+  `script_path` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `frequency_minutes` int NOT NULL,
+  `duration_minutes` int DEFAULT NULL,
+  `start_time` time DEFAULT NULL,
+  `end_time` time DEFAULT NULL,
+  `parameters` json DEFAULT NULL,
+  `is_active` tinyint(1) DEFAULT '1',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_exam_id` (`exam_id`),
+  KEY `idx_is_active` (`is_active`),
+  CONSTRAINT `analytics_tasks_ibfk_1` FOREIGN KEY (`exam_id`) REFERENCES `exams` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
--- Default admin user  (password: admin123 — change immediately)
-INSERT INTO users (username, email, password_hash, full_name, role)
-VALUES (
-  'admin',
-  'admin@example.com',
-  '$2a$10$sPWmm5xLOruCv.hDLs3BW.RZvgbGa3w32IwEiJKr.q19F7mXQyN/m',
-  'System Administrator',
-  'ADMIN'
-) ON DUPLICATE KEY UPDATE username = username;
+--
+-- Table structure for table `camera_links`
+--
 
--- ============================================================
--- Table: exams
--- Master exam records with date range and skip configuration
--- ============================================================
-CREATE TABLE IF NOT EXISTS exams (
-  id          INT AUTO_INCREMENT PRIMARY KEY,
-  exam_name   VARCHAR(255) NOT NULL,
-  exam_body   VARCHAR(255),
-  link_type   VARCHAR(255),
-  description TEXT,
-  start_date  DATE COMMENT 'Exam start date',
-  end_date    DATE COMMENT 'Exam end date',
-  skip_days   JSON COMMENT 'Array of day names to skip, e.g. ["Saturday","Sunday"]',
-  skip_dates  JSON COMMENT 'Array of specific dates to skip, e.g. ["2026-03-15","2026-03-20"]',
-  is_active   BOOLEAN DEFAULT TRUE,
-  created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  INDEX idx_exam_body (exam_body),
-  INDEX idx_is_active (is_active)
+DROP TABLE IF EXISTS `camera_links`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `camera_links` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `exam_id` int NOT NULL,
+  `camera_id` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Unique camera identifier',
+  `stream_url` text COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'RTSP or HLS stream URL',
+  `stream_type` enum('RTSP','HLS') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `location` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Physical location or room number',
+  `metadata` json DEFAULT NULL COMMENT 'Additional camera metadata',
+  `is_active` tinyint(1) DEFAULT '1',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `unique_camera_per_exam` (`exam_id`,`camera_id`),
+  KEY `idx_exam_id` (`exam_id`),
+  KEY `idx_is_active` (`is_active`),
+  CONSTRAINT `camera_links_ibfk_1` FOREIGN KEY (`exam_id`) REFERENCES `exams` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
--- ============================================================
--- Table: exam_shifts
--- Shifts defined at exam level (template for scheduling)
--- ============================================================
-CREATE TABLE IF NOT EXISTS exam_shifts (
-  id          INT AUTO_INCREMENT PRIMARY KEY,
-  exam_id     INT NOT NULL,
-  shift_name  VARCHAR(255) NOT NULL,
-  start_time  TIME NOT NULL,
-  end_time    TIME NOT NULL,
-  is_active   BOOLEAN DEFAULT TRUE,
-  created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  FOREIGN KEY (exam_id) REFERENCES exams(id) ON DELETE CASCADE,
-  INDEX idx_exam_shifts_exam_id (exam_id),
-  INDEX idx_is_active (is_active)
+--
+-- Table structure for table `camera_links_hls`
+--
+
+DROP TABLE IF EXISTS `camera_links_hls`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `camera_links_hls` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `exam_id` int NOT NULL,
+  `centre_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Test centre name',
+  `tc_code` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `city` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `state` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `camera_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `ch_code` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Unique channel key (ch_no from Excel)',
+  `cctv_url` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `camera_category` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `classification` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `exam_date` date DEFAULT NULL COMMENT 'Date of assessment',
+  `shift_id` int DEFAULT NULL COMMENT 'FK to exam_shifts, NULL means applies to all shifts',
+  `is_active` tinyint(1) DEFAULT '1',
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `status` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `unique_exam_ch_code` (`exam_id`,`ch_code`),
+  KEY `idx_exam_id` (`exam_id`),
+  KEY `idx_shift_id` (`shift_id`),
+  KEY `idx_is_active` (`is_active`),
+  CONSTRAINT `camera_links_hls_ibfk_1` FOREIGN KEY (`exam_id`) REFERENCES `exams` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `camera_links_hls_ibfk_2` FOREIGN KEY (`shift_id`) REFERENCES `exam_shifts` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_camera_hls_shift` FOREIGN KEY (`shift_id`) REFERENCES `exam_shifts` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB AUTO_INCREMENT=201 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `camera_links_rtsp`
+--
+
+DROP TABLE IF EXISTS `camera_links_rtsp`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `camera_links_rtsp` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `device_id` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Unique device identifier',
+  `exam_id` int NOT NULL,
+  `centre_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `tc_code` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `camera_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `camera_no` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `city` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `state` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `cctv_url` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `is_active` tinyint(1) DEFAULT '1',
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `classification` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `status` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_exam_id` (`exam_id`),
+  KEY `idx_device_id` (`device_id`),
+  KEY `idx_is_active` (`is_active`),
+  CONSTRAINT `camera_links_rtsp_ibfk_1` FOREIGN KEY (`exam_id`) REFERENCES `exams` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=5430 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `camera_report_hls`
+--
+
+DROP TABLE IF EXISTS `camera_report_hls`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `camera_report_hls` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `exam_id` int DEFAULT NULL,
+  `shift_id` int DEFAULT NULL,
+  `city` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `center_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `camera_id` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `camera_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `camera_category` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `tc_code` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `ch_code` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `state` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `camera_status` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `events` int DEFAULT '0',
+  `rejected_events` int DEFAULT '0',
+  `date_time` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Manual entry (dd/mm/yyyy HH:MM:SS)',
+  `imageurl` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+  `detection_type` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `unique_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `pushed_to_client` tinyint(1) NOT NULL DEFAULT '0',
+  `remove_from_client` tinyint(1) NOT NULL DEFAULT '0',
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `shift_id` (`shift_id`),
+  KEY `idx_camera_id` (`camera_id`),
+  KEY `idx_push_status` (`pushed_to_client`,`created_at` DESC),
+  KEY `idx_detection_type` (`detection_type`,`pushed_to_client`),
+  KEY `idx_camera_time` (`camera_id`,`created_at` DESC),
+  KEY `idx_exam_shift_push` (`exam_id`,`shift_id`,`pushed_to_client`,`created_at` DESC),
+  KEY `idx_unique_id` (`unique_id`),
+  KEY `idx_pushed_to_client` (`pushed_to_client`),
+  KEY `idx_exam_detection_type` (`exam_id`,`detection_type`),
+  KEY `idx_exam_pushed` (`exam_id`,`pushed_to_client`),
+  CONSTRAINT `camera_report_hls_ibfk_1` FOREIGN KEY (`exam_id`) REFERENCES `exams` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `camera_report_hls_ibfk_2` FOREIGN KEY (`shift_id`) REFERENCES `exam_shifts` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
--- ============================================================
--- Table: analytics_tasks
--- ============================================================
-CREATE TABLE IF NOT EXISTS analytics_tasks (
-  id                  INT AUTO_INCREMENT PRIMARY KEY,
-  exam_id             INT NOT NULL,
-  task_name           VARCHAR(255) NOT NULL,
-  description         TEXT,
-  script_path         VARCHAR(500) NOT NULL,
-  frequency_minutes   INT NOT NULL,
-  duration_minutes    INT,
-  start_time          TIME,
-  end_time            TIME,
-  parameters          JSON,
-  is_active           BOOLEAN DEFAULT TRUE,
-  created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  FOREIGN KEY (exam_id) REFERENCES exams(id) ON DELETE CASCADE,
-  INDEX idx_exam_id   (exam_id),
-  INDEX idx_is_active (is_active)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+--
+-- Table structure for table `camera_report_rtsp`
+--
 
--- Master registry of all available scripts
--- Independent of exams; used for assigning to shifts
--- ============================================================
-CREATE TABLE IF NOT EXISTS scripts (
-  id                        INT AUTO_INCREMENT PRIMARY KEY,
-  script_id                 VARCHAR(100) NOT NULL UNIQUE COMMENT 'Technical identifier, e.g. face_detection',
-  name                      VARCHAR(255) NOT NULL,
-  default_frequency_minutes INT DEFAULT 5,
-  default_duration_minutes  INT DEFAULT 1,
-  is_active                 BOOLEAN DEFAULT TRUE,
-  created_at                TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at                TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  INDEX idx_script_id (script_id),
-  INDEX idx_is_active (is_active)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+DROP TABLE IF EXISTS `camera_report_rtsp`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `camera_report_rtsp` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `exam_id` int DEFAULT NULL,
+  `shift_id` int DEFAULT NULL,
+  `city` varchar(255) DEFAULT NULL,
+  `center_name` varchar(255) DEFAULT NULL,
+  `camera_id` varchar(255) DEFAULT NULL,
+  `device_id` varchar(255) DEFAULT NULL,
+  `camera_no` varchar(255) DEFAULT NULL,
+  `camera_name` varchar(255) DEFAULT NULL,
+  `tc_code` varchar(255) DEFAULT NULL,
+  `state` varchar(255) DEFAULT NULL,
+  `camera_status` varchar(50) DEFAULT NULL,
+  `events` int DEFAULT '0',
+  `date_time` varchar(100) DEFAULT NULL,
+  `imageurl` text,
+  `detection_type` varchar(255) DEFAULT NULL,
+  `unique_id` varchar(50) DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `pushed_to_client` tinyint(1) DEFAULT '0',
+  `remove_from_client` tinyint(1) DEFAULT '0',
+  `rejected_events` int DEFAULT '0',
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `shift_id` (`shift_id`),
+  KEY `idx_device_camera` (`device_id`,`camera_no`),
+  KEY `idx_exam_shift` (`exam_id`,`shift_id`),
+  KEY `idx_unique_id` (`unique_id`),
+  KEY `idx_pushed_to_client` (`pushed_to_client`),
+  KEY `idx_exam_detection_type` (`exam_id`,`detection_type`),
+  KEY `idx_exam_pushed` (`exam_id`,`pushed_to_client`),
+  CONSTRAINT `camera_report_rtsp_ibfk_1` FOREIGN KEY (`exam_id`) REFERENCES `exams` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `camera_report_rtsp_ibfk_2` FOREIGN KEY (`shift_id`) REFERENCES `exam_shifts` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
--- Seed scripts
-INSERT INTO scripts (script_id, name, default_frequency_minutes, default_duration_minutes, is_active) VALUES
-  ('server',      'Server Room Detection',  5, 1, 1),
-  ('crowd',       'Crowd Detection',        5, 1, 1),
-  ('intruder',    'Intruder Detection',     5, 1, 1),
-  ('entry_exit',  'Entry Exit Detection',   5, 1, 1),
-  ('proximity',   'Proximity Detection',    5, 1, 1),
-  ('phone',       'Phone Detection',        5, 1, 1),
-  ('invigilator', 'Invigilator Detection',  5, 1, 1)
-ON DUPLICATE KEY UPDATE
-  name        = VALUES(name);
+--
+-- Table structure for table `exam_shifts`
+--
 
--- ============================================================
--- Table: shift_script_assignments
--- Links scripts to exam shifts with per-date granularity
--- Unique constraint: (shift_id, script_id, assignment_date)
--- ============================================================
-CREATE TABLE IF NOT EXISTS shift_script_assignments (
-  id                        INT AUTO_INCREMENT PRIMARY KEY,
-  shift_id                  INT NOT NULL COMMENT 'FK to exam_shifts.id',
-  script_id                 INT NOT NULL COMMENT 'FK to scripts.id',
-  analytics_task_id         INT COMMENT 'Backward compatibility, nullable',
-  status                    ENUM('PENDING','RUNNING','COMPLETED','FAILED','CANCELLED') DEFAULT 'PENDING' COMMENT 'Execution status of this assignment',
-  assignment_date           DATE NOT NULL COMMENT 'Date on which this assignment should run',
-  custom_start_time         TIME,
-  custom_end_time           TIME,
-  custom_frequency_minutes  INT,
-  notes                     TEXT,
-  started_at                DATETIME,
-  completed_at              DATETIME,
-  error_log                 TEXT,
-  result_data               JSON,
-  is_active                 BOOLEAN DEFAULT TRUE,
-  created_at                TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at                TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  FOREIGN KEY (shift_id) REFERENCES exam_shifts(id) ON DELETE CASCADE,
-  FOREIGN KEY (script_id) REFERENCES scripts(id) ON DELETE CASCADE,
-  UNIQUE KEY unique_shift_task_date (shift_id, script_id, assignment_date),
-  INDEX idx_shift_id (shift_id),
-  INDEX idx_script_id (script_id),
-  INDEX idx_status (status),
-  INDEX idx_assignment_date (assignment_date),
-  INDEX idx_is_active (is_active)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+DROP TABLE IF EXISTS `exam_shifts`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `exam_shifts` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `exam_id` int NOT NULL,
+  `shift_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `start_time` time NOT NULL,
+  `end_time` time NOT NULL,
+  `is_active` tinyint(1) DEFAULT '1',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_exam_shifts_exam_id` (`exam_id`),
+  KEY `idx_is_active` (`is_active`),
+  CONSTRAINT `exam_shifts_ibfk_1` FOREIGN KEY (`exam_id`) REFERENCES `exams` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=70 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
--- ============================================================
--- Table: script_executions
--- Tracks script execution records and results
--- ============================================================
-CREATE TABLE IF NOT EXISTS script_executions (
-  id                        INT AUTO_INCREMENT PRIMARY KEY,
-  shift_id                  INT COMMENT 'FK to exam_shifts.id',
-  camera_link_id            INT COMMENT 'FK to camera_links_hls or camera_links_rtsp',
-  script_id                 INT COMMENT 'FK to scripts.id',
-  analytics_task_id         INT COMMENT 'Backward compatibility, nullable',
-  status                    ENUM('PENDING','RUNNING','COMPLETED','FAILED','CANCELLED') DEFAULT 'PENDING',
-  scheduled_time            DATETIME NOT NULL,
-  started_at                DATETIME,
-  completed_at              DATETIME,
-  error_log                 TEXT,
-  result_data               JSON,
-  execution_metadata        JSON,
-  created_at                TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at                TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  FOREIGN KEY (shift_id) REFERENCES exam_shifts(id) ON DELETE SET NULL,
-  FOREIGN KEY (script_id) REFERENCES scripts(id) ON DELETE SET NULL,
-  INDEX idx_status (status),
-  INDEX idx_scheduled_time (scheduled_time),
-  INDEX idx_shift_id (shift_id),
-  INDEX idx_script_id (script_id),
-  INDEX idx_created_at (created_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+--
+-- Table structure for table `exams`
+--
 
--- ============================================================
--- Table: camera_links_hls
--- HLS camera streams with structured metadata
--- ============================================================
-CREATE TABLE IF NOT EXISTS camera_links_hls (
-  id              INT AUTO_INCREMENT PRIMARY KEY,
-  exam_id         INT NOT NULL,
-  centre_name     VARCHAR(255) COMMENT 'Test centre name',
-  tc_code         VARCHAR(255),
-  city            VARCHAR(255),
-  state           VARCHAR(255),
-  camera_name     VARCHAR(255),
-  ch_code         VARCHAR(255) COMMENT 'Unique channel key (ch_no from Excel)',
-  cctv_url        TEXT NOT NULL,
-  camera_category VARCHAR(255),
-  classification  VARCHAR(255),
-  exam_date       DATE COMMENT 'Date of assessment',
-  shift_id        INT COMMENT 'FK to exam_shifts, NULL means applies to all shifts',
-  is_active       BOOLEAN DEFAULT TRUE,
-  created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  FOREIGN KEY (exam_id) REFERENCES exams(id) ON DELETE CASCADE,
-  FOREIGN KEY (shift_id) REFERENCES exam_shifts(id) ON DELETE SET NULL,
-  INDEX idx_exam_id (exam_id),
-  INDEX idx_shift_id (shift_id),
-  INDEX idx_is_active (is_active)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+DROP TABLE IF EXISTS `exams`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `exams` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `exam_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `exam_body` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `link_type` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `description` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+  `start_date` date DEFAULT NULL COMMENT 'Exam start date',
+  `end_date` date DEFAULT NULL COMMENT 'Exam end date',
+  `skip_days` json DEFAULT NULL COMMENT 'Array of day names to skip, e.g. ["Saturday","Sunday"]',
+  `skip_dates` json DEFAULT NULL COMMENT 'Array of specific dates to skip, e.g. ["2026-03-15","2026-03-20"]',
+  `is_active` tinyint(1) DEFAULT '1',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_exam_body` (`exam_body`),
+  KEY `idx_is_active` (`is_active`)
+) ENGINE=InnoDB AUTO_INCREMENT=11 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
--- ============================================================
--- Table: camera_links_rtsp
--- RTSP camera streams with structured metadata
--- ============================================================
-CREATE TABLE IF NOT EXISTS camera_links_rtsp (
-  id          INT AUTO_INCREMENT PRIMARY KEY,
-  device_id   VARCHAR(255) NOT NULL UNIQUE COMMENT 'Unique device identifier',
-  exam_id     INT NOT NULL,
-  centre_name VARCHAR(255),
-  tc_code     VARCHAR(255),
-  camera_name VARCHAR(255),
-  city        VARCHAR(255),
-  state       VARCHAR(255),
-  cctv_url    TEXT NOT NULL,
-  is_active   BOOLEAN DEFAULT TRUE,
-  created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  FOREIGN KEY (exam_id) REFERENCES exams(id) ON DELETE CASCADE,
-  INDEX idx_exam_id (exam_id),
-  INDEX idx_device_id (device_id),
-  INDEX idx_is_active (is_active)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+--
+-- Temporary view structure for view `execution_summary`
+--
 
--- ============================================================
--- View: pending_assignments
--- Shows pending script assignments for today
--- ============================================================
-CREATE OR REPLACE VIEW pending_assignments AS
-SELECT 
-  ssa.id,
-  ssa.shift_id,
-  ssa.script_id,
-  ssa.assignment_date,
-  es.start_time,
-  es.end_time,
-  s.script_id AS script_identifier,
-  s.name AS script_name,
-  ssa.custom_frequency_minutes,
-  s.default_frequency_minutes
-FROM shift_script_assignments ssa
-JOIN exam_shifts es ON ssa.shift_id = es.id
-JOIN scripts s ON ssa.script_id = s.id
-WHERE ssa.status = 'PENDING'
-  AND ssa.assignment_date = CURDATE()
-  AND ssa.is_active = TRUE;
+DROP TABLE IF EXISTS `execution_summary`;
+/*!50001 DROP VIEW IF EXISTS `execution_summary`*/;
+SET @saved_cs_client     = @@character_set_client;
+/*!50503 SET character_set_client = utf8mb4 */;
+/*!50001 CREATE VIEW `execution_summary` AS SELECT 
+ 1 AS `exam_name`,
+ 1 AS `task_name`,
+ 1 AS `total_executions`,
+ 1 AS `completed`,
+ 1 AS `failed`,
+ 1 AS `running`,
+ 1 AS `pending`*/;
+SET character_set_client = @saved_cs_client;
 
--- ============================================================
--- View: execution_summary
--- Provides execution statistics by exam and script
--- ============================================================
-CREATE OR REPLACE VIEW execution_summary AS
-SELECT
-  e.exam_name,
-  s.name        AS script_name,
-  COUNT(*)      AS total_executions,
-  SUM(CASE WHEN se.status = 'COMPLETED' THEN 1 ELSE 0 END) AS completed,
-  SUM(CASE WHEN se.status = 'FAILED'    THEN 1 ELSE 0 END) AS failed,
-  SUM(CASE WHEN se.status = 'RUNNING'   THEN 1 ELSE 0 END) AS running,
-  SUM(CASE WHEN se.status = 'PENDING'   THEN 1 ELSE 0 END) AS pending
-FROM script_executions se
-LEFT JOIN scripts s ON se.script_id = s.id
-LEFT JOIN exam_shifts es ON se.shift_id = es.id
-LEFT JOIN exams e ON es.exam_id = e.id
-GROUP BY e.exam_name, s.name;
+--
+-- Temporary view structure for view `pending_assignments`
+--
 
--- ============================================================
--- View: camera_inventory
--- Shows all cameras (both HLS and RTSP) for each exam
--- ============================================================
-CREATE OR REPLACE VIEW camera_inventory AS
-SELECT
-  e.exam_name,
-  'HLS' AS stream_type,
-  h.ch_code AS camera_id,
-  h.camera_name,
-  h.centre_name,
-  h.city,
-  h.state,
-  h.cctv_url AS stream_url,
-  h.exam_date,
-  h.is_active
-FROM camera_links_hls h
-JOIN exams e ON h.exam_id = e.id
-UNION ALL
-SELECT
-  e.exam_name,
-  'RTSP' AS stream_type,
-  r.device_id AS camera_id,
-  r.camera_name,
-  r.centre_name,
-  r.city,
-  r.state,
-  r.cctv_url AS stream_url,
-  NULL AS exam_date,
-  r.is_active
-FROM camera_links_rtsp r
-JOIN exams e ON r.exam_id = e.id;
+DROP TABLE IF EXISTS `pending_assignments`;
+/*!50001 DROP VIEW IF EXISTS `pending_assignments`*/;
+SET @saved_cs_client     = @@character_set_client;
+/*!50503 SET character_set_client = utf8mb4 */;
+/*!50001 CREATE VIEW `pending_assignments` AS SELECT 
+ 1 AS `id`,
+ 1 AS `shift_id`,
+ 1 AS `script_id`,
+ 1 AS `assignment_date`,
+ 1 AS `start_time`,
+ 1 AS `end_time`,
+ 1 AS `script_identifier`,
+ 1 AS `script_name`,
+ 1 AS `custom_frequency_minutes`,
+ 1 AS `default_frequency_minutes`*/;
+SET character_set_client = @saved_cs_client;
 
--- ============================================================
--- Table: camera_report_hls
--- Reports for HLS camera detections
--- ============================================================
-CREATE TABLE IF NOT EXISTS camera_report_hls (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    exam_id INT NULL,
-    shift_id INT NULL,
-    city VARCHAR(255) NULL,
-    center_name VARCHAR(255) NULL,
-    camera_id INT NULL COMMENT 'Reference to camera_links_hls.id',
-    camera_name VARCHAR(255) NULL,
-    camera_category VARCHAR(255) NULL,
-    tc_code VARCHAR(255) NULL,
-    ch_code VARCHAR(255) NULL,
-    state VARCHAR(255) NULL,
-    camera_status VARCHAR(50) NULL,
-    events INT DEFAULT 0,
-    rejected_events INT DEFAULT 0,
-    date_time VARCHAR(100) NULL COMMENT 'Manual entry (dd/mm/yyyy HH:MM:SS)',
-    imageurl TEXT NULL,
-    detection_type VARCHAR(255) NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (exam_id) REFERENCES exams(id) ON DELETE SET NULL,
-    FOREIGN KEY (shift_id) REFERENCES exam_shifts(id) ON DELETE SET NULL,
-    INDEX idx_camera_id (camera_id),
-    INDEX idx_exam_shift (exam_id, shift_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+--
+-- Table structure for table `script_executions`
+--
 
--- ============================================================
--- 10. camera_report_rtsp
--- ============================================================
-CREATE TABLE IF NOT EXISTS camera_report_rtsp (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    exam_id INT NULL,
-    shift_id INT NULL,
-    city VARCHAR(255) NULL,
-    center_name VARCHAR(255) NULL,
-    camera_id INT NULL, -- Reference to camera_links_rtsp.id
-    device_id VARCHAR(255) NULL,
-    camera_no VARCHAR(255) NULL,
-    camera_name VARCHAR(255) NULL,
-    tc_code VARCHAR(255) NULL,
-    state VARCHAR(255) NULL,
-    camera_status VARCHAR(50) NULL,
-    events INT DEFAULT 0,
-    rejected_events INT DEFAULT 0,
-    date_time VARCHAR(100) NULL COMMENT 'Manual entry (dd/mm/yyyy HH:MM:SS)',
-    imageurl TEXT NULL,
-    detection_type VARCHAR(255) NULL,
-    unique_id VARCHAR(50) DEFAULT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (exam_id) REFERENCES exams(id) ON DELETE SET NULL,
-    FOREIGN KEY (shift_id) REFERENCES exam_shifts(id) ON DELETE SET NULL,
-    INDEX idx_device_camera (device_id, camera_no),
-    INDEX idx_exam_shift (exam_id, shift_id),
-    INDEX idx_unique_id (unique_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+DROP TABLE IF EXISTS `script_executions`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `script_executions` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `shift_id` int DEFAULT NULL COMMENT 'FK to exam_shifts.id',
+  `camera_link_id` int DEFAULT NULL COMMENT 'FK to camera_links_hls or camera_links_rtsp',
+  `script_id` int DEFAULT NULL COMMENT 'FK to scripts.id',
+  `analytics_task_id` int DEFAULT NULL,
+  `status` enum('PENDING','RUNNING','COMPLETED','FAILED','CANCELLED') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT 'PENDING',
+  `scheduled_time` datetime NOT NULL,
+  `started_at` datetime DEFAULT NULL,
+  `completed_at` datetime DEFAULT NULL,
+  `error_log` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+  `result_data` json DEFAULT NULL,
+  `execution_metadata` json DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `shift_script_assignment_id` int DEFAULT NULL COMMENT 'Reference to shift_script_assignments.id',
+  PRIMARY KEY (`id`),
+  KEY `idx_status` (`status`),
+  KEY `idx_scheduled_time` (`scheduled_time`),
+  KEY `idx_shift_id` (`shift_id`),
+  KEY `idx_script_id` (`script_id`),
+  KEY `idx_created_at` (`created_at`),
+  KEY `idx_shift_script_assignment_id` (`shift_script_assignment_id`),
+  KEY `idx_exec_script_id` (`script_id`),
+  CONSTRAINT `fk_exec_script` FOREIGN KEY (`script_id`) REFERENCES `scripts` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_shift_script_assignment` FOREIGN KEY (`shift_script_assignment_id`) REFERENCES `shift_script_assignments` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `script_executions_ibfk_1` FOREIGN KEY (`shift_id`) REFERENCES `exam_shifts` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `script_executions_ibfk_2` FOREIGN KEY (`script_id`) REFERENCES `scripts` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB AUTO_INCREMENT=467 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
--- ============================================================
--- Done — Schema created successfully
--- ============================================================
-SELECT 'Schema created successfully' AS status;
+--
+-- Table structure for table `scripts`
+--
+
+DROP TABLE IF EXISTS `scripts`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `scripts` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `script_id` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Technical identifier, e.g. face_detection',
+  `name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `default_frequency_minutes` int DEFAULT '5',
+  `default_duration_minutes` int DEFAULT '1',
+  `is_active` tinyint(1) DEFAULT '1',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `script_id` (`script_id`),
+  KEY `idx_script_id` (`script_id`),
+  KEY `idx_is_active` (`is_active`)
+) ENGINE=InnoDB AUTO_INCREMENT=19625 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `shift_script_assignments`
+--
+
+DROP TABLE IF EXISTS `shift_script_assignments`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `shift_script_assignments` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `shift_id` int NOT NULL COMMENT 'FK to exam_shifts.id',
+  `script_id` int NOT NULL COMMENT 'FK to scripts.id',
+  `analytics_task_id` int DEFAULT NULL,
+  `status` enum('PENDING','RUNNING','COMPLETED','FAILED','CANCELLED') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT 'PENDING' COMMENT 'Execution status of this assignment',
+  `assignment_date` date NOT NULL COMMENT 'Date on which this assignment should run',
+  `custom_start_time` time DEFAULT NULL,
+  `custom_end_time` time DEFAULT NULL,
+  `custom_frequency_minutes` int DEFAULT NULL,
+  `notes` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+  `started_at` datetime DEFAULT NULL,
+  `completed_at` datetime DEFAULT NULL,
+  `error_log` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+  `result_data` json DEFAULT NULL,
+  `is_active` tinyint(1) DEFAULT '1',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `unique_shift_task_date` (`shift_id`,`script_id`,`assignment_date`),
+  KEY `idx_shift_id` (`shift_id`),
+  KEY `idx_script_id` (`script_id`),
+  KEY `idx_status` (`status`),
+  KEY `idx_assignment_date` (`assignment_date`),
+  KEY `idx_is_active` (`is_active`),
+  CONSTRAINT `fk_ssa_script` FOREIGN KEY (`script_id`) REFERENCES `scripts` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `shift_script_assignments_ibfk_1` FOREIGN KEY (`shift_id`) REFERENCES `exam_shifts` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `shift_script_assignments_ibfk_2` FOREIGN KEY (`script_id`) REFERENCES `scripts` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=229 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `users`
+--
+
+DROP TABLE IF EXISTS `users`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `users` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `username` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `email` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `password_hash` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `full_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `phone` varchar(20) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Contact phone number',
+  `company_name` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Company or organization name',
+  `verified` tinyint(1) DEFAULT '0' COMMENT 'Account verification status',
+  `verified_date` datetime DEFAULT NULL COMMENT 'Date and time when account was verified',
+  `role` enum('ADMIN','OPERATOR','VIEWER') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT 'VIEWER',
+  `is_active` tinyint(1) DEFAULT '1',
+  `last_login` timestamp NULL DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `username` (`username`),
+  UNIQUE KEY `email` (`email`),
+  KEY `idx_username` (`username`),
+  KEY `idx_email` (`email`),
+  KEY `idx_role` (`role`),
+  KEY `idx_verified` (`verified`),
+  KEY `idx_company_name` (`company_name`)
+) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Final view structure for view `execution_summary`
+--
+
+/*!50001 DROP VIEW IF EXISTS `execution_summary`*/;
+/*!50001 SET @saved_cs_client          = @@character_set_client */;
+/*!50001 SET @saved_cs_results         = @@character_set_results */;
+/*!50001 SET @saved_col_connection     = @@collation_connection */;
+/*!50001 SET character_set_client      = utf8mb4 */;
+/*!50001 SET character_set_results     = utf8mb4 */;
+/*!50001 SET collation_connection      = utf8mb4_unicode_ci */;
+/*!50001 CREATE ALGORITHM=UNDEFINED */
+/*!50013 DEFINER=`root`@`localhost` SQL SECURITY DEFINER */
+/*!50001 VIEW `execution_summary` AS select `e`.`exam_name` AS `exam_name`,`at`.`task_name` AS `task_name`,count(0) AS `total_executions`,sum((case when (`se`.`status` = 'COMPLETED') then 1 else 0 end)) AS `completed`,sum((case when (`se`.`status` = 'FAILED') then 1 else 0 end)) AS `failed`,sum((case when (`se`.`status` = 'RUNNING') then 1 else 0 end)) AS `running`,sum((case when (`se`.`status` = 'PENDING') then 1 else 0 end)) AS `pending` from ((`script_executions` `se` join `analytics_tasks` `at` on((`se`.`analytics_task_id` = `at`.`id`))) join `exams` `e` on((`at`.`exam_id` = `e`.`id`))) group by `e`.`exam_name`,`at`.`task_name` */;
+/*!50001 SET character_set_client      = @saved_cs_client */;
+/*!50001 SET character_set_results     = @saved_cs_results */;
+/*!50001 SET collation_connection      = @saved_col_connection */;
+
+--
+-- Final view structure for view `pending_assignments`
+--
+
+/*!50001 DROP VIEW IF EXISTS `pending_assignments`*/;
+/*!50001 SET @saved_cs_client          = @@character_set_client */;
+/*!50001 SET @saved_cs_results         = @@character_set_results */;
+/*!50001 SET @saved_col_connection     = @@collation_connection */;
+/*!50001 SET character_set_client      = utf8mb4 */;
+/*!50001 SET character_set_results     = utf8mb4 */;
+/*!50001 SET collation_connection      = utf8mb4_unicode_ci */;
+/*!50001 CREATE ALGORITHM=UNDEFINED */
+/*!50013 DEFINER=`root`@`localhost` SQL SECURITY DEFINER */
+/*!50001 VIEW `pending_assignments` AS select `ssa`.`id` AS `id`,`ssa`.`shift_id` AS `shift_id`,`ssa`.`script_id` AS `script_id`,`ssa`.`assignment_date` AS `assignment_date`,`es`.`start_time` AS `start_time`,`es`.`end_time` AS `end_time`,`s`.`script_id` AS `script_identifier`,`s`.`name` AS `script_name`,`ssa`.`custom_frequency_minutes` AS `custom_frequency_minutes`,`s`.`default_frequency_minutes` AS `default_frequency_minutes` from ((`shift_script_assignments` `ssa` join `exam_shifts` `es` on((`ssa`.`shift_id` = `es`.`id`))) join `scripts` `s` on((`ssa`.`script_id` = `s`.`id`))) where ((`ssa`.`status` = 'PENDING') and (`ssa`.`assignment_date` = curdate()) and (`ssa`.`is_active` = true)) */;
+/*!50001 SET character_set_client      = @saved_cs_client */;
+/*!50001 SET character_set_results     = @saved_cs_results */;
+/*!50001 SET collation_connection      = @saved_col_connection */;
+/*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
+
+/*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
+/*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;
+/*!40014 SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS */;
+/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
+/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
+/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
+/*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
+
+-- Dump completed on 2026-04-26 10:37:36

@@ -25,6 +25,7 @@ import { io } from 'socket.io-client';
 import { reportAPI, examsAPI } from '../services/api';
 import { API_BASE_1, IMG_BASE, SOCKET_URL, SOCKET_PATH } from '../constants/data';
 import { useDetectionCounts } from '../contexts/DetectionCountsContext';
+import { useAuth } from '../contexts/AuthContext';
 import * as XLSX from 'xlsx';
 
 const TYPE_META = {
@@ -671,6 +672,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
 
 
 export default function Detections() {
+  const { user } = useAuth();
   const { setAllCounts, setUnfilteredCounts, typeFilter, setTypeFilter, setExportToExcel, setDownloadConsolidatedReport } = useDetectionCounts();
   const [searchParams] = useSearchParams();
 
@@ -839,26 +841,75 @@ export default function Detections() {
       reconnectionDelay: 1000,
     });
 
-    socket.on('connect', () => setSocketConnected(true));
-    socket.on('disconnect', () => setSocketConnected(false));
+    let incomingQueue = [];
+    let syncInterval;
 
-    socket.on('detection:new', (newItem) => {
-      setLiveAlert(newItem);
-      // Always update header + sidebar totals
-      setUnfilteredCounts((prev) => ({ ...prev, [newItem.type]: (prev[newItem.type] || 0) + 1 }));
-      setAllCounts((prev) => ({ ...prev, [newItem.type]: (prev[newItem.type] || 0) + 1 }));
-      if (!matchesFilters(newItem)) return;
-      setTotal((prev) => prev + 1);
-      setCounts((prev) => ({ ...prev, [newItem.type]: (prev[newItem.type] || 0) + 1 }));
-      if (page === 1) {
-        setData((prev) => {
-          if (prev.some((existing) => existing.image_url === newItem.image_url)) return prev;
-          return [newItem, ...prev].slice(0, rowsPerPage);
-        });
-      }
+    socket.on('connect', () => {
+      setSocketConnected(true);
+      // Process queue every 1 second to prevent UI stutter/crashes under heavy load
+      syncInterval = setInterval(() => {
+        if (incomingQueue.length > 0) {
+          const batch = [...incomingQueue];
+          incomingQueue = [];
+
+          setLiveAlert(batch[batch.length - 1]);
+
+          // Aggregate counts for the header
+          const typeIncrements = {};
+          batch.forEach(item => {
+            typeIncrements[item.type] = (typeIncrements[item.type] || 0) + 1;
+          });
+
+          setUnfilteredCounts(prev => {
+            const next = { ...prev };
+            for (const t in typeIncrements) next[t] = (next[t] || 0) + typeIncrements[t];
+            return next;
+          });
+          setAllCounts(prev => {
+            const next = { ...prev };
+            for (const t in typeIncrements) next[t] = (next[t] || 0) + typeIncrements[t];
+            return next;
+          });
+
+          // Filter items based on active sidebar/dropdown filters
+          const matchedItems = batch.filter(matchesFilters);
+          if (matchedItems.length > 0) {
+            setTotal(prev => prev + matchedItems.length);
+            
+            setCounts(prev => {
+              const next = { ...prev };
+              matchedItems.forEach(item => {
+                next[item.type] = (next[item.type] || 0) + 1;
+              });
+              return next;
+            });
+
+            if (page === 1) {
+              setData(prev => {
+                // Prepend new items, deduplicate, slice to rowsPerPage
+                const newItems = matchedItems.filter(mi => !prev.some(ex => ex.image_url === mi.image_url));
+                if (newItems.length === 0) return prev;
+                return [...newItems, ...prev].slice(0, rowsPerPage);
+              });
+            }
+          }
+        }
+      }, 1000);
+    });
+    
+    socket.on('disconnect', () => {
+      setSocketConnected(false);
+      clearInterval(syncInterval);
     });
 
-    return () => socket.disconnect();
+    socket.on('detection:new', (newItem) => {
+      incomingQueue.push(newItem);
+    });
+
+    return () => {
+      clearInterval(syncInterval);
+      socket.disconnect();
+    };
   }, [matchesFilters, page, setAllCounts, setUnfilteredCounts, rowsPerPage]);
 
   const handlePageChange = (_, pg) => {
@@ -1064,27 +1115,29 @@ export default function Detections() {
           }}
           sx={{ minWidth: 200, maxWidth: 400, flex: 1 }}
         />
-        <FormControl size="small" sx={{ minWidth: 150 }}>
-          <InputLabel sx={{ fontSize: 14 }}>Exam</InputLabel>
-          <Select
-            value={examFilter}
-            label="Exam"
-            onChange={(e) => setExamFilter(e.target.value)}
-            sx={{
-              borderRadius: '8px', bgcolor: '#f8fafc', height: 36, fontSize: 14,
-              '& fieldset': { border: 'none' },
-            }}
-          >
-            <MenuItem value="">
-              <em>All Exams</em>
-            </MenuItem>
-            {exams.map((exam) => (
-              <MenuItem key={exam.id} value={exam.id}>
-                {exam.exam_name}
+        {user?.role !== 'OPERATOR' && (
+          <FormControl size="small" sx={{ minWidth: 150 }}>
+            <InputLabel sx={{ fontSize: 14 }}>Exam</InputLabel>
+            <Select
+              value={examFilter}
+              label="Exam"
+              onChange={(e) => setExamFilter(e.target.value)}
+              sx={{
+                borderRadius: '8px', bgcolor: '#f8fafc', height: 36, fontSize: 14,
+                '& fieldset': { border: 'none' },
+              }}
+            >
+              <MenuItem value="">
+                <em>All Exams</em>
               </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+              {exams.map((exam) => (
+                <MenuItem key={exam.id} value={exam.id}>
+                  {exam.exam_name}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        )}
         <Box sx={{ position: 'relative', minWidth: 150, maxWidth: 100 }}>
           <TextField
             type="date"

@@ -51,6 +51,7 @@ import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
 import { CustomSvgIcon } from './DetectionSvgIcon';
 import { ShiftSvgIcon } from './ShiftSvgIcon';
 import CameraIcon from './CameraIcon';
+import { examsAPI } from '../services/api';
 
 const DRAWER_WIDTH = 260;
 const APPBAR_HEIGHT = 64;
@@ -98,9 +99,17 @@ const menuItems = [
 ];
 
 // Menu items for VIEWER role (reordered with Client Dashboard first)
+// Menu items for VIEWER role
 const viewerMenuItems = [
-  { text: 'Dashboard', icon: <Dashboard />, path: '/client-dashboard' }, // Renamed and reordered
-  { text: 'Detections', icon: <CustomSvgIcon />, path: '/client-detections', hasSubItems: true },
+  { text: 'Dashboard', icon: <Dashboard />, path: '/' },
+  { text: 'Exams', icon: <ExamsSvgIcon />, path: '/exams' },
+  { text: 'Cameras', icon: <CameraAltIcon />, path: '/cameras' },
+  { text: 'Detections', icon: <CustomSvgIcon />, path: '/detections', hasSubItems: true },
+];
+
+// Menu items for OPERATOR role
+const operatorMenuItems = [
+  { text: 'Detections', icon: <CustomSvgIcon />, path: '/detections', hasSubItems: true },
 ];
 
 /* ── Detection Sub-Items (multi-select) ── */
@@ -298,10 +307,40 @@ function LayoutInner() {
   const { unfilteredCounts, exportToExcel, downloadConsolidatedReport } = useDetectionCounts();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState(null);
+  const [liveExamsCount, setLiveExamsCount] = useState(0);
 
-  const filteredMenuItems = user?.role === 'VIEWER' 
-    ? viewerMenuItems 
-    : menuItems.filter(item => item.text !== 'Client Detections' && item.text !== 'Client Dashboard');
+  // Fetch live exams (active today)
+  useEffect(() => {
+    if (location.pathname === '/') {
+      const fetchLiveExams = async () => {
+        try {
+          const res = await examsAPI.getAll({ is_active: true });
+          const exams = res.data?.data || [];
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+
+          const liveCount = exams.filter(exam => {
+            if (!exam.start_date || !exam.end_date) return false;
+            const start = new Date(exam.start_date);
+            const end = new Date(exam.end_date);
+            start.setHours(0, 0, 0, 0);
+            end.setHours(0, 0, 0, 0);
+            return today >= start && today <= end;
+          }).length;
+          setLiveExamsCount(liveCount);
+        } catch (err) {
+          console.error("Failed to fetch live exams:", err);
+        }
+      };
+      fetchLiveExams();
+    }
+  }, [location.pathname]);
+
+  const filteredMenuItems = user?.role === 'VIEWER'
+    ? viewerMenuItems
+    : user?.role === 'OPERATOR'
+      ? operatorMenuItems
+      : menuItems.filter(item => item.text !== 'Client Detections' && item.text !== 'Client Dashboard');
 
   // Allow certain paths that are not in menu (like user-verification)
   const allowedPaths = ['/user-verification'];
@@ -309,9 +348,13 @@ function LayoutInner() {
   useEffect(() => {
     const isAllowedPath = allowedPaths.includes(location.pathname);
     const isInMenu = filteredMenuItems.some((item) => item.path === location.pathname);
-    
+
     if (!isInMenu && !isAllowedPath) {
-      navigate(user?.role === 'VIEWER' ? '/client-dashboard' : '/');
+      if (user?.role === 'OPERATOR') {
+        navigate('/detections');
+      } else {
+        navigate('/');
+      }
     }
   }, [location.pathname, user]);
 
@@ -325,7 +368,7 @@ function LayoutInner() {
     navigate('/login');
   };
 
-  const currentPageTitle = location.pathname === '/user-verification' 
+  const currentPageTitle = location.pathname === '/user-verification'
     ? 'User Verification'
     : (filteredMenuItems.find((item) => item.path === location.pathname)?.text || '');
 
@@ -380,29 +423,31 @@ function LayoutInner() {
           <Box sx={{ flexGrow: 1 }} />
 
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            {location.pathname === '/detections' && (
-              <>
-                <Button
-                  variant="contained"
-                  startIcon={<Download sx={{ fontSize: 16 }} />}
-                  disableElevation
-                  onClick={downloadConsolidatedReport}
-                  sx={{
-                    height: 34,
-                    borderRadius: '8px',
-                    fontSize: 13,
-                    fontWeight: 600,
-                    textTransform: 'none',
-                    bgcolor: '#e0e7fa',
-                    color: '#2563eb',
-                    px: 2,
-                    transition: 'all 0.2s ease',
-                    '&:hover': { bgcolor: '#e0e7fa', opacity: 0.8, transform: 'translateY(-1px)' },
-                  }}
-                >
-                  Consolidated Report
-                </Button>
-                <Button
+            {location.pathname === '/detections' && user?.role === 'ADMIN' && (
+              <Button
+                variant="contained"
+                startIcon={<Download sx={{ fontSize: 16 }} />}
+                disableElevation
+                onClick={downloadConsolidatedReport}
+                sx={{
+                  height: 34,
+                  borderRadius: '8px',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  textTransform: 'none',
+                  bgcolor: '#e0e7fa',
+                  color: '#2563eb',
+                  px: 2,
+                  transition: 'all 0.2s ease',
+                  '&:hover': { bgcolor: '#e0e7fa', opacity: 0.8, transform: 'translateY(-1px)' },
+                }}
+              >
+                Consolidated Report
+              </Button>
+            )}
+            
+            {location.pathname === '/detections' && user?.role !== 'OPERATOR' && (
+              <Button
                   variant="contained"
                   startIcon={<img src={`${import.meta.env.BASE_URL}file-excel-fill.svg`} alt="excel" style={{ width: 18, height: 18, filter: 'invert(32%) sepia(93%) saturate(1548%) hue-rotate(213deg) brightness(97%) contrast(93%)' }} />}
                   disableElevation
@@ -421,9 +466,34 @@ function LayoutInner() {
                   }}
                 >
                   Export detections
-                </Button>
-              </>
+              </Button>
             )}
+
+            {(location.pathname === '/') && user?.role !== 'OPERATOR' && (
+              <Button
+                variant="outlined"
+                disableElevation
+                startIcon={<Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: '#10b981', animation: 'pulse 1.5s infinite', '@keyframes pulse': { '0%,100%': { opacity: 1 }, '50%': { opacity: 0.5 } } }} />}
+                onClick={() => navigate('/exams')}
+                sx={{
+                  height: 24,
+                  borderRadius: '20px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  textTransform: 'none',
+                  bgcolor: '#ecfdf5',
+                  color: '#059669',
+                  borderColor: '#10b981',
+                  px: 1.5,
+                  py: 1.5,
+                  mr: 1,
+                  '&:hover': { bgcolor: '#d1fae5', borderColor: '#10b981' },
+                }}
+              >
+                {liveExamsCount} Live {liveExamsCount === 1 ? 'Exam' : 'Exams'}
+              </Button>
+            )}
+
             <IconButton onClick={(e) => setAnchorEl(e.currentTarget)} size="small">
               <AccountCircle sx={{ fontSize: 32, color: '#94a3b8' }} />
             </IconButton>

@@ -44,6 +44,7 @@ import {
   ChevronRight,
   KeyboardArrowDown,
   Check,
+  Warning,
   Close as CloseIcon,
   GridView, LocationCity, Close,
 } from '@mui/icons-material';
@@ -54,6 +55,8 @@ import axios from 'axios';
 import { io } from 'socket.io-client';
 import { API_BASE_1, SOCKET_URL, SOCKET_PATH } from '../constants/data';
 import { useDetectionCounts } from '../contexts/DetectionCountsContext';
+import { useSearchParams } from 'react-router-dom';
+import { examsAPI } from '../services/api';
 
 const TYPE_META = {
   proximity: { label: 'Close Proximity', color: '#5cb88a', bg: '#e5f5ed' },
@@ -842,6 +845,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, removingId, re
 
 const ClientDetections = () => {
   const { setAllCounts, setUnfilteredCounts, typeFilter, setTypeFilter } = useDetectionCounts();
+  const [searchParams] = useSearchParams();
 
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [images, setImages] = useState([]);
@@ -852,6 +856,8 @@ const ClientDetections = () => {
   const [rowsPerPage, setRowsPerPage] = useState(50);
   const [view, setView] = useState('grid');
   const [search, setSearch] = useState('');
+  const [examFilter, setExamFilter] = useState('');
+  const [exams, setExams] = useState([]);
   const [sourceFilter, setSourceFilter] = useState('');
   const [dateFilter, setDateFilter] = useState(todayDate);
   const [startTime, setStartTime] = useState('');
@@ -896,6 +902,7 @@ const ClientDetections = () => {
       if (search.trim()) params.append('search', search.trim());
       if (appliedStartTime) params.append('start_time', appliedStartTime);
       if (appliedEndTime) params.append('end_time', appliedEndTime);
+      if (examFilter) params.append('exam_id', examFilter);
 
       const res = await axios.get(`${API_BASE_1}/client-detections?${params}`);
       if (res.data.success) {
@@ -919,12 +926,37 @@ const ClientDetections = () => {
     } finally {
       setLoading(false);
     }
-  }, [sourceFilter, typeFilter, dateFilter, search, appliedStartTime, appliedEndTime, rowsPerPage, setAllCounts]);
+  }, [sourceFilter, typeFilter, dateFilter, search, appliedStartTime, appliedEndTime, examFilter, rowsPerPage, setAllCounts]);
+
+  // Load exams for filter dropdown
+  useEffect(() => {
+    const fetchExams = async () => {
+      try {
+        const res = await examsAPI.getAll({ is_active: true });
+        if (res.data?.data) setExams(res.data.data);
+      } catch (err) { console.error('Failed to fetch exams:', err); }
+    };
+    fetchExams();
+  }, []);
+
+  // Read exam_id from URL params on mount
+  useEffect(() => {
+    const examId = searchParams.get('exam_id');
+    if (examId) setExamFilter(examId);
+  }, []);
 
   useEffect(() => {
     setListSelectedIndex(0);
     fetchClientImages(1, rowsPerPage);
   }, [fetchClientImages, rowsPerPage]);
+
+  const examsRef = useRef([]);
+  useEffect(() => { examsRef.current = exams.map(e => String(e.id)); }, [exams]);
+  const examFilterRef = useRef('');
+  useEffect(() => { examFilterRef.current = examFilter; }, [examFilter]);
+
+  const matchesFiltersRef = useRef();
+  // defined later, we will assign it below
 
   useEffect(() => {
     const resolvedPath = SOCKET_PATH || '/cctv_dev/socket.io';
@@ -936,21 +968,70 @@ const ClientDetections = () => {
       reconnectionDelay: 1000,
     });
 
-    socket.on('connect', () => setSocketConnected(true));
-    socket.on('disconnect', () => setSocketConnected(false));
+    let incomingQueue = [];
+    let syncInterval;
+
+    socket.on('connect', () => {
+      setSocketConnected(true);
+      
+      syncInterval = setInterval(() => {
+        if (incomingQueue.length > 0) {
+          const batch = [...incomingQueue];
+          incomingQueue = [];
+
+          // Aggregate counts
+          const typeIncrements = {};
+          batch.forEach(item => {
+            typeIncrements[item.type] = (typeIncrements[item.type] || 0) + 1;
+          });
+
+          setUnfilteredCounts((prev) => {
+            const next = { ...prev };
+            for (const t in typeIncrements) next[t] = (next[t] || 0) + typeIncrements[t];
+            return next;
+          });
+          setAllCounts((prev) => {
+            const next = { ...prev };
+            for (const t in typeIncrements) next[t] = (next[t] || 0) + typeIncrements[t];
+            return next;
+          });
+
+          // Process matches
+          const matchedItems = batch.filter(matchesFiltersRef.current || (() => true));
+          if (matchedItems.length > 0) {
+            setTotal(prev => prev + matchedItems.length);
+            setCounts(prev => {
+              const next = { ...prev };
+              matchedItems.forEach(item => {
+                next[item.type] = (next[item.type] || 0) + 1;
+              });
+              return next;
+            });
+
+            setImages(prev => {
+              const newItems = matchedItems.filter(mi => !prev.some(ex => buildImageKey(ex) === buildImageKey(mi)));
+              if (newItems.length === 0) return prev;
+              return [...newItems, ...prev].slice(0, rowsPerPage);
+            });
+          }
+        }
+      }, 1000);
+    });
+    
+    socket.on('disconnect', () => {
+      setSocketConnected(false);
+      clearInterval(syncInterval);
+    });
 
     socket.on('client-detection:new', (item) => {
+      // Security/scope check: only process if the detection is for one of the user's allocated exams
+      if (examsRef.current.length > 0 && !examsRef.current.includes(String(item.exam_id))) return;
+      
+      // If a specific exam is selected in the dropdown, drop mis-matched ones
+      if (examFilterRef.current && String(item.exam_id) !== examFilterRef.current) return;
+
       const newItem = { ...item, image_url: `${API_BASE_1}${item.image_url || item.imageUrl}` };
-      // Always update header + sidebar totals
-      setUnfilteredCounts((prev) => ({ ...prev, [item.type]: (prev[item.type] || 0) + 1 }));
-      setAllCounts((prev) => ({ ...prev, [item.type]: (prev[item.type] || 0) + 1 }));
-      setImages((prev) => {
-        const key = buildImageKey(newItem);
-        if (prev.some((existing) => buildImageKey(existing) === key)) return prev;
-        return [newItem, ...prev].slice(0, rowsPerPage);
-      });
-      setTotal((prev) => prev + 1);
-      setCounts((prev) => ({ ...prev, [item.type]: (prev[item.type] || 0) + 1 }));
+      incomingQueue.push(newItem);
     });
 
     socket.on('client-detection:remove', (payload) => {
@@ -963,10 +1044,14 @@ const ClientDetections = () => {
       }
     });
 
-    return () => socket.disconnect();
+    return () => {
+      clearInterval(syncInterval);
+      socket.disconnect();
+    };
   }, [setAllCounts, setUnfilteredCounts, rowsPerPage]);
 
   const matchesFilters = useCallback((item) => {
+    if (examFilter && String(item.exam_id) !== String(examFilter)) return false;
     if (typeFilter.length > 0 && !typeFilter.includes(item.type)) return false;
     if (sourceFilter && item.source !== sourceFilter) return false;
     if (dateFilter) {
@@ -993,7 +1078,10 @@ const ClientDetections = () => {
       }
     }
     return true;
-  }, [search, typeFilter, sourceFilter, dateFilter, appliedStartTime, appliedEndTime]);
+  }, [search, typeFilter, sourceFilter, dateFilter, appliedStartTime, appliedEndTime, examFilter]);
+
+  // Keep ref synchronized
+  useEffect(() => { matchesFiltersRef.current = matchesFilters; }, [matchesFilters]);
 
   const filteredImages = useMemo(() => images.filter(matchesFilters), [images, matchesFilters]);
 
@@ -1062,6 +1150,21 @@ const ClientDetections = () => {
           }}
           sx={{ minWidth: 260, maxWidth: 600, flex: 1 }}
         />
+        {/* Exam Filter */}
+        <FormControl size="small" sx={{ minWidth: 160 }}>
+          <InputLabel sx={{ fontSize: 13 }}>Exam</InputLabel>
+          <Select
+            value={examFilter}
+            label="Exam"
+            onChange={(e) => { setExamFilter(e.target.value); setPage(1); }}
+            sx={{ borderRadius: '8px', bgcolor: '#f8fafc', height: 36, fontSize: 14, '& fieldset': { border: 'none' } }}
+          >
+            <MenuItem value=""><em>All Exams</em></MenuItem>
+            {exams.map((exam) => (
+              <MenuItem key={exam.id} value={exam.id}>{exam.exam_name}</MenuItem>
+            ))}
+          </Select>
+        </FormControl>
         <Box sx={{ position: 'relative', minWidth: 350 }}>
           <TextField
             type="date"

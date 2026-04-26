@@ -5,7 +5,7 @@ const logger = require("../utils/logger");
 const sequelize = new Sequelize(
   process.env.DB_NAME || "cctv_monitoring",
   process.env.DB_USER || "root",
-  process.env.DB_PASSWORD || "rootpassword123",
+  process.env.DB_PASSWORD || "root123",
   {
     host: process.env.DB_HOST || "localhost",
     port: process.env.DB_PORT || 3306,
