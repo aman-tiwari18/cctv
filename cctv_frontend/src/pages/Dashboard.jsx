@@ -13,39 +13,21 @@ import {
   LinearProgress,
 } from '@mui/material';
 import {
-  Assignment,
-  FolderOpen,
-  Slideshow,
-  Percent,
   CheckCircle,
   Cancel,
   Autorenew,
   MoreHoriz,
   InfoOutlined,
-  Schedule,
-  WarningAmber,
-  Groups,
-  PersonOff,
-  Dns,
-  DirectionsWalk,
-  MeetingRoom,
-  Smartphone,
-  VisibilityOff,
-  Visibility,
-  FlipCameraAndroid,
-  SecurityUpdateWarning,
 } from '@mui/icons-material';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts';
 import { examsAPI, executionsAPI, dashboardAPI } from '../services/api';
 import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
 import { CustomSvgIcon } from '../components/DetectionSvgIcon';
 import { ShiftSvgIcon } from '../components/ShiftSvgIcon';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
-import axios from 'axios';
-import { io } from 'socket.io-client';
-import { API_BASE_1, SOCKET_URL, SOCKET_PATH } from '../constants/data';
 import { useAuth } from '../contexts/AuthContext';
 import { useDetectionCounts } from '../contexts/DetectionCountsContext';
+import { useSocket } from '../contexts/SocketContext';
 import { useNavigate } from 'react-router-dom';
 
 const CATEGORY_COLORS = {
@@ -176,6 +158,7 @@ const EXECUTION_DETAIL_ITEMS = [
 const Dashboard = () => {
   const navigate = useNavigate();
   const { unfilteredCounts } = useDetectionCounts();
+  const { connected } = useSocket();
   const [stats, setStats] = useState({
     exams: 0,
     upcomingShifts: 0,
@@ -188,53 +171,8 @@ const Dashboard = () => {
   const [timeRange, setTimeRange] = useState('24h');
   const [selectedCategory, setSelectedCategory] = useState('all');
 
-  const [localLiveCount, setLocalLiveCount] = useState(0);
-
-  // Initial fetch for count and socket connection
-  useEffect(() => {
-    let mounted = true;
-
-    // Fetch initial base count
-    axios.get(`${API_BASE_1}/detections?page=1&limit=1`)
-      .then(res => {
-        if (mounted && res.data && res.data.counts) {
-          const total = Object.values(res.data.counts).reduce((a, b) => a + b, 0);
-          setLocalLiveCount(total);
-        }
-      })
-      .catch(err => console.error('Dashboard count fetch error:', err));
-
-    // Connect to WebSockets for live bumping without heavy re-renders
-    const resolvedPath = SOCKET_PATH || '/cctv_dev/socket.io';
-    const socket = io(SOCKET_URL, {
-      path: resolvedPath,
-      transports: ['polling'],
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-    });
-
-    let batchCount = 0;
-    let syncInterval;
-
-    socket.on('connect', () => {
-      syncInterval = setInterval(() => {
-        if (batchCount > 0) {
-          setLocalLiveCount(prev => prev + batchCount);
-          batchCount = 0;
-        }
-      }, 2000); // Batch DOM updates every 2 seconds to prevent browser lockup
-    });
-
-    socket.on('detection:new', () => {
-      batchCount += 1;
-    });
-
-    return () => {
-      mounted = false;
-      clearInterval(syncInterval);
-      socket.disconnect();
-    };
-  }, []);
+  // Calculate total detections from context
+  const totalDetections = Object.values(unfilteredCounts).reduce((a, b) => a + b, 0);
 
   useEffect(() => {
     loadDashboardData();
@@ -359,7 +297,7 @@ const Dashboard = () => {
         <Grid item xs={12} sm={6} md={3}>
           <StatCard
             title="Total Detections"
-            value={localLiveCount.toLocaleString()}
+            value={totalDetections.toLocaleString()}
             icon={<CustomSvgIcon />}
             color="#3b82f6"
             loading={loading}

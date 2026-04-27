@@ -3,6 +3,8 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { DetectionCountsProvider } from './contexts/DetectionCountsContext';
+import { SocketProvider } from './contexts/SocketContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import Layout from './components/Layout';
 import Login from './pages/Login';
@@ -149,31 +151,35 @@ function App() {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <AuthProvider>
-        {/* <BrowserRouter> */}
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
-          <Route path="/forgot-password" element={<ForgotPassword />} />
-          <Route
-            path="/"
-            element={
-              <ProtectedRoute>
-                <Layout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<RoleBasedRoute AdminComp={Dashboard} ViewerComp={ClientDetectionDashboard} />} />
-            <Route path="exams" element={<RoleBasedRoute AdminComp={Exams} ViewerComp={ClientExams} />} />
-            <Route path="cameras" element={<RoleBasedRoute AdminComp={Cameras} ViewerComp={ClientCameras} />} />
-            <Route path="shifts" element={<RoleBasedRoute AdminComp={Shifts} />} />
-            <Route path="analytics" element={<RoleBasedRoute AdminComp={Analytics} />} />
-            <Route path="executions" element={<RoleBasedRoute AdminComp={Executions} />} />
-            <Route path="detections" element={<RoleBasedRoute AdminComp={Detections} ViewerComp={ClientDetections} OperatorComp={Detections} />} />
-            <Route path="user-verification" element={<UserVerification />} />
-          </Route>
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-        {/* </BrowserRouter> */}
+        <DetectionCountsProvider>
+          <SocketProvider>
+            {/* <BrowserRouter> */}
+            <Routes>
+              <Route path="/login" element={<Login />} />
+              <Route path="/register" element={<Register />} />
+              <Route path="/forgot-password" element={<ForgotPassword />} />
+              <Route
+                path="/"
+                element={
+                  <ProtectedRoute>
+                    <Layout />
+                  </ProtectedRoute>
+                }
+              >
+                <Route index element={<RoleBasedRoute AdminComp={Dashboard} ViewerComp={ClientDetectionDashboard} />} />
+                <Route path="exams" element={<RoleBasedRoute AdminComp={Exams} ViewerComp={ClientExams} />} />
+                <Route path="cameras" element={<RoleBasedRoute AdminComp={Cameras} ViewerComp={ClientCameras} />} />
+                <Route path="shifts" element={<RoleBasedRoute AdminComp={Shifts} />} />
+                <Route path="analytics" element={<RoleBasedRoute AdminComp={Analytics} />} />
+                <Route path="executions" element={<RoleBasedRoute AdminComp={Executions} />} />
+                <Route path="detections" element={<RoleBasedRoute AdminComp={Detections} ViewerComp={ClientDetections} OperatorComp={Detections} />} />
+                <Route path="user-verification" element={<UserVerification />} />
+              </Route>
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+            {/* </BrowserRouter> */}
+          </SocketProvider>
+        </DetectionCountsProvider>
       </AuthProvider>
     </ThemeProvider>
   );

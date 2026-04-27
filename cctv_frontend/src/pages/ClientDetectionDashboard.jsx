@@ -34,12 +34,10 @@ import {
   Download,
 } from '@mui/icons-material';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
-import axios from 'axios';
-import { io } from 'socket.io-client';
-import { API_BASE_1, SOCKET_URL, SOCKET_PATH } from '../constants/data';
 import { clientDashboardAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useDetectionCounts } from '../contexts/DetectionCountsContext';
+import { useSocket } from '../contexts/SocketContext';
 import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
 import { CustomSvgIcon } from '../components/DetectionSvgIcon';
 import { ShiftSvgIcon } from '../components/ShiftSvgIcon';
@@ -186,6 +184,7 @@ const ClientDetectionDashboard = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { unfilteredCounts } = useDetectionCounts();
+  const { connected, setClientExams } = useSocket();
   const [dashboardData, setDashboardData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedExam, setSelectedExam] = useState('all');
@@ -202,65 +201,15 @@ const ClientDetectionDashboard = () => {
   const [availableCameraDates, setAvailableCameraDates] = useState([]);
   const [downloadMenuAnchor, setDownloadMenuAnchor] = useState(null);
 
-  const [localLiveCount, setLocalLiveCount] = useState(0);
+  // Calculate total detections from context
+  const totalDetections = Object.values(unfilteredCounts).reduce((a, b) => a + b, 0);
 
-  const examsRef = useRef([]);
+  // Set client exams when dashboard data loads
   useEffect(() => {
     if (dashboardData?.exams) {
-      examsRef.current = dashboardData.exams.map(e => String(e.id));
+      setClientExams(dashboardData.exams.map(e => e.id));
     }
-  }, [dashboardData]);
-
-  // Initial fetch for count and socket connection
-  useEffect(() => {
-    let mounted = true;
-
-    // Fetch initial base count specifically for the logged in client
-    axios.get(`${API_BASE_1}/client-detections?page=1&limit=1`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
-    })
-      .then(res => {
-        if (mounted && res.data && res.data.counts) {
-          const total = Object.values(res.data.counts).reduce((a, b) => a + b, 0);
-          setLocalLiveCount(total);
-        }
-      })
-      .catch(err => console.error('ClientDashboard count fetch error:', err));
-
-    // Connect to WebSockets for live bumping
-    const resolvedPath = SOCKET_PATH || '/cctv_dev/socket.io';
-    const socket = io(SOCKET_URL, {
-      path: resolvedPath,
-      transports: ['polling'],
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-    });
-
-    let batchCount = 0;
-    let syncInterval;
-
-    socket.on('connect', () => {
-      syncInterval = setInterval(() => {
-        if (batchCount > 0) {
-          setLocalLiveCount(prev => prev + batchCount);
-          batchCount = 0;
-        }
-      }, 2000); // Batch DOM updates every 2 seconds
-    });
-
-    socket.on('client-detection:new', (item) => {
-      // Secure scope: only increment if this detection belongs to one of this client's exams!
-      if (examsRef.current.length > 0 && examsRef.current.includes(String(item.exam_id))) {
-        batchCount += 1;
-      }
-    });
-
-    return () => {
-      mounted = false;
-      clearInterval(syncInterval);
-      socket.disconnect();
-    };
-  }, []);
+  }, [dashboardData, setClientExams]);
 
   useEffect(() => {
     loadDashboardData();
@@ -639,7 +588,7 @@ const ClientDetectionDashboard = () => {
         <Grid item xs={12} sm={6} md={4}>
           <StatCard
             title="Total Detections"
-            value={localLiveCount.toLocaleString()}
+            value={totalDetections.toLocaleString()}
             icon={<CustomSvgIcon />}
             color="#3b82f6"
             onClick={() => navigate('/detections')}

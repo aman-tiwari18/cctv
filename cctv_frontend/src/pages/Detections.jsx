@@ -21,9 +21,8 @@ import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { enGB } from 'date-fns/locale';
 import axios from 'axios';
-import { io } from 'socket.io-client';
 import { reportAPI, examsAPI } from '../services/api';
-import { API_BASE_1, IMG_BASE, SOCKET_URL, SOCKET_PATH } from '../constants/data';
+import { API_BASE_1, IMG_BASE } from '../constants/data';
 import { useDetectionCounts } from '../contexts/DetectionCountsContext';
 import { useAuth } from '../contexts/AuthContext';
 import * as XLSX from 'xlsx';
@@ -697,7 +696,6 @@ export default function Detections() {
   const [pushedUids, setPushedUids] = useState(new Set());
   const [clientSnackbar, setClientSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [liveAlert, setLiveAlert] = useState(null);
-  const [socketConnected, setSocketConnected] = useState(false);
   const [listSelectedIndex, setListSelectedIndex] = useState(0);
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [allShifts, setAllShifts] = useState(false);
@@ -826,91 +824,12 @@ export default function Detections() {
 
   useEffect(() => {
     setPage(1);
-
     setListSelectedIndex(0);
     fetchDetections(1);
   }, [fetchDetections]);
 
-  useEffect(() => {
-    const resolvedPath = SOCKET_PATH || '/cctv_dev/socket.io';
-    const socket = io(SOCKET_URL, {
-      path: resolvedPath,
-      transports: ['polling'],
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 1000,
-    });
-
-    let incomingQueue = [];
-    let syncInterval;
-
-    socket.on('connect', () => {
-      setSocketConnected(true);
-      // Process queue every 1 second to prevent UI stutter/crashes under heavy load
-      syncInterval = setInterval(() => {
-        if (incomingQueue.length > 0) {
-          const batch = [...incomingQueue];
-          incomingQueue = [];
-
-          setLiveAlert(batch[batch.length - 1]);
-
-          // Aggregate counts for the header
-          const typeIncrements = {};
-          batch.forEach(item => {
-            typeIncrements[item.type] = (typeIncrements[item.type] || 0) + 1;
-          });
-
-          setUnfilteredCounts(prev => {
-            const next = { ...prev };
-            for (const t in typeIncrements) next[t] = (next[t] || 0) + typeIncrements[t];
-            return next;
-          });
-          setAllCounts(prev => {
-            const next = { ...prev };
-            for (const t in typeIncrements) next[t] = (next[t] || 0) + typeIncrements[t];
-            return next;
-          });
-
-          // Filter items based on active sidebar/dropdown filters
-          const matchedItems = batch.filter(matchesFilters);
-          if (matchedItems.length > 0) {
-            setTotal(prev => prev + matchedItems.length);
-            
-            setCounts(prev => {
-              const next = { ...prev };
-              matchedItems.forEach(item => {
-                next[item.type] = (next[item.type] || 0) + 1;
-              });
-              return next;
-            });
-
-            if (page === 1) {
-              setData(prev => {
-                // Prepend new items, deduplicate, slice to rowsPerPage
-                const newItems = matchedItems.filter(mi => !prev.some(ex => ex.image_url === mi.image_url));
-                if (newItems.length === 0) return prev;
-                return [...newItems, ...prev].slice(0, rowsPerPage);
-              });
-            }
-          }
-        }
-      }, 1000);
-    });
-    
-    socket.on('disconnect', () => {
-      setSocketConnected(false);
-      clearInterval(syncInterval);
-    });
-
-    socket.on('detection:new', (newItem) => {
-      incomingQueue.push(newItem);
-    });
-
-    return () => {
-      clearInterval(syncInterval);
-      socket.disconnect();
-    };
-  }, [matchesFilters, page, setAllCounts, setUnfilteredCounts, rowsPerPage]);
+  // Socket connection is now handled by SocketContext
+  // No need for duplicate socket connection here
 
   const handlePageChange = (_, pg) => {
     setPage(pg);

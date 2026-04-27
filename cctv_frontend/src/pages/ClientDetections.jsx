@@ -52,8 +52,7 @@ import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { enGB } from 'date-fns/locale';
 import axios from 'axios';
-import { io } from 'socket.io-client';
-import { API_BASE_1, SOCKET_URL, SOCKET_PATH } from '../constants/data';
+import { API_BASE_1 } from '../constants/data';
 import { useDetectionCounts } from '../contexts/DetectionCountsContext';
 import { useSearchParams } from 'react-router-dom';
 import { examsAPI } from '../services/api';
@@ -864,7 +863,6 @@ const ClientDetections = () => {
   const [endTime, setEndTime] = useState('');
   const [appliedStartTime, setAppliedStartTime] = useState('');
   const [appliedEndTime, setAppliedEndTime] = useState('');
-  const [socketConnected, setSocketConnected] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [listSelectedIndex, setListSelectedIndex] = useState(0);
   const [selected, setSelected] = useState(null);
@@ -950,105 +948,8 @@ const ClientDetections = () => {
     fetchClientImages(1, rowsPerPage);
   }, [fetchClientImages, rowsPerPage]);
 
-  const examsRef = useRef([]);
-  useEffect(() => { examsRef.current = exams.map(e => String(e.id)); }, [exams]);
-  const examFilterRef = useRef('');
-  useEffect(() => { examFilterRef.current = examFilter; }, [examFilter]);
-
-  const matchesFiltersRef = useRef();
-  // defined later, we will assign it below
-
-  useEffect(() => {
-    const resolvedPath = SOCKET_PATH || '/cctv_dev/socket.io';
-    const socket = io(SOCKET_URL, {
-      path: resolvedPath,
-      transports: ['polling'],
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 1000,
-    });
-
-    let incomingQueue = [];
-    let syncInterval;
-
-    socket.on('connect', () => {
-      setSocketConnected(true);
-      
-      syncInterval = setInterval(() => {
-        if (incomingQueue.length > 0) {
-          const batch = [...incomingQueue];
-          incomingQueue = [];
-
-          // Aggregate counts
-          const typeIncrements = {};
-          batch.forEach(item => {
-            typeIncrements[item.type] = (typeIncrements[item.type] || 0) + 1;
-          });
-
-          setUnfilteredCounts((prev) => {
-            const next = { ...prev };
-            for (const t in typeIncrements) next[t] = (next[t] || 0) + typeIncrements[t];
-            return next;
-          });
-          setAllCounts((prev) => {
-            const next = { ...prev };
-            for (const t in typeIncrements) next[t] = (next[t] || 0) + typeIncrements[t];
-            return next;
-          });
-
-          // Process matches
-          const matchedItems = batch.filter(matchesFiltersRef.current || (() => true));
-          if (matchedItems.length > 0) {
-            setTotal(prev => prev + matchedItems.length);
-            setCounts(prev => {
-              const next = { ...prev };
-              matchedItems.forEach(item => {
-                next[item.type] = (next[item.type] || 0) + 1;
-              });
-              return next;
-            });
-
-            setImages(prev => {
-              const newItems = matchedItems.filter(mi => !prev.some(ex => buildImageKey(ex) === buildImageKey(mi)));
-              if (newItems.length === 0) return prev;
-              return [...newItems, ...prev].slice(0, rowsPerPage);
-            });
-          }
-        }
-      }, 1000);
-    });
-    
-    socket.on('disconnect', () => {
-      setSocketConnected(false);
-      clearInterval(syncInterval);
-    });
-
-    socket.on('client-detection:new', (item) => {
-      // Security/scope check: only process if the detection is for one of the user's allocated exams
-      if (examsRef.current.length > 0 && !examsRef.current.includes(String(item.exam_id))) return;
-      
-      // If a specific exam is selected in the dropdown, drop mis-matched ones
-      if (examFilterRef.current && String(item.exam_id) !== examFilterRef.current) return;
-
-      const newItem = { ...item, image_url: `${API_BASE_1}${item.image_url || item.imageUrl}` };
-      incomingQueue.push(newItem);
-    });
-
-    socket.on('client-detection:remove', (payload) => {
-      if (payload && payload.uid) {
-        setRemovedUids((prev) => {
-          const next = new Set(prev);
-          next.add(payload.uid);
-          return next;
-        });
-      }
-    });
-
-    return () => {
-      clearInterval(syncInterval);
-      socket.disconnect();
-    };
-  }, [setAllCounts, setUnfilteredCounts, rowsPerPage]);
+  // Socket connection is now handled by SocketContext
+  // No need for duplicate socket connection here
 
   const matchesFilters = useCallback((item) => {
     if (examFilter && String(item.exam_id) !== String(examFilter)) return false;
@@ -1079,9 +980,6 @@ const ClientDetections = () => {
     }
     return true;
   }, [search, typeFilter, sourceFilter, dateFilter, appliedStartTime, appliedEndTime, examFilter]);
-
-  // Keep ref synchronized
-  useEffect(() => { matchesFiltersRef.current = matchesFilters; }, [matchesFilters]);
 
   const filteredImages = useMemo(() => images.filter(matchesFilters), [images, matchesFilters]);
 
