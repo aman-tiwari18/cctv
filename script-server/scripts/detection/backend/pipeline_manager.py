@@ -22,6 +22,7 @@ ALL_ANALYTICS = [
     "crowd_zero",
     "crowd_five",
     "blind_spot",
+    "strongroom",
 ]
 
 def start_all():

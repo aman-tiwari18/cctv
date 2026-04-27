@@ -188,18 +188,30 @@ def start_video_stream(server_address, device_id, camera_no):
             urls.extend([urllib.parse.unquote(part) for part in parts])
         
         stream_token = data.get("token") or token
+        # if urls:
+        #     return urls[0], stream_token, True
         if urls:
-            return urls[0], stream_token, True
+              return urls, stream_token, True  
         return None, None, False
     except Exception:
         return None, None, False
 
+# def build_rtsp_url(server_address, device_id, camera_no):
+#     try:
+#         if not server_address or not device_id or not camera_no: return None, False
+#         rtsp_url, stream_token, success = start_video_stream(server_address, device_id, camera_no)
+#         if success and rtsp_url and stream_token:
+#             return add_token_to_url(rtsp_url, stream_token), True
+#         return None, False
+#     except Exception:
+#         return None, False
+
 def build_rtsp_url(server_address, device_id, camera_no):
     try:
         if not server_address or not device_id or not camera_no: return None, False
-        rtsp_url, stream_token, success = start_video_stream(server_address, device_id, camera_no)
-        if success and rtsp_url and stream_token:
-            return add_token_to_url(rtsp_url, stream_token), True
+        rtsp_urls, stream_token, success = start_video_stream(server_address, device_id, camera_no)
+        if success and rtsp_urls and stream_token:
+            return [add_token_to_url(url, stream_token) for url in rtsp_urls], True
         return None, False
     except Exception:
         return None, False
@@ -342,7 +354,7 @@ def quick_accessibility_check(cam):
     else:
         return cam, None, False, 'Failed to get stream URL from API'
 
-def process_accessible_camera(cam, stream_url, exam_id):
+def process_accessible_camera(cam, stream_urls, exam_id):
     device_id = cam.get("device_id")
     camera_no = cam.get("camera_no")
     id_str = f"{device_id}_{camera_no}"
@@ -355,11 +367,20 @@ def process_accessible_camera(cam, stream_url, exam_id):
     }
     
     try:
-        img_path = capture_frame_from_stream(stream_url, id_str)
+        # Try all available URLs until one works
+        img_path = None
+        for url_index, stream_url in enumerate(stream_urls):
+            img_path = capture_frame_from_stream(stream_url, id_str)
+            if img_path:
+                logger.debug(f"✅ Frame captured from URL #{url_index+1} for {id_str}")
+                break
+            else:
+                logger.debug(f"⚠️ URL #{url_index+1} failed for {id_str}, trying next...")
+        
         if not img_path:
             result['status'] = 'Not Accessible'
             result['label'] = 'Failed to Classify'
-            result['error'] = 'Frame capture failed'
+            result['error'] = 'Frame capture failed on all URLs'
         else:
             label, reason = classify_with_vlm(img_path)
             result['status'] = 'Accessible'
@@ -461,8 +482,8 @@ def main():
         
         with ThreadPoolExecutor(max_workers=MAX_WORKERS_VLM) as executor:
             tasks = []
-            for cam, stream_url in accessible_cameras:
-                tasks.append(executor.submit(process_accessible_camera, cam, stream_url, exam_id))
+            for cam, stream_urls in accessible_cameras:
+                tasks.append(executor.submit(process_accessible_camera, cam, stream_urls, exam_id))
             
             total_pass2 = len(tasks)
             completed_pass2 = 0

@@ -4560,8 +4560,14 @@ _STOP_EVENT = threading.Event()
 def _handle_stop(sig, frame):
     _STOP_EVENT.set()
 
-signal.signal(signal.SIGINT,  _handle_stop)
-signal.signal(signal.SIGTERM, _handle_stop)
+# Signal handlers can only be set in the main thread
+# When imported from worker threads, this will fail silently
+try:
+    signal.signal(signal.SIGINT,  _handle_stop)
+    signal.signal(signal.SIGTERM, _handle_stop)
+except ValueError:
+    # Not in main thread, signal handlers will be set by master_pipeline
+    pass
 
 # ================= PATH SETUP =================
 _DETECTION_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))

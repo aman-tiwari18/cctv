@@ -424,6 +424,7 @@ DETECTION_FOLDERS = {
     "invigilator":"invigilator_detection",
     "inversion" : "camera_inversion_detection",
     "tamper" : "camera_tampering_detection",
+    "strongroom": "strongroom_detection",
 }
 
 DETECTION_LABELS = {
@@ -439,7 +440,7 @@ DETECTION_LABELS = {
     "invigilator": "Invigilator Tracking",
     "tamper" : "Camera Tampering",
     "inversion" : "Camera Inversion",
-    
+    "strongroom":  "Strong Room Movement",
 }
 
 def parse_detection_filename(

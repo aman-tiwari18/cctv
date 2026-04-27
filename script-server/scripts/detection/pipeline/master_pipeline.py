@@ -34,7 +34,9 @@ import threading
 # ================= PATH SETUP =================
 BASE_DIR     = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(BASE_DIR, ".."))
+WORKERS_DIR  = os.path.join(PROJECT_ROOT, "workers")
 sys.path.insert(0, PROJECT_ROOT)
+sys.path.insert(0, WORKERS_DIR)
 
 # ================= LOGGING =================
 logging.basicConfig(
@@ -65,6 +67,7 @@ def get_worker(analytic_name, mode="rtsp"):
         "crowd_zero":  ("crowd_zero_det_worker",   "crowd_zero_worker",       "crowd_zero_det_worker_hls"),
         "crowd_five":  ("crowd_five_det_worker",   "crowd_five_worker",       "crowd_five_det_worker_hls"),
         "blind_spot":  ("blind_spot_worker",       "blind_spot_worker",       "blind_spot_worker_hls"),
+        "strongroom":  ("strongroom_worker",       "strongroom_worker",       "strongroom_worker_hls"),
     }
     
     if analytic_name not in mapping:
@@ -73,12 +76,12 @@ def get_worker(analytic_name, mode="rtsp"):
         
     module_name, rtsp_fn, hls_fn = mapping[analytic_name]
     try:
-        # Try importing as a package first
+        # Try direct import first (workers/ is in sys.path)
         try:
-            module = importlib.import_module(f"workers.{module_name}")
-        except (ImportError, ModuleNotFoundError):
-            # Fallback if workers/ directory is already in sys.path
             module = importlib.import_module(module_name)
+        except (ImportError, ModuleNotFoundError):
+            # Fallback to package import
+            module = importlib.import_module(f"workers.{module_name}")
 
         fn_name = rtsp_fn if mode.lower() == "rtsp" else hls_fn
         return getattr(module, fn_name)
@@ -121,6 +124,7 @@ def handle_sigterm(sig, frame):
         "workers.blind_spot_worker",
         "workers.camera_tampering_worker",
         "workers.camera_inversion_worker",
+        "workers.strongroom_worker",
     ]:
         try:
             mod = sys.modules.get(mod_name)
@@ -291,6 +295,7 @@ def rtsp_producer(cam_configs, queues):
     Accepts list-of-configs or a single dict.
     Supports direct RTSP URL (no DSS) when server_ip is absent.
     Re-authenticates after 10 consecutive frame failures.
+    Tries all available RTSP URLs if first one fails.
     """
     if isinstance(cam_configs, dict):
         cam_configs = [cam_configs]
@@ -332,45 +337,69 @@ def rtsp_producer(cam_configs, queues):
                 time.sleep(10)
                 continue
 
-            rtsp_url = add_token_to_url(ordered[0], stream_token)
+            # Try all available URLs until one works
+            rtsp_urls = [add_token_to_url(url, stream_token) for url in ordered]
         else:
             if not direct_url:
                 logger.warning(f"⚠️ No server_ip or cctv_url for {label}. Skipping.")
                 break
-            rtsp_url = direct_url
+            rtsp_urls = [direct_url]
 
-        logger.info(f"🔥 Connecting → {label}  URL: {rtsp_url}")
+        # Try each URL until one works
+        connected = False
+        for url_index, rtsp_url in enumerate(rtsp_urls):
+            logger.info(f"🔥 Connecting → {label}  URL #{url_index+1}/{len(rtsp_urls)}: {rtsp_url}")
 
-        pipe       = start_ffmpeg_stream(rtsp_url)
-        fail_count = 0
-
-        while not STOP:
-            frame = read_frame_from_pipe(pipe)
-
-            if frame is None:
-                fail_count += 1
-                logger.warning(f"⚠️ Frame fail #{fail_count} → {label}")
-                if fail_count >= 10:
-                    logger.warning(f"🔄 Reconnecting → {label}")
-                    break
-                time.sleep(0.5)
-                continue
-
+            pipe       = start_ffmpeg_stream(rtsp_url)
             fail_count = 0
-            # 4-tuple: workers unpack (frame, device_id, camera_no, camera_id_pk)
-            # camera_id_pk is the DB primary key — use this for unique file naming
-            packet = (frame, device_id, camera_no, camera_id_pk)
-            for q in queues:
-                if not q.full():
-                    q.put(packet)
 
-            time.sleep(0.04)   # ~25 FPS throttle
+            while not STOP:
+                frame = read_frame_from_pipe(pipe)
 
-        try:
-            pipe.kill()
-            pipe.wait(timeout=3)
-        except Exception:
-            pass
+                if frame is None:
+                    fail_count += 1
+                    logger.warning(f"⚠️ Frame fail #{fail_count} → {label} (URL #{url_index+1})")
+                    if fail_count >= 10:
+                        logger.warning(f"🔄 URL #{url_index+1} failed, trying next URL → {label}")
+                        break
+                    time.sleep(0.5)
+                    continue
+
+                # Success! Mark as connected and process frames
+                if not connected:
+                    logger.info(f"✅ Connected successfully → {label} (URL #{url_index+1})")
+                    connected = True
+                
+                fail_count = 0
+                # 4-tuple: workers unpack (frame, device_id, camera_no, camera_id_pk)
+                # camera_id_pk is the DB primary key — use this for unique file naming
+                packet = (frame, device_id, camera_no, camera_id_pk)
+                for q in queues:
+                    if not q.full():
+                        q.put(packet)
+
+                time.sleep(0.04)   # ~25 FPS throttle
+
+            try:
+                pipe.kill()
+                pipe.wait(timeout=3)
+            except Exception:
+                pass
+            
+            # If we successfully connected and then lost connection, try to reconnect with same URL
+            if connected:
+                logger.warning(f"🔄 Connection lost, re-authenticating → {label}")
+                break  # Break inner loop to re-authenticate
+            
+            # If this URL failed and there are more URLs to try, continue to next URL
+            if url_index < len(rtsp_urls) - 1:
+                logger.info(f"⏭️  Trying next URL for {label}")
+                continue
+            else:
+                # All URLs failed, re-authenticate and try again
+                logger.warning(f"❌ All URLs failed → {label}, re-authenticating in 10s")
+                time.sleep(10)
+                break  # Break inner loop to re-authenticate
 
     # send stop signal to all workers
     for q in queues:

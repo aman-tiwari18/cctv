@@ -268,15 +268,20 @@ const ClientDetectionDashboard = () => {
 
   // Set default exam to first available exam when data loads
   useEffect(() => {
-    if (dashboardData?.exams && dashboardData.exams.length > 0 && selectedScriptExam === 'all') {
-      setSelectedScriptExam(dashboardData.exams[0].id);
+    if (dashboardData?.exams && dashboardData.exams.length > 0) {
+      // Only set default if currently on 'all'
+      if (selectedScriptExam === 'all') {
+        setSelectedScriptExam(dashboardData.exams[0].id);
+      }
     }
   }, [dashboardData]);
 
+  // Get available dates from backend
+  const availableDates = dashboardData?.exam_dates || [];
+  
   // Get date range for selected exam - show only today or first day
   const getDefaultDateForExam = () => {
     const today = new Date().toISOString().split('T')[0];
-    const availableDates = dashboardData?.exam_dates || [];
     
     if (selectedScriptExam === 'all') {
       // For "All Exams", check if today is in any exam's date range
@@ -505,16 +510,13 @@ const ClientDetectionDashboard = () => {
     return row;
   });
 
-  // Get available dates from backend
-  const availableDates = dashboardData.exam_dates || [];
-  
   // Get date range for selected exam
   const getDateRangeForExam = () => {
     if (selectedScriptExam === 'all') {
       return availableDates;
     }
     
-    const selectedExamData = (dashboardData.exams || []).find(e => e.id === parseInt(selectedScriptExam));
+    const selectedExamData = (dashboardData?.exams || []).find(e => e.id === parseInt(selectedScriptExam));
     if (!selectedExamData || !selectedExamData.start_date || !selectedExamData.end_date) {
       return availableDates;
     }
@@ -1017,7 +1019,6 @@ const ClientDetectionDashboard = () => {
                   }
                 }}
               >
-                <MenuItem value="all">All Exams</MenuItem>
                 {(dashboardData.exams || []).map(exam => (
                   <MenuItem key={exam.id} value={exam.id}>{exam.name}</MenuItem>
                 ))}
