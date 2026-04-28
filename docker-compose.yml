@@ -1,0 +1,185 @@
+version: '3.8'
+
+services:
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    container_name: cctv_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword123
+      MYSQL_DATABASE: cctv_monitoring
+      MYSQL_USER: cctv_user
+      MYSQL_PASSWORD: cctv_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./cctv_backend/src/migrations:/docker-entrypoint-initdb.d
+    networks:
+      - cctv_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword123"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend API
+  backend:
+    build:
+      context: ./cctv_backend
+      dockerfile: Dockerfile
+    container_name: cctv_backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: rootpassword123
+      DB_NAME: cctv_monitoring
+      JWT_SECRET: your-super-secret-jwt-key-change-in-production
+      JWT_EXPIRE: 7d
+      EMAIL_HOST: smtp.gmail.com
+      EMAIL_PORT: 587
+      EMAIL_USER: your-email@gmail.com
+      EMAIL_PASSWORD: your-email-password
+      SMS_API_KEY: your-sms-api-key
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./cctv_backend/uploads:/app/uploads
+      - ./cctv_backend/logs:/app/logs
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - cctv_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Frontend
+  frontend:
+    build:
+      context: ./cctv_frontend
+      dockerfile: Dockerfile
+    container_name: cctv_frontend
+    restart: unless-stopped
+    environment:
+      VITE_API_URL: http://localhost:5000/api
+      VITE_SOCKET_URL: http://localhost:5000
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - cctv_network
+
+  # Script Server (Detection & Classification)
+  script-server:
+    build:
+      context: ./script-server
+      dockerfile: Dockerfile
+    container_name: cctv_script_server
+    restart: unless-stopped
+    shm_size: '8gb'  # H200 optimization: Large shared memory for GPU operations
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: rootpassword123
+      DB_NAME: cctv_monitoring
+      EXAM_ID: 19
+      PYTHONUNBUFFERED: 1
+      # H200 GPU Optimization
+      CUDA_VISIBLE_DEVICES: 0
+      PYTORCH_CUDA_ALLOC_CONF: max_split_size_mb:512
+      TORCH_CUDNN_V8_API_ENABLED: 1
+      # Enable TF32 for faster inference on H200
+      NVIDIA_TF32_OVERRIDE: 1
+    volumes:
+      - ./script-server/results:/app/results
+      - ./script-server/frames:/app/frames
+      - ./script-server/models:/app/models
+      - ./script-server/data:/app/data
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - cctv_network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+        limits:
+          memory: 32g  # RAM limit (H200 has 141GB VRAM, but limit system RAM)
+    healthcheck:
+      test: ["CMD", "nvidia-smi"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Ollama (for VLM classification)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: cctv_ollama
+    restart: unless-stopped
+    shm_size: '4gb'  # H200 optimization: Shared memory for model loading
+    environment:
+      # H200 optimization: Allow multiple models and parallel requests
+      OLLAMA_MAX_LOADED_MODELS: 4
+      OLLAMA_NUM_PARALLEL: 4
+      OLLAMA_KEEP_ALIVE: 5m
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - cctv_network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+        limits:
+          memory: 16g  # RAM limit for Ollama
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # GPU Monitor (Optional - for H200 monitoring)
+  gpu-monitor:
+    image: nvidia/cuda:12.2.0-base-ubuntu22.04
+    container_name: cctv_gpu_monitor
+    restart: unless-stopped
+    command: sh -c "while true; do clear; nvidia-smi; sleep 2; done"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks:
+      - cctv_network
+    profiles:
+      - monitoring  # Only starts with: docker-compose --profile monitoring up
+
+networks:
+  cctv_network:
+    driver: bridge
+
+volumes:
+  mysql_data:
+  ollama_data:
