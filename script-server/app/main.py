@@ -272,11 +272,21 @@ async def serve_client_detection_image(file_path: str):
 @app.get("/health")
 async def health_check():
     import time
+    
+    # Get worker info if available
+    worker_info = {}
+    try:
+        from app.camera_distributor import distributor
+        worker_info = distributor.get_worker_stats()
+    except ImportError:
+        pass
+    
     return {
         "success": True,
         "message": "Script execution server is running",
         "timestamp": datetime.now().isoformat(),
-        "uptime": time.monotonic()  # Basic uptime metric
+        "uptime": time.monotonic(),
+        "worker": worker_info
     }
 
 @app.get("/status")

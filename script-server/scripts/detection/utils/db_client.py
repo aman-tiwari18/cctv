@@ -401,6 +401,7 @@ def get_hls_cameras(exam_id: int, shift_id: int, exam_date: str) -> list:
     """
     Query camera_links_hls for cameras matching exam_id, shift_id,
     and exam_date (YYYY-MM-DD).
+    Automatically filters cameras based on worker assignment for horizontal scaling.
 
     Returns list of dicts with keys:
         cctv_url, ch_code, classification, camera_name,
@@ -425,6 +426,15 @@ def get_hls_cameras(exam_id: int, shift_id: int, exam_date: str) -> list:
             with conn.cursor() as cur:
                 cur.execute(sql, tuple(params))
                 rows = cur.fetchall()
+                
+                # Apply camera distribution filter for horizontal scaling
+                try:
+                    from app.camera_distributor import filter_cameras
+                    rows = filter_cameras(rows)
+                except ImportError:
+                    # If distributor not available, return all cameras (single-node mode)
+                    pass
+                
                 logger.info(
                     f"[DB] Loaded {len(rows)} HLS cameras "
                     f"(exam_id={exam_id}, shift_id={shift_id}, date={exam_date})"
@@ -498,6 +508,7 @@ def update_hls_status(exam_id: int, shift_id: int, exam_date: str, ch_code: str,
 def get_rtsp_cameras(exam_id: int) -> list:
     """
     Query camera_links_rtsp for cameras matching exam_id.
+    Automatically filters cameras based on worker assignment for horizontal scaling.
 
     Returns list of dicts with keys:
         cctv_url, device_id, classification, camera_name,
@@ -518,6 +529,15 @@ def get_rtsp_cameras(exam_id: int) -> list:
             with conn.cursor() as cur:
                 cur.execute(sql, (exam_id,))
                 rows = cur.fetchall()
+                
+                # Apply camera distribution filter for horizontal scaling
+                try:
+                    from app.camera_distributor import filter_cameras
+                    rows = filter_cameras(rows)
+                except ImportError:
+                    # If distributor not available, return all cameras (single-node mode)
+                    pass
+                
                 logger.info(
                     f"[DB] Loaded {len(rows)} RTSP cameras "
                     f"(exam_id={exam_id})"

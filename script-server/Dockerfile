@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y \
     mysql-client \
     curl \
     git \
+    nfs-common \
     && rm -rf /var/lib/apt/lists/*
 
 # Set Python 3.10 as default

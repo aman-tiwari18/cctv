@@ -1,0 +1,78 @@
+================================================================================
+HORIZONTAL SCALING ARCHITECTURE
+================================================================================
+
+BEFORE (Single System):
+┌─────────────────────────────────────────┐
+│         Main Server (1 GPU)             │
+│  ┌────────────────────────────────────┐ │
+│  │ Backend + Frontend + MySQL         │ │
+│  │ Script-Server (ALL 20K cameras)    │ │
+│  └────────────────────────────────────┘ │
+└─────────────────────────────────────────┘
+         ↓ Processes all 20,000 cameras
+         ↓ GPU overloaded!
+
+
+AFTER (Distributed):
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Main Server (192.168.1.100)                     │
+│  ┌────────────────────────────────────────────────────────────────────┐ │
+│  │ Backend API + Frontend + MySQL (port 3307)                         │ │
+│  │ NFS Server (/mnt/nfs/cctv_images)                                  │ │
+│  │ Script-Server (cameras 1-5,000)                                    │ │
+│  └────────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────┘
+         ↓ MySQL (3307)              ↓ NFS (2049)
+         ↓                           ↓
+    ┌────┴────────────┬──────────────┴──────────────┬──────────────┐
+    ↓                 ↓                             ↓              ↓
+┌─────────┐      ┌─────────┐                  ┌─────────┐    ┌─────────┐
+│Worker 2 │      │Worker 3 │                  │Worker 4 │    │Worker N │
+│GPU Sys 2│      │GPU Sys 3│                  │GPU Sys 4│    │GPU Sys N│
+├─────────┤      ├─────────┤                  ├─────────┤    ├─────────┤
+│Script-  │      │Script-  │                  │Script-  │    │Script-  │
+│Server   │      │Server   │                  │Server   │    │Server   │
+│         │      │         │                  │         │    │         │
+│Cameras: │      │Cameras: │                  │Cameras: │    │Cameras: │
+│5K-10K   │      │10K-15K  │                  │15K-20K  │    │...      │
+└─────────┘      └─────────┘                  └─────────┘    └─────────┘
+
+================================================================================
+DATA FLOW:
+================================================================================
+
+1. USER ACTION (Frontend)
+   ↓
+2. BACKEND API (Main Server)
+   ↓ Creates assignments in MySQL
+3. ALL WORKERS poll MySQL
+   ↓
+4. Each worker fetches cameras from MySQL
+   ↓
+5. CAMERA DISTRIBUTOR filters by range
+   ↓ Worker 2 gets only cameras 5,001-10,000
+6. Worker processes RTSP streams
+   ↓ Detection + Classification
+7. Save images to NFS (/mnt/nfs/cctv_images)
+   ↓ Shared storage, accessible from main server
+8. Write results to MySQL
+   ↓ Central database
+9. FRONTEND displays all results
+   ↓ From all workers combined
+
+================================================================================
+DEPLOYMENT:
+================================================================================
+
+Main Server:
+  1. Setup NFS server
+  2. docker-compose up -d
+  3. Done!
+
+Each Worker:
+  1. Copy script-server folder
+  2. sudo ./setup_worker.sh <id> <main_ip> <start> <end>
+  3. Done!
+
+================================================================================

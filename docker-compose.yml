@@ -16,6 +16,8 @@ services:
       - ./db_schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
     networks:
       - cctv_network
+    # Allow remote connections for worker nodes
+    command: --bind-address=0.0.0.0 --max-connections=500
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword123"]
       interval: 10s
@@ -96,6 +98,10 @@ services:
       EXAM_ID: 19
       PYTHONUNBUFFERED: 1
       HTTP_PORT: 8000
+      # Worker identification (main server)
+      WORKER_ID: main
+      WORKER_NAME: Main Server
+      DISTRIBUTION_MODE: single
       # H200 GPU Optimization
       CUDA_VISIBLE_DEVICES: 0
       PYTORCH_CUDA_ALLOC_CONF: max_split_size_mb:512
@@ -103,6 +109,11 @@ services:
       # Enable TF32 for faster inference on H200
       NVIDIA_TF32_OVERRIDE: 1
     volumes:
+      # For horizontal scaling: mount NFS share instead of local directories
+      # Uncomment these lines if using NFS:
+      # - /mnt/nfs/cctv_images:/app/results
+      # - /mnt/nfs/cctv_images:/app/frames
+      # For single-node deployment: use local directories
       - ./script-server/results:/app/results
       - ./script-server/frames:/app/frames
       - ./script-server/models:/app/models
