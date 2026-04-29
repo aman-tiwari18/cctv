@@ -162,22 +162,29 @@ else
 fi
 
 # ============================================================
-# Step 7: Link Results to NFS (Optional)
+# Step 7: Link Results to NFS
 # ============================================================
 print_info "Setting up NFS storage link..."
 
-if [ -d "$SCRIPT_SERVER_DIR/results" ]; then
-    # Backup existing results
-    if [ ! -L "$SCRIPT_SERVER_DIR/results" ]; then
-        mv "$SCRIPT_SERVER_DIR/results" "$SCRIPT_SERVER_DIR/results.backup.$(date +%Y%m%d_%H%M%S)"
-        print_info "✓ Backed up existing results"
-    fi
+DETECTION_RESULTS_DIR="$SCRIPT_SERVER_DIR/scripts/detection/results"
+
+if [ -d "$DETECTION_RESULTS_DIR" ] && [ ! -L "$DETECTION_RESULTS_DIR" ]; then
+    # Backup existing results directory
+    mv "$DETECTION_RESULTS_DIR" "${DETECTION_RESULTS_DIR}.backup.$(date +%Y%m%d_%H%M%S)"
+    print_info "✓ Backed up existing detection results"
+fi
+
+# Remove if it's a broken symlink
+if [ -L "$DETECTION_RESULTS_DIR" ] && [ ! -e "$DETECTION_RESULTS_DIR" ]; then
+    rm "$DETECTION_RESULTS_DIR"
 fi
 
 # Create symlink to NFS
-if [ ! -L "$SCRIPT_SERVER_DIR/results" ]; then
-    ln -sf /mnt/nfs/cctv_images "$SCRIPT_SERVER_DIR/results"
-    print_info "✓ Linked results to NFS storage"
+if [ ! -e "$DETECTION_RESULTS_DIR" ]; then
+    ln -sf /mnt/nfs/cctv_images "$DETECTION_RESULTS_DIR"
+    print_info "✓ Linked detection results to NFS storage"
+else
+    print_warn "Detection results already exists, skipping symlink"
 fi
 
 # ============================================================
