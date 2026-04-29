@@ -89,23 +89,6 @@ CONFIDENCE = 0.45      # YOLO confidence threshold
 MIN_BOX_AREA = 5000    # Minimum area for QP box detection (pixels)
 MAX_BOX_AREA = 200000  # Maximum area for QP box detection (pixels)
 
-# Color ranges for QP box detection (HSV)
-# White/Grey/Brown color ranges
-COLOR_RANGES = {
-    'white': {
-        'lower': np.array([0, 0, 180]),
-        'upper': np.array([180, 30, 255])
-    },
-    'grey': {
-        'lower': np.array([0, 0, 80]),
-        'upper': np.array([180, 50, 180])
-    },
-    'brown': {
-        'lower': np.array([10, 50, 50]),
-        'upper': np.array([20, 255, 200])
-    }
-}
-
 # target scenes — Strong Room cameras only
 TARGET_SCENES = [
     "Server Room",
@@ -139,39 +122,6 @@ def get_yolo_model():
     return _yolo_model
 
 
-def detect_qp_box_color(frame, bbox):
-    """
-    Check if the detected box matches QP box color (white/grey/brown).
-    
-    Args:
-        frame: Input frame
-        bbox: Bounding box [x1, y1, x2, y2]
-    
-    Returns:
-        bool: True if box matches QP box color
-    """
-    x1, y1, x2, y2 = map(int, bbox)
-    
-    # Extract ROI
-    roi = frame[y1:y2, x1:x2]
-    if roi.size == 0:
-        return False
-    
-    # Convert to HSV
-    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-    
-    # Check each color range
-    for color_name, color_range in COLOR_RANGES.items():
-        mask = cv2.inRange(hsv, color_range['lower'], color_range['upper'])
-        color_ratio = np.count_nonzero(mask) / mask.size
-        
-        # If more than 30% of the box matches the color, consider it a QP box
-        if color_ratio > 0.3:
-            return True
-    
-    return False
-
-
 def detect_qp_box_in_frame(frame):
     """
     Detect if QP box is present in the frame.
@@ -185,8 +135,7 @@ def detect_qp_box_in_frame(frame):
     
     results = model(frame, conf=CONFIDENCE, verbose=False)[0]
     
-    # Look for objects that could be boxes (class IDs: 0=person, 24=backpack, 25=umbrella, 26=handbag, 28=suitcase, 73=book, 84=book)
-    # We're primarily interested in detecting rectangular objects
+    # Look for objects that could be boxes (class IDs: 24=backpack, 25=umbrella, 26=handbag, 28=suitcase, 73=book, 84=book)
     box_class_ids = [24, 25, 26, 28, 73, 84]  # Potential box-like objects
     
     detected_boxes = []
@@ -202,15 +151,13 @@ def detect_qp_box_in_frame(frame):
             
             # Check if size is appropriate for QP box
             if MIN_BOX_AREA <= area <= MAX_BOX_AREA:
-                # Check color
-                if detect_qp_box_color(frame, [x1, y1, x2, y2]):
-                    detected_boxes.append({
-                        'bbox': [x1, y1, x2, y2],
-                        'conf': conf,
-                        'class_id': class_id,
-                        'area': area
-                    })
-                    qp_box_found = True
+                detected_boxes.append({
+                    'bbox': [x1, y1, x2, y2],
+                    'conf': conf,
+                    'class_id': class_id,
+                    'area': area
+                })
+                qp_box_found = True
     
     return qp_box_found, detected_boxes
 

@@ -35,23 +35,6 @@ CONFIDENCE = 0.45  # YOLO confidence threshold
 MIN_BOX_AREA = 5000    # Minimum area for QP box detection (pixels)
 MAX_BOX_AREA = 200000  # Maximum area for QP box detection (pixels)
 
-# Color ranges for QP box detection (HSV)
-# White/Grey/Brown color ranges
-COLOR_RANGES = {
-    'white': {
-        'lower': np.array([0, 0, 180]),
-        'upper': np.array([180, 30, 255])
-    },
-    'grey': {
-        'lower': np.array([0, 0, 80]),
-        'upper': np.array([180, 50, 180])
-    },
-    'brown': {
-        'lower': np.array([10, 50, 50]),
-        'upper': np.array([20, 255, 200])
-    }
-}
-
 # Target scenes — Strong Room cameras only
 TARGET_SCENES = [
     "Server Room",
@@ -77,39 +60,6 @@ def get_model():
 
 last_save_times = {}
 qp_box_detections = {}  # Store QP box detection status for each camera
-
-
-def detect_qp_box_color(frame, bbox):
-    """
-    Check if the detected box matches QP box color (white/grey/brown).
-    
-    Args:
-        frame: Input frame
-        bbox: Bounding box [x1, y1, x2, y2]
-    
-    Returns:
-        bool: True if box matches QP box color
-    """
-    x1, y1, x2, y2 = map(int, bbox)
-    
-    # Extract ROI
-    roi = frame[y1:y2, x1:x2]
-    if roi.size == 0:
-        return False
-    
-    # Convert to HSV
-    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-    
-    # Check each color range
-    for color_name, color_range in COLOR_RANGES.items():
-        mask = cv2.inRange(hsv, color_range['lower'], color_range['upper'])
-        color_ratio = np.count_nonzero(mask) / mask.size
-        
-        # If more than 30% of the box matches the color, consider it a QP box
-        if color_ratio > 0.3:
-            return True
-    
-    return False
 
 
 def detect_qp_box_in_frame(frame, device_id="unknown", camera_no="unknown"):
@@ -138,19 +88,17 @@ def detect_qp_box_in_frame(frame, device_id="unknown", camera_no="unknown"):
             
             # Check if size is appropriate for QP box
             if MIN_BOX_AREA <= area <= MAX_BOX_AREA:
-                # Check color
-                if detect_qp_box_color(frame, [x1, y1, x2, y2]):
-                    detected_boxes.append({
-                        'bbox': [x1, y1, x2, y2],
-                        'conf': conf,
-                        'class_id': class_id,
-                        'area': area
-                    })
-                    qp_box_found = True
-                    # Draw bounding box for detected QP box
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                    label = f"QP Box {conf:.2f}"
-                    cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                detected_boxes.append({
+                    'bbox': [x1, y1, x2, y2],
+                    'conf': conf,
+                    'class_id': class_id,
+                    'area': area
+                })
+                qp_box_found = True
+                # Draw bounding box for detected QP box
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                label = f"QP Box {conf:.2f}"
+                cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
     
     # Add detection info to frame
     y_offset = 30

@@ -7,6 +7,8 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     python3.10-dev \
     ffmpeg \
+    tesseract-ocr \
+    tesseract-ocr-eng \
     libsm6 \
     libxext6 \
     libxrender-dev \
