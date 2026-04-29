@@ -1,5 +1,5 @@
 # Script Server Dockerfile - Optimized for H200 GPU
-FROM nvidia/cuda:12.2.0-cudnn8-runtime-ubuntu22.04
+FROM nvidia/cuda:12.2.2-cudnn8-runtime-ubuntu22.04
 
 # Install Python 3.10 and system dependencies
 RUN apt-get update && apt-get install -y \
@@ -54,5 +54,5 @@ ENV PYTHONUNBUFFERED=1
 # Use entrypoint script
 ENTRYPOINT ["docker-entrypoint.sh"]
 
-# Default command (can be overridden)
-CMD ["python", "-c", "print('Script server ready. Use docker exec to run scripts.')"]
+# Start FastAPI server
+CMD ["python", "run.py"]

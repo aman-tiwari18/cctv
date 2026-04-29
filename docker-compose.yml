@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # MySQL Database
   mysql:
@@ -12,10 +10,10 @@ services:
       MYSQL_USER: cctv_user
       MYSQL_PASSWORD: cctv_password
     ports:
-      - "3306:3306"
+      - "3307:3306"
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./cctv_backend/src/migrations:/docker-entrypoint-initdb.d
+      - ./db_schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
     networks:
       - cctv_network
     healthcheck:
@@ -27,13 +25,13 @@ services:
   # Backend API
   backend:
     build:
-      context: ./cctv_backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./cctv_backend/Dockerfile
     container_name: cctv_backend
     restart: unless-stopped
     environment:
       NODE_ENV: production
-      PORT: 5000
+      PORT: 3000
       DB_HOST: mysql
       DB_PORT: 3306
       DB_USER: root
@@ -47,7 +45,7 @@ services:
       EMAIL_PASSWORD: your-email-password
       SMS_API_KEY: your-sms-api-key
     ports:
-      - "5000:5000"
+      - "3000:3000"
     volumes:
       - ./cctv_backend/uploads:/app/uploads
       - ./cctv_backend/logs:/app/logs
@@ -73,7 +71,7 @@ services:
       VITE_API_URL: http://localhost:5000/api
       VITE_SOCKET_URL: http://localhost:5000
     ports:
-      - "3000:80"
+      - "3001:80"
     depends_on:
       - backend
     networks:
@@ -87,6 +85,8 @@ services:
     container_name: cctv_script_server
     restart: unless-stopped
     shm_size: '8gb'  # H200 optimization: Large shared memory for GPU operations
+    ports:
+      - "8000:8000"
     environment:
       DB_HOST: mysql
       DB_PORT: 3306
@@ -95,6 +95,7 @@ services:
       DB_NAME: cctv_monitoring
       EXAM_ID: 19
       PYTHONUNBUFFERED: 1
+      HTTP_PORT: 8000
       # H200 GPU Optimization
       CUDA_VISIBLE_DEVICES: 0
       PYTORCH_CUDA_ALLOC_CONF: max_split_size_mb:512
