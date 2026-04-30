@@ -149,11 +149,15 @@ if [ -d "$SCRIPT_SERVER_DIR" ]; then
     # Add worker configuration if not present
     if ! grep -q "WORKER_ID" .env; then
         echo "" >> .env
-        echo "# Worker Configuration (Main Server)" >> .env
-        echo "WORKER_ID=main" >> .env
-        echo "WORKER_NAME=Main Server" >> .env
-        echo "DISTRIBUTION_MODE=single" >> .env
-        print_info "✓ Added worker configuration to .env"
+        echo "# ──────────────────────────────────────────────────────" >> .env
+        echo "# Worker Configuration (Horizontal Scaling)" >> .env
+        echo "# ──────────────────────────────────────────────────────" >> .env
+        echo "WORKER_ID=worker-0" >> .env
+        echo "WORKER_NAME=Main Server (Worker 0)" >> .env
+        echo "DISTRIBUTION_MODE=static" >> .env
+        echo "CAMERA_START_ID=1" >> .env
+        echo "CAMERA_END_ID=6250" >> .env
+        print_info "✓ Added worker configuration to .env (Main Server = Worker 0, Cameras 1-6,250)"
     else
         print_warn "Worker configuration already exists in .env"
     fi
@@ -167,6 +171,9 @@ fi
 print_info "Setting up NFS storage link..."
 
 DETECTION_RESULTS_DIR="$SCRIPT_SERVER_DIR/scripts/detection/results"
+
+# Create parent directory if it doesn't exist
+mkdir -p "$(dirname "$DETECTION_RESULTS_DIR")"
 
 if [ -d "$DETECTION_RESULTS_DIR" ] && [ ! -L "$DETECTION_RESULTS_DIR" ]; then
     # Backup existing results directory
@@ -227,12 +234,14 @@ echo "NFS Export:       Configured for all IPs"
 echo "============================================================"
 echo ""
 echo "Next Steps:"
-echo "1. Grant MySQL remote access:"
+echo "1. Grant MySQL remote access (MySQL 8.0 syntax):"
 echo "   mysql -u root -p"
-echo "   GRANT ALL PRIVILEGES ON cctv_monitoring.* TO 'root'@'%' IDENTIFIED BY 'your_password';"
+echo "   CREATE USER IF NOT EXISTS 'root'@'192.168.19.%' IDENTIFIED BY 'rootpassword123';"
+echo "   GRANT ALL PRIVILEGES ON cctv_monitoring.* TO 'root'@'192.168.19.%';"
 echo "   FLUSH PRIVILEGES;"
 echo ""
 echo "2. Start your application with PM2:"
+echo "   cd /data/cctv_dev/cctv"
 echo "   pm2 start ecosystem.config.js"
 echo "   pm2 save"
 echo ""

@@ -27,6 +27,9 @@ logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+script-server/db_reports.log
+script-server/logs/
+cctv_backend/logs/
 
 # Editor and IDE
 .vscode/*
@@ -53,6 +56,16 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 
+# Backup files
+*.backup
+*.backup.*
+*.bak
+*~
+
+# System and deployment specific
+/etc/exports.backup.*
+/etc/mysql/mysql.conf.d/mysqld.cnf.backup.*
+
 # Specific project ignores
 cctv_backend/uploads/
 cctv_backend/logs/ 
@@ -74,14 +87,29 @@ script-server/scripts/face_recognition.py
 script-server/scripts/motion_detection.py
 script-server/scripts/object_detection.py
 script-server/scripts/test_simple.sh
-script-server/scripts/detection/results/tcs_detections/*
+
+# Detection results and models (large files)
+script-server/scripts/detection/results/
+script-server/scripts/detection/results.backup.*/
 script-server/scripts/detection/models/*
 script-server/models/*
 script-server/scripts/detection/frames/*
 script-server/scripts/frames/*
-script-server/results/*
+script-server/results/
+script-server/results.backup.*/
 script-server/scripts/models/*
 script-server/scripts/yolo11n.pt
+
+# NFS and shared storage (symlinks and mounted directories)
+/mnt/nfs/
+script-server/scripts/detection/results
+!script-server/scripts/detection/results/.gitkeep
+
+# Worker-specific files
+script-server/.env.worker
+script-server/.env.worker.*
+.env.worker
+.env.worker.*
 
 # Ignore all environment files across all folders
 .env

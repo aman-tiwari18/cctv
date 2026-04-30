@@ -72,9 +72,8 @@ services:
       DETECTION_RTSP_IMAGE_BASE_URL: http://${MAIN_SERVER_IP}:3000/cctv_dev/serve-rtsp-detection-images
       
     volumes:
-      # NFS mount for shared image storage
-      - /mnt/nfs/cctv_images:/app/results
-      - /mnt/nfs/cctv_images:/app/frames
+      # NFS mount for shared image storage (detection scripts save to scripts/detection/results/)
+      - /mnt/nfs/cctv_images:/app/scripts/detection/results
       
       # Local volumes for models and logs
       - ./models:/app/models
