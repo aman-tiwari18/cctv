@@ -41,6 +41,7 @@ services:
       DB_NAME: cctv_monitoring
       JWT_SECRET: your-super-secret-jwt-key-change-in-production
       JWT_EXPIRE: 7d
+      SCRIPT_SERVER_API_KEY: your_script_server_api_key
       EMAIL_HOST: smtp.gmail.com
       EMAIL_PORT: 587
       EMAIL_USER: your-email@gmail.com
@@ -57,7 +58,7 @@ services:
     networks:
       - cctv_network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:3000/cctv_analytics/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -70,8 +71,9 @@ services:
     container_name: cctv_frontend
     restart: unless-stopped
     environment:
-      VITE_API_URL: http://localhost:5000/api
-      VITE_SOCKET_URL: http://localhost:5000
+      VITE_API_BASE_URL: /cctv_analytics/api
+      VITE_SCRIPT_SERVER_BASE_URL: /cctv_dev
+      VITE_SCRIPT_SERVER_SOCKET_PATH: /cctv_dev/socket.io
     ports:
       - "3001:80"
     depends_on:
@@ -95,13 +97,17 @@ services:
       DB_USER: root
       DB_PASSWORD: rootpassword123
       DB_NAME: cctv_monitoring
+      MAIN_BACKEND_URL: http://backend:3000/cctv_analytics/api
+      API_KEY: your_script_server_api_key
       EXAM_ID: 19
       PYTHONUNBUFFERED: 1
       HTTP_PORT: 8000
-      # Worker identification (main server)
-      WORKER_ID: main
-      WORKER_NAME: Main Server
-      DISTRIBUTION_MODE: single
+      # Worker identification (main server, worker index 0 of 4)
+      WORKER_ID: worker-0
+      WORKER_NAME: Main Server (Worker 0)
+      DISTRIBUTION_MODE: auto
+      TOTAL_WORKERS: 4
+      NFS_MOUNT_PATH: /mnt/nfs/cctv_images
       # H200 GPU Optimization
       CUDA_VISIBLE_DEVICES: 0
       PYTORCH_CUDA_ALLOC_CONF: max_split_size_mb:512
@@ -109,14 +115,11 @@ services:
       # Enable TF32 for faster inference on H200
       NVIDIA_TF32_OVERRIDE: 1
     volumes:
-      # For horizontal scaling: mount NFS share instead of local directories
-      # Uncomment these lines if using NFS:
-      # - /mnt/nfs/cctv_images:/app/results
-      # - /mnt/nfs/cctv_images:/app/frames
-      # For single-node deployment: use local directories
-      - ./script-server/results:/app/results
-      - ./script-server/frames:/app/frames
+      # NFS image storage shared by all workers.
+      # Detection scripts read/write under scripts/detection/results.
+      - /data/nfs/cctv_images:/app/scripts/detection/results
       - ./script-server/models:/app/models
+      - ./script-server/logs:/app/logs
       - ./script-server/data:/app/data
     depends_on:
       mysql:

@@ -6,7 +6,7 @@
 #
 # Prerequisites:
 # 1. NFS mount configured: /mnt/nfs/cctv_images
-# 2. Network access to main server MySQL (port 3307)
+# 2. Network access to main server MySQL (port 3306 on the PM2 main VM)
 # 3. NVIDIA Docker runtime installed
 # 4. Environment variables configured (see .env.worker.example)
 #
@@ -29,17 +29,19 @@ services:
       - "${WORKER_HTTP_PORT:-8000}:8000"
     environment:
       # Database connection to main server
-      DB_HOST: ${MAIN_SERVER_IP}
+      DB_HOST: ${DB_HOST:-192.168.19.30}
       DB_PORT: ${DB_PORT:-3306}
-      DB_USER: root
-      DB_PASSWORD: rootpassword123
-      DB_NAME: cctv_monitoring
+      DB_USER: ${DB_USER:-root}
+      DB_PASSWORD: ${DB_PASSWORD:-rootpassword123}
+      DB_NAME: ${DB_NAME:-cctv_monitoring}
       
       # Worker identification
       WORKER_ID: ${WORKER_ID:-worker-1}
       WORKER_NAME: ${WORKER_NAME:-GPU Worker 1}
+      DISTRIBUTION_MODE: ${DISTRIBUTION_MODE:-auto}
+      TOTAL_WORKERS: ${TOTAL_WORKERS:-4}
       
-      # Camera assignment range (for static distribution)
+      # Camera assignment range (only used when DISTRIBUTION_MODE=static/range)
       CAMERA_START_ID: ${CAMERA_START_ID:-1}
       CAMERA_END_ID: ${CAMERA_END_ID:-5000}
       
@@ -58,18 +60,18 @@ services:
       NVIDIA_TF32_OVERRIDE: 1
       
       # Backend API connection
-      MAIN_BACKEND_URL: http://${MAIN_SERVER_IP}:3000/cctv_analytics/api
+      MAIN_BACKEND_URL: ${MAIN_BACKEND_URL:-http://192.168.19.30:3000/cctv_analytics/api}
       API_KEY: ${API_KEY:-your_script_server_api_key}
       
       # Polling configuration
-      POLL_INTERVAL_MS: 30000
-      LOOKAHEAD_MINUTES: 3
-      GRACE_MINUTES: 30
+      POLL_INTERVAL_MS: ${POLL_INTERVAL_MS:-30000}
+      LOOKAHEAD_MINUTES: ${LOOKAHEAD_MINUTES:-3}
+      GRACE_MINUTES: ${GRACE_MINUTES:-30}
       
       # NFS image storage path
       NFS_MOUNT_PATH: /mnt/nfs/cctv_images
-      DETECTION_IMAGE_BASE_URL: http://${MAIN_SERVER_IP}:3000/cctv_dev/serve-detection-images
-      DETECTION_RTSP_IMAGE_BASE_URL: http://${MAIN_SERVER_IP}:3000/cctv_dev/serve-rtsp-detection-images
+      DETECTION_IMAGE_BASE_URL: ${DETECTION_IMAGE_BASE_URL:-http://192.168.19.30:3000/cctv_dev/serve-detection-images}
+      DETECTION_RTSP_IMAGE_BASE_URL: ${DETECTION_RTSP_IMAGE_BASE_URL:-http://192.168.19.30:3000/cctv_dev/serve-rtsp-detection-images}
       
     volumes:
       # NFS mount for shared image storage (detection scripts save to scripts/detection/results/)

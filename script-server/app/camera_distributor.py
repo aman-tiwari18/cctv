@@ -27,12 +27,17 @@ class CameraDistributor:
         self.worker_id = os.environ.get("WORKER_ID", "main")
         self.camera_start = self._parse_int_env("CAMERA_START_ID")
         self.camera_end = self._parse_int_env("CAMERA_END_ID")
-        self.distribution_mode = os.environ.get("DISTRIBUTION_MODE", "static")
+        self.distribution_mode = os.environ.get("DISTRIBUTION_MODE", "auto")
+        
+        # For auto mode: total workers in the cluster
+        self.total_workers = self._parse_int_env("TOTAL_WORKERS") or 1
+        self.worker_index = self._extract_worker_index()
         
         logger.info(
             f"Camera Distributor initialized: "
             f"worker_id={self.worker_id}, "
             f"mode={self.distribution_mode}, "
+            f"worker_index={self.worker_index}/{self.total_workers}, "
             f"range={self.camera_start}-{self.camera_end}"
         )
     
@@ -47,6 +52,21 @@ class CameraDistributor:
                 logger.warning(f"Invalid integer for {key}: {val}")
         return None
     
+    def _extract_worker_index(self) -> int:
+        """
+        Extract numeric index from worker_id.
+        Examples: worker-0 -> 0, worker-1 -> 1, main -> 0
+        """
+        if self.worker_id in ["main", "worker-0"]:
+            return 0
+        
+        import re
+        match = re.search(r'(\d+)$', self.worker_id)
+        if match:
+            return int(match.group(1))
+        
+        return 0
+    
     def should_process_camera(self, camera: Dict) -> bool:
         """
         Determine if this worker should process the given camera.
@@ -57,10 +77,20 @@ class CameraDistributor:
         Returns:
             True if this worker should process the camera
         """
-        if self.distribution_mode == "static":
+        if self.distribution_mode in ("static", "range"):
             return self._static_assignment(camera)
         elif self.distribution_mode == "dynamic":
             return self._dynamic_assignment(camera)
+        elif self.distribution_mode == "auto":
+            return self._auto_assignment(camera)
+        elif self.distribution_mode == "single":
+            if self.camera_start is not None and self.camera_end is not None:
+                logger.warning(
+                    "DISTRIBUTION_MODE=single with CAMERA_START_ID/CAMERA_END_ID set; "
+                    "using static range assignment to avoid duplicate processing"
+                )
+                return self._static_assignment(camera)
+            return True
         else:
             # Default: process all cameras (single-node mode)
             return True
@@ -77,16 +107,28 @@ class CameraDistributor:
             return True
         
         # Try to get camera ID from various fields
-        camera_id = (
-            camera.get("id") or
-            camera.get("camera_id") or
-            self._extract_numeric_id(camera.get("ch_code")) or
-            self._extract_numeric_id(camera.get("device_id"))
-        )
+        # Prioritize camera_id over the generic 'id' field which might be an execution ID
+        # Note: If 'camera_id' is present, it's a specific assignment. 
+        # If only 'id' is present, we check if it looks like a camera ID or an execution ID.
+        camera_id = camera.get("camera_id")
+        
+        # If no camera_id, check other fields
+        if camera_id is None:
+            camera_id = (
+                self._extract_numeric_id(camera.get("ch_code")) or
+                self._extract_numeric_id(camera.get("device_id"))
+            )
+            
+        # Fallback to 'id' only if it's not a poller assignment (where id is execution_id)
+        # We assume if 'script_code' or 'task_name' is present, it's an assignment object.
+        if camera_id is None and not any(k in camera for k in ["script_code", "task_name", "analytics_task_id"]):
+            camera_id = camera.get("id")
         
         if camera_id is None:
-            logger.warning(f"Cannot determine camera ID for assignment: {camera}")
-            return False
+            # If no camera ID is found, it might be a global assignment.
+            # Allow it to run on all workers so they can filter cameras internally.
+            logger.debug(f"No camera ID found in assignment; allowing on worker {self.worker_id} for internal filtering")
+            return True
         
         # Check if camera falls within this worker's range
         in_range = self.camera_start <= camera_id <= self.camera_end
@@ -114,6 +156,39 @@ class CameraDistributor:
         
         # Check if assigned to this worker
         return assigned_worker == self.worker_id
+    
+    def _auto_assignment(self, camera: Dict) -> bool:
+        """
+        Automatic load balancing using hash-based distribution.
+        
+        Distributes cameras evenly across workers using modulo operation.
+        This automatically adapts to any number of cameras without
+        manual configuration.
+        """
+        # Try to get camera ID from various fields
+        camera_id = camera.get("camera_id")
+        
+        # If no camera_id, check other fields
+        if camera_id is None:
+            camera_id = (
+                self._extract_numeric_id(camera.get("ch_code")) or
+                self._extract_numeric_id(camera.get("device_id"))
+            )
+            
+        # Fallback to 'id' only if it's not a poller assignment (where id is execution_id)
+        if camera_id is None and not any(k in camera for k in ["script_code", "task_name", "analytics_task_id"]):
+            camera_id = camera.get("id")
+        
+        if camera_id is None:
+            # If no camera ID is found, it might be a global assignment.
+            # Allow it to run on all workers so they can filter cameras internally.
+            logger.debug(f"No camera ID found in auto assignment; allowing on worker {self.worker_id}")
+            return True
+        
+        # Hash-based distribution: camera_id % total_workers == worker_index % total_workers
+        # This handles both 0-based (0,1,2,3) and 1-based (1,2,3,4) worker naming
+        assigned_worker = camera_id % self.total_workers
+        return assigned_worker == (self.worker_index % self.total_workers)
     
     @staticmethod
     def _extract_numeric_id(value: any) -> Optional[int]:
@@ -162,6 +237,8 @@ class CameraDistributor:
         """Get worker statistics for monitoring."""
         return {
             "worker_id": self.worker_id,
+            "worker_index": self.worker_index,
+            "total_workers": self.total_workers,
             "distribution_mode": self.distribution_mode,
             "camera_range": {
                 "start": self.camera_start,
@@ -285,13 +362,33 @@ if __name__ == "__main__":
     print_distribution_plan(20000, 4)
     print_distribution_plan(100000, 10)
     
-    # Test distributor
+    print("\n" + "="*60)
+    print("TESTING AUTO MODE (Hash-based Distribution)")
+    print("="*60)
+    
+    # Simulate 4 workers with auto mode
     test_cameras = [
-        {"id": 1, "ch_code": "12345"},
-        {"id": 5001, "ch_code": "67890"},
-        {"id": 10001, "ch_code": "11111"},
+        {"id": i, "ch_code": f"cam_{i}"} 
+        for i in range(1, 41)  # Test with 40 cameras
     ]
     
+    # Test each worker
+    for worker_idx in range(4):
+        os.environ["WORKER_ID"] = f"worker-{worker_idx}"
+        os.environ["TOTAL_WORKERS"] = "4"
+        os.environ["DISTRIBUTION_MODE"] = "auto"
+        
+        dist = CameraDistributor()
+        filtered = dist.filter_cameras(test_cameras)
+        
+        print(f"\nWorker {worker_idx}: Assigned {len(filtered)} cameras")
+        print(f"  Camera IDs: {[c['id'] for c in filtered[:10]]}{'...' if len(filtered) > 10 else ''}")
+    
+    print("\n" + "="*60)
+    print("TESTING STATIC MODE (Range-based Distribution)")
+    print("="*60)
+    
+    # Test static mode
     os.environ["WORKER_ID"] = "worker-1"
     os.environ["CAMERA_START_ID"] = "1"
     os.environ["CAMERA_END_ID"] = "5000"
@@ -300,6 +397,6 @@ if __name__ == "__main__":
     dist = CameraDistributor()
     filtered = dist.filter_cameras(test_cameras)
     
-    print(f"\nFiltered cameras for worker-1: {len(filtered)}")
+    print(f"\nWorker 1 (Static): Assigned {len(filtered)} cameras")
     for cam in filtered:
         print(f"  - Camera ID {cam['id']}")

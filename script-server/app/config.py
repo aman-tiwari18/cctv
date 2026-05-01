@@ -3,7 +3,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-MAIN_BACKEND_URL = os.getenv("MAIN_BACKEND_URL", "http://localhost:3000/cctv_analytics/api")
+def _clean_env_url(url: str) -> str:
+    """Clean environment variable URLs from common typos like backticks or trailing braces."""
+    if not url:
+        return url
+    return url.strip(" '\"`{}")
+
+MAIN_BACKEND_URL = _clean_env_url(os.getenv("MAIN_BACKEND_URL", "http://localhost:3000/cctv_analytics/api"))
 API_KEY = os.getenv("API_KEY", "cctv-monitoring-secret-key-2024")
 POLL_INTERVAL_MS = int(os.getenv("POLL_INTERVAL_MS", 30000))
 LOOKAHEAD_MINUTES = int(os.getenv("LOOKAHEAD_MINUTES", 3))

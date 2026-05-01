@@ -115,7 +115,7 @@ if mount | grep -q "/mnt/nfs/cctv_images"; then
     umount /mnt/nfs/cctv_images
 fi
 
-mount -t nfs $MAIN_SERVER_IP:/mnt/nfs/cctv_images /mnt/nfs/cctv_images
+mount -t nfs $MAIN_SERVER_IP:/data/nfs/cctv_images /mnt/nfs/cctv_images
 
 if [ $? -eq 0 ]; then
     print_info "✓ NFS mounted successfully"
@@ -138,7 +138,7 @@ fi
 # Add to fstab if not already present
 if ! grep -q "/mnt/nfs/cctv_images" /etc/fstab; then
     print_info "Adding NFS mount to /etc/fstab..."
-    echo "$MAIN_SERVER_IP:/mnt/nfs/cctv_images /mnt/nfs/cctv_images nfs defaults,_netdev 0 0" >> /etc/fstab
+    echo "$MAIN_SERVER_IP:/data/nfs/cctv_images /mnt/nfs/cctv_images nfs defaults,_netdev 0 0" >> /etc/fstab
     print_info "✓ Added to /etc/fstab"
 else
     print_warn "NFS mount already in /etc/fstab"
@@ -150,8 +150,8 @@ fi
 print_info "Testing database connectivity..."
 
 # Check if MySQL port is accessible
-if ! nc -z -w5 $MAIN_SERVER_IP 3307 2>/dev/null; then
-    print_error "Cannot connect to MySQL at $MAIN_SERVER_IP:3307"
+if ! nc -z -w5 $MAIN_SERVER_IP 3306 2>/dev/null; then
+    print_error "Cannot connect to MySQL at $MAIN_SERVER_IP:3306"
     print_error "Please ensure MySQL is accessible from this worker"
     exit 1
 fi
@@ -174,7 +174,11 @@ API_KEY=your_script_server_api_key
 WORKER_ID=worker-$WORKER_ID
 WORKER_NAME=GPU Worker $WORKER_ID
 
-# Camera Assignment Range
+# Camera Distribution
+DISTRIBUTION_MODE=auto
+TOTAL_WORKERS=4
+
+# Camera Assignment Range (used only if DISTRIBUTION_MODE=static/range)
 CAMERA_START_ID=$CAMERA_START
 CAMERA_END_ID=$CAMERA_END
 

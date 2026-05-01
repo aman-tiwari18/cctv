@@ -429,9 +429,20 @@ def get_hls_cameras(exam_id: int, shift_id: int, exam_date: str) -> list:
                 
                 # Apply camera distribution filter for horizontal scaling
                 try:
-                    from app.camera_distributor import filter_cameras
+                    try:
+                        from app.camera_distributor import filter_cameras
+                    except ImportError:
+                        # Add parent directory to path to find 'app' package when running as standalone script
+                        import sys
+                        from pathlib import Path
+                        root_dir = str(Path(__file__).resolve().parents[3])
+                        if root_dir not in sys.path:
+                            sys.path.append(root_dir)
+                        from app.camera_distributor import filter_cameras
+                    
                     rows = filter_cameras(rows)
-                except ImportError:
+                except Exception as e:
+                    logger.warning(f"Failed to apply camera distribution filter: {e}")
                     # If distributor not available, return all cameras (single-node mode)
                     pass
                 

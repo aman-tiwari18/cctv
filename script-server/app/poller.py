@@ -1,9 +1,14 @@
 import asyncio
+import os
 import httpx
 from datetime import datetime, timezone
 from app.config import MAIN_BACKEND_URL, API_KEY, POLL_INTERVAL_MS, LOOKAHEAD_MINUTES, GRACE_MINUTES
 from app.logger import logger
 from app.script_runner import script_runner
+from app.camera_distributor import should_process_camera
+
+WORKER_ID = os.environ.get("WORKER_ID", "worker-0")
+IS_MAIN_WORKER = WORKER_ID in ("worker-0", "main")
 
 class Poller:
     def __init__(self):
@@ -52,7 +57,8 @@ class Poller:
             logger.debug("Polling for upcoming assignments...")
             
             async with httpx.AsyncClient() as client:
-                response = await client.get(
+                # 1. Fetch PENDING tasks
+                pending_response = await client.get(
                     f"{self.backend_url}/executions/pending",
                     headers={"X-API-Key": self.api_key},
                     params={
@@ -61,13 +67,39 @@ class Poller:
                         "grace": self.grace_mins
                     }
                 )
-                response.raise_for_status()
-                data = response.json().get("data", [])
+                pending_response.raise_for_status()
+                pending_data = pending_response.json().get("data", [])
                 
-                if data:
-                    logger.info(f"Fetched {len(data)} upcoming assignment(s)")
-                    for assignment in data:
-                        self.queue_assignment(assignment)
+                # 2. Fetch RUNNING tasks (so workers that restart mid-shift can catch up)
+                running_data = []
+                try:
+                    running_response = await client.get(
+                        f"{self.backend_url}/executions",
+                        headers={"X-API-Key": self.api_key},
+                        params={
+                            "status": "RUNNING",
+                            "limit": 50
+                        }
+                    )
+                    if running_response.status_code == 200:
+                        running_data = running_response.json().get("data", [])
+                except Exception as e:
+                    logger.debug(f"Could not fetch running assignments: {e}")
+                
+                # Combine tasks, removing duplicates by ID (using dict for deduplication)
+                seen = {}
+                for item in (pending_data + running_data):
+                    seen[str(item["id"])] = item
+                all_data = list(seen.values())
+                
+                if all_data:
+                    logger.info(f"Fetched {len(all_data)} assignment(s) (Pending: {len(pending_data)}, Running: {len(running_data)})")
+                    for assignment in all_data:
+                        # Filter assignments based on camera distribution
+                        if should_process_camera(assignment):
+                            self.queue_assignment(assignment)
+                        else:
+                            logger.debug(f"Assignment {assignment.get('id')} skipped: not assigned to this worker")
                 else:
                     logger.debug("No upcoming assignments")
                     
@@ -76,12 +108,30 @@ class Poller:
 
     def queue_assignment(self, assignment):
         assignment_id = str(assignment["id"])
+        already_running = str(assignment.get("status", "")).upper() == "RUNNING"
         
+        # If queued for future but backend says RUNNING now — cancel and run immediately
+        if assignment_id in self.scheduled_scripts and already_running:
+            logger.info(f"Assignment {assignment_id} is now RUNNING on backend — triggering immediate run")
+            self.scheduled_scripts[assignment_id].cancel()
+            self.scheduled_scripts.pop(assignment_id, None)
+            asyncio.create_task(self.run_assignment(assignment))
+            return
+
         if assignment_id in self.running_scripts or assignment_id in self.scheduled_scripts:
             logger.debug(f"Assignment {assignment_id} already queued/running — skipping")
             return
             
         scheduled_at_str = assignment.get("scheduled_at")
+        
+        # RUNNING status or missing scheduled_at = run immediately
+        if already_running or not scheduled_at_str:
+            if not scheduled_at_str and not already_running:
+                logger.warning(f"Assignment {assignment_id} has no scheduled_at time — running immediately")
+            
+            asyncio.create_task(self.run_assignment(assignment))
+            return
+
         try:
             # Handle ISO timestamp parsing
             if scheduled_at_str.endswith("Z"):
@@ -122,20 +172,27 @@ class Poller:
         try:
             logger.info(f"▶ Running assignment {assignment_id}: {assignment.get('task_name', 'Unknown task')}")
             
-            await self.update_assignment_status(assignment_id, "RUNNING")
+            # Only main worker updates global status to RUNNING
+            if IS_MAIN_WORKER:
+                await self.update_assignment_status(assignment_id, "RUNNING")
             
             result = await script_runner.execute_script(assignment)
             
-            await self.update_assignment_status(assignment_id, "COMPLETED", {"result_data": result})
+            # Only main worker updates global status to COMPLETED
+            if IS_MAIN_WORKER:
+                await self.update_assignment_status(assignment_id, "COMPLETED", {"result_data": result})
+            
             logger.info(f"✔ Assignment {assignment_id} completed")
             
         except Exception as e:
             if "__TIMEOUT_COMPLETED__" in str(e):
                 logger.info(f"✔ Assignment {assignment_id} timed out after duration — marking COMPLETED")
-                await self.update_assignment_status(assignment_id, "COMPLETED", {"result_data": {"note": "Script ran for full duration"}})
+                if IS_MAIN_WORKER:
+                    await self.update_assignment_status(assignment_id, "COMPLETED", {"result_data": {"note": "Script ran for full duration"}})
             else:
                 logger.error(f"✘ Assignment {assignment_id} failed: {e}")
-                await self.update_assignment_status(assignment_id, "FAILED", {"error_log": str(e)})
+                if IS_MAIN_WORKER:
+                    await self.update_assignment_status(assignment_id, "FAILED", {"error_log": str(e)})
             
         finally:
             self.running_scripts.discard(assignment_id)

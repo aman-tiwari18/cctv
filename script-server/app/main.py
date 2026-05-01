@@ -22,7 +22,7 @@ from contextlib import asynccontextmanager
 from app.config import HTTP_PORT, MAIN_BACKEND_URL, POLL_INTERVAL_MS, SCRIPTS_DIR
 from app.logger import logger
 from app.log_manager import log_manager
-from app.poller import poller_service
+from app.poller import poller_service, IS_MAIN_WORKER
 from scripts.detection.utils.db_client import get_hls_camera_by_ch_code, get_rtsp_camera_by_id, get_hls_cameras, get_rtsp_cameras, get_rtsp_camera_by_device_and_ch, _get_connection
 
 # Import legacy pipeline functionality from the old backend
@@ -328,9 +328,10 @@ async def cancel_execution(execution_id: str):
     poller_service.running_scripts.discard(execution_id)
 
     # Mark CANCELLED in the main backend DB
-    await poller_service.update_assignment_status(
-        execution_id, "CANCELLED", {"error_log": "Manually cancelled via API"}
-    )
+    if IS_MAIN_WORKER:
+        await poller_service.update_assignment_status(
+            execution_id, "CANCELLED", {"error_log": "Manually cancelled via API"}
+        )
 
     logger.info(f"⏹ Assignment {execution_id} cancelled by user request")
     return {

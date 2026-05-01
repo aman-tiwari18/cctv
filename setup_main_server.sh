@@ -52,10 +52,10 @@ print_info "✓ NFS server installed"
 # ============================================================
 print_info "Creating NFS shared directory..."
 
-mkdir -p /mnt/nfs/cctv_images
-chmod 777 /mnt/nfs/cctv_images
+mkdir -p /data/nfs/cctv_images
+chmod 777 /data/nfs/cctv_images
 
-print_info "✓ Created /mnt/nfs/cctv_images"
+print_info "✓ Created /data/nfs/cctv_images"
 
 # ============================================================
 # Step 3: Configure NFS Exports
@@ -68,8 +68,8 @@ if [ -f /etc/exports ]; then
 fi
 
 # Add NFS export if not already present
-if ! grep -q "/mnt/nfs/cctv_images" /etc/exports; then
-    echo "/mnt/nfs/cctv_images *(rw,sync,no_subtree_check,no_root_squash)" >> /etc/exports
+if ! grep -q "/data/nfs/cctv_images" /etc/exports; then
+    echo "/data/nfs/cctv_images *(rw,sync,no_subtree_check,no_root_squash)" >> /etc/exports
     print_info "✓ Added NFS export"
 else
     print_warn "NFS export already exists"
@@ -154,10 +154,13 @@ if [ -d "$SCRIPT_SERVER_DIR" ]; then
         echo "# ──────────────────────────────────────────────────────" >> .env
         echo "WORKER_ID=worker-0" >> .env
         echo "WORKER_NAME=Main Server (Worker 0)" >> .env
-        echo "DISTRIBUTION_MODE=static" >> .env
-        echo "CAMERA_START_ID=1" >> .env
-        echo "CAMERA_END_ID=6250" >> .env
-        print_info "✓ Added worker configuration to .env (Main Server = Worker 0, Cameras 1-6,250)"
+        echo "DISTRIBUTION_MODE=auto" >> .env
+        echo "TOTAL_WORKERS=4" >> .env
+        echo "" >> .env
+        echo "# AUTO mode: Cameras distributed automatically using hash" >> .env
+        echo "# Works with any camera count (25k, 40k, 100k+)" >> .env
+        echo "# No reconfiguration needed when cameras increase!" >> .env
+        print_info "✓ Added worker configuration to .env (AUTO mode, Worker 0 of 4)"
     else
         print_warn "Worker configuration already exists in .env"
     fi
@@ -188,7 +191,7 @@ fi
 
 # Create symlink to NFS
 if [ ! -e "$DETECTION_RESULTS_DIR" ]; then
-    ln -sf /mnt/nfs/cctv_images "$DETECTION_RESULTS_DIR"
+    ln -sf /data/nfs/cctv_images "$DETECTION_RESULTS_DIR"
     print_info "✓ Linked detection results to NFS storage"
 else
     print_warn "Detection results already exists, skipping symlink"
@@ -214,7 +217,7 @@ else
 fi
 
 # Check NFS exports
-if exportfs -v | grep -q "/mnt/nfs/cctv_images"; then
+if exportfs -v | grep -q "/data/nfs/cctv_images"; then
     print_info "✓ NFS export configured"
 else
     print_error "✗ NFS export not found"
@@ -228,7 +231,7 @@ echo "============================================================"
 echo -e "${GREEN}Main Server Setup Complete!${NC}"
 echo "============================================================"
 echo "NFS Server:       Running"
-echo "Shared Directory: /mnt/nfs/cctv_images"
+echo "Shared Directory: /data/nfs/cctv_images"
 echo "MySQL Port:       3306 (accessible remotely)"
 echo "NFS Export:       Configured for all IPs"
 echo "============================================================"
