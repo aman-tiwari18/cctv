@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Grid,
   Card,
@@ -39,12 +39,15 @@ const CATEGORY_COLORS = {
 const SCRIPT_CATEGORY_MAP = {
   proximity: 'people',
   crowd: 'people',
+  crowd_biometric: 'people',
   crowd_five: 'people',
   crowd_zero: 'people',
   invigilator: 'people',
   phone: 'people',
   server: 'people',
   intruder: 'people',
+  strongroom: 'movement',
+  qp_box: 'movement',
   entry_exit: 'movement',
   inversion: 'camera',
   tamper: 'camera',
@@ -55,11 +58,14 @@ const SCRIPT_CATEGORY_MAP = {
 
 const DETECTION_TYPE_LABELS = {
   proximity: 'Close Proximity',
-  crowd: 'Crowd Detection',
+  crowd: 'Crowd Detection (Entry/Exit)',
+  crowd_biometric: 'Crowd Detection (Biometric)',
   crowd_five: 'Crowd < 5',
   crowd_zero: 'Zero Person',
   server: 'Server Room',
   intruder: 'Intruder',
+  strongroom: 'Strong Room Movement',
+  qp_box: 'QP Box Detection',
   entry_exit: 'Entry/Exit',
   phone: 'Phone',
   blind_spot: 'Blind Spot',
@@ -172,7 +178,11 @@ const Dashboard = () => {
   const [selectedCategory, setSelectedCategory] = useState('all');
 
   // Calculate total detections from context
-  const totalDetections = Object.values(unfilteredCounts).reduce((a, b) => a + b, 0);
+  const totalDetections = useMemo(() => {
+    const total = Object.values(unfilteredCounts).reduce((a, b) => a + b, 0);
+    console.log('[Dashboard] Total detections updated:', total, unfilteredCounts);
+    return total;
+  }, [unfilteredCounts]);
 
   useEffect(() => {
     loadDashboardData();

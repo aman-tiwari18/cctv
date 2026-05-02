@@ -102,10 +102,22 @@ export const SocketProvider = ({ children }) => {
       adminQueue.push(item);
     });
 
-    // Listen to detection counts updates
+    // Listen to detection counts updates (merge with existing counts instead of replacing)
     newSocket.on('detection:counts', (counts) => {
-      setUnfilteredCounts(counts);
-      setAllCounts(counts);
+      setUnfilteredCounts(prev => {
+        const merged = { ...prev };
+        for (const type in counts) {
+          merged[type] = counts[type];
+        }
+        return merged;
+      });
+      setAllCounts(prev => {
+        const merged = { ...prev };
+        for (const type in counts) {
+          merged[type] = counts[type];
+        }
+        return merged;
+      });
       console.log('📊 Admin counts updated via socket:', counts);
     });
 
@@ -117,12 +129,24 @@ export const SocketProvider = ({ children }) => {
       }
     });
 
-    // Listen to client detection counts updates
+    // Listen to client detection counts updates (merge with existing counts instead of replacing)
     newSocket.on('client-detection:counts', (counts) => {
       // For client side, we usually use the same context or a separate one
       // But let's at least update unfiltered if this is a client-only view
-      setUnfilteredCounts(counts);
-      setAllCounts(counts);
+      setUnfilteredCounts(prev => {
+        const merged = { ...prev };
+        for (const type in counts) {
+          merged[type] = counts[type];
+        }
+        return merged;
+      });
+      setAllCounts(prev => {
+        const merged = { ...prev };
+        for (const type in counts) {
+          merged[type] = counts[type];
+        }
+        return merged;
+      });
       console.log('📊 Client counts updated via socket:', counts);
     });
 

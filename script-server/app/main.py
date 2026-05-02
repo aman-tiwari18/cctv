@@ -445,8 +445,10 @@ DETECTION_FOLDERS = {
     "invigilator":      "invigilator_detection",
     "inversion":        "camera_inversion_detection",
     "tamper":           "camera_tampering_detection",
+    "tampering":        "camera_tampering_detection",
     "strongroom":       "strongroom_detection",
     "qp_box":           "qp_box_missing",
+    "vision":           "scene_classification",
 }
 
 DETECTION_LABELS = {
@@ -462,9 +464,11 @@ DETECTION_LABELS = {
     "blind_spot":       "Blind Spot",
     "invigilator":      "Invigilator Tracking",
     "tamper":           "Camera Tampering",
+    "tampering":        "Camera Tampering",
     "inversion":        "Camera Inversion",
     "strongroom":       "Strong Room Movement",
     "qp_box":           "QP Box Detection",
+    "vision":           "Scene Classification",
 }
 
 def parse_detection_filename(

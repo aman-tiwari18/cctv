@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Box,
   Grid,
@@ -54,12 +54,15 @@ const CATEGORY_COLORS = {
 const SCRIPT_CATEGORY_MAP = {
   proximity: 'people',
   crowd: 'people',
+  crowd_biometric: 'people',
   crowd_five: 'people',
   crowd_zero: 'people',
   invigilator: 'people',
   phone: 'people',
   server: 'people',
   intruder: 'people',
+  strongroom: 'movement',
+  qp_box: 'movement',
   entry_exit: 'movement',
   inversion: 'camera',
   tamper: 'camera',
@@ -71,10 +74,13 @@ const SCRIPT_CATEGORY_MAP = {
 const SCRIPT_COLORS = {
   proximity: { bg: '#e5f5ed', color: '#5cb88a' },
   crowd: { bg: '#e9e3f8ff', color: '#e24d7b' },
+  crowd_biometric: { bg: '#f3e8ff', color: '#9333ea' },
   crowd_five: { bg: '#fce8e6', color: '#e06050' },
   crowd_zero: { bg: '#edeaf3', color: '#6b5b95' },
   server: { bg: '#f3ebe4', color: '#a0623d' },
   intruder: { bg: '#f0dfefff', color: '#d94466' },
+  strongroom: { bg: '#fef2f2', color: '#b91c1c' },
+  qp_box: { bg: '#fee2e2', color: '#dc2626' },
   entry_exit: { bg: '#e0f0f0', color: '#1d7a7d' },
   phone: { bg: '#e8ece5', color: '#465a38' },
   blind_spot: { bg: '#f3f2e4', color: '#b0a850' },
@@ -88,10 +94,13 @@ const SCRIPT_COLORS = {
 const SCRIPT_ICONS = {
   proximity: WarningAmber,
   crowd: Groups,
+  crowd_biometric: Groups,
   crowd_five: Groups,
   crowd_zero: PersonOff,
   server: Dns,
   intruder: DirectionsWalk,
+  strongroom: SecurityUpdateWarning,
+  qp_box: SecurityUpdateWarning,
   entry_exit: MeetingRoom,
   phone: Smartphone,
   blind_spot: VisibilityOff,
@@ -104,11 +113,14 @@ const SCRIPT_ICONS = {
 
 const DETECTION_TYPE_LABELS = {
   proximity: 'Close Proximity',
-  crowd: 'Crowd Detection',
+  crowd: 'Crowd Detection (Entry/Exit)',
+  crowd_biometric: 'Crowd Detection (Biometric)',
   crowd_five: 'Crowd < 5',
   crowd_zero: 'Zero Person',
   server: 'Server Room',
   intruder: 'Intruder',
+  strongroom: 'Strong Room Movement',
+  qp_box: 'QP Box Detection',
   entry_exit: 'Entry/Exit',
   phone: 'Phone',
   blind_spot: 'Blind Spot',
@@ -202,7 +214,11 @@ const ClientDetectionDashboard = () => {
   const [downloadMenuAnchor, setDownloadMenuAnchor] = useState(null);
 
   // Calculate total detections from context
-  const totalDetections = Object.values(unfilteredCounts).reduce((a, b) => a + b, 0);
+  const totalDetections = useMemo(() => {
+    const total = Object.values(unfilteredCounts).reduce((a, b) => a + b, 0);
+    console.log('[ClientDashboard] Total detections updated:', total, unfilteredCounts);
+    return total;
+  }, [unfilteredCounts]);
 
   // Set client exams when dashboard data loads
   useEffect(() => {

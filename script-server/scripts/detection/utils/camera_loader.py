@@ -90,6 +90,8 @@ def load_cameras_for_execution(execution: dict) -> list:
                 "camera_name":    str(row.get("camera_name", "")).strip(),
                 "centre_name":    str(row.get("centre_name", "")).strip(),
                 "tc_code":        str(row.get("tc_code", "")).strip(),
+                "exam_id":        exam_id,      # ← ADD exam_id to camera config
+                "shift_id":       shift_id,     # ← ADD shift_id to camera config
             })
 
     elif link_type == "RTSP":
@@ -124,6 +126,8 @@ def load_cameras_for_execution(execution: dict) -> list:
                 "camera_name":    str(row.get("camera_name", "")).strip(),
                 "centre_name":    str(row.get("centre_name", "")).strip(),
                 "tc_code":        str(row.get("tc_code", "")).strip(),
+                "exam_id":        exam_id,      # ← ADD exam_id to camera config
+                "shift_id":       shift_id,     # ← ADD shift_id to camera config
             })
     else:
         logger.error(f"[CameraLoader] Unknown link_type: {link_type}")

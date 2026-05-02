@@ -73,7 +73,8 @@ const sidebarPalette = {
 // Subtle, cohesive icon colors — all within the blue-slate-indigo range to match the app
 const TYPE_META = {
   proximity: { label: 'Close Proximity', icon: WarningAmber, iconColor: '#5cb88a' },
-  crowd: { label: 'Crowd Detection', icon: Groups, iconColor: '#e24d7b' },
+  crowd: { label: 'Crowd Detection (Entry/Exit)', icon: Groups, iconColor: '#e24d7b' },
+  crowd_biometric: { label: 'Crowd Detection (Biometric)', icon: Groups, iconColor: '#9333ea' },
   crowd_five: { label: 'Crowd < 5', icon: Groups, iconColor: '#e06050' },
   crowd_zero: { label: 'Zero Person', icon: PersonOff, iconColor: '#6b5b95' },
   server: { label: 'Server Room', icon: Dns, iconColor: '#a0623d' },
@@ -84,6 +85,10 @@ const TYPE_META = {
   invigilator: { label: 'Invigilator', icon: Visibility, iconColor: '#00bfcf' },
   inversion: { label: 'Camera Inversion', icon: FlipCameraAndroid, iconColor: '#7a86b4' },
   tamper: { label: 'Camera Tampering', icon: SecurityUpdateWarning, iconColor: '#00c8d4' },
+  tampering: { label: 'Camera Tampering', icon: SecurityUpdateWarning, iconColor: '#00c8d4' },
+  strongroom: { label: 'Strong Room Movement', icon: SecurityUpdateWarning, iconColor: '#b91c1c' },
+  qp_box: { label: 'QP Box Detection', icon: SecurityUpdateWarning, iconColor: '#dc2626' },
+  vision: { label: 'Vision Detection', icon: Visibility, iconColor: '#3b82f6' },
 };
 
 const menuItems = [
@@ -114,6 +119,11 @@ const operatorMenuItems = [
 
 /* ── Detection Sub-Items (multi-select) ── */
 function DetectionSubItems({ counts, typeFilter, onTypeSelect }) {
+  // Log when counts change
+  React.useEffect(() => {
+    console.log('[DetectionSubItems] Counts updated:', counts);
+  }, [counts]);
+
   return (
     <List component="div" disablePadding sx={{ pb: 0.5 }}>
       {Object.entries(TYPE_META).map(([key, meta]) => {
@@ -309,6 +319,13 @@ function LayoutInner() {
   const [anchorEl, setAnchorEl] = useState(null);
   const [liveExamsCount, setLiveExamsCount] = useState(0);
 
+  // Calculate total detections with useMemo for better reactivity
+  const totalDetections = React.useMemo(() => {
+    const total = Object.values(unfilteredCounts).reduce((a, b) => a + b, 0);
+    console.log('[Layout] Total detections updated:', total, unfilteredCounts);
+    return total;
+  }, [unfilteredCounts]);
+
   // Fetch live exams (active today)
   useEffect(() => {
     if (location.pathname === '/') {
@@ -404,7 +421,7 @@ function LayoutInner() {
 
           {(location.pathname === '/detections' || location.pathname === '/client-detections') && (
             <Chip
-              label={`TOTAL DETECTIONS | ${Object.values(unfilteredCounts).reduce((a, b) => a + b, 0).toLocaleString()}`}
+              label={`TOTAL DETECTIONS | ${totalDetections.toLocaleString()}`}
               variant="outlined"
               sx={{
                 ml: 2,

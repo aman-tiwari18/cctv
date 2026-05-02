@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useMemo } from 'react';
+import React, { createContext, useContext, useState, useMemo, useCallback } from 'react';
 
 const DetectionCountsContext = createContext({
   allCounts: {},
@@ -26,20 +26,30 @@ export const DetectionCountsProvider = ({ children }) => {
     return Object.values(unfilteredCounts).reduce((sum, count) => sum + count, 0);
   }, [unfilteredCounts]);
 
+  // Memoize the context value to prevent unnecessary re-renders
+  const contextValue = useMemo(() => ({
+    allCounts,
+    setAllCounts,
+    unfilteredCounts,
+    setUnfilteredCounts,
+    totalLiveCount,
+    typeFilter,
+    setTypeFilter,
+    exportToExcel,
+    setExportToExcel,
+    downloadConsolidatedReport,
+    setDownloadConsolidatedReport,
+  }), [
+    allCounts,
+    unfilteredCounts,
+    totalLiveCount,
+    typeFilter,
+    exportToExcel,
+    downloadConsolidatedReport,
+  ]);
+
   return (
-    <DetectionCountsContext.Provider value={{
-      allCounts,
-      setAllCounts,
-      unfilteredCounts,
-      setUnfilteredCounts,
-      totalLiveCount,
-      typeFilter,
-      setTypeFilter,
-      exportToExcel,
-      setExportToExcel,
-      downloadConsolidatedReport,
-      setDownloadConsolidatedReport,
-    }}>
+    <DetectionCountsContext.Provider value={contextValue}>
       {children}
     </DetectionCountsContext.Provider>
   );
