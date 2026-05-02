@@ -890,7 +890,7 @@ const Cameras = () => {
             <Alert severity="info" sx={{ mb: 2 }}>
               {isHLS
                 ? 'Expected HLS columns: TC Code, Centre Name, City, State, Camera Name, ch_no, CCTV URL, Camera Category, Classification (optional)'
-                : 'Expected RTSP columns: Device ID, TC Code, Camera Name, Centre Name, City, State, Server Address, Classification (or Room Classification - optional)'}
+                : 'Expected RTSP columns: Device ID, TC Code, Camera Name, Centre Name, City, State, Server Address, Classification (or Scene Classification / Room Classification - optional)'}
               <br /><strong>Download the template below to get the exact format.</strong>
             </Alert>
             <Button variant="outlined" component="label" fullWidth startIcon={<Upload />} sx={{ mb: 2 }}>

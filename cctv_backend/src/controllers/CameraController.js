@@ -200,10 +200,29 @@ exports.uploadCameras = async (req, res) => {
                     row,
                     "Classification",
                     "classification",
+                    "Scene Classification",
+                    "scene_classification",
+                    "scene classification",
+                    "SceneClassification",
+                    "sceneclassification",
+                    "SCENE CLASSIFICATION",
                     "Room Classification",
                     "room_classification",
-                    "room classification"
+                    "room classification",
+                    "RoomClassification",
+                    "roomclassification",
+                    "ROOM CLASSIFICATION",
+                    "Room_Classification"
                 ) || null;
+
+                // Debug logging for classification
+                if (device_id) {
+                    console.log(`[DEBUG] Row for device ${device_id}:`, {
+                        rawHeaders: Object.keys(row),
+                        classificationValue: classification,
+                        rawRow: row
+                    });
+                }
 
                 if (!device_id || !cctv_url) continue;
 
@@ -227,7 +246,7 @@ exports.uploadCameras = async (req, res) => {
             const detectedHeaders = Object.keys(data[0] || {});
             const missingColumnsMessage =
                 linkType === "RTSP"
-                    ? `No valid records found. Required RTSP columns: Device ID, Server Address (or CCTV URL). Optional: Camera No, TC Code, Camera Name, Centre/Center Name, City, State, Classification (or Room Classification). Detected headers: ${detectedHeaders.join(", ")}`
+                    ? `No valid records found. Required RTSP columns: Device ID, Server Address (or CCTV URL). Optional: Camera No, TC Code, Camera Name, Centre/Center Name, City, State, Classification (or Scene Classification / Room Classification). Detected headers: ${detectedHeaders.join(", ")}`
                     : "No valid records found. Make sure the Excel contains a 'CCTV URL' column.";
 
             return res.status(400).json({
@@ -235,6 +254,15 @@ exports.uploadCameras = async (req, res) => {
                 message: missingColumnsMessage,
             });
         }
+
+        // Debug: Log sample records with classification
+        console.log(`[DEBUG] Sample records to insert (first 3):`, 
+            validRecords.slice(0, 3).map(r => ({
+                device_id: r.device_id,
+                classification: r.classification,
+                camera_name: r.camera_name
+            }))
+        );
 
         // Filter out duplicate ch_code for HLS
         let recordsToInsert = validRecords;
