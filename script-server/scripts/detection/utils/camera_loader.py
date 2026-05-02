@@ -14,6 +14,36 @@ from utils.api_client import get_pending_executions
 logger = logging.getLogger(__name__)
 
 
+# ================= ANALYTIC -> CLASSIFICATION MAPPING =================
+# This ensures each script only processes relevant cameras.
+SCRIPT_CLASSIFICATION_MAP = {
+    "server":      ["server room", "server", "ups"],
+    "proximity":   ["classroom", "computer lab", "exam", "lab", "room", "hall"],
+    "crowd":       ["classroom", "exam", "lab", "corridor", "hall", "area", "centre"],
+    "intruder":    ["strong room", "corridor", "hall", "entrance", "outside", "outdoor", "exterior", "gate"],
+    "entry_exit":  ["entry", "exit", "entrance", "gate", "door"],
+    "phone":       ["classroom", "exam", "lab", "room"],
+    "invigilator": ["classroom", "exam", "lab", "room"],
+    "tamper":      ["all"], # Process all cameras for tampering
+    "inversion":   ["all"],
+    "blind_spot":  ["classroom", "exam", "lab", "room"],
+    "strongroom":  ["strong room", "strongroom"],
+    "crowd_zero":  ["classroom", "exam", "lab", "room"],
+    "crowd_five":  ["classroom", "exam", "lab", "room"],
+}
+
+def _camera_matches_script(classification, script_code):
+    """Check if a camera's classification matches the requested script_code"""
+    if not classification:
+        return True # Default to including if unknown
+    
+    allowed = SCRIPT_CLASSIFICATION_MAP.get(script_code, [])
+    if "all" in allowed:
+        return True
+        
+    cls_lower = classification.lower()
+    return any(scene in cls_lower for scene in allowed)
+
 def load_cameras_for_execution(execution: dict) -> list:
     """
     Given a pending execution dict, query the appropriate DB table
@@ -41,7 +71,12 @@ def load_cameras_for_execution(execution: dict) -> list:
         rows = get_hls_cameras(exam_id, shift_id, today)
         for row in rows:
             ch_code = str(row.get("ch_code", "")).strip()
+            classification = str(row.get("classification", "")).strip()
+            
             if not ch_code or not row.get("cctv_url"):
+                continue
+            
+            if not _camera_matches_script(classification, script_code):
                 continue
 
             cameras.append({
@@ -61,12 +96,22 @@ def load_cameras_for_execution(execution: dict) -> list:
         rows = get_rtsp_cameras(exam_id)
         for row in rows:
             device_id = str(row.get("device_id", "")).strip()
+            classification = str(row.get("classification", "")).strip()
+            
             if not device_id or not row.get("cctv_url"):
+                continue
+
+            if not _camera_matches_script(classification, script_code):
                 continue
 
             # id is PRIMARY KEY — guaranteed unique per row
             db_id     = str(row.get("id", "")).strip()
-            camera_no = str(row.get("camera_no", "")).strip() or device_id
+            
+            raw_cam_no = row.get("camera_no")
+            if raw_cam_no is None or str(raw_cam_no).strip().lower() in ("none", "null", ""):
+                camera_no = "1"
+            else:
+                camera_no = str(raw_cam_no).strip()
 
             cameras.append({
                 "cctv_url":       row["cctv_url"],

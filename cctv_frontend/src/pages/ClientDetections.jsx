@@ -983,6 +983,34 @@ const ClientDetections = () => {
 
   const filteredImages = useMemo(() => images.filter(matchesFilters), [images, matchesFilters]);
 
+  // Handle live updates for client detections
+  const { socket } = useSocket();
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleNewClientDetection = (item) => {
+      // Process URL if missing base
+      const processedItem = {
+        ...item,
+        image_url: item.image_url?.startsWith('http') ? item.image_url : `${API_BASE_1}${item.image_url || item.imageUrl}`,
+        addedAt: Date.now(), // For the "New" badge
+      };
+
+      if (matchesFilters(processedItem)) {
+        setImages(prev => {
+          const exists = prev.some(i => (i.uid || i.id) === (processedItem.uid || processedItem.id));
+          if (exists) return prev;
+          const next = [processedItem, ...prev];
+          return next.slice(0, rowsPerPage);
+        });
+        setTotal(t => t + 1);
+      }
+    };
+
+    socket.on('client-detection:new', handleNewClientDetection);
+    return () => socket.off('client-detection:new', handleNewClientDetection);
+  }, [socket, matchesFilters, rowsPerPage]);
+
   const handleRemove = async (item) => {
     if (!item || !item.uid) return;
     setRemovingId(item.uid);

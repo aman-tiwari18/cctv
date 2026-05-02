@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 # ============================================================
 TIMEOUT_API = 10
 AUTH_USERNAME = "system"
-AUTH_PASSWORD = "Coreiseven@@"
+AUTH_PASSWORD = "Sasd@12345"
 
 # ============================================================
 # Authentication
@@ -105,7 +105,7 @@ def authenticate_server(server_address):
         "randomKey": randomKey, "publicKey": publicKey, "encryptType": "MD5",
         "ipAddress": "", "clientType": "WINPC_V1", "userType": "0"
     }
-    headers2 = {"Content-Type": "application/json", "Cookie": cookie}
+    headers2 = {"Content-Type": "application/json", "Cookie": cookie, "User-Agent": "WINPC_V1"}
     res2 = make_api_call(auth_url, payload2, headers2)
     
     if res2 is None:
@@ -116,11 +116,16 @@ def authenticate_server(server_address):
     except Exception:
         return None
     
-    if resp_json2.get("code") not in (None, 1000):
+    if resp_json2.get("code") not in (None, 1000, 0):
         return None
     
     token = resp_json2.get("token")
     return token
+
+
+def add_token_to_url(rtsp_url, token):
+    """Append session token as ?token= query parameter."""
+    return f"{rtsp_url}?token={token}"
 
 
 def get_rtsp_urls_from_server(server_address, device_id, camera_no):

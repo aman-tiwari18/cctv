@@ -3,45 +3,54 @@ import time
 import os
 import logging
 import sys
+import threading
+import torch
 from datetime import datetime
-import pymysql
-import re
 from ultralytics import YOLO
 
 # ================= LOGGING =================
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # ================= CONFIG ==================
-PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.path.join(BASE_DIR, "models", "yolov10m.pt")
+SAVE_FOLDER = os.path.join(BASE_DIR, "results/strongroom_detection")
 
-# DAV_VIDEO_PATH will be set when running as a script
-DAV_VIDEO_PATH = None
-
-MODEL_PATH = os.path.join(PROJECT_ROOT, "models/yolov10m.pt")
-SAVE_FOLDER = os.path.join(PROJECT_ROOT, "results/tcs_detections/strongroom_detection")
-
-MIN_PERSONS = 0  # Detect any movement/person
-CONF_THRESHOLD = 0.3
-COOLDOWN_TIME = 0
-
-DEVICE_ID = "DAV_NVR"
-CAMERA_NO = "CH_STRONGROOM"
+COOLDOWN_TIME = 0         # Immediate alert
+MIN_PERSONS = 0           # Threshold for violation (>0 persons)
+CONF_THRESHOLD = 0.30     # Confidence for person detection
 
 os.makedirs(SAVE_FOLDER, exist_ok=True)
 
 # ================= YOLO ====================
-print("Loading YOLO model...")
-yolo_model = YOLO(MODEL_PATH)
+yolo_model = None
+_model_lock = threading.Lock()
+
+def get_yolo_model():
+    """Return a shared YOLO model instance."""
+    global yolo_model
+    if yolo_model is None:
+        with _model_lock:
+            if yolo_model is None:
+                logger.info(f"Loading YOLO model from {MODEL_PATH}...")
+                yolo_model = YOLO(MODEL_PATH)
+                if torch.cuda.is_available():
+                    yolo_model.to('cuda')
+                    logger.info("YOLO model moved to CUDA")
+    return yolo_model
 
 # ================= STATE ===================
 last_save_times = {}
-person_counts = {}
+_state_lock = threading.Lock()
 
 # =====================================================
-# DETECTION FUNCTION
+# CORE DETECTION LOGIC
 # =====================================================
-def detect_persons_in_frame(frame, device_id="unknown", camera_no="unknown"):
-    results = yolo_model(frame, conf=CONF_THRESHOLD, verbose=False)[0]
+def detect_strongroom_in_frame(frame, device_id="unknown", camera_no="unknown", script_name="strongroom"):
+    """Standalone detection for a single frame."""
+    model = get_yolo_model()
+    results = model(frame, conf=CONF_THRESHOLD, verbose=False)[0]
 
     person_detections = [
         box for box in results.boxes
@@ -49,125 +58,59 @@ def detect_persons_in_frame(frame, device_id="unknown", camera_no="unknown"):
     ]
 
     person_count = len(person_detections)
-    max_conf = float(max([box.conf[0] for box in person_detections], default=0))
 
+    # Draw detections
     for box in person_detections:
         x1, y1, x2, y2 = map(int, box.xyxy[0])
-        conf = float(box.conf[0])
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        cv2.putText(
-            frame,
-            f"Person {conf:.2f}",
-            (x1, y1 - 10),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            (0, 255, 0),
-            2
-        )
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
 
-    cv2.putText(
-        frame,
-        f"Persons: {person_count}",
-        (10, 30),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.7,
-        (0, 255, 0),
-        2
-    )
-    cv2.putText(
-        frame,
-        f"Device: {device_id}, Cam: {camera_no}",
-        (10, 60),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.7,
-        (0, 255, 0),
-        2
-    )
+    cv2.putText(frame, f"Persons: {person_count}", (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    cv2.putText(frame, f"{device_id} - {camera_no}", (10, 60),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
     key = f"{device_id}_{camera_no}"
     now = time.time()
-    time_elapsed = now - last_save_times.get(key, 0)
+    
+    violation_detected = person_count > MIN_PERSONS
 
-    movement_detected = person_count > MIN_PERSONS
+    with _state_lock:
+        time_elapsed = now - last_save_times.get(key, 0)
+        if violation_detected and time_elapsed >= COOLDOWN_TIME:
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{SAVE_FOLDER}/{script_name}_{camera_no}_{ts}.jpg"
+            cv2.imwrite(filename, frame)
+            last_save_times[key] = now
+            logger.warning(f"[{device_id}-{camera_no}] 🚨 Strongroom intrusion: {filename}")
 
-    if movement_detected and time_elapsed >= COOLDOWN_TIME:
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        # Format: strongroom_{device_id}_{camera_no}_{ts}.jpg
-        filename = f"{SAVE_FOLDER}/strongroom_{device_id}_{camera_no}_{ts}.jpg"
-        cv2.imwrite(filename, frame)
-        last_save_times[key] = now
-        logging.info(f"[{device_id}-{camera_no}] 🚨 Movement detected & saved: {filename}")
+    return frame, violation_detected, person_count
 
-    person_counts[key] = person_counts.get(key, 0) + person_count
-    return frame, movement_detected, person_count
+def detect_strongroom_batch(items):
+    """Run true batch inference."""
+    model = get_yolo_model()
+    frames = [item['frame'] for item in items]
+    results = model(frames, conf=CONF_THRESHOLD, verbose=False)
 
+    outputs = []
+    for item, result in zip(items, results):
+        frame = item['frame'].copy()
+        person_boxes = [
+            box for box in result.boxes
+            if int(box.cls[0]) == 0 and float(box.conf[0]) >= CONF_THRESHOLD
+        ]
+        person_count = len(person_boxes)
+        violation_detected = person_count > MIN_PERSONS
 
-# ================= DB REPORTING =================
-import sys as _sys
-_utils_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'utils')
-if _utils_path not in _sys.path:
-    _sys.path.insert(0, _utils_path)
-from db_client import report_to_db_hls  # noqa: E402
+        for box in person_boxes:
+            x1, y1, x2, y2 = map(int, box.xyxy[0])
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
 
+        ch_no = item.get('ch_no', item.get('camera_id', 'unknown'))
+        cv2.putText(frame, f"Persons: {person_count}", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        cv2.putText(frame, f"CH: {ch_no}", (10, 60),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
-# =====================================================
-# DAV PROCESSOR
-# =====================================================
-def process_dav_video():
-    global DAV_VIDEO_PATH
-    if not DAV_VIDEO_PATH:
-        if len(sys.argv) < 2:
-            print("❌ Usage: python3 script.py <video_file>")
-            sys.exit(1)
-        DAV_VIDEO_PATH = sys.argv[1]
+        outputs.append((frame, violation_detected, person_count))
 
-    cap = cv2.VideoCapture(DAV_VIDEO_PATH, cv2.CAP_FFMPEG)
-
-    if not cap.isOpened():
-        logging.error("❌ DAV video could not be opened")
-        return
-
-    frame_count = 0
-    logging.info("Starting Strong Room Movement detection on DAV video")
-
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            logging.info("✅ Video finished")
-            break
-
-        frame_count += 1
-
-        # performance optimization
-        if frame_count % 5 != 0:
-            continue
-
-        frame = cv2.resize(frame, (640, 360))
-
-        processed_frame, detected, count = detect_persons_in_frame(
-            frame,
-            DEVICE_ID,
-            CAMERA_NO
-        )
-
-        if frame_count % 50 == 0:
-            if detected:
-                logging.warning(
-                    f"[{DEVICE_ID}-{CAMERA_NO}] 🚨 Movement detected! Count={count}"
-                )
-            else:
-                logging.info(
-                    f"[{DEVICE_ID}-{CAMERA_NO}] Monitoring... No movement"
-                )
-
-        cv2.imshow("Strong Room Movement Detection", processed_frame)
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            break
-
-    cap.release()
-    cv2.destroyAllWindows()
-    logging.info("Strong Room Movement detection completed")
-
-# ================= MAIN ====================
-if __name__ == "__main__":
-    process_dav_video()
+    return outputs

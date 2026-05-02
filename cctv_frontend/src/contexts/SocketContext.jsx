@@ -102,12 +102,28 @@ export const SocketProvider = ({ children }) => {
       adminQueue.push(item);
     });
 
+    // Listen to detection counts updates
+    newSocket.on('detection:counts', (counts) => {
+      setUnfilteredCounts(counts);
+      setAllCounts(counts);
+      console.log('📊 Admin counts updated via socket:', counts);
+    });
+
     // Listen to client detections
     newSocket.on('client-detection:new', (item) => {
       // Security check: only process if belongs to client's exams
       if (clientExamsRef.current.length === 0 || clientExamsRef.current.includes(String(item.exam_id))) {
         clientQueue.push(item);
       }
+    });
+
+    // Listen to client detection counts updates
+    newSocket.on('client-detection:counts', (counts) => {
+      // For client side, we usually use the same context or a separate one
+      // But let's at least update unfiltered if this is a client-only view
+      setUnfilteredCounts(counts);
+      setAllCounts(counts);
+      console.log('📊 Client counts updated via socket:', counts);
     });
 
     setSocket(newSocket);

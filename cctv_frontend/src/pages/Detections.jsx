@@ -25,6 +25,7 @@ import { reportAPI, examsAPI } from '../services/api';
 import { API_BASE_1, IMG_BASE } from '../constants/data';
 import { useDetectionCounts } from '../contexts/DetectionCountsContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useSocket } from '../contexts/SocketContext';
 import * as XLSX from 'xlsx';
 
 const TYPE_META = {
@@ -821,6 +822,34 @@ export default function Detections() {
   }, [typeFilter, dateFilter, examFilter, search, appliedStartTime, appliedEndTime]);
 
   const filteredData = useMemo(() => data.filter(matchesFilters), [data, matchesFilters]);
+
+  // Handle live updates for the data list
+  const { socket } = useSocket();
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleNewDetection = (item) => {
+      // Only add if it matches current page filters
+      if (matchesFilters(item)) {
+        setData(prev => {
+          // Check if already exists (avoid duplicates)
+          const exists = prev.some(i => (i.uid || i.id || i.image_url) === (item.uid || item.id || item.image_url));
+          if (exists) return prev;
+          
+          // Add to start and keep pagination limit
+          const next = [item, ...prev];
+          return next.slice(0, rowsPerPage);
+        });
+        
+        // Show live alert
+        setLiveAlert(item);
+        setTimeout(() => setLiveAlert(null), 5000);
+      }
+    };
+
+    socket.on('detection:new', handleNewDetection);
+    return () => socket.off('detection:new', handleNewDetection);
+  }, [socket, matchesFilters, rowsPerPage]);
 
   useEffect(() => {
     setPage(1);

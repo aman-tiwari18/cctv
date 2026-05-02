@@ -169,7 +169,16 @@ async def detection_watch_loop():
                     relative_path, type_key, file_path,
                     is_new_image=True, source=origin,
                 )
+                
+                # Emit detection to all users
                 await sio.emit("detection:new", payload)
+                
+                # Emit updated counts to all users
+                # We need to re-scan or just increment from known state
+                # For simplicity and accuracy, let's re-calculate from known_detection_files
+                counts = {k: len(v) for k, v in current_snapshot.items()}
+                await sio.emit("detection:counts", counts)
+                
                 logger.info(f"Live detection emitted ({origin}): {type_key} {relative_path}")
 
         known_detection_files = current_snapshot
@@ -847,22 +856,28 @@ async def copy_client_detections(payload: ClientDetectionCopyRequest):
                         "uid": row.get("unique_id"),
                     })
                     copied.append(copied_item)
-
-                    try:
-                        await sio.emit("client-detection:new", copied_item)
-                        logger.info(f"Emitted client-detection:new for {item.uid}")
-                                                
-                        # Trigger SMS Alert via Node.js Backend
-                        try:
-                            # Payload: { "uid": str, "source": str }
-                            sms_payload = {"uid": item.uid, "source": item.source}
-                            sms_url = f"{MAIN_BACKEND_URL}/sms/send-push-alert"
-                            logger.info(f"Triggering SMS alert on Node.js: {sms_url}")
-                            requests.post(sms_url, json=sms_payload, timeout=5)
-                        except Exception as sms_err:
-                            logger.error(f"Failed to trigger SMS alert via Node.js: {sms_err}")
-                    except Exception as e:
-                        logger.warning(f"Failed to emit client detection socket event: {e}")
+                    
+            # After all updates, emit client detections and updated client counts
+            for item in copied:
+                await sio.emit("client-detection:new", item)
+            
+            # Re-fetch total client counts for today
+            try:
+                today_iso = datetime.now().date().isoformat()
+                cur.execute("SELECT camera_category, COUNT(*) as count FROM camera_report_hls WHERE exam_date = %s AND pushed_to_client = 1 GROUP BY camera_category", (today_iso,))
+                hls_c = cur.fetchall()
+                cur.execute("SELECT camera_category, COUNT(*) as count FROM camera_report_rtsp WHERE exam_date = %s AND pushed_to_client = 1 GROUP BY camera_category", (today_iso,))
+                rtsp_c = cur.fetchall()
+                
+                client_counts = {}
+                for row in hls_c + rtsp_c:
+                    cat = row["camera_category"]
+                    client_counts[cat] = client_counts.get(cat, 0) + row["count"]
+                
+                await sio.emit("client-detection:counts", client_counts)
+            except Exception as e:
+                logger.error(f"Failed to emit client counts: {e}")
+                
         conn.commit()
     except Exception as e:
         logger.error(f"DB Error in /client-detections/copy: {e}")

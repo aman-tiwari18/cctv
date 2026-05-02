@@ -6,7 +6,7 @@ import logging
 # ================= DSS CONFIG =================
 DSS_BASE = "https://d11.camview.io:443"
 USERNAME = "system"
-PASSWORD = "Coreiseven@@"
+PASSWORD = "Sasd@12345"
 CLIENT_TYPE = "WINPC_V1"
 
 # ================= LOGGER ====================
