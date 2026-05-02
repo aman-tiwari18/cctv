@@ -18,7 +18,7 @@ MODEL_PATH = os.path.join(BASE_DIR, "models", "yolov10m.pt")
 SAVE_FOLDER = os.path.join(BASE_DIR, "results/crowd_detection")
 
 COOLDOWN_TIME = 240       # Seconds between saves
-MIN_PERSONS = 12          # Threshold for crowd violation
+MIN_PERSONS = 10          # Threshold for crowd violation
 CONF_THRESHOLD = 0.45     # Confidence for person detection
 
 os.makedirs(SAVE_FOLDER, exist_ok=True)

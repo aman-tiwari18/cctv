@@ -19,10 +19,10 @@ logger = logging.getLogger(__name__)
 SCRIPT_CLASSIFICATION_MAP = {
     "server":          ["server room", "server", "ups"],
     "proximity":       ["inside classroom", "inside_classroom", "classroom"],
-    "crowd":           ["entry/exit", "entry_exit", "entryexit"],
+    "crowd":           ["entry/exit", "entry_exit", "entryexit", "entry"],
     "crowd_biometric": ["biometric"],
     "intruder":        ["strong room", "strongroom", "strong_room"],
-    "entry_exit":      ["entry/exit", "entry_exit", "entryexit"],
+    "entry_exit":      ["entry/exit", "entry_exit", "entryexit", "entry"],
     "phone":           ["inside classroom", "inside_classroom", "classroom"],
     "invigilator":     ["inside classroom", "inside_classroom", "classroom"],
     "tamper":          ["all"], # Process all cameras for tampering

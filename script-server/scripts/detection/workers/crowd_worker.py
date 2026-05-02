@@ -171,6 +171,7 @@ def crowd_worker(frame_queue):
     """RTSP Worker entry point."""
     logger.info("🟢 [Crowd] RTSP worker started")
     stop_event = threading.Event()
+    _rtsp_states = {}  # per-camera cooldown state, keyed by (device_id, camera_no)
 
     gpu_t = threading.Thread(
         target=_gpu_batch_worker,
@@ -196,6 +197,10 @@ def crowd_worker(frame_queue):
             if frame is None:
                 continue
 
+            cam_key = (device_id, camera_no)
+            if cam_key not in _rtsp_states:
+                _rtsp_states[cam_key] = {"last_save": 0}
+
             try:
                 _gpu_queue.put({
                     "frame":        frame.copy(),
@@ -205,7 +210,7 @@ def crowd_worker(frame_queue):
                     "exam_id":      exam_id,
                     "script_name":  "crowd",
                     "source_type":  "RTSP",
-                    "state":        {},
+                    "state":        _rtsp_states[cam_key],
                 }, timeout=0.1)
             except queue.Full:
                 pass
