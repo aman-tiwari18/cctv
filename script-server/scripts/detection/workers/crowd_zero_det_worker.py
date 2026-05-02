@@ -62,7 +62,7 @@ _gpu_queue = queue.Queue(maxsize=GPU_QUEUE_SIZE)
 # =====================================================
 # 🚀 GPU BATCH WORKER
 # =====================================================
-def _gpu_batch_worker(stop_event, save_folder, cooldown_time=240):
+def _gpu_batch_worker(stop_event, save_folder, cooldown_time=360):
     """
     GPU batch worker — TRUE batch inference.
     """
@@ -274,11 +274,11 @@ def crowd_zero_det_worker_hls(camera_configs, stop_event=None):
     if stop_event is None:
         stop_event = _STOP_EVENT
 
-    # Scene filtering
+    # Scene filtering - Crowd Zero detection (candidate count < 5) only for Inside Classroom cameras
     valid_configs = []
     for cfg in camera_configs:
         cls_val = str(cfg.get('classification', '')).lower()
-        if not cls_val or any(s in cls_val for s in ('corridor', 'entrance', 'lobby', 'parking')):
+        if not cls_val or any(s in cls_val for s in ('inside classroom', 'inside_classroom', 'classroom')):
             valid_configs.append(cfg)
             
     if not valid_configs:

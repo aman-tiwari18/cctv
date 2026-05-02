@@ -62,7 +62,7 @@ _gpu_queue = queue.Queue(maxsize=GPU_QUEUE_SIZE)
 # =====================================================
 # 🚀 GPU BATCH WORKER
 # =====================================================
-def _gpu_batch_worker(stop_event, save_folder, cooldown_time=480):
+def _gpu_batch_worker(stop_event, save_folder, cooldown_time=600):
     """
     GPU batch worker — TRUE batch inference.
     """
@@ -274,11 +274,11 @@ def phone_worker_hls(camera_configs, stop_event=None):
     if stop_event is None:
         stop_event = _STOP_EVENT
 
-    # Scene filtering
+    # Scene filtering - Phone detection only for Inside Classroom cameras
     valid_configs = []
     for cfg in camera_configs:
         cls_val = str(cfg.get('classification', '')).lower()
-        if not cls_val or any(s in cls_val for s in ('classroom', 'exam', 'lab', 'corridor')):
+        if not cls_val or any(s in cls_val for s in ('inside classroom', 'inside_classroom', 'classroom')):
             valid_configs.append(cfg)
             
     if not valid_configs:

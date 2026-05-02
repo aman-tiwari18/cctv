@@ -979,20 +979,21 @@ def get_worker(analytic_name, mode="rtsp"):
     Returns the worker function for the given analytic and mode (rtsp/hls).
     """
     mapping = {
-        "server":      ("server_room_worker",      "server_room_worker",      "server_room_worker_hls"),
-        "crowd":       ("crowd_worker",            "crowd_worker",            "crowd_worker_hls"),
-        "intruder":    ("intruder_worker",         "intruder_worker",         "intruder_worker_hls"),
-        "entry_exit":  ("entry_exit_worker",       "entry_exit_worker",       "entry_exit_worker_hls"),
-        "proximity":   ("close_proximity_worker",  "close_proximity_worker",  "close_proximity_worker_hls"),
-        "phone":       ("phone_worker",            "phone_worker",            "phone_worker_hls"),
-        "invigilator": ("invigilator_worker",      "invigilator_worker",      "invigilator_worker_hls"),
-        "tamper":      ("camera_tampering_worker", "camera_tampering_worker", "camera_tampering_worker_hls"),
-        "inversion":   ("camera_inversion_worker", "camera_inversion_worker", "camera_inversion_worker_hls"),
-        "crowd_zero":  ("crowd_zero_det_worker",   "crowd_zero_det_worker",   "crowd_zero_det_worker_hls"),
-        "crowd_five":  ("crowd_five_det_worker",   "crowd_five_det_worker",   "crowd_five_det_worker_hls"),
-        "blind_spot":  ("blind_spot_worker",       "blind_spot_worker",       "blind_spot_worker_hls"),
-        "strongroom":  ("strongroom_worker",       "strongroom_worker",       "strongroom_worker_hls"),
-        "qp_box":      ("qp_box_det_worker",       "qp_box_det_worker",       "qp_box_det_worker_hls"),
+        "server":           ("server_room_worker",         "server_room_worker",         "server_room_worker_hls"),
+        "crowd":            ("crowd_worker",               "crowd_worker",               "crowd_worker_hls"),
+        "crowd_biometric":  ("crowd_det_biometric_worker", "crowd_det_biometric_worker", "crowd_det_biometric_worker_hls"),
+        "intruder":         ("intruder_worker",            "intruder_worker",            "intruder_worker_hls"),
+        "entry_exit":       ("entry_exit_worker",          "entry_exit_worker",          "entry_exit_worker_hls"),
+        "proximity":        ("close_proximity_worker",     "close_proximity_worker",     "close_proximity_worker_hls"),
+        "phone":            ("phone_worker",               "phone_worker",               "phone_worker_hls"),
+        "invigilator":      ("invigilator_worker",         "invigilator_worker",         "invigilator_worker_hls"),
+        "tamper":           ("camera_tampering_worker",    "camera_tampering_worker",    "camera_tampering_worker_hls"),
+        "inversion":        ("camera_inversion_worker",    "camera_inversion_worker",    "camera_inversion_worker_hls"),
+        "crowd_zero":       ("crowd_zero_det_worker",      "crowd_zero_det_worker",      "crowd_zero_det_worker_hls"),
+        "crowd_five":       ("crowd_five_det_worker",      "crowd_five_det_worker",      "crowd_five_det_worker_hls"),
+        "blind_spot":       ("blind_spot_worker",          "blind_spot_worker",          "blind_spot_worker_hls"),
+        "strongroom":       ("strongroom_worker",          "strongroom_worker",          "strongroom_worker_hls"),
+        "qp_box":           ("qp_box_det_worker",          "qp_box_det_worker",          "qp_box_det_worker_hls"),
     }
     
     if analytic_name not in mapping:
@@ -1087,6 +1088,7 @@ def handle_sigterm(sig, frame):
         "workers.server_room_worker",
         "workers.phone_worker",
         "workers.crowd_worker",
+        "workers.crowd_det_biometric_worker",
         "workers.crowd_zero_det_worker",
         "workers.crowd_five_det_worker",
         "workers.blind_spot_worker",
