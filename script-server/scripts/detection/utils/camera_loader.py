@@ -17,19 +17,21 @@ logger = logging.getLogger(__name__)
 # ================= ANALYTIC -> CLASSIFICATION MAPPING =================
 # This ensures each script only processes relevant cameras.
 SCRIPT_CLASSIFICATION_MAP = {
-    "server":      ["server room", "server", "ups"],
-    "proximity":   ["classroom", "computer lab", "exam", "lab", "room", "hall"],
-    "crowd":       ["classroom", "exam", "lab", "corridor", "hall", "area", "centre"],
-    "intruder":    ["strong room", "corridor", "hall", "entrance", "outside", "outdoor", "exterior", "gate"],
-    "entry_exit":  ["entry", "exit", "entrance", "gate", "door"],
-    "phone":       ["classroom", "exam", "lab", "room"],
-    "invigilator": ["classroom", "exam", "lab", "room"],
-    "tamper":      ["all"], # Process all cameras for tampering
-    "inversion":   ["all"],
-    "blind_spot":  ["classroom", "exam", "lab", "room"],
-    "strongroom":  ["strong room", "strongroom"],
-    "crowd_zero":  ["classroom", "exam", "lab", "room"],
-    "crowd_five":  ["classroom", "exam", "lab", "room"],
+    "server":          ["server room", "server", "ups"],
+    "proximity":       ["inside classroom", "inside_classroom", "classroom"],
+    "crowd":           ["entry/exit", "entry_exit", "entryexit"],
+    "crowd_biometric": ["biometric"],
+    "intruder":        ["strong room", "strongroom", "strong_room"],
+    "entry_exit":      ["entry/exit", "entry_exit", "entryexit"],
+    "phone":           ["inside classroom", "inside_classroom", "classroom"],
+    "invigilator":     ["inside classroom", "inside_classroom", "classroom"],
+    "tamper":          ["all"], # Process all cameras for tampering
+    "inversion":       ["all"],
+    "blind_spot":      ["all"],
+    "strongroom":      ["strong room", "strongroom", "strong_room"],
+    "qp_box":          ["strong room", "strongroom", "strong_room"],
+    "crowd_zero":      ["inside classroom", "inside_classroom", "classroom"],
+    "crowd_five":      ["inside classroom", "inside_classroom", "classroom"],
 }
 
 def _camera_matches_script(classification, script_code):

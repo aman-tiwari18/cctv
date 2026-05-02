@@ -114,6 +114,7 @@ class ScriptRunner:
             "crowd",
             "crowd_five",
             "crowd_zero",
+            "crowd_biometric",  # ← ADDED
             "intruder",
             "entry_exit",
             "proximity",
@@ -122,6 +123,8 @@ class ScriptRunner:
             "inversion",
             "tampering",
             "blind_spot",
+            "strongroom",       # ← ADDED
+            "qp_box",           # ← ADDED
         }
 
         link_type_for_path = str(execution_metadata.get("link_type") or execution.get("link_type") or "HLS").upper()
