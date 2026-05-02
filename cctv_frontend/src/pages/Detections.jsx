@@ -65,12 +65,12 @@ const NewBadge = ({ addedAt, sx }) => {
   useEffect(() => {
     if (!addedAt) return;
 
-    const parsedTime = new Date(addedAt).getTime();
+    const parsedTime = typeof addedAt === 'number' ? addedAt : new Date(addedAt).getTime();
     if (isNaN(parsedTime)) return; // safety check
 
     const diff = Date.now() - parsedTime;
 
-    if (diff < 7000) {
+    if (diff < 5000) {
       setVisible(true);
       const timer = setTimeout(() => setVisible(false), 5000 - diff);
       return () => clearTimeout(timer);

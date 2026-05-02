@@ -41,6 +41,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+import uuid
+
 # ================= CONFIG ==================
 RTSP_SAVE_FOLDER = os.path.join(DETECTION_ROOT, "results/proximity_detection")
 HLS_SAVE_FOLDER  = os.path.join(DETECTION_ROOT, "results/tcs_detections/proximity_detection")
@@ -116,19 +118,44 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=180):
 
             state["last_save"] = now
             ts = time.strftime("%Y%m%d_%H%M%S")
+            uid = str(uuid.uuid4())[:8]
             
             dev_id = item.get("device_id") or item.get("camera_id")
             ch_no = item.get("ch_no")
+            exam_id = item.get("exam_id") or "0"
             script_name = item.get("script_name", "proximity")
             
             if item.get("source_type") == "HLS":
-                fname = f"{script_name}_ch{ch_no}_{ts}.jpg"
+                fname = f"{script_name}_ch{ch_no}_exam{exam_id}_{ts}_{uid}.jpg"
             else:
-                fname = f"{script_name}_{dev_id}_{ch_no}_{ts}.jpg"
+                fname = f"{script_name}_{dev_id}_{ch_no}_exam{exam_id}_{ts}_{uid}.jpg"
             
             path = os.path.join(save_folder, fname)
             cv2.imwrite(path, annotated_frame)
             logger.warning(f"[Proximity] 🚨 SAVED violations={violation_count} → {path}")
+            
+            # Report to database
+            if item.get("source_type") == "HLS":
+                try:
+                    from utils.db_client import report_to_db_hls
+                    report_to_db_hls(
+                        ch_code=str(ch_no),
+                        image_name=fname,
+                        folder="proximity_detection"
+                    )
+                except Exception as e:
+                    logger.error(f"[Proximity] HLS DB Reporting Error: {e}")
+            else:  # RTSP
+                try:
+                    from utils.db_client import report_to_db_rtsp
+                    report_to_db_rtsp(
+                        device_id=str(dev_id),
+                        camera_no=str(ch_no),
+                        image_name=fname,
+                        folder="proximity_detection"
+                    )
+                except Exception as e:
+                    logger.error(f"[Proximity] RTSP DB Reporting Error: {e}")
             
             del annotated_frame
             if 'frame' in item: del item['frame']
@@ -162,8 +189,9 @@ def close_proximity_worker(frame_queue):
                 frame        = packet.get("frame")
                 device_id    = str(packet.get("device_id", "unknown"))
                 camera_no    = str(packet.get("camera_no") or packet.get("ch_no") or "0")
+                exam_id      = str(packet.get("exam_id", "0"))
             else:
-                frame, device_id, camera_no = packet[:3]
+                frame, device_id, camera_no, _, exam_id = packet[:5]
 
             if frame is None:
                 continue
@@ -174,6 +202,7 @@ def close_proximity_worker(frame_queue):
                     "device_id":    device_id,
                     "camera_no":    camera_no,
                     "ch_no":        camera_no,
+                    "exam_id":      exam_id,
                     "script_name":  "proximity",
                     "source_type":  "RTSP",
                     "state":        {},
@@ -197,6 +226,7 @@ def _hls_camera_thread(cfg, stop_event):
     camera_id   = cfg['camera_id']
     script_name = cfg.get('script_code', 'proximity')
     ch_no       = cfg.get('ch_no') or cfg.get('camera_no') or camera_id
+    exam_id     = cfg.get('exam_id', '0')
     initial_url = cfg.get('cctv_url') or cfg.get('stream_url') or cfg.get('url', '')
 
     hls = extract_hls_streaming_url(initial_url)
@@ -224,6 +254,7 @@ def _hls_camera_thread(cfg, stop_event):
                 "frame":       frame,
                 "camera_id":   camera_id,
                 "ch_no":       ch_no,
+                "exam_id":     exam_id,
                 "script_name": script_name,
                 "source_type": "HLS",
                 "state":       state,

@@ -98,17 +98,42 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=180):
                 last_save_time[cam_id] = now
                 ts = datetime.now().strftime("%Y%m%d_%H%M%S")
                 uid = str(uuid.uuid4())[:8]
+                
                 ch_no = item.get("ch_no") or "0"
+                exam_id = "0"  # Blind spot doesn't have exam_id in packet
                 script_name = "blind_spot"
                 
                 if item.get("source_type") == "HLS":
-                    fname = f"{script_name}_ch{ch_no}_{ts}_{uid}.jpg"
+                    fname = f"{script_name}_ch{ch_no}_exam{exam_id}_{ts}_{uid}.jpg"
                 else:
-                    fname = f"{script_name}_{cam_id}_{ch_no}_{ts}_{uid}.jpg"
+                    fname = f"{script_name}_{cam_id}_{ch_no}_exam{exam_id}_{ts}_{uid}.jpg"
                 
                 path = os.path.join(save_folder, fname)
                 cv2.imwrite(path, annotated)
                 logger.warning(f"[BlindSpot] 🚨 SAVED violation → {path}")
+                
+                # Report to database
+                if item.get("source_type") == "HLS":
+                    try:
+                        from utils.db_client import report_to_db_hls
+                        report_to_db_hls(
+                            ch_code=str(ch_no),
+                            image_name=fname,
+                            folder="blind_spot_detection"
+                        )
+                    except Exception as e:
+                        logger.error(f"[BlindSpot] HLS DB Reporting Error: {e}")
+                else:  # RTSP
+                    try:
+                        from utils.db_client import report_to_db_rtsp
+                        report_to_db_rtsp(
+                            device_id=str(cam_id),
+                            camera_no=str(ch_no),
+                            image_name=fname,
+                            folder="blind_spot_detection"
+                        )
+                    except Exception as e:
+                        logger.error(f"[BlindSpot] RTSP DB Reporting Error: {e}")
                 
                 del annotated
                 if 'frame' in item: del item['frame']

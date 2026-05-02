@@ -93,7 +93,12 @@ const NewBadge = ({ addedAt, sx }) => {
 
   useEffect(() => {
     if (!addedAt) return;
-    const diff = Date.now() - addedAt;
+    
+    const parsedTime = typeof addedAt === 'number' ? addedAt : new Date(addedAt).getTime();
+    if (isNaN(parsedTime)) return;
+    
+    const diff = Date.now() - parsedTime;
+    
     if (diff < 5000) {
       setVisible(true);
       const timer = setTimeout(() => setVisible(false), 5000 - diff);

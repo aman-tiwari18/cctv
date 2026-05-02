@@ -134,6 +134,29 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=0):
             cv2.imwrite(path, annotated_frame)
             logger.warning(f"[Intruder] 🚨 SAVED persons={person_count} → {path}")
             
+            # Report to database
+            if item.get("source_type") == "HLS":
+                try:
+                    from utils.db_client import report_to_db_hls
+                    report_to_db_hls(
+                        ch_code=str(ch_no),
+                        image_name=fname,
+                        folder="intruder_detection"
+                    )
+                except Exception as e:
+                    logger.error(f"[Intruder] HLS DB Reporting Error: {e}")
+            else:  # RTSP
+                try:
+                    from utils.db_client import report_to_db_rtsp
+                    report_to_db_rtsp(
+                        device_id=str(dev_id),
+                        camera_no=str(ch_no),
+                        image_name=fname,
+                        folder="intruder_detection"
+                    )
+                except Exception as e:
+                    logger.error(f"[Intruder] RTSP DB Reporting Error: {e}")
+            
             del annotated_frame
             if 'frame' in item: del item['frame']
 

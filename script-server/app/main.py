@@ -586,6 +586,15 @@ def parse_detection_filename(
     if date_str:
         date_display = f"{date_str[6:]}-{date_str[4:6]}-{date_str[:4]}"
 
+    # Calculate detectedAt timestamp in milliseconds from the filename date/time
+    detected_at_ms = None
+    if date_str and time_str:
+        try:
+            dt = datetime.strptime(date_str + time_str, "%Y%m%d%H%M%S")
+            detected_at_ms = int(dt.timestamp() * 1000)
+        except Exception:
+            detected_at_ms = now_ms  # Fallback to current time
+
     image_rel = quote(str(file_obj.as_posix()), safe="/")
     issue_label_map = {
         "no_targets": "No Targets",
@@ -612,6 +621,7 @@ def parse_detection_filename(
         "issueLabel":  issue_label_map.get(issue_type, issue_type.replace("_", " ").title() if issue_type else ""),
         "detectionType": type_key,
         "addedAt":     now_ms,
+        "detectedAt":  detected_at_ms,  # ← Actual detection timestamp in ms
         "timestamp":   timestamp_iso,
         "isNewImage":  is_new_image,
         "source":      source,

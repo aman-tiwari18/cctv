@@ -126,15 +126,39 @@ def _process_packet(item, save_folder):
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             uid = str(uuid.uuid4())[:8]
             script_name = "tampering"
+            exam_id = "0"  # Tampering doesn't have exam_id in packet
             
             if source_type == "HLS":
-                fname = f"{script_name}_ch{camera_no}_{ts}_{uid}.jpg"
+                fname = f"{script_name}_ch{camera_no}_exam{exam_id}_{ts}_{uid}.jpg"
             else:
-                fname = f"{script_name}_{device_id}_{camera_no}_{ts}_{uid}.jpg"
+                fname = f"{script_name}_{device_id}_{camera_no}_exam{exam_id}_{ts}_{uid}.jpg"
             
             path = os.path.join(save_folder, fname)
             cv2.imwrite(path, frame)
             logger.warning(f"[Tampering] 🚨 {status} | {device_id} → {path}")
+            
+            # Report to database
+            if source_type == "HLS":
+                try:
+                    from utils.db_client import report_to_db_hls
+                    report_to_db_hls(
+                        ch_code=str(camera_no),
+                        image_name=fname,
+                        folder="camera_tampering_detection"
+                    )
+                except Exception as e:
+                    logger.error(f"[Tampering] HLS DB Reporting Error: {e}")
+            else:  # RTSP
+                try:
+                    from utils.db_client import report_to_db_rtsp
+                    report_to_db_rtsp(
+                        device_id=str(device_id),
+                        camera_no=str(camera_no),
+                        image_name=fname,
+                        folder="camera_tampering_detection"
+                    )
+                except Exception as e:
+                    logger.error(f"[Tampering] RTSP DB Reporting Error: {e}")
             
     except Exception as e:
         logger.error(f"[Tampering] Error: {e}")

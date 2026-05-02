@@ -40,6 +40,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+import uuid
+
 # ================= CONFIG ==================
 RTSP_SAVE_FOLDER = os.path.join(DETECTION_ROOT, "results/camera_inversion_detection")
 HLS_SAVE_FOLDER  = os.path.join(DETECTION_ROOT, "results/tcs_detections/camera_inversion_detection")
@@ -192,16 +194,40 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=120):
                 uid = str(uuid.uuid4())[:8]
                 
                 ch_no = item.get("ch_no") or "0"
+                exam_id = "0"  # Inversion doesn't have exam_id in packet
                 script_name = "inversion"
                 
                 if item.get("source_type") == "HLS":
-                    fname = f"{script_name}_ch{ch_no}_{ts}_{uid}.jpg"
+                    fname = f"{script_name}_ch{ch_no}_exam{exam_id}_{ts}_{uid}.jpg"
                 else:
-                    fname = f"{script_name}_{cam_id}_{ch_no}_{ts}_{uid}.jpg"
+                    fname = f"{script_name}_{cam_id}_{ch_no}_exam{exam_id}_{ts}_{uid}.jpg"
                 
                 path = os.path.join(save_folder, fname)
                 cv2.imwrite(path, corrected)
                 logger.warning(f"[Inversion] 🚨 SAVED inversion → {path}")
+                
+                # Report to database
+                if item.get("source_type") == "HLS":
+                    try:
+                        from utils.db_client import report_to_db_hls
+                        report_to_db_hls(
+                            ch_code=str(ch_no),
+                            image_name=fname,
+                            folder="camera_inversion_detection"
+                        )
+                    except Exception as e:
+                        logger.error(f"[Inversion] HLS DB Reporting Error: {e}")
+                else:  # RTSP
+                    try:
+                        from utils.db_client import report_to_db_rtsp
+                        report_to_db_rtsp(
+                            device_id=str(cam_id),
+                            camera_no=str(ch_no),
+                            image_name=fname,
+                            folder="camera_inversion_detection"
+                        )
+                    except Exception as e:
+                        logger.error(f"[Inversion] RTSP DB Reporting Error: {e}")
                 
                 del corrected
                 if 'frame' in item: del item['frame']
