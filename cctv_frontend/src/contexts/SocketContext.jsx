@@ -31,62 +31,18 @@ export const SocketProvider = ({ children }) => {
 
       // Process queues every 2 seconds for consistent batching
       syncInterval = setInterval(() => {
-        // Process admin detections
+        // Process admin detections (for live feed display, not for counts)
         if (adminQueue.length > 0) {
           const batch = [...adminQueue];
           adminQueue = [];
-
-          const typeIncrements = {};
-          batch.forEach(item => {
-            typeIncrements[item.type] = (typeIncrements[item.type] || 0) + 1;
-          });
-
-          setUnfilteredCounts(prev => {
-            const next = { ...prev };
-            for (const t in typeIncrements) {
-              next[t] = (next[t] || 0) + typeIncrements[t];
-            }
-            return next;
-          });
-
-          setAllCounts(prev => {
-            const next = { ...prev };
-            for (const t in typeIncrements) {
-              next[t] = (next[t] || 0) + typeIncrements[t];
-            }
-            return next;
-          });
-
-          console.log(`📊 Processed ${batch.length} admin detections`);
+          console.log(`📊 Processed ${batch.length} admin detections (for live feed)`);
         }
 
-        // Process client detections
+        // Process client detections (for live feed display, not for counts)
         if (clientQueue.length > 0) {
           const batch = [...clientQueue];
           clientQueue = [];
-
-          const typeIncrements = {};
-          batch.forEach(item => {
-            typeIncrements[item.type] = (typeIncrements[item.type] || 0) + 1;
-          });
-
-          setUnfilteredCounts(prev => {
-            const next = { ...prev };
-            for (const t in typeIncrements) {
-              next[t] = (next[t] || 0) + typeIncrements[t];
-            }
-            return next;
-          });
-
-          setAllCounts(prev => {
-            const next = { ...prev };
-            for (const t in typeIncrements) {
-              next[t] = (next[t] || 0) + typeIncrements[t];
-            }
-            return next;
-          });
-
-          console.log(`📊 Processed ${batch.length} client detections`);
+          console.log(`📊 Processed ${batch.length} client detections (for live feed)`);
         }
       }, 2000); // Consistent 2-second batching
     });
@@ -97,31 +53,23 @@ export const SocketProvider = ({ children }) => {
       console.log('❌ Socket disconnected');
     });
 
-    // Listen to admin detections
+    // Listen to admin detections (for live feed display only)
     newSocket.on('detection:new', (item) => {
       adminQueue.push(item);
     });
 
-    // Listen to detection counts updates (merge with existing counts instead of replacing)
+    // Listen to detection counts updates - THIS IS THE SOURCE OF TRUTH FOR COUNTS
     newSocket.on('detection:counts', (counts) => {
-      setUnfilteredCounts(prev => {
-        const merged = { ...prev };
-        for (const type in counts) {
-          merged[type] = counts[type];
-        }
-        return merged;
-      });
-      setAllCounts(prev => {
-        const merged = { ...prev };
-        for (const type in counts) {
-          merged[type] = counts[type];
-        }
-        return merged;
-      });
-      console.log('📊 Admin counts updated via socket:', counts);
+      console.log('📊 Received detection:counts from backend:', counts);
+      
+      // Set absolute counts (not incremental)
+      setUnfilteredCounts(counts);
+      setAllCounts(counts);
+      
+      console.log('✅ Counts updated in context');
     });
 
-    // Listen to client detections
+    // Listen to client detections (for live feed display only)
     newSocket.on('client-detection:new', (item) => {
       // Security check: only process if belongs to client's exams
       if (clientExamsRef.current.length === 0 || clientExamsRef.current.includes(String(item.exam_id))) {
@@ -129,25 +77,15 @@ export const SocketProvider = ({ children }) => {
       }
     });
 
-    // Listen to client detection counts updates (merge with existing counts instead of replacing)
+    // Listen to client detection counts updates
     newSocket.on('client-detection:counts', (counts) => {
-      // For client side, we usually use the same context or a separate one
-      // But let's at least update unfiltered if this is a client-only view
-      setUnfilteredCounts(prev => {
-        const merged = { ...prev };
-        for (const type in counts) {
-          merged[type] = counts[type];
-        }
-        return merged;
-      });
-      setAllCounts(prev => {
-        const merged = { ...prev };
-        for (const type in counts) {
-          merged[type] = counts[type];
-        }
-        return merged;
-      });
-      console.log('📊 Client counts updated via socket:', counts);
+      console.log('📊 Received client-detection:counts from backend:', counts);
+      
+      // Set absolute counts (not incremental)
+      setUnfilteredCounts(counts);
+      setAllCounts(counts);
+      
+      console.log('✅ Client counts updated in context');
     });
 
     setSocket(newSocket);

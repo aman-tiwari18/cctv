@@ -3,6 +3,7 @@ import asyncio
 import re
 import os
 import shutil
+import time
 import openpyxl
 from openpyxl.styles import Font
 from pydantic import BaseModel
@@ -148,6 +149,9 @@ def list_detection_files() -> dict:
 
 async def detection_watch_loop():
     global known_detection_files
+    
+    # Throttle: Track last emission time per detection type (1 per second per type)
+    last_emission_time = {}
 
     while True:
         await asyncio.sleep(DETECTION_SCAN_INTERVAL_SECONDS)
@@ -157,7 +161,14 @@ async def detection_watch_loop():
             previous_files = known_detection_files.get(type_key, set())
             new_files = sorted(current_files - previous_files)
 
-            for tagged_path in new_files:
+            # Throttle: Only emit 1 detection per second per type
+            now = time.time()
+            last_emit = last_emission_time.get(type_key, 0)
+            
+            if new_files and (now - last_emit) >= 1.0:
+                # Emit only the FIRST new detection for this type
+                tagged_path = new_files[0]
+                
                 # tagged_path is "hls:relative" or "rtsp:relative"
                 origin, relative_path = tagged_path.split(":", 1)
                 if origin == "rtsp":
@@ -173,13 +184,16 @@ async def detection_watch_loop():
                 # Emit detection to all users
                 await sio.emit("detection:new", payload)
                 
-                # Emit updated counts to all users
-                # We need to re-scan or just increment from known state
-                # For simplicity and accuracy, let's re-calculate from known_detection_files
-                counts = {k: len(v) for k, v in current_snapshot.items()}
-                await sio.emit("detection:counts", counts)
+                # Update last emission time for this type
+                last_emission_time[type_key] = now
                 
-                logger.info(f"Live detection emitted ({origin}): {type_key} {relative_path}")
+                logger.info(f"Live detection emitted ({origin}): {type_key} {relative_path} (throttled: {len(new_files)-1} skipped)")
+            elif new_files:
+                logger.debug(f"Throttled {len(new_files)} detections for {type_key} (last emit {now - last_emit:.1f}s ago)")
+                
+        # Always emit updated counts (regardless of throttling)
+        counts = {k: len(v) for k, v in current_snapshot.items()}
+        await sio.emit("detection:counts", counts)
 
         known_detection_files = current_snapshot
 
