@@ -196,6 +196,14 @@ exports.uploadCameras = async (req, res) => {
                 const camera_name = pick(row, "Camera Name", "camera_name");
                 const camera_no = pick(row, "Camera No", "camera_no", "CameraNo", "Camera Number", "camera_number");
                 const cctv_url = pick(row, "Server Address", "CCTV URL", "cctv_url", "url", "URL", "Link");
+                const classification = pick(
+                    row,
+                    "Classification",
+                    "classification",
+                    "Room Classification",
+                    "room_classification",
+                    "room classification"
+                ) || null;
 
                 if (!device_id || !cctv_url) continue;
 
@@ -209,6 +217,7 @@ exports.uploadCameras = async (req, res) => {
                     city: pick(row, "City", "city", "CITY"),
                     state: pick(row, "State", "state", "STATE"),
                     cctv_url,
+                    classification,  // ← ADDED classification field
                     is_active: true,
                 });
             }
@@ -218,7 +227,7 @@ exports.uploadCameras = async (req, res) => {
             const detectedHeaders = Object.keys(data[0] || {});
             const missingColumnsMessage =
                 linkType === "RTSP"
-                    ? `No valid records found. Required RTSP columns: Device ID, Server Address (or CCTV URL). Optional: Camera No, TC Code, Camera Name, Centre/Center Name, City, State. Detected headers: ${detectedHeaders.join(", ")}`
+                    ? `No valid records found. Required RTSP columns: Device ID, Server Address (or CCTV URL). Optional: Camera No, TC Code, Camera Name, Centre/Center Name, City, State, Classification (or Room Classification). Detected headers: ${detectedHeaders.join(", ")}`
                     : "No valid records found. Make sure the Excel contains a 'CCTV URL' column.";
 
             return res.status(400).json({
