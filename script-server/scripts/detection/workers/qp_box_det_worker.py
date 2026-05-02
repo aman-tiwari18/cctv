@@ -2,6 +2,7 @@
 QP Box Worker — supports both RTSP (via master_pipeline producer)
 and HLS (via its own internal OpenCV reader).
 """
+# for ctgd
 
 import queue
 import time
