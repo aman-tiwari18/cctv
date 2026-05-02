@@ -54,6 +54,7 @@ import { enGB } from 'date-fns/locale';
 import axios from 'axios';
 import { API_BASE_1 } from '../constants/data';
 import { useDetectionCounts } from '../contexts/DetectionCountsContext';
+import { useSocket } from '../contexts/SocketContext';
 import { useSearchParams } from 'react-router-dom';
 import { examsAPI } from '../services/api';
 
