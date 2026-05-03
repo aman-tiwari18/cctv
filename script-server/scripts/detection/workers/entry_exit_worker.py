@@ -118,7 +118,7 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=60):
 
             state["last_save"] = now
             ts = time.strftime("%Y%m%d_%H%M%S")
-            uid = str(uuid.uuid4())[:8]
+            uid = str(uuid.uuid4())
             
             dev_id = item.get("device_id") or item.get("camera_id")
             ch_no = item.get("ch_no")
@@ -179,6 +179,8 @@ def entry_exit_worker(frame_queue):
     )
     gpu_t.start()
 
+    camera_states = {}
+
     try:
         while True:
             packet = frame_queue.get()
@@ -196,6 +198,10 @@ def entry_exit_worker(frame_queue):
             if frame is None:
                 continue
 
+            cam_key = (device_id, camera_no)
+            if cam_key not in camera_states:
+                camera_states[cam_key] = {"last_save": 0}
+
             try:
                 _gpu_queue.put({
                     "frame":        frame.copy(),
@@ -205,7 +211,7 @@ def entry_exit_worker(frame_queue):
                     "exam_id":      exam_id,
                     "script_name":  "entry_exit",
                     "source_type":  "RTSP",
-                    "state":        {},
+                    "state":        camera_states[cam_key],
                 }, timeout=0.1)
             except queue.Full:
                 pass

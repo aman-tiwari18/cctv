@@ -65,10 +65,11 @@ const NewBadge = ({ addedAt, sx }) => {
   useEffect(() => {
     if (!addedAt) return;
 
-    const parsedTime = typeof addedAt === 'number' ? addedAt : new Date(addedAt).getTime();
+    const rawTime = typeof addedAt === 'number' ? addedAt : new Date(addedAt).getTime();
+    const parsedTime = rawTime < 10000000000 ? rawTime * 1000 : rawTime;
     if (isNaN(parsedTime)) return; // safety check
 
-    const diff = Date.now() - parsedTime;
+    const diff = Math.max(0, Date.now() - parsedTime);
 
     if (diff < 5000) {
       setVisible(true);
@@ -147,7 +148,7 @@ function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onS
           />
         )}
         <NewBadge
-          addedAt={item.detectedAt}
+          addedAt={item.newBadgeAt || item.detectedAt}
           sx={{ position: 'absolute', top: 8, right: 8 }}
         />
         {invigilatorEventLabel && (
@@ -457,7 +458,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
             >
               <Box sx={{ position: 'relative', display: 'flex', ml: 1, mr: 1.5, my: 0.5 }}>
                 <NewBadge
-                  addedAt={listItem.detectedAt}
+                  addedAt={listItem.newBadgeAt || listItem.detectedAt}
                   sx={{ position: 'absolute', top: -4, left: -4, zIndex: 10, transform: 'scale(0.85)' }}
                 />
                 <Box

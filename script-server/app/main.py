@@ -39,6 +39,21 @@ DETECTION_SCAN_INTERVAL_SECONDS = 2
 known_detection_files = {}
 
 
+def _epoch_ms(value) -> Optional[int]:
+    if not value:
+        return None
+    if hasattr(value, "timestamp"):
+        return int(value.timestamp() * 1000)
+    try:
+        numeric = float(value)
+        return int(numeric * 1000) if numeric < 10_000_000_000 else int(numeric)
+    except Exception:
+        try:
+            return int(datetime.fromisoformat(str(value)).timestamp() * 1000)
+        except Exception:
+            return None
+
+
 @lru_cache(maxsize=4096)
 def _camera_meta_for_ch(ch_no: str, exam_date_iso: str) -> dict:
     if not ch_no:
@@ -644,6 +659,7 @@ def parse_detection_filename(
         "detectionType": type_key,
         "addedAt":     now_ms,
         "detectedAt":  detected_at_ms,  # ← Actual detection timestamp in ms
+        "newBadgeAt":  detected_at_ms if detected_at_ms is not None else (now_ms if is_new_image else None),
         "timestamp":   timestamp_iso,
         "isNewImage":  is_new_image,
         "source":      source,
@@ -845,22 +861,48 @@ async def copy_client_detections(payload: ClientDetectionCopyRequest):
                     continue
                 
                 table_name = "camera_report_rtsp" if item.source == "rtsp" else "camera_report_hls"
+                folder_name = DETECTION_FOLDERS.get(item.type, item.type)
+                item_uid = str(item.uid).lower()
+                filename = Path(item.relativePath).name
+                row = None
                 
-                # Update the DB
+                # Fetch first. MySQL UPDATE rowcount can be 0 when the row is already pushed.
                 try:
-                    sql = f"UPDATE {table_name} SET pushed_to_client = 1 WHERE unique_id = %s"
-                    cur.execute(sql, (item.uid,))
+                    cur.execute(f"SELECT * FROM {table_name} WHERE unique_id = %s LIMIT 1", (item_uid,))
+                    row = cur.fetchone()
+
+                    if not row:
+                        cur.execute(
+                            f"""
+                            SELECT * FROM {table_name}
+                            WHERE detection_type = %s
+                              AND (imageurl LIKE %s OR imageurl LIKE %s)
+                            ORDER BY id DESC
+                            LIMIT 1
+                            """,
+                            (folder_name, f"%/{filename}", f"%/{item.relativePath}"),
+                        )
+                        row = cur.fetchone()
+
+                    if not row:
+                        failed.append({"uid": item.uid, "error": f"uid {item.uid} not found"})
+                        continue
+
+                    cur.execute(
+                        f"""
+                        UPDATE {table_name}
+                        SET pushed_to_client = 1,
+                            unique_id = COALESCE(NULLIF(unique_id, ''), %s)
+                        WHERE id = %s
+                        """,
+                        (item_uid, row.get("id")),
+                    )
+                    if not row.get("unique_id"):
+                        row["unique_id"] = item_uid
+                    pushed_at_ms = int(datetime.now().timestamp() * 1000)
                 except Exception as e:
                     failed.append({"uid": item.uid, "error": f"DB update failed on {table_name}: {e}"})
                     continue
-                
-                if cur.rowcount == 0:
-                    failed.append({"uid": item.uid, "error": f"uid {item.uid} not found"})
-                    continue
-                
-                # Fetch row to reconstruct the socket payload
-                cur.execute(f"SELECT * FROM {table_name} WHERE unique_id = %s LIMIT 1", (item.uid,))
-                row = cur.fetchone()
                 
                 if row:
                     imageurl_full = str(row.get("imageurl", ""))
@@ -886,6 +928,8 @@ async def copy_client_detections(payload: ClientDetectionCopyRequest):
                         "tcCode": row.get("tc_code"),
                         "category": row.get("camera_category", ""),
                         "uid": row.get("unique_id"),
+                        "updatedAt": pushed_at_ms,
+                        "updated_at": pushed_at_ms,
                     })
                     copied.append(copied_item)
                     
@@ -984,8 +1028,9 @@ def list_client_detections(
                     "tcCode": row.get("tc_code"),
                     "category": row.get("camera_category", ""),
                     "uid": row.get("unique_id"),
-                    "_mtime": row.get("created_at").timestamp() if hasattr(row.get("created_at"), "timestamp") else 0,
-                    "updated_at": row.get("updated_at").timestamp() if hasattr(row.get("updated_at"), "timestamp") else 0,
+                    "_mtime": _epoch_ms(row.get("created_at")) or 0,
+                    "updatedAt": _epoch_ms(row.get("updated_at")),
+                    "updated_at": _epoch_ms(row.get("updated_at")),
                 })
 
                 if date and not item["date"].startswith(date):

@@ -5,6 +5,7 @@ import logging
 import sys
 import threading
 import torch
+import uuid
 from datetime import datetime
 from ultralytics import YOLO
 
@@ -17,7 +18,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "models", "yolov10m.pt")
 SAVE_FOLDER = os.path.join(BASE_DIR, "results/strongroom_detection")
 
-COOLDOWN_TIME = 0         # Immediate alert
+COOLDOWN_TIME = 180       # 3 minutes between saves per camera
 MIN_PERSONS = 0           # Threshold for violation (>0 persons)
 CONF_THRESHOLD = 0.30     # Confidence for person detection
 
@@ -78,7 +79,8 @@ def detect_strongroom_in_frame(frame, device_id="unknown", camera_no="unknown", 
         time_elapsed = now - last_save_times.get(key, 0)
         if violation_detected and time_elapsed >= COOLDOWN_TIME:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{SAVE_FOLDER}/{script_name}_{camera_no}_{ts}.jpg"
+            uid = str(uuid.uuid4())
+            filename = f"{SAVE_FOLDER}/{script_name}_{camera_no}_{ts}_{uid}.jpg"
             cv2.imwrite(filename, frame)
             last_save_times[key] = now
             logger.warning(f"[{device_id}-{camera_no}] 🚨 Strongroom intrusion: {filename}")

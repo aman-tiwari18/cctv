@@ -97,10 +97,10 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=180):
                 
                 last_save_time[cam_id] = now
                 ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                uid = str(uuid.uuid4())[:8]
+                uid = str(uuid.uuid4())
                 
                 ch_no = item.get("ch_no") or "0"
-                exam_id = "0"  # Blind spot doesn't have exam_id in packet
+                exam_id = item.get("exam_id", "0")
                 script_name = "blind_spot"
                 
                 if item.get("source_type") == "HLS":
@@ -171,7 +171,7 @@ def blind_spot_worker(frame_queue):
                 device_id    = str(packet.get("device_id", "unknown"))
                 camera_no    = str(packet.get("camera_no") or packet.get("ch_no") or "0")
             else:
-                frame, device_id, camera_no = packet[:3]
+                frame, device_id, camera_no, _, exam_id = packet[:5]
 
             if frame is None:
                 continue
@@ -181,6 +181,7 @@ def blind_spot_worker(frame_queue):
                     "frame":        frame.copy(),
                     "device_id":    device_id,
                     "ch_no":        camera_no,
+                    "exam_id":      exam_id,
                     "source_type":  "RTSP",
                 }, timeout=0.1)
             except queue.Full:
@@ -189,6 +190,8 @@ def blind_spot_worker(frame_queue):
     finally:
         stop_event.set()
         gpu_t.join(timeout=5)
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
 # =====================================================
 # 📡 HLS PATH

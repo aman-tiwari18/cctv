@@ -118,7 +118,7 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=60):
 
             state["last_save"] = now
             ts = time.strftime("%Y%m%d_%H%M%S")
-            uid = str(uuid.uuid4())[:8]
+            uid = str(uuid.uuid4())
             
             dev_id = item.get("device_id") or item.get("camera_id")
             ch_no = item.get("ch_no")
@@ -179,6 +179,9 @@ def close_proximity_worker(frame_queue):
     )
     gpu_t.start()
 
+    # Per-camera state dict for cooldown tracking — keyed by (device_id, camera_no)
+    camera_states = {}
+
     try:
         while True:
             packet = frame_queue.get()
@@ -192,9 +195,18 @@ def close_proximity_worker(frame_queue):
                 exam_id      = str(packet.get("exam_id", "0"))
             else:
                 frame, device_id, camera_no, _, exam_id = packet[:5]
+                device_id = str(device_id)
+                camera_no = str(camera_no)
+                exam_id   = str(exam_id)
 
             if frame is None:
                 continue
+
+            # Reuse per-camera state so cooldown persists across frames
+            cam_key = (device_id, camera_no)
+            if cam_key not in camera_states:
+                camera_states[cam_key] = {"last_save": 0}
+            state = camera_states[cam_key]
 
             try:
                 _gpu_queue.put({
@@ -205,7 +217,7 @@ def close_proximity_worker(frame_queue):
                     "exam_id":      exam_id,
                     "script_name":  "proximity",
                     "source_type":  "RTSP",
-                    "state":        {},
+                    "state":        state,
                 }, timeout=0.1)
             except queue.Full:
                 pass

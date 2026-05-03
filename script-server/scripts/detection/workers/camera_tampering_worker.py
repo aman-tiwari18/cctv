@@ -124,7 +124,7 @@ def _process_packet(item, save_folder):
                 _last_save_time[device_id] = now
 
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            uid = str(uuid.uuid4())[:8]
+            uid = str(uuid.uuid4())
             script_name = "tampering"
             exam_id = "0"  # Tampering doesn't have exam_id in packet
             

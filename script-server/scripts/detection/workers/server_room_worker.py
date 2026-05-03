@@ -129,7 +129,7 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=60):
 
             state["last_save"] = now
             ts = time.strftime("%Y%m%d_%H%M%S")
-            uid = str(uuid.uuid4())[:8]
+            uid = str(uuid.uuid4())
             
             dev_id = item.get("device_id") or item.get("camera_id")
             ch_no = item.get("ch_no")

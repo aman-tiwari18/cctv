@@ -20,7 +20,7 @@ SCRIPT_CLASSIFICATION_MAP = {
     "server":          ["server room", "server", "ups"],
     "proximity":       ["inside classroom", "inside_classroom", "classroom"],
     "crowd":           ["entry/exit", "entry_exit", "entryexit", "entry"],
-    "crowd_biometric": ["biometric"],
+    "crowd_biometric": ["entry/exit", "entry_exit", "entryexit", "entry"],
     "intruder":        ["strong room", "strongroom", "strong_room"],
     "entry_exit":      ["entry/exit", "entry_exit", "entryexit", "entry"],
     "phone":           ["inside classroom", "inside_classroom", "classroom"],

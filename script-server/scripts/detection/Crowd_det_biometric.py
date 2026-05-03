@@ -9,6 +9,7 @@ import logging
 import sys
 import threading
 import torch
+import uuid
 from datetime import datetime
 from ultralytics import YOLO
 
@@ -20,6 +21,8 @@ logger = logging.getLogger(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "models", "yolov10m.pt")
 SAVE_FOLDER = os.path.join(BASE_DIR, "results/crowd_detection_biometric")
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
 
 COOLDOWN_TIME = 240       # Seconds between saves
 MIN_PERSONS = 12          # Threshold for crowd violation at biometric area
@@ -82,8 +85,20 @@ def detect_crowd_biometric_in_frame(frame, device_id="unknown", camera_no="unkno
         time_elapsed = now - last_save_times.get(key, 0)
         if crowd_detected and time_elapsed >= COOLDOWN_TIME:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{SAVE_FOLDER}/{script_name}_{camera_no}_{ts}.jpg"
+            uid = str(uuid.uuid4())
+            fname = f"{script_name}_{device_id}_{camera_no}_{ts}_{uid}.jpg"
+            filename = os.path.join(SAVE_FOLDER, fname)
             cv2.imwrite(filename, frame)
+            try:
+                from utils.db_client import report_to_db_rtsp
+                report_to_db_rtsp(
+                    device_id=str(device_id),
+                    camera_no=str(camera_no),
+                    image_name=fname,
+                    folder="crowd_detection_biometric",
+                )
+            except Exception as e:
+                logger.error(f"[{device_id}-{camera_no}] Biometric crowd DB reporting error: {e}")
             last_save_times[key] = now
             logger.warning(f"[{device_id}-{camera_no}] 🚨 Biometric Crowd detected: {filename}")
 

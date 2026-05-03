@@ -86,7 +86,7 @@ def detect_persons_in_frame(frame, device_id="unknown", camera_no="unknown", scr
         time_elapsed = now - last_save_times.get(key, 0)
         if server_detected and time_elapsed >= COOLDOWN_TIME:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            uid = str(uuid.uuid4())[:8]
+            uid = str(uuid.uuid4())
             filename = f"{SAVE_FOLDER}/{script_name}_{device_id}_{camera_no}_{ts}_{uid}.jpg"
             cv2.imwrite(filename, frame)
             last_save_times[key] = now

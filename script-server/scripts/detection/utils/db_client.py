@@ -356,6 +356,7 @@ import re
 import logging
 import pymysql
 from datetime import datetime
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -723,6 +724,24 @@ _RTSP_IMAGE_BASE_URL = os.environ.get(
 _LOG_FILE = os.path.join(os.path.dirname(__file__), "../../db_reports.log")
 
 
+def _extract_unique_id_from_image_name(image_name: str) -> Optional[str]:
+    """Extract the detection UID from a saved image filename."""
+    base_name = os.path.basename(str(image_name))
+    full_uuid = re.search(
+        r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?=\.[^.]+$|$)',
+        base_name,
+        re.IGNORECASE,
+    )
+    if full_uuid:
+        return full_uuid.group(1).lower()
+
+    short_uid = os.path.splitext(base_name)[0].split("_")[-1]
+    if re.fullmatch(r'[0-9a-f]{8}', short_uid, re.IGNORECASE):
+        return short_uid.lower()
+
+    return None
+
+
 def report_to_db_hls(ch_code: str, image_name: str, folder: str = "crowd_detection") -> bool:
     """
     Central HLS detection reporter.
@@ -739,10 +758,7 @@ def report_to_db_hls(ch_code: str, image_name: str, folder: str = "crowd_detecti
     Returns:
         True on success, False on any failure.
     """
-    # Extract UUID (v4) from filename — expected format: ..._<uuid>.jpg
-    _UUID_PATTERN = r'([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})'
-    uuid_match = re.search(_UUID_PATTERN, image_name, re.IGNORECASE)
-    unique_id = uuid_match.group(1) if uuid_match else None
+    unique_id = _extract_unique_id_from_image_name(image_name)
     try:
         with open(_LOG_FILE, "a") as f:
             f.write(
@@ -869,10 +885,7 @@ def report_to_db_rtsp(device_id: str, camera_no: str, image_name: str, folder: s
     Returns:
         True on success, False on any failure.
     """
-    # Extract UUID from filename (relaxed regex to allow dummy tests)
-    _UUID_PATTERN = r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})'
-    uuid_match = re.search(_UUID_PATTERN, image_name, re.IGNORECASE)
-    unique_id = uuid_match.group(1) if uuid_match else None
+    unique_id = _extract_unique_id_from_image_name(image_name)
 
     # Handle potentially missing device/camera info if they weren't explicitly passed
     if not device_id or not camera_no:
