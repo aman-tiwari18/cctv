@@ -14,6 +14,8 @@ pymysql>=1.1.0
 cryptography>=41.0.0
 
 # HTTP & API
+fastapi>=0.110.0
+uvicorn>=0.27.0
 requests>=2.31.0
 urllib3>=2.0.0
 aiohttp>=3.9.0

@@ -148,7 +148,7 @@ function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onS
           />
         )}
         <NewBadge
-          addedAt={item.newBadgeAt || item.detectedAt}
+          addedAt={item.newBadgeAt}
           sx={{ position: 'absolute', top: 8, right: 8 }}
         />
         {invigilatorEventLabel && (
@@ -458,7 +458,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
             >
               <Box sx={{ position: 'relative', display: 'flex', ml: 1, mr: 1.5, my: 0.5 }}>
                 <NewBadge
-                  addedAt={listItem.newBadgeAt || listItem.detectedAt}
+                  addedAt={listItem.newBadgeAt}
                   sx={{ position: 'absolute', top: -4, left: -4, zIndex: 10, transform: 'scale(0.85)' }}
                 />
                 <Box
@@ -707,6 +707,19 @@ export default function Detections() {
   const [selectedPaths, setSelectedPaths] = useState([]);
 
   const buildSelectionKey = (item) => `${item.source}|${item.type}|${item.relativePath}`;
+  const getDetectionKey = useCallback((item = {}) => (
+    item.uid
+    || item.id
+    || item.image_url
+    || (item.source && item.type && item.relativePath ? `${item.source}|${item.type}|${item.relativePath}` : null)
+    || item.filename
+  ), []);
+  const dataKeysRef = useRef(new Set());
+
+  useEffect(() => {
+    dataKeysRef.current = new Set(data.map(getDetectionKey).filter(Boolean));
+  }, [data, getDetectionKey]);
+
   const toggleSelection = (item) => {
     const key = buildSelectionKey(item);
     setSelectedPaths((prev) => (
@@ -715,10 +728,12 @@ export default function Detections() {
   };
 
   const handleSkipLocally = useCallback((itemToRemove) => {
-    setData((prev) => prev.filter(i => (i.uid || i.id || i.image_url) !== (itemToRemove.uid || itemToRemove.id || itemToRemove.image_url)));
-  }, []);
+    setData((prev) => prev.filter(i => getDetectionKey(i) !== getDetectionKey(itemToRemove)));
+  }, [getDetectionKey]);
 
   const fetchAllCounts = useCallback(async () => {
+    if (typeFilter.length === 0) return;
+
     try {
       const params = new URLSearchParams({ page: 1, limit: 1 });
       if (dateFilter) params.append('date', parseDateForQuery(dateFilter));
@@ -733,7 +748,7 @@ export default function Detections() {
     } catch (err) {
       console.error('Failed to fetch all counts:', err);
     }
-  }, [dateFilter, setAllCounts, setUnfilteredCounts, typeFilter.length, setExamFilter]);
+  }, [dateFilter, examFilter, setAllCounts, setUnfilteredCounts, typeFilter.length]);
 
   useEffect(() => {
     fetchAllCounts();
@@ -759,17 +774,21 @@ export default function Detections() {
     loadExams();
   }, [loadExams]);
 
+  const buildDetectionParams = useCallback((pg = 1, rpp = rowsPerPage) => {
+    const params = new URLSearchParams({ page: pg, limit: rpp });
+    if (typeFilter.length > 0) params.append('type', typeFilter.join(','));
+    if (dateFilter) params.append('date', parseDateForQuery(dateFilter));
+    if (search.trim()) params.append('search', search.trim());
+    if (examFilter) params.append('exam_id', examFilter);
+    if (appliedStartTime) params.append('start_time', appliedStartTime);
+    if (appliedEndTime) params.append('end_time', appliedEndTime);
+    return params;
+  }, [typeFilter, dateFilter, search, examFilter, appliedStartTime, appliedEndTime, rowsPerPage]);
+
   const fetchDetections = useCallback(async (pg = 1, rpp = rowsPerPage) => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ page: pg, limit: rpp });
-      if (typeFilter.length > 0) params.append('type', typeFilter.join(','));
-      if (dateFilter) params.append('date', parseDateForQuery(dateFilter));
-      if (search.trim()) params.append('search', search.trim());
-      if (examFilter) params.append('exam_id', examFilter);
-      if (appliedStartTime) params.append('start_time', appliedStartTime);
-      if (appliedEndTime) params.append('end_time', appliedEndTime);
-
+      const params = buildDetectionParams(pg, rpp);
       const res = await axios.get(`${API_BASE_1}/detections?${params}`);
 
       try {
@@ -784,17 +803,23 @@ export default function Detections() {
       }
 
       if (res.data.success) {
-        setData(res.data.data);
+        const fetchedItems = Array.isArray(res.data.data)
+          ? res.data.data.map((item) => ({ ...item, newBadgeAt: undefined }))
+          : [];
+        setData(fetchedItems);
         setTotal(res.data.total);
         setCounts(res.data.counts || {});
         setAllCounts(res.data.counts || {});
+        if (typeFilter.length === 0) {
+          setUnfilteredCounts(res.data.counts || {});
+        }
       }
     } catch (err) {
       console.error('Failed to fetch detections:', err);
     } finally {
       setLoading(false);
     }
-  }, [typeFilter, dateFilter, search, examFilter, appliedStartTime, appliedEndTime, rowsPerPage, setAllCounts]);
+  }, [buildDetectionParams, rowsPerPage, setAllCounts, setUnfilteredCounts, typeFilter.length]);
 
   const matchesFilters = useCallback((item) => {
     if (typeFilter.length > 0 && !typeFilter.includes(item.type)) return false;
@@ -824,33 +849,98 @@ export default function Detections() {
 
   const filteredData = useMemo(() => data.filter(matchesFilters), [data, matchesFilters]);
 
+  const mergeLiveDetections = useCallback((items, { incrementTotal = false } = {}) => {
+    const incoming = (Array.isArray(items) ? items : [items]).filter(Boolean);
+    if (incoming.length === 0) return;
+
+    const now = Date.now();
+    const seen = new Set(dataKeysRef.current);
+    const freshItems = [];
+
+    incoming.forEach((item) => {
+      const liveItem = {
+        ...item,
+        newBadgeAt: now,
+      };
+      if (!matchesFilters(liveItem)) return;
+
+      const key = getDetectionKey(liveItem);
+      if (!key || seen.has(key)) return;
+
+      seen.add(key);
+      freshItems.push(liveItem);
+    });
+
+    if (freshItems.length === 0) return;
+
+    dataKeysRef.current = seen;
+
+    setData(prev => {
+      const prevKeys = new Set(prev.map(getDetectionKey).filter(Boolean));
+      const uniqueFreshItems = freshItems.filter((item) => {
+        const key = getDetectionKey(item);
+        if (!key || prevKeys.has(key)) return false;
+        prevKeys.add(key);
+        return true;
+      });
+
+      if (uniqueFreshItems.length === 0) return prev;
+      return [...uniqueFreshItems, ...prev].slice(0, rowsPerPage);
+    });
+
+    if (incrementTotal) {
+      setTotal(prev => prev + freshItems.length);
+    }
+
+    setLiveAlert(freshItems[0]);
+    setTimeout(() => setLiveAlert(null), 5000);
+  }, [getDetectionKey, matchesFilters, rowsPerPage]);
+
   // Handle live updates for the data list
-  const { socket } = useSocket();
+  const { socket, connected } = useSocket();
   useEffect(() => {
     if (!socket) return;
 
     const handleNewDetection = (item) => {
-      // Only add if it matches current page filters
-      if (matchesFilters(item)) {
-        setData(prev => {
-          // Check if already exists (avoid duplicates)
-          const exists = prev.some(i => (i.uid || i.id || i.image_url) === (item.uid || item.id || item.image_url));
-          if (exists) return prev;
-          
-          // Add to start and keep pagination limit
-          const next = [item, ...prev];
-          return next.slice(0, rowsPerPage);
-        });
-        
-        // Show live alert
-        setLiveAlert(item);
-        setTimeout(() => setLiveAlert(null), 5000);
-      }
+      mergeLiveDetections(item, { incrementTotal: true });
     };
 
     socket.on('detection:new', handleNewDetection);
     return () => socket.off('detection:new', handleNewDetection);
-  }, [socket, matchesFilters, rowsPerPage]);
+  }, [socket, mergeLiveDetections]);
+
+  useEffect(() => {
+    if (loading || page !== 1 || connected) return;
+
+    let cancelled = false;
+    let inFlight = false;
+
+    const pollLatestDetections = async () => {
+      if (inFlight) return;
+      inFlight = true;
+
+      try {
+        const params = buildDetectionParams(1, rowsPerPage);
+        const res = await axios.get(`${API_BASE_1}/detections?${params}`);
+        if (cancelled || !res.data.success) return;
+
+        setTotal(res.data.total || 0);
+        setCounts(res.data.counts || {});
+        setAllCounts(res.data.counts || {});
+        mergeLiveDetections(res.data.data || []);
+      } catch (err) {
+        console.error('Failed to poll latest detections:', err);
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    const interval = setInterval(pollLatestDetections, 10000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [loading, page, connected, rowsPerPage, buildDetectionParams, mergeLiveDetections, setAllCounts]);
 
   useEffect(() => {
     setPage(1);

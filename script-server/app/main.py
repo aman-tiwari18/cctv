@@ -3,11 +3,10 @@ import asyncio
 import re
 import os
 import shutil
-import time
 import openpyxl
 from openpyxl.styles import Font
 from pydantic import BaseModel
-from datetime import datetime,time
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import quote
@@ -69,6 +68,13 @@ def _camera_meta_for_rtsp_pk(camera_id_pk: int) -> dict:
     return get_rtsp_camera_by_id(camera_id_pk) or {}
 
 
+@lru_cache(maxsize=8192)
+def _camera_meta_for_rtsp_device_ch(device_id: str, camera_no: str) -> dict:
+    if not device_id or not camera_no:
+        return {}
+    return get_rtsp_camera_by_device_and_ch(device_id, camera_no) or {}
+
+
 # RTSP filenames follow: {script}_{camera_id_pk}_{camera_no}_{date}_{time}_{extra}.jpg
 # The prefix (script name like server, phone, crowd, etc.) comes before the pk.
 _RTSP_SCRIPT_PREFIXES = {
@@ -119,6 +125,52 @@ def _extract_ch_no(camera_id: str) -> str:
     return m.group(1) if m else ""
 
 
+def _basic_detection_meta(filename: str) -> dict:
+    """Extract cheap filter fields from filename without DB metadata lookups."""
+    stem = Path(filename).stem
+    dt_match = re.search(r'(\d{8})_(\d{6})', stem)
+    date_iso = ""
+    time_str = ""
+    if dt_match:
+        date_str = dt_match.group(1)
+        time_str = dt_match.group(2)
+        date_iso = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+
+    exam_id = None
+    exam_match = re.search(r'_exam(\d+)', stem, flags=re.IGNORECASE)
+    if exam_match:
+        exam_id = int(exam_match.group(1))
+
+    return {"date": date_iso, "time": time_str, "exam_id": exam_id}
+
+
+def _basic_detection_matches(
+    relative_path: str,
+    date: Optional[str] = None,
+    exam_id: Optional[str] = None,
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None,
+) -> bool:
+    basic = _basic_detection_meta(relative_path)
+
+    if date and not basic["date"].startswith(date):
+        return False
+
+    if exam_id and str(basic.get("exam_id")) != str(exam_id):
+        return False
+
+    if start_time or end_time:
+        time_str = basic.get("time")
+        if time_str and len(time_str) >= 4:
+            h_m = f"{time_str[:2]}:{time_str[2:4]}"
+            if start_time and h_m < start_time:
+                return False
+            if end_time and h_m > end_time:
+                return False
+
+    return True
+
+
 def _iter_detection_files(type_key: str, folder: Path):
     """Yield image files for one detection type.
 
@@ -164,53 +216,53 @@ def list_detection_files() -> dict:
 
 async def detection_watch_loop():
     global known_detection_files
-    
-    # Throttle: Track last emission time per detection type (1 per second per type)
-    last_emission_time = {}
 
     while True:
         await asyncio.sleep(DETECTION_SCAN_INTERVAL_SECONDS)
-        current_snapshot = list_detection_files()
+        try:
+            current_snapshot = list_detection_files()
 
-        for type_key, current_files in current_snapshot.items():
-            previous_files = known_detection_files.get(type_key, set())
-            new_files = sorted(current_files - previous_files)
+            for type_key, current_files in current_snapshot.items():
+                previous_files = known_detection_files.get(type_key, set())
+                new_files = sorted(current_files - previous_files)
 
-            # Throttle: Only emit 1 detection per second per type
-            now = time.time()
-            last_emit = last_emission_time.get(type_key, 0)
-            
-            if new_files and (now - last_emit) >= 1.0:
-                # Emit only the FIRST new detection for this type
-                tagged_path = new_files[0]
-                
-                # tagged_path is "hls:relative" or "rtsp:relative"
-                origin, relative_path = tagged_path.split(":", 1)
-                if origin == "rtsp":
-                    base_dir = RTSP_RESULTS_DIR
-                else:
-                    base_dir = RESULTS_DIR
-                file_path = base_dir / DETECTION_FOLDERS[type_key] / relative_path
-                payload = parse_detection_filename(
-                    relative_path, type_key, file_path,
-                    is_new_image=True, source=origin,
-                )
-                
-                # Emit detection to all users
-                await sio.emit("detection:new", payload)
-                
-                # Update last emission time for this type
-                last_emission_time[type_key] = now
-                
-                logger.info(f"Live detection emitted ({origin}): {type_key} {relative_path} (throttled: {len(new_files)-1} skipped)")
-            elif new_files:
-                logger.debug(f"Throttled {len(new_files)} detections for {type_key} (last emit {now - last_emit:.1f}s ago)")
-                
-        # Always emit updated counts (regardless of throttling)
-        counts = {k: len(v) for k, v in current_snapshot.items()}
-        await sio.emit("detection:counts", counts)
+                if new_files:
+                    def _new_file_mtime(tagged_path: str) -> float:
+                        try:
+                            origin, relative_path = tagged_path.split(":", 1)
+                            base_dir = RTSP_RESULTS_DIR if origin == "rtsp" else RESULTS_DIR
+                            return (base_dir / DETECTION_FOLDERS[type_key] / relative_path).stat().st_mtime
+                        except Exception:
+                            return 0
 
-        known_detection_files = current_snapshot
+                    emitted = 0
+                    for tagged_path in sorted(new_files, key=_new_file_mtime):
+                        try:
+                            # tagged_path is "hls:relative" or "rtsp:relative"
+                            origin, relative_path = tagged_path.split(":", 1)
+                            base_dir = RTSP_RESULTS_DIR if origin == "rtsp" else RESULTS_DIR
+                            file_path = base_dir / DETECTION_FOLDERS[type_key] / relative_path
+                            payload = parse_detection_filename(
+                                relative_path, type_key, file_path,
+                                is_new_image=True, source=origin,
+                            )
+
+                            await sio.emit("detection:new", payload)
+                            emitted += 1
+                        except Exception as exc:
+                            logger.error(f"Failed to emit live detection {type_key} {tagged_path}: {exc}")
+
+                    logger.info(f"Live detections emitted: {type_key} count={emitted} new_files={len(new_files)}")
+
+            # Always emit updated counts.
+            counts = {k: len(v) for k, v in current_snapshot.items()}
+            await sio.emit("detection:counts", counts)
+
+            known_detection_files = current_snapshot
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.error(f"Detection watch loop failed: {exc}")
 
 
 sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
@@ -603,7 +655,7 @@ def parse_detection_filename(
         parts = stem.split("_")
         dev_id = parts[1]
         cam_no_part = parts[2]
-        cam_meta = get_rtsp_camera_by_device_and_ch(dev_id, cam_no_part)
+        cam_meta = _camera_meta_for_rtsp_device_ch(dev_id, cam_no_part)
     else:
         ch_no = _extract_ch_no(camera_id)
         cam_meta = _camera_meta_for_ch(ch_no, exam_date_iso)
@@ -659,7 +711,7 @@ def parse_detection_filename(
         "detectionType": type_key,
         "addedAt":     now_ms,
         "detectedAt":  detected_at_ms,  # ← Actual detection timestamp in ms
-        "newBadgeAt":  detected_at_ms if detected_at_ms is not None else (now_ms if is_new_image else None),
+        "newBadgeAt":  now_ms if is_new_image else None,
         "timestamp":   timestamp_iso,
         "isNewImage":  is_new_image,
         "source":      source,
@@ -696,6 +748,9 @@ def list_detections(
     limit: int = 50,
 ):
     rows = []
+    candidates = []
+    counts = {k: 0 for k in DETECTION_FOLDERS}
+    needs_full_scan_parse = bool(search)
     
     # Handle comma-separated type query
     selected_types = type.split(',') if type else []
@@ -708,25 +763,23 @@ def list_detections(
                 continue
             for f in _iter_detection_files(type_key, folder):
                 relative_path = str(f.relative_to(folder).as_posix())
+                if not _basic_detection_matches(relative_path, date, exam_id, start_time, end_time):
+                    continue
+
+                try:
+                    mtime = f.stat().st_mtime
+                except FileNotFoundError:
+                    continue
+
+                if not needs_full_scan_parse:
+                    counts[type_key] = counts.get(type_key, 0) + 1
+                    candidates.append((mtime, type_key, relative_path, f, origin))
+                    continue
+
                 item = parse_detection_filename(
                     relative_path, type_key, f,
                     is_new_image=False, source=origin,
                 )
-
-                if date and not item["date"].startswith(date):
-                    continue
-                
-                if exam_id and str(item.get("exam_id")) != str(exam_id):
-                    continue
-
-                if start_time or end_time:
-                    time_str = item.get("time")
-                    if time_str and len(time_str) >= 4:
-                        h_m = f"{time_str[:2]}:{time_str[2:4]}"
-                        if start_time and h_m < start_time:
-                            continue
-                        if end_time and h_m > end_time:
-                            continue
 
                 if search:
                     q = search.lower()
@@ -741,7 +794,8 @@ def list_detections(
                     if q not in haystack:
                         continue
 
-                rows.append((f.stat().st_mtime, item))
+                counts[item["type"]] = counts.get(item["type"], 0) + 1
+                rows.append((mtime, item))
 
     # Scan based on source filter or both
     if source != "rtsp":
@@ -749,18 +803,23 @@ def list_detections(
     if source != "hls":
         _scan_dir(RTSP_RESULTS_DIR, "rtsp")
 
-    # Sort by file write time descending (newest first).
-    rows.sort(key=lambda x: x[0], reverse=True)
-    results = [item for _, item in rows]
-
-    total = len(results)
     start = (page - 1) * limit
-    paginated = results[start: start + limit]
-
-    # Summary counts per type
-    counts = {k: 0 for k in DETECTION_FOLDERS}
-    for r in results:
-        counts[r["type"]] = counts.get(r["type"], 0) + 1
+    if needs_full_scan_parse:
+        # Search needs enriched camera metadata, so all surviving candidates were parsed.
+        rows.sort(key=lambda x: x[0], reverse=True)
+        results = [item for _, item in rows]
+        total = len(results)
+        paginated = results[start: start + limit]
+    else:
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        total = len(candidates)
+        paginated = [
+            parse_detection_filename(
+                relative_path, type_key, file_path,
+                is_new_image=False, source=origin,
+            )
+            for _, type_key, relative_path, file_path, origin in candidates[start: start + limit]
+        ]
 
     # Fetch pushed_to_client statuses for paginated items securely
     uids_to_check = [item.get("uid") for item in paginated if item.get("uid")]
