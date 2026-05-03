@@ -35,7 +35,7 @@ def get_yolo_model():
             if yolo_model is None:
                 logger.info(f"Loading YOLO model from {MODEL_PATH}...")
                 yolo_model = YOLO(MODEL_PATH)
-                if torch.cuda.available():
+                if torch.cuda.is_available():
                     yolo_model.to('cuda')
                     logger.info("YOLO model moved to CUDA")
     return yolo_model

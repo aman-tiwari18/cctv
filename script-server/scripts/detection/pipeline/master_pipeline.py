@@ -891,13 +891,9 @@ def rtsp_producer(cam_configs, queues, pre_fetched_token=None):
             if consecutive_failures < MAX_CONSECUTIVE_FAILURES:
                 time.sleep(10)
 
-    # Signal end-of-stream to workers
-    for q in queues:
-        try:
-            q.put(None)
-        except Exception:
-            pass
-
+    # Do not signal shared workers from an individual camera producer.
+    # The RTSP pipeline owns the shared worker lifecycle and sends the
+    # final sentinel only after every producer has finished.
     logger.info(f"RTSP Producer stopped → {label}")
 
 

@@ -62,14 +62,18 @@ _gpu_queue = queue.Queue(maxsize=GPU_QUEUE_SIZE)
 # =====================================================
 # 🚀 GPU BATCH WORKER
 # =====================================================
-def _gpu_batch_worker(stop_event, save_folder, cooldown_time=360):
+def _gpu_batch_worker(stop_event, save_folder, cooldown_time=120):
     """
     GPU batch worker — TRUE batch inference.
     """
     logger.info("🚀 [CrowdFive] GPU worker started (true batch mode)")
     
-    # Warm up model
-    crowd_five_core.get_yolo_model()
+    try:
+        crowd_five_core.get_yolo_model()
+    except Exception:
+        logger.exception("[CrowdFive] YOLO model warmup failed")
+        stop_event.set()
+        return
     log_counter = 0
 
     while not stop_event.is_set():
