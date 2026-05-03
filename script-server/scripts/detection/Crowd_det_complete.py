@@ -20,7 +20,12 @@ SAVE_FOLDER = os.path.join(BASE_DIR, "results/crowd_detection")
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
-COOLDOWN_TIME = 240       # Seconds between saves
+# CAMERA CLASSIFICATION: Entry/Exit, Outside/Biometric Area
+# This detection runs on cameras classified as:
+# - Entry / Entry-Exit / Entry Gate / Exit Gate
+# - Outdoor Scene / Outside Area / Biometric Area
+
+COOLDOWN_TIME = 180       # Seconds between saves (changed from 240 to match working version)
 MIN_PERSONS = 10          # Threshold for crowd violation
 CONF_THRESHOLD = 0.45     # Confidence for person detection
 

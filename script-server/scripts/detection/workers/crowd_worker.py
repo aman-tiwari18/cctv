@@ -279,11 +279,15 @@ def crowd_worker_hls(camera_configs, stop_event=None):
     if stop_event is None:
         stop_event = _STOP_EVENT
 
-    # Scene filtering - Crowd detection for Entry/Exit cameras only
+    # Scene filtering - Crowd detection for Entry/Exit and Outside/Biometric Area cameras
     valid_configs = []
     for cfg in camera_configs:
         cls_val = str(cfg.get('classification', '')).lower()
-        if not cls_val or any(s in cls_val for s in ('entry/exit', 'entry_exit', 'entryexit')):
+        if not cls_val or any(s in cls_val for s in (
+            'entry', 'entry/exit', 'entry_exit', 'entryexit',
+            'outdoor scene', 'outdoor_scene', 'outside area', 'outside_area',
+            'biometric area', 'biometric_area', 'biometric'
+        )):
             valid_configs.append(cfg)
             
     if not valid_configs:

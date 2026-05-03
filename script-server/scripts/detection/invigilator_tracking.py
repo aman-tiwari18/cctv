@@ -18,6 +18,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "models", "yolov10m.pt")
 SAVE_FOLDER = os.path.join(BASE_DIR, "results/invigilator_detection")
 
+# CAMERA CLASSIFICATION: Inside Lab
+# This detection runs on cameras classified as:
+# - Computer Lab / Inside Lab / Exam Lab / Inside Classroom
+
 COOLDOWN_TIME = 180       # Seconds between saves
 CONF_THRESHOLD = 0.45     # Confidence for person detection
 STATIC_THRESH = 35        # Pixels movement threshold
@@ -121,7 +125,10 @@ def detect_invigilator_in_frame(frame, device_id="unknown", camera_no="unknown",
     with _state_lock:
         if violation_detected and now - tracker.last_save >= COOLDOWN_TIME:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{SAVE_FOLDER}/{script_name}_{camera_no}_{ts}.jpg"
+            import uuid
+            uid = str(uuid.uuid4())
+            fname = f"{script_name}_{device_id}_{camera_no}_{ts}_{uid}.jpg"
+            filename = os.path.join(SAVE_FOLDER, fname)
             cv2.imwrite(filename, frame)
             tracker.last_save = now
             logger.warning(f"[{device_id}-{camera_no}] 🚨 Invigilator {status}: {filename}")

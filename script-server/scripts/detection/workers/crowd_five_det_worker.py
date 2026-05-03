@@ -284,11 +284,14 @@ def crowd_five_det_worker_hls(camera_configs, stop_event=None):
     if stop_event is None:
         stop_event = _STOP_EVENT
 
-    # Scene filtering - Crowd Five detection (low person count) only for Inside Classroom cameras
+    # Scene filtering - Crowd Five detection for Inside Lab cameras (less than 5 candidates)
     valid_configs = []
     for cfg in camera_configs:
         cls_val = str(cfg.get('classification', '')).lower()
-        if not cls_val or any(s in cls_val for s in ('inside classroom', 'inside_classroom', 'classroom')):
+        if not cls_val or any(s in cls_val for s in (
+            'computer lab', 'inside lab', 'exam lab', 'lab',
+            'inside classroom', 'inside_classroom', 'classroom'
+        )):
             valid_configs.append(cfg)
             
     if not valid_configs:

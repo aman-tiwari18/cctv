@@ -17,6 +17,11 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "models", "yolov10m.pt")
 SAVE_FOLDER = os.path.join(BASE_DIR, "results/entry_exit_detection")
 
+# CAMERA CLASSIFICATION: Entry/Exit, Outside
+# This detection runs on cameras classified as:
+# - Entry / Entry-Exit / Entry Gate / Exit Gate
+# - Outdoor Scene / Outside Area / Crowd at Entry/Exit Gate
+
 COOLDOWN_TIME = 180       # Seconds between saves
 MIN_PERSONS = 2           # Threshold for violation
 CONF_THRESHOLD = 0.45     # Confidence for person detection
@@ -78,7 +83,10 @@ def detect_entry_exit_in_frame(frame, device_id="unknown", camera_no="unknown", 
         time_elapsed = now - last_save_times.get(key, 0)
         if violation_detected and time_elapsed >= COOLDOWN_TIME:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{SAVE_FOLDER}/{script_name}_{camera_no}_{ts}.jpg"
+            import uuid
+            uid = str(uuid.uuid4())
+            fname = f"{script_name}_{device_id}_{camera_no}_{ts}_{uid}.jpg"
+            filename = os.path.join(SAVE_FOLDER, fname)
             cv2.imwrite(filename, frame)
             last_save_times[key] = now
             logger.warning(f"[{device_id}-{camera_no}] 🚨 Entry/Exit violation detected: {filename}")

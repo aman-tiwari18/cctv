@@ -18,6 +18,10 @@ PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
 MODEL_PATH = os.path.join(PROJECT_ROOT, "models", "yolov10m.pt")
 SAVE_FOLDER = os.path.join(PROJECT_ROOT, "results/tcs_detections/server_room_detection")
 
+# CAMERA CLASSIFICATION: Server Room
+# This detection runs on cameras classified as:
+# - Server Room / Strong Room
+
 COOLDOWN_TIME = 90        # Seconds between saves per camera
 MIN_PERSONS = 1           # Threshold for violation
 CONF_THRESHOLD = 0.45     # Confidence for person detection
@@ -87,7 +91,8 @@ def detect_persons_in_frame(frame, device_id="unknown", camera_no="unknown", scr
         if server_detected and time_elapsed >= COOLDOWN_TIME:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             uid = str(uuid.uuid4())
-            filename = f"{SAVE_FOLDER}/{script_name}_{device_id}_{camera_no}_{ts}_{uid}.jpg"
+            fname = f"{script_name}_{device_id}_{camera_no}_{ts}_{uid}.jpg"
+            filename = os.path.join(SAVE_FOLDER, fname)
             cv2.imwrite(filename, frame)
             last_save_times[key] = now
             logger.warning(f"[{device_id}-{camera_no}] 🚨 Server intrusion saved: {filename}")

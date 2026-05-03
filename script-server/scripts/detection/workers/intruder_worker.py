@@ -280,11 +280,14 @@ def intruder_worker_hls(camera_configs, stop_event=None):
     if stop_event is None:
         stop_event = _STOP_EVENT
 
-    # Scene filtering - Intruder detection only for Strong Room cameras
+    # Scene filtering - Intruder detection for Inside Lab and Server Room cameras
     valid_configs = []
     for cfg in camera_configs:
         cls_val = str(cfg.get('classification', '')).lower()
-        if not cls_val or any(s in cls_val for s in ('strong room', 'strongroom', 'strong_room')):
+        if not cls_val or any(s in cls_val for s in (
+            'computer lab', 'inside lab', 'exam lab', 'lab',
+            'server room', 'server_room', 'serverroom'
+        )):
             valid_configs.append(cfg)
             
     if not valid_configs:

@@ -280,11 +280,14 @@ def crowd_zero_det_worker_hls(camera_configs, stop_event=None):
     if stop_event is None:
         stop_event = _STOP_EVENT
 
-    # Scene filtering - Crowd Zero detection (candidate count < 5) only for Inside Classroom cameras
+    # Scene filtering - Crowd Zero detection for Inside Lab cameras (0 candidates)
     valid_configs = []
     for cfg in camera_configs:
         cls_val = str(cfg.get('classification', '')).lower()
-        if not cls_val or any(s in cls_val for s in ('inside classroom', 'inside_classroom', 'classroom')):
+        if not cls_val or any(s in cls_val for s in (
+            'computer lab', 'inside lab', 'exam lab', 'lab',
+            'inside classroom', 'inside_classroom', 'classroom'
+        )):
             valid_configs.append(cfg)
             
     if not valid_configs:

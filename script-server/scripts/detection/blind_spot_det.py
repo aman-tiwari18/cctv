@@ -18,6 +18,11 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "models", "yolov10m.pt")
 SAVE_FOLDER = os.path.join(BASE_DIR, "results/blind_spot_detection")
 
+# CAMERA CLASSIFICATION: Inside Lab
+# This detection runs on cameras classified as:
+# - Computer Lab / Inside Lab / Exam Lab / Inside Classroom
+# Detects blind spots and obstructions in camera view
+
 EDGE_OBSTRUCTION_THRESHOLD = 0.15
 CONF_THRESHOLD = 0.40
 COOLDOWN_TIME = 180

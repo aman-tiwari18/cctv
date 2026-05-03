@@ -18,7 +18,11 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "models", "yolov10m.pt")
 SAVE_FOLDER = os.path.join(BASE_DIR, "results/proximity_detection")
 
-COOLDOWN_TIME = 180       # Seconds between saves
+# CAMERA CLASSIFICATION: Inside Lab
+# This detection runs on cameras classified as:
+# - Computer Lab / Inside Lab / Exam Lab / Inside Classroom
+
+COOLDOWN_TIME = 60        # Seconds between saves (matches worker)
 PROXIMITY_THRESHOLD = 100 # Pixels
 CONF_THRESHOLD = 0.45     # Confidence for person detection
 
@@ -92,8 +96,21 @@ def detect_proximity_in_frame(frame, device_id="unknown", camera_no="unknown", s
         time_elapsed = now - last_save_times.get(key, 0)
         if violation_detected and time_elapsed >= COOLDOWN_TIME:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{SAVE_FOLDER}/{script_name}_{camera_no}_{ts}.jpg"
+            import uuid
+            uid = str(uuid.uuid4())
+            fname = f"{script_name}_{device_id}_{camera_no}_{ts}_{uid}.jpg"
+            filename = os.path.join(SAVE_FOLDER, fname)
             cv2.imwrite(filename, frame)
+            try:
+                from utils.db_client import report_to_db_rtsp
+                report_to_db_rtsp(
+                    device_id=str(device_id),
+                    camera_no=str(camera_no),
+                    image_name=fname,
+                    folder="proximity_detection",
+                )
+            except Exception as e:
+                logger.error(f"[{device_id}-{camera_no}] Proximity DB reporting error: {e}")
             last_save_times[key] = now
             logger.warning(f"[{device_id}-{camera_no}] 🚨 Proximity violation detected: {filename}")
 

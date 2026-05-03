@@ -237,12 +237,25 @@ def _hls_camera_thread(cfg, stop_event):
     cap.release()
 
 def blind_spot_worker_hls(camera_configs, stop_event=None):
-    """HLS worker entry point."""
+    """HLS worker entry point - Blind Spot detection for Inside Lab cameras."""
     if isinstance(camera_configs, dict):
         camera_configs = [camera_configs]
 
     if stop_event is None:
         stop_event = _STOP_EVENT
+
+    # Scene filtering - Blind Spot detection for Inside Lab cameras
+    valid_configs = []
+    for cfg in camera_configs:
+        cls_val = str(cfg.get('classification', '')).lower()
+        if not cls_val or any(s in cls_val for s in (
+            'computer lab', 'inside lab', 'exam lab', 'lab',
+            'inside classroom', 'inside_classroom', 'classroom'
+        )):
+            valid_configs.append(cfg)
+            
+    if not valid_configs:
+        return
 
     gpu_t = threading.Thread(
         target=_gpu_batch_worker,

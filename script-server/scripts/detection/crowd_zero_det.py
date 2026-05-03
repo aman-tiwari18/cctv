@@ -5,6 +5,7 @@ import logging
 import sys
 import threading
 import torch
+import uuid
 from datetime import datetime
 from ultralytics import YOLO
 
@@ -17,7 +18,12 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "models", "yolov10m.pt")
 SAVE_FOLDER = os.path.join(BASE_DIR, "results/zero_person_detection")
 
-COOLDOWN_TIME = 240       # Seconds between saves
+# CAMERA CLASSIFICATION: Inside Lab
+# This detection runs on cameras classified as:
+# - Computer Lab / Inside Lab / Exam Lab / Inside Classroom
+# Detects when 0 candidates are present in the room
+
+COOLDOWN_TIME = 360       # Seconds between saves (changed from 240 to match worker)
 MAX_PERSONS = 1           # Threshold for violation (0 persons)
 CONF_THRESHOLD = 0.45     # Confidence for person detection
 
@@ -78,8 +84,21 @@ def detect_crowd_zero_in_frame(frame, device_id="unknown", camera_no="unknown", 
         time_elapsed = now - last_save_times.get(key, 0)
         if violation_detected and time_elapsed >= COOLDOWN_TIME:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{SAVE_FOLDER}/{script_name}_{camera_no}_{ts}.jpg"
+            import uuid
+            uid = str(uuid.uuid4())
+            fname = f"{script_name}_{device_id}_{camera_no}_{ts}_{uid}.jpg"
+            filename = os.path.join(SAVE_FOLDER, fname)
             cv2.imwrite(filename, frame)
+            try:
+                from utils.db_client import report_to_db_rtsp
+                report_to_db_rtsp(
+                    device_id=str(device_id),
+                    camera_no=str(camera_no),
+                    image_name=fname,
+                    folder="zero_person_detection",
+                )
+            except Exception as e:
+                logger.error(f"[{device_id}-{camera_no}] Crowd Zero DB reporting error: {e}")
             last_save_times[key] = now
             logger.warning(f"[{device_id}-{camera_no}] 🚨 ZERO persons detected: {filename}")
 

@@ -331,12 +331,15 @@ def _hls_camera_thread(cfg, stop_event):
     cap.release()
 
 def camera_inversion_worker_hls(camera_configs, stop_event=None):
-    """HLS worker entry point."""
+    """HLS worker entry point - Camera Inversion detection for all camera types."""
     if isinstance(camera_configs, dict):
         camera_configs = [camera_configs]
 
     if stop_event is None:
         stop_event = _STOP_EVENT
+
+    # No scene filtering - Camera inversion can happen on any camera type
+    # (Inside Lab, Server Room, Outside, etc.)
 
     gpu_t = threading.Thread(
         target=_gpu_batch_worker,

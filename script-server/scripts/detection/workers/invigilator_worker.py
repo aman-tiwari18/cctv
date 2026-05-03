@@ -280,11 +280,14 @@ def invigilator_worker_hls(camera_configs, stop_event=None):
     if stop_event is None:
         stop_event = _STOP_EVENT
 
-    # Scene filtering - Invigilator detection only for Inside Classroom cameras
+    # Scene filtering - Invigilator detection for Inside Lab cameras
     valid_configs = []
     for cfg in camera_configs:
         cls_val = str(cfg.get('classification', '')).lower()
-        if not cls_val or any(s in cls_val for s in ('inside classroom', 'inside_classroom', 'classroom')):
+        if not cls_val or any(s in cls_val for s in (
+            'computer lab', 'inside lab', 'exam lab', 'lab',
+            'inside classroom', 'inside_classroom', 'classroom'
+        )):
             valid_configs.append(cfg)
             
     if not valid_configs:

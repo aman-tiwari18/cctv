@@ -17,6 +17,11 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "models", "yolov10m.pt")
 SAVE_FOLDER = os.path.join(BASE_DIR, "results/intruder_detection")
 
+# CAMERA CLASSIFICATION: Inside Lab, Server Room
+# This detection runs on cameras classified as:
+# - Computer Lab / Inside Lab / Exam Lab
+# - Server Room / Strong Room
+
 COOLDOWN_TIME = 0         # Immediate alert for intruder
 MIN_PERSONS = 0           # Threshold for violation (>0)
 CONF_THRESHOLD = 0.30     # Confidence for intruder detection
@@ -74,7 +79,10 @@ def detect_intruder_in_frame(frame, device_id="unknown", camera_no="unknown", sc
         time_elapsed = now - last_save_times.get(key, 0)
         if intruder_detected and time_elapsed >= COOLDOWN_TIME:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{SAVE_FOLDER}/{script_name}_{camera_no}_{ts}.jpg"
+            import uuid
+            uid = str(uuid.uuid4())
+            fname = f"{script_name}_{device_id}_{camera_no}_{ts}_{uid}.jpg"
+            filename = os.path.join(SAVE_FOLDER, fname)
             cv2.imwrite(filename, frame)
             last_save_times[key] = now
             logger.warning(f"[{device_id}-{camera_no}] 🚨 Intruder detected: {filename}")

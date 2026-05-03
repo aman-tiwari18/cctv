@@ -5,6 +5,7 @@ import logging
 import sys
 import threading
 import torch
+import uuid
 from datetime import datetime
 from ultralytics import YOLO
 
@@ -17,7 +18,12 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "models", "yolov10m.pt")
 SAVE_FOLDER = os.path.join(BASE_DIR, "results/crowd_detection_threshold")
 
-COOLDOWN_TIME = 240       # Seconds between saves
+# CAMERA CLASSIFICATION: Inside Lab
+# This detection runs on cameras classified as:
+# - Computer Lab / Inside Lab / Exam Lab / Inside Classroom
+# Detects when less than 5 candidates are present in the room
+
+COOLDOWN_TIME = 120       # Seconds between saves (changed from 240 to match worker)
 MAX_PERSONS = 5           # Threshold for violation (less than 5 persons)
 CONF_THRESHOLD = 0.45     # Confidence for person detection
 
@@ -78,8 +84,20 @@ def detect_crowd_five_in_frame(frame, device_id="unknown", camera_no="unknown", 
         time_elapsed = now - last_save_times.get(key, 0)
         if violation_detected and time_elapsed >= COOLDOWN_TIME:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{SAVE_FOLDER}/{script_name}_{camera_no}_{ts}.jpg"
+            uid = str(uuid.uuid4())
+            fname = f"{script_name}_{device_id}_{camera_no}_{ts}_{uid}.jpg"
+            filename = os.path.join(SAVE_FOLDER, fname)
             cv2.imwrite(filename, frame)
+            try:
+                from utils.db_client import report_to_db_rtsp
+                report_to_db_rtsp(
+                    device_id=str(device_id),
+                    camera_no=str(camera_no),
+                    image_name=fname,
+                    folder="crowd_detection_threshold",
+                )
+            except Exception as e:
+                logger.error(f"[{device_id}-{camera_no}] Crowd Five DB reporting error: {e}")
             last_save_times[key] = now
             logger.warning(f"[{device_id}-{camera_no}] 🚨 Less than 5 persons detected: {filename}")
 
