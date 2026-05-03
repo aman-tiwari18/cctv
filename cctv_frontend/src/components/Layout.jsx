@@ -85,7 +85,7 @@ const TYPE_META = {
   invigilator: { label: 'Invigilator', icon: Visibility, iconColor: '#00bfcf' },
   inversion: { label: 'Camera Inversion', icon: FlipCameraAndroid, iconColor: '#7a86b4' },
   tamper: { label: 'Camera Tampering', icon: SecurityUpdateWarning, iconColor: '#00c8d4' },
-  tampering: { label: 'Camera Tampering', icon: SecurityUpdateWarning, iconColor: '#00c8d4' },
+  // tampering: { label: 'Camera Tampering', icon: SecurityUpdateWarning, iconColor: '#00c8d4' },
   strongroom: { label: 'Strong Room Movement', icon: SecurityUpdateWarning, iconColor: '#b91c1c' },
   qp_box: { label: 'QP Box Detection', icon: SecurityUpdateWarning, iconColor: '#dc2626' },
   vision: { label: 'Vision Detection', icon: Visibility, iconColor: '#3b82f6' },
