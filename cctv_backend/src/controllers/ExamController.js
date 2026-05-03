@@ -230,6 +230,7 @@ exports.deleteExam = async (req, res) => {
 
 exports.getDetectionCount = async (req, res) => {
     const examId = req.params.id;
+    const userRole = req.user?.role;
 
     const exam = await Exam.findByPk(examId);
 
@@ -243,13 +244,17 @@ exports.getDetectionCount = async (req, res) => {
     const linkType = (exam.link_type || "").toUpperCase();
     let detectionCount = 0;
 
+    // For VIEWER (client) role, only count detections pushed to client
+    const isClientView = userRole === 'VIEWER';
+    const clientFilter = isClientView ? 'AND pushed_to_client = 1 AND remove_from_client = 0' : '';
+
     try {
         if (linkType === "HLS") {
             // Count from camera_report_hls table
             const [results] = await sequelize.query(
                 `SELECT COUNT(DISTINCT id) as count 
                  FROM camera_report_hls 
-                 WHERE exam_id = :examId`,
+                 WHERE exam_id = :examId ${clientFilter}`,
                 {
                     replacements: { examId },
                     type: sequelize.QueryTypes.SELECT,
@@ -261,7 +266,7 @@ exports.getDetectionCount = async (req, res) => {
             const [results] = await sequelize.query(
                 `SELECT COUNT(DISTINCT id) as count 
                  FROM camera_report_rtsp 
-                 WHERE exam_id = :examId`,
+                 WHERE exam_id = :examId ${clientFilter}`,
                 {
                     replacements: { examId },
                     type: sequelize.QueryTypes.SELECT,
@@ -276,6 +281,7 @@ exports.getDetectionCount = async (req, res) => {
                 exam_id: examId,
                 link_type: linkType,
                 detection_count: parseInt(detectionCount, 10),
+                is_client_view: isClientView,
             },
         });
     } catch (error) {

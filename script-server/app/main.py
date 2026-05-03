@@ -70,9 +70,36 @@ def _camera_meta_for_rtsp_pk(camera_id_pk: int) -> dict:
 
 @lru_cache(maxsize=8192)
 def _camera_meta_for_rtsp_device_ch(device_id: str, camera_no: str) -> dict:
-    if not device_id or not camera_no:
+    """Fetch RTSP camera metadata by device_id and camera_no.
+    
+    If device_id is empty, try to find by camera_no alone (useful for HLS->RTSP fallback).
+    """
+    if not camera_no:
         return {}
-    return get_rtsp_camera_by_device_and_ch(device_id, camera_no) or {}
+    
+    if device_id:
+        result = get_rtsp_camera_by_device_and_ch(device_id, camera_no)
+        if result:
+            return result
+    
+    # Fallback: try to find by camera_no alone if device_id is missing
+    try:
+        conn = _get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT * FROM camera_links_rtsp
+                WHERE camera_no = %s AND is_active = 1
+                LIMIT 1
+                """,
+                (camera_no,)
+            )
+            row = cur.fetchone()
+            conn.close()
+            return row or {}
+    except Exception as e:
+        logger.error(f"RTSP camera lookup by camera_no failed: {e}")
+        return {}
 
 
 # RTSP filenames follow: {script}_{camera_id_pk}_{camera_no}_{date}_{time}_{extra}.jpg
@@ -82,7 +109,7 @@ _RTSP_SCRIPT_PREFIXES = {
     "invigilator", "tamper", "inversion", "blind", "zero", "five",
     "tampering", "violation", "entry_exit", "server_room", "blind_spot",
     "inversion", "tamper", "zero_person", "detection", "crowd_zero", "crowd_five",
-    "blindspot"
+    "blindspot", "crowd_five", "entry_exit"
 }
 
 
@@ -648,17 +675,29 @@ def parse_detection_filename(
 
     exam_date_iso = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}" if date_str else ""
 
-    # ── Metadata lookup: RTSP uses pk, HLS uses ch_code ──
-    # if source == "rtsp" and rtsp_pk:
-    #     cam_meta = _camera_meta_for_rtsp_pk(rtsp_pk)
+    # ── Metadata lookup: RTSP uses device_id+camera_no, HLS uses ch_code ──
+    cam_meta = {}
     if source == "rtsp" and _is_rtsp_filename(stem):
         parts = stem.split("_")
-        dev_id = parts[1]
-        cam_no_part = parts[2]
-        cam_meta = _camera_meta_for_rtsp_device_ch(dev_id, cam_no_part)
-    else:
+        if len(parts) >= 3 and parts[1].isdigit() and parts[2].isdigit():
+            dev_id = parts[1]
+            cam_no_part = parts[2]
+            cam_meta = _camera_meta_for_rtsp_device_ch(dev_id, cam_no_part)
+            logger.debug(f"RTSP metadata lookup: dev_id={dev_id}, cam_no={cam_no_part}, found={bool(cam_meta)}")
+    
+    # Fallback to HLS lookup if RTSP lookup failed or if source is HLS
+    if not cam_meta:
         ch_no = _extract_ch_no(camera_id)
-        cam_meta = _camera_meta_for_ch(ch_no, exam_date_iso)
+        if ch_no:
+            cam_meta = _camera_meta_for_ch(ch_no, exam_date_iso)
+            logger.debug(f"HLS metadata lookup: ch_no={ch_no}, exam_date={exam_date_iso}, found={bool(cam_meta)}")
+        
+        # If HLS lookup failed and we have exam_id, try RTSP lookup as fallback
+        if not cam_meta and exam_id and ch_no:
+            # Try to find in RTSP table using camera_no
+            cam_meta = _camera_meta_for_rtsp_device_ch("", ch_no)
+            if cam_meta:
+                logger.debug(f"Fallback RTSP metadata lookup succeeded: ch_no={ch_no}")
 
     ch_no_display = str(cam_meta.get("camera_no") or cam_meta.get("ch_code") or _extract_ch_no(camera_id))
     camera_name = cam_meta.get("camera_name") or camera_id
