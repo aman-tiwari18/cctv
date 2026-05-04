@@ -543,9 +543,7 @@ def capture_frame_with_ffmpeg_stream(stream_url, id_str):
     """
     Capture frame via FFmpeg subprocess.
     
-    Uses both:
-      -timeout  (general I/O timeout, microseconds)
-      -stimeout (RTSP-specific session timeout, microseconds)
+    Uses -timeout (general I/O timeout, microseconds) for connection/read timeouts.
     Plus subprocess.run(timeout=...) as the final hard kill.
     """
     if not shutil.which("ffmpeg"):
@@ -562,10 +560,9 @@ def capture_frame_with_ffmpeg_stream(stream_url, id_str):
     if stream_url.startswith("rtsp"):
         cmd += [
             "-rtsp_transport", "tcp",
-            "-stimeout", str(timeout_us),   # RTSP session timeout
         ]
     cmd += [
-        "-timeout",   str(timeout_us),      # general I/O timeout
+        "-timeout",   str(timeout_us),      # general I/O timeout (works for RTSP too)
         "-i",         stream_url,
         "-frames:v",  "1",
         "-loglevel",  "warning",            # warning shows RTSP-level errors

@@ -1034,6 +1034,14 @@ async def copy_client_detections(payload: ClientDetectionCopyRequest):
             # After all updates, emit client detections and updated client counts
             for item in copied:
                 await sio.emit("client-detection:new", item)
+                
+                # Emit detection:pushed event for multi-user synchronization
+                # This notifies all connected users that this detection has been pushed
+                await sio.emit("detection:pushed", {
+                    "uid": item.get("uid"),
+                    "pushedBy": None,  # Can be enhanced to include user ID if available
+                    "pushedAt": item.get("updatedAt")
+                })
             
             # Re-fetch total client counts for today
             try:

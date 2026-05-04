@@ -5,7 +5,7 @@ import {
   TextField, Select, MenuItem, FormControl, InputLabel,
   ToggleButtonGroup, ToggleButton, Pagination, TablePagination,
   IconButton, Skeleton, Grid, Checkbox, FormControlLabel, Dialog, DialogContent,
-  InputAdornment, Button, Snackbar, Alert, LinearProgress,
+  InputAdornment, Button, Snackbar, Alert, LinearProgress, CircularProgress,
 } from '@mui/material';
 import {
   Search, CameraAlt, GridView, Close,
@@ -27,6 +27,61 @@ import { useDetectionCounts } from '../contexts/DetectionCountsContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
 import * as XLSX from 'xlsx';
+
+// ============================================================
+// PERFORMANCE UTILITIES
+// ============================================================
+
+// Debounce hook for search input
+function useDebounce(value, delay) {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value);
+    }, delay);
+
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [value, delay]);
+
+  return debouncedValue;
+}
+
+// Request queue to prevent concurrent push operations
+class RequestQueue {
+  constructor() {
+    this.queue = [];
+    this.processing = false;
+  }
+
+  async add(fn) {
+    return new Promise((resolve, reject) => {
+      this.queue.push({ fn, resolve, reject });
+      this.process();
+    });
+  }
+
+  async process() {
+    if (this.processing || this.queue.length === 0) return;
+    
+    this.processing = true;
+    const { fn, resolve, reject } = this.queue.shift();
+    
+    try {
+      const result = await fn();
+      resolve(result);
+    } catch (error) {
+      reject(error);
+    } finally {
+      this.processing = false;
+      this.process(); // Process next item
+    }
+  }
+}
+
+const pushQueue = new RequestQueue();
 
 const TYPE_META = {
   proximity: { label: 'Close Proximity', color: '#5cb88a', bg: '#e5f5ed', iconKey: 'proximity' },
@@ -686,6 +741,7 @@ export default function Detections() {
   const [rowsPerPage, setRowsPerPage] = useState(50);
   const [view, setView] = useState('grid');
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 500); // 500ms debounce
   const [exams, setExams] = useState([]);
   const [examFilter, setExamFilter] = useState('');
   const [dateFilter, setDateFilter] = useState(todayDate);
@@ -705,6 +761,11 @@ export default function Detections() {
 
   const [selected, setSelected] = useState(null);
   const [selectedPaths, setSelectedPaths] = useState([]);
+
+  // Performance optimization: Use refs to prevent unnecessary re-renders
+  const abortControllerRef = useRef(null);
+  const fetchTimeoutRef = useRef(null);
+  const lastFetchParamsRef = useRef(null);
 
   const buildSelectionKey = (item) => `${item.source}|${item.type}|${item.relativePath}`;
   const getDetectionKey = useCallback((item = {}) => (
@@ -731,6 +792,7 @@ export default function Detections() {
     setData((prev) => prev.filter(i => getDetectionKey(i) !== getDetectionKey(itemToRemove)));
   }, [getDetectionKey]);
 
+  // Optimized: Only fetch counts when filters change, not on every render
   const fetchAllCounts = useCallback(async () => {
     if (typeFilter.length === 0) return;
 
@@ -738,7 +800,11 @@ export default function Detections() {
       const params = new URLSearchParams({ page: 1, limit: 1 });
       if (dateFilter) params.append('date', parseDateForQuery(dateFilter));
       if (examFilter) params.append('exam_id', examFilter);
-      const res = await axios.get(`${API_BASE_1}/detections?${params}`);
+      
+      const res = await axios.get(`${API_BASE_1}/detections?${params}`, {
+        signal: abortControllerRef.current?.signal
+      });
+      
       if (res.data.success) {
         setUnfilteredCounts(res.data.counts || {});
         if (typeFilter.length === 0) {
@@ -746,12 +812,18 @@ export default function Detections() {
         }
       }
     } catch (err) {
-      console.error('Failed to fetch all counts:', err);
+      if (err.name !== 'CanceledError') {
+        console.error('Failed to fetch all counts:', err);
+      }
     }
   }, [dateFilter, examFilter, setAllCounts, setUnfilteredCounts, typeFilter.length]);
 
+  // Debounced counts fetch
   useEffect(() => {
-    fetchAllCounts();
+    const timer = setTimeout(() => {
+      fetchAllCounts();
+    }, 300);
+    return () => clearTimeout(timer);
   }, [fetchAllCounts]);
 
   const loadExams = useCallback(async () => {
@@ -760,7 +832,6 @@ export default function Detections() {
       const examList = Array.isArray(response?.data?.data) ? response.data.data : [];
       setExams(examList);
       
-      // Set exam filter from URL params if present
       const examIdFromUrl = searchParams.get('exam_id');
       if (examIdFromUrl && examList.some(exam => String(exam.id) === examIdFromUrl)) {
         setExamFilter(examIdFromUrl);
@@ -778,76 +849,74 @@ export default function Detections() {
     const params = new URLSearchParams({ page: pg, limit: rpp });
     if (typeFilter.length > 0) params.append('type', typeFilter.join(','));
     if (dateFilter) params.append('date', parseDateForQuery(dateFilter));
-    if (search.trim()) params.append('search', search.trim());
+    if (debouncedSearch.trim()) params.append('search', debouncedSearch.trim()); // Use debounced search
     if (examFilter) params.append('exam_id', examFilter);
     if (appliedStartTime) params.append('start_time', appliedStartTime);
     if (appliedEndTime) params.append('end_time', appliedEndTime);
     return params;
-  }, [typeFilter, dateFilter, search, examFilter, appliedStartTime, appliedEndTime, rowsPerPage]);
+  }, [typeFilter, dateFilter, debouncedSearch, examFilter, appliedStartTime, appliedEndTime, rowsPerPage]);
 
+  // Optimized fetch with abort controller and request deduplication
   const fetchDetections = useCallback(async (pg = 1, rpp = rowsPerPage) => {
-    setLoading(true);
-    try {
-      const params = buildDetectionParams(pg, rpp);
-      const res = await axios.get(`${API_BASE_1}/detections?${params}`);
+    // Cancel previous request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
 
-      try {
-        const cParams = new URLSearchParams(params);
-        cParams.set('limit', '1');
-        const cRes = await axios.get(`${API_BASE_1}/client-detections?${cParams}`);
-        if (cRes.data.success) {
-          setClientTotal(cRes.data.total || 0);
+    // Create new abort controller
+    abortControllerRef.current = new AbortController();
+
+    const params = buildDetectionParams(pg, rpp);
+    const paramsString = params.toString();
+
+    // Prevent duplicate requests
+    if (lastFetchParamsRef.current === paramsString) {
+      return;
+    }
+    lastFetchParamsRef.current = paramsString;
+
+    setLoading(true);
+    
+    try {
+      // Parallel requests with single abort controller
+      const [detectionsRes, clientRes] = await Promise.all([
+        axios.get(`${API_BASE_1}/detections?${params}`, {
+          signal: abortControllerRef.current.signal
+        }),
+        axios.get(`${API_BASE_1}/client-detections?${new URLSearchParams({ ...Object.fromEntries(params), limit: 1 })}`, {
+          signal: abortControllerRef.current.signal
+        }).catch(() => ({ data: { total: 0 } })) // Graceful fallback
+      ]);
+
+      if (detectionsRes.data.success) {
+        const fetchedItems = Array.isArray(detectionsRes.data.data)
+          ? detectionsRes.data.data.map((item) => ({ ...item, newBadgeAt: undefined }))
+          : [];
+        
+        setData(fetchedItems);
+        setTotal(detectionsRes.data.total);
+        setCounts(detectionsRes.data.counts || {});
+        setAllCounts(detectionsRes.data.counts || {});
+        
+        if (typeFilter.length === 0) {
+          setUnfilteredCounts(detectionsRes.data.counts || {});
         }
-      } catch (err) {
-        console.error('Failed to fetch client total:', err);
       }
 
-      if (res.data.success) {
-        const fetchedItems = Array.isArray(res.data.data)
-          ? res.data.data.map((item) => ({ ...item, newBadgeAt: undefined }))
-          : [];
-        setData(fetchedItems);
-        setTotal(res.data.total);
-        setCounts(res.data.counts || {});
-        setAllCounts(res.data.counts || {});
-        if (typeFilter.length === 0) {
-          setUnfilteredCounts(res.data.counts || {});
-        }
+      if (clientRes.data.success) {
+        setClientTotal(clientRes.data.total || 0);
       }
     } catch (err) {
-      console.error('Failed to fetch detections:', err);
+      if (err.name !== 'CanceledError') {
+        console.error('Failed to fetch detections:', err);
+      }
     } finally {
       setLoading(false);
     }
   }, [buildDetectionParams, rowsPerPage, setAllCounts, setUnfilteredCounts, typeFilter.length]);
 
-  const matchesFilters = useCallback((item) => {
-    if (typeFilter.length > 0 && !typeFilter.includes(item.type)) return false;
-    const normalizedDateFilter = parseDateForQuery(dateFilter);
-    if (dateFilter && item.date !== normalizedDateFilter) return false;
-    if (examFilter && String(item.exam_id) !== String(examFilter)) return false;
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      const haystack = [
-        item.camera_id, item.cameraId, item.cameraName,
-        item.centerName, item.city, item.state, item.tcCode,
-      ].filter(Boolean).join(' ').toLowerCase();
-      if (!haystack.includes(q)) return false;
-    }
-    // Time range filter (client-side on detected_at)
-    if (dateFilter && (appliedStartTime || appliedEndTime)) {
-      const itemSec = parseDetectedAtTime(item.detected_at);
-      if (itemSec !== null) {
-        const startSec = timeStringToSeconds(appliedStartTime);
-        const endSec = timeStringToSeconds(appliedEndTime);
-        if (startSec !== null && itemSec < startSec) return false;
-        if (endSec !== null && itemSec > endSec + 59) return false; // +59 to include the whole minute
-      }
-    }
-    return true;
-  }, [typeFilter, dateFilter, examFilter, search, appliedStartTime, appliedEndTime]);
-
-  const filteredData = useMemo(() => data.filter(matchesFilters), [data, matchesFilters]);
+  // Optimized: Only filter on server-side, remove client-side filtering
+  const filteredData = useMemo(() => data, [data]); // Server already filtered
 
   const mergeLiveDetections = useCallback((items, { incrementTotal = false } = {}) => {
     const incoming = (Array.isArray(items) ? items : [items]).filter(Boolean);
@@ -862,7 +931,6 @@ export default function Detections() {
         ...item,
         newBadgeAt: now,
       };
-      if (!matchesFilters(liveItem)) return;
 
       const key = getDetectionKey(liveItem);
       if (!key || seen.has(key)) return;
@@ -894,7 +962,7 @@ export default function Detections() {
 
     setLiveAlert(freshItems[0]);
     setTimeout(() => setLiveAlert(null), 5000);
-  }, [getDetectionKey, matchesFilters, rowsPerPage]);
+  }, [getDetectionKey, rowsPerPage]);
 
   // Handle live updates for the data list
   const { socket, connected } = useSocket();
@@ -909,6 +977,7 @@ export default function Detections() {
     return () => socket.off('detection:new', handleNewDetection);
   }, [socket, mergeLiveDetections]);
 
+  // Optimized polling: Only when NOT connected and on page 1
   useEffect(() => {
     if (loading || page !== 1 || connected) return;
 
@@ -916,12 +985,15 @@ export default function Detections() {
     let inFlight = false;
 
     const pollLatestDetections = async () => {
-      if (inFlight) return;
+      if (inFlight || cancelled) return;
       inFlight = true;
 
       try {
         const params = buildDetectionParams(1, rowsPerPage);
-        const res = await axios.get(`${API_BASE_1}/detections?${params}`);
+        const res = await axios.get(`${API_BASE_1}/detections?${params}`, {
+          signal: abortControllerRef.current?.signal
+        });
+        
         if (cancelled || !res.data.success) return;
 
         setTotal(res.data.total || 0);
@@ -929,55 +1001,106 @@ export default function Detections() {
         setAllCounts(res.data.counts || {});
         mergeLiveDetections(res.data.data || []);
       } catch (err) {
-        console.error('Failed to poll latest detections:', err);
+        if (err.name !== 'CanceledError') {
+          console.error('Failed to poll latest detections:', err);
+        }
       } finally {
         inFlight = false;
       }
     };
 
-    const interval = setInterval(pollLatestDetections, 10000);
+    const interval = setInterval(pollLatestDetections, 15000); // Increased to 15s
     return () => {
       cancelled = true;
       clearInterval(interval);
     };
   }, [loading, page, connected, rowsPerPage, buildDetectionParams, mergeLiveDetections, setAllCounts]);
 
+  // Debounced fetch on filter changes
   useEffect(() => {
     setPage(1);
     setListSelectedIndex(0);
-    fetchDetections(1);
-  }, [fetchDetections]);
+    
+    // Clear previous timeout
+    if (fetchTimeoutRef.current) {
+      clearTimeout(fetchTimeoutRef.current);
+    }
 
-  // Socket connection is now handled by SocketContext
-  // No need for duplicate socket connection here
+    // Debounce fetch
+    fetchTimeoutRef.current = setTimeout(() => {
+      fetchDetections(1);
+    }, 300);
+
+    return () => {
+      if (fetchTimeoutRef.current) {
+        clearTimeout(fetchTimeoutRef.current);
+      }
+    };
+  }, [typeFilter, dateFilter, examFilter, appliedStartTime, appliedEndTime, debouncedSearch]);
+
+  // Broadcast push events to other users via socket
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleDetectionPushed = ({ uid, pushedBy }) => {
+      // Update local state when another user pushes
+      if (pushedBy !== user?.id) {
+        setPushedUids((prev) => {
+          const next = new Set(prev);
+          next.add(uid);
+          return next;
+        });
+        setClientTotal((prev) => prev + 1);
+      }
+    };
+
+    socket.on('detection:pushed', handleDetectionPushed);
+    return () => socket.off('detection:pushed', handleDetectionPushed);
+  }, [socket, user]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      if (fetchTimeoutRef.current) {
+        clearTimeout(fetchTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handlePageChange = (_, pg) => {
     setPage(pg);
-
     setListSelectedIndex(0);
     fetchDetections(pg);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  // Optimized push to client with queue and optimistic updates
   const pushToClient = async (items) => {
     if (items.length === 0) return;
 
-    const currentItem = items[0]; // since you're passing single item
+    const currentItem = items[0];
     const id = currentItem.id || currentItem.timestamp || currentItem.image_url;
+
+    // Optimistic update
+    setPushedUids((prev) => {
+      const next = new Set(prev);
+      items.forEach(itm => next.add(itm.uid || itm.id || itm.image_url));
+      return next;
+    });
+    setClientTotal((prev) => prev + items.length);
 
     setCopyingId(id);
 
     try {
-      await axios.post(`${API_BASE_1}/client-detections/copy`, {
-        items: items.map(({ source, type, relativePath, uid }) => ({ source, type, relativePath, uid })),
+      // Use queue to prevent concurrent requests
+      await pushQueue.add(async () => {
+        return await axios.post(`${API_BASE_1}/client-detections/copy`, {
+          items: items.map(({ source, type, relativePath, uid }) => ({ source, type, relativePath, uid })),
+        });
       });
-
-      setPushedUids((prev) => {
-        const next = new Set(prev);
-        items.forEach(itm => next.add(itm.uid || itm.id || itm.image_url));
-        return next;
-      });
-      setClientTotal((prev) => prev + items.length);
 
       setClientSnackbar({
         open: true,
@@ -986,6 +1109,15 @@ export default function Detections() {
       });
     } catch (err) {
       console.error(err);
+      
+      // Rollback optimistic update on error
+      setPushedUids((prev) => {
+        const next = new Set(prev);
+        items.forEach(itm => next.delete(itm.uid || itm.id || itm.image_url));
+        return next;
+      });
+      setClientTotal((prev) => prev - items.length);
+      
       setClientSnackbar({
         open: true,
         message: 'Failed to push selected images to client',
