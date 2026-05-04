@@ -48,7 +48,7 @@ exports.getClientDashboardStats = async (req, res) => {
         }
 
         // Build exam filter
-        let examQuery = 'SELECT id, exam_name, exam_body, start_date, end_date FROM exams WHERE is_active = 1';
+        let examQuery = 'SELECT id, exam_name, exam_body, link_type, start_date, end_date FROM exams WHERE is_active = 1';
         let queryParams = [];
 
         if (userRole !== 'ADMIN' && userCompanyName) {
@@ -94,69 +94,54 @@ exports.getClientDashboardStats = async (req, res) => {
         // Get detection counts by type with accuracy calculation
         const detectionDistribution = [];
         
-        // Group exams by link_type
-        const hlsExams = exams.filter(e => e.link_type === 'HLS').map(e => e.id);
-        const rtspExams = exams.filter(e => e.link_type === 'RTSP').map(e => e.id);
+        // Query HLS detections for user's exams
+        const hlsDetections = await query(`
+            SELECT 
+                detection_type,
+                COUNT(*) as total_count,
+                SUM(CASE WHEN pushed_to_client = 1 THEN 1 ELSE 0 END) as pushed_count,
+                SUM(CASE WHEN remove_from_client = 1 THEN 1 ELSE 0 END) as removed_count
+            FROM camera_report_hls
+            WHERE exam_id IN (?) ${dateCondition}
+            GROUP BY detection_type
+        `, [examIds]);
         
-        // Query HLS detections if there are HLS exams
-        if (hlsExams.length > 0) {
-            const hlsDetections = await query(`
-                SELECT 
-                    detection_type,
-                    COUNT(*) as total_count,
-                    SUM(CASE WHEN pushed_to_client = 1 THEN 1 ELSE 0 END) as pushed_count,
-                    SUM(CASE WHEN remove_from_client = 1 THEN 1 ELSE 0 END) as removed_count
-                FROM camera_report_hls
-                WHERE exam_id IN (?) ${dateCondition}
-                GROUP BY detection_type
-            `, [hlsExams]);
-            
-            hlsDetections.forEach(row => {
-                const existing = detectionDistribution.find(d => d.type === row.detection_type);
-                if (existing) {
-                    existing.total_count += row.total_count;
-                    existing.pushed_count += row.pushed_count;
-                    existing.removed_count += row.removed_count;
-                } else {
-                    detectionDistribution.push({
-                        type: row.detection_type || 'unknown',
-                        total_count: row.total_count,
-                        pushed_count: row.pushed_count,
-                        removed_count: row.removed_count
-                    });
-                }
+        hlsDetections.forEach(row => {
+            detectionDistribution.push({
+                type: row.detection_type || 'unknown',
+                total_count: row.total_count,
+                pushed_count: row.pushed_count,
+                removed_count: row.removed_count
             });
-        }
+        });
         
-        // Query RTSP detections if there are RTSP exams
-        if (rtspExams.length > 0) {
-            const rtspDetections = await query(`
-                SELECT 
-                    detection_type,
-                    COUNT(*) as total_count,
-                    SUM(CASE WHEN pushed_to_client = 1 THEN 1 ELSE 0 END) as pushed_count,
-                    SUM(CASE WHEN remove_from_client = 1 THEN 1 ELSE 0 END) as removed_count
-                FROM camera_report_rtsp
-                WHERE exam_id IN (?) ${dateCondition}
-                GROUP BY detection_type
-            `, [rtspExams]);
-            
-            rtspDetections.forEach(row => {
-                const existing = detectionDistribution.find(d => d.type === row.detection_type);
-                if (existing) {
-                    existing.total_count += row.total_count;
-                    existing.pushed_count += row.pushed_count;
-                    existing.removed_count += row.removed_count;
-                } else {
-                    detectionDistribution.push({
-                        type: row.detection_type || 'unknown',
-                        total_count: row.total_count,
-                        pushed_count: row.pushed_count,
-                        removed_count: row.removed_count
-                    });
-                }
-            });
-        }
+        // Query RTSP detections for user's exams
+        const rtspDetections = await query(`
+            SELECT 
+                detection_type,
+                COUNT(*) as total_count,
+                SUM(CASE WHEN pushed_to_client = 1 THEN 1 ELSE 0 END) as pushed_count,
+                SUM(CASE WHEN remove_from_client = 1 THEN 1 ELSE 0 END) as removed_count
+            FROM camera_report_rtsp
+            WHERE exam_id IN (?) ${dateCondition}
+            GROUP BY detection_type
+        `, [examIds]);
+        
+        rtspDetections.forEach(row => {
+            const existing = detectionDistribution.find(d => d.type === row.detection_type);
+            if (existing) {
+                existing.total_count += row.total_count;
+                existing.pushed_count += row.pushed_count;
+                existing.removed_count += row.removed_count;
+            } else {
+                detectionDistribution.push({
+                    type: row.detection_type || 'unknown',
+                    total_count: row.total_count,
+                    pushed_count: row.pushed_count,
+                    removed_count: row.removed_count
+                });
+            }
+        });
         
         // Calculate accuracy for each detection type
         // Accuracy = (pushed_to_client / total_count) * 100
@@ -289,9 +274,9 @@ exports.getClientDashboardStats = async (req, res) => {
                     id: e.id, 
                     name: e.exam_name, 
                     body: e.exam_body,
+                    link_type: e.link_type,
                     start_date: e.start_date,
-                    end_date: e.end_date,
-                    link_type: e.link_type
+                    end_date: e.end_date
                 }))
             }
         });
@@ -399,9 +384,9 @@ exports.getCameraAccessibility = async (req, res) => {
         const allCameras = [...hlsCameras, ...rtspCameras];
 
         // Count accessible vs non-accessible
-        // Assuming status field: 'active' or 'online' = accessible, anything else = non-accessible
+        // Status field: 'accessible' = accessible, anything else = non-accessible
         const accessible = allCameras.filter(cam => 
-            cam.status && (cam.status.toLowerCase() === 'active' || cam.status.toLowerCase() === 'online')
+            cam.status && cam.status.toLowerCase() === 'accessible'
         ).length;
         const nonAccessible = allCameras.length - accessible;
 
@@ -569,11 +554,11 @@ exports.downloadCameraAccessibility = async (req, res) => {
         
         if (type === 'accessible') {
             allCameras = allCameras.filter(cam => 
-                cam.status && (cam.status.toLowerCase() === 'active' || cam.status.toLowerCase() === 'online')
+                cam.status && cam.status.toLowerCase() === 'accessible'
             );
         } else if (type === 'non_accessible') {
             allCameras = allCameras.filter(cam => 
-                !cam.status || (cam.status.toLowerCase() !== 'active' && cam.status.toLowerCase() !== 'online')
+                !cam.status || cam.status.toLowerCase() !== 'accessible'
             );
         }
 
