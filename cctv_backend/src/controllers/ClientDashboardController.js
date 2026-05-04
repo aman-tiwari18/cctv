@@ -92,51 +92,52 @@ exports.getClientDashboardStats = async (req, res) => {
         const totalCameras = (hlsCameras[0]?.count || 0) + (rtspCameras[0]?.count || 0);
 
         // Get detection counts by type with accuracy calculation
+        // For clients: only count pushed_to_client = 1 detections
+        // Accuracy = (pushed_count - removed_count) / pushed_count * 100
         const detectionDistribution = [];
         
-        // Query HLS detections for user's exams
+        // Query HLS detections for user's exams (only pushed to client)
         const hlsDetections = await query(`
             SELECT 
                 detection_type,
-                COUNT(*) as total_count,
-                SUM(CASE WHEN pushed_to_client = 1 THEN 1 ELSE 0 END) as pushed_count,
+                COUNT(*) as pushed_count,
                 SUM(CASE WHEN remove_from_client = 1 THEN 1 ELSE 0 END) as removed_count
             FROM camera_report_hls
-            WHERE exam_id IN (?) ${dateCondition}
+            WHERE exam_id IN (?) 
+              AND pushed_to_client = 1
+              ${dateCondition}
             GROUP BY detection_type
         `, [examIds]);
         
         hlsDetections.forEach(row => {
             detectionDistribution.push({
                 type: row.detection_type || 'unknown',
-                total_count: row.total_count,
                 pushed_count: row.pushed_count,
                 removed_count: row.removed_count
             });
         });
         
-        // Query RTSP detections for user's exams
+        // Query RTSP detections for user's exams (only pushed to client)
         const rtspDetections = await query(`
             SELECT 
                 detection_type,
-                COUNT(*) as total_count,
-                SUM(CASE WHEN pushed_to_client = 1 THEN 1 ELSE 0 END) as pushed_count,
+                COUNT(*) as pushed_count,
                 SUM(CASE WHEN remove_from_client = 1 THEN 1 ELSE 0 END) as removed_count
             FROM camera_report_rtsp
-            WHERE exam_id IN (?) ${dateCondition}
+            WHERE exam_id IN (?) 
+              AND pushed_to_client = 1
+              ${dateCondition}
             GROUP BY detection_type
         `, [examIds]);
         
         rtspDetections.forEach(row => {
             const existing = detectionDistribution.find(d => d.type === row.detection_type);
             if (existing) {
-                existing.total_count += row.total_count;
                 existing.pushed_count += row.pushed_count;
                 existing.removed_count += row.removed_count;
             } else {
                 detectionDistribution.push({
                     type: row.detection_type || 'unknown',
-                    total_count: row.total_count,
                     pushed_count: row.pushed_count,
                     removed_count: row.removed_count
                 });
@@ -144,16 +145,23 @@ exports.getClientDashboardStats = async (req, res) => {
         });
         
         // Calculate accuracy for each detection type
-        // Accuracy = (pushed_to_client / total_count) * 100
-        const detectionDistributionWithAccuracy = detectionDistribution.map(d => ({
-            type: d.type,
-            count: d.total_count,
-            pushed_count: d.pushed_count,
-            removed_count: d.removed_count,
-            accuracy: d.total_count > 0 ? ((d.pushed_count / d.total_count) * 100).toFixed(2) : 0
-        }));
+        // Client-side accuracy = (pushed_count - removed_count) / pushed_count * 100
+        const detectionDistributionWithAccuracy = detectionDistribution.map(d => {
+            const accurateCount = d.pushed_count - d.removed_count;
+            const accuracy = d.pushed_count > 0 ? ((accurateCount / d.pushed_count) * 100).toFixed(2) : 0;
+            
+            return {
+                type: d.type,
+                count: d.pushed_count, // Total pushed to client
+                pushed_count: d.pushed_count,
+                removed_count: d.removed_count,
+                accurate_count: accurateCount, // Pushed - Removed
+                accuracy: parseFloat(accuracy)
+            };
+        });
         
-        const totalDetections = detectionDistribution.reduce((sum, d) => sum + d.total_count, 0);
+        // Total detections = sum of all pushed_to_client
+        const totalDetections = detectionDistribution.reduce((sum, d) => sum + d.pushed_count, 0);
 
         // Get all available scripts
         const allScripts = await query(`

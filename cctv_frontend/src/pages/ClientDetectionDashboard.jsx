@@ -354,24 +354,15 @@ const ClientDetectionDashboard = () => {
   // Prepare detection distribution data
   const detectionData = dashboardData.detection_distribution || [];
   
-  // Filter by selected exam first
-  const examFilteredDetectionData = selectedDetectionExam === 'all'
-    ? detectionData
-    : detectionData.filter(item => {
-        // Find which exams have this detection type
-        const examHasDetection = (dashboardData.exams || []).some(exam => {
-          if (exam.id !== parseInt(selectedDetectionExam)) return false;
-          // Check if this exam has detections of this type
-          // This is a simplified check - you may need to adjust based on your data structure
-          return true;
-        });
-        return examHasDetection;
-      });
+  // Filter by selected category first
+  const categoryFilteredData = selectedCategory === 'all' 
+    ? detectionData 
+    : detectionData.filter(item => SCRIPT_CATEGORY_MAP[item.type] === selectedCategory);
   
-  // Then filter by selected category
-  const filteredDetectionData = selectedCategory === 'all' 
-    ? examFilteredDetectionData 
-    : examFilteredDetectionData.filter(item => SCRIPT_CATEGORY_MAP[item.type] === selectedCategory);
+  // Then filter by selected exam if needed
+  const filteredDetectionData = selectedDetectionExam === 'all'
+    ? categoryFilteredData
+    : categoryFilteredData; // Backend already filters by user's exams
   
   // Group detections by type for pie chart with accuracy
   const pieData = filteredDetectionData.map(item => ({
@@ -380,6 +371,7 @@ const ClientDetectionDashboard = () => {
     count: item.count,
     pushed_count: item.pushed_count,
     removed_count: item.removed_count,
+    accurate_count: item.accurate_count || (item.pushed_count - item.removed_count),
     type: item.type,
     category: SCRIPT_CATEGORY_MAP[item.type] || 'camera',
     color: CATEGORY_COLORS[SCRIPT_CATEGORY_MAP[item.type]] || '#94a3b8',
@@ -1203,7 +1195,33 @@ const ClientDetectionDashboard = () => {
                       <Cell key={`cell-${index}`} fill={entry.color} />
                     ))}
                   </Pie>
-                  <Tooltip />
+                  <Tooltip 
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        const data = payload[0].payload;
+                        return (
+                          <Box sx={{ bgcolor: 'white', p: 1.5, borderRadius: 1, boxShadow: 2, border: '1px solid #e2e8f0' }}>
+                            <Typography variant="caption" fontWeight={700} sx={{ color: '#0f172a', display: 'block', mb: 0.5 }}>
+                              {data.name}
+                            </Typography>
+                            <Typography variant="caption" sx={{ color: '#64748b', display: 'block', fontSize: '0.7rem' }}>
+                              Pushed: {data.pushed_count}
+                            </Typography>
+                            <Typography variant="caption" sx={{ color: '#64748b', display: 'block', fontSize: '0.7rem' }}>
+                              Removed: {data.removed_count}
+                            </Typography>
+                            <Typography variant="caption" sx={{ color: '#64748b', display: 'block', fontSize: '0.7rem' }}>
+                              Accurate: {data.accurate_count}
+                            </Typography>
+                            <Typography variant="caption" fontWeight={700} sx={{ color: data.color, display: 'block', mt: 0.5 }}>
+                              Accuracy: {data.value}%
+                            </Typography>
+                          </Box>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
                 </PieChart>
               </ResponsiveContainer>
               
@@ -1226,7 +1244,7 @@ const ClientDetectionDashboard = () => {
             <Box display="flex" flexDirection="column" gap={1.5} mt={2} maxHeight={140} sx={{ overflowY: 'auto' }}>
               {pieData.map((item, index) => (
                 <Box key={index} display="flex" alignItems="center" justifyContent="space-between" gap={2}>
-                  <Box display="flex" alignItems="center" gap={1}>
+                  <Box display="flex" alignItems="center" gap={1} flex={1}>
                     <Box
                       sx={{
                         width: 12,
@@ -1240,9 +1258,14 @@ const ClientDetectionDashboard = () => {
                       {item.name}
                     </Typography>
                   </Box>
-                  <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 700, color: '#0f172a' }}>
-                    {item.value}%
-                  </Typography>
+                  <Box display="flex" alignItems="center" gap={2}>
+                    <Typography variant="caption" sx={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                      {item.accurate_count}/{item.pushed_count}
+                    </Typography>
+                    <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 700, color: '#0f172a', minWidth: 45, textAlign: 'right' }}>
+                      {item.value}%
+                    </Typography>
+                  </Box>
                 </Box>
               ))}
             </Box>
