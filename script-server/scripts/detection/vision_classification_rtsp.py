@@ -52,13 +52,16 @@ logger = logging.getLogger(__name__)
 MAX_WORKERS_NETWORK = 64  
 MAX_WORKERS_VLM = 4       
 
-TIMEOUT_API    = 10    # fine as-is
-TIMEOUT_OPENCV = 10000 # was 5000ms
-TIMEOUT_FFMPEG = 10    # was 5s
-TIMEOUT_VLM    = 120   
+TIMEOUT_API    = 10    # API request timeout (seconds)
+TIMEOUT_OPENCV = 5000  # OpenCV timeout (milliseconds) - may be ignored by some builds
+TIMEOUT_OPENCV_REAL = 8    # Hard thread timeout for OpenCV (seconds)
+TIMEOUT_FFMPEG = 8     # FFmpeg timeout (seconds)
+TIMEOUT_VLM    = 60    # VLM classification timeout (seconds)
 
 AUTH_USERNAME = "system"
-AUTH_PASSWORD = "Sasd@12345"
+# AUTH_PASSWORD = "Sasd@12345"
+AUTH_PASSWORD = "Coreiseven@@"
+
 
 TOKEN_EXPIRY_SECONDS = 90  
 
@@ -70,7 +73,12 @@ keepalive_threads = {}
 
 TWO_PASS_MODE = True
 SKIP_PRIVATE_IPS = True
-TIMEOUT_OPENCV_REAL = 8    # Hard thread timeout for OpenCV (seconds)
+
+# RTSP Proxy — set to map "host:port" → "proxy_host:proxy_port" if needed
+# Leave empty ({}) to connect directly
+RTSP_PROXY_MAP = {
+    # "15.207.163.63:9100": "10.x.x.x:19100",   # example: proxy through trusted relay
+}
 
 # ============================================================
 # Authentication for Camview
@@ -271,8 +279,26 @@ def generate_signature(userName, password, realm, randomKey):
     return hashlib.md5((temp + ":" + randomKey).encode()).hexdigest()
 
 def add_token_to_url(rtsp_url, token):
-    """Append session token as ?token= query parameter."""
+    """Append session token as ?token= query parameter.
+    DSS API docs show exact format: ...cameraid=X%24Y%26substream=1?token=NNN
+    The URL must remain encoded (%24, %26) and token goes after a literal '?'.
+    """
     return f"{rtsp_url}?token={token}"
+
+def apply_rtsp_proxy(url):
+    """Rewrite RTSP URL to go through a trusted relay if configured in RTSP_PROXY_MAP."""
+    if not RTSP_PROXY_MAP:
+        return url
+    h, p = extract_host_port(url)
+    if not h or not p:
+        return url
+    key = f"{h}:{p}"
+    if key in RTSP_PROXY_MAP:
+        proxy = RTSP_PROXY_MAP[key]
+        new_url = url.replace(f"{h}:{p}", proxy, 1)
+        logger.debug(f"RTSP proxy: {key} → {proxy}")
+        return new_url
+    return url
 
 def start_video_stream(server_address, device_id, camera_no):
     """
@@ -420,7 +446,12 @@ def build_rtsp_url(server_address, device_id, camera_no):
                             return [add_token_to_url(url, hls_token) for url in hls_urls], True
                         return None, False
             
-            return [add_token_to_url(url, stream_token) for url in rtsp_urls], True
+            # Add token + apply proxy rewrite (if RTSP_PROXY_MAP is configured)
+            rtsp_urls_with_token = [
+                apply_rtsp_proxy(add_token_to_url(url, stream_token)) 
+                for url in rtsp_urls
+            ]
+            return rtsp_urls_with_token, True
         
         # RTSP failed — try HLS fallback
         logger.debug(f"RTSP unavailable for {device_id}_{camera_no}, trying HLS...")
@@ -440,38 +471,82 @@ def build_rtsp_url(server_address, device_id, camera_no):
 # Frame Capture
 # ============================================================
 def capture_frame_from_stream(stream_url, id_str, timeout_ms=None):
-    if timeout_ms is None: timeout_ms = TIMEOUT_OPENCV
-    img_path = capture_frame_with_opencv_stream(stream_url, id_str, timeout_ms)
-    if img_path: return img_path
+    """
+    Try OpenCV first (with thread-level hard timeout),
+    then fall back to FFmpeg.
+    """
+    if timeout_ms is None:
+        timeout_ms = TIMEOUT_OPENCV
     
-    img_path = capture_frame_with_ffmpeg_stream(stream_url, id_str)
-    return img_path
+    img_path = capture_frame_with_opencv_stream(stream_url, id_str, timeout_ms)
+    if img_path:
+        return img_path
+    
+    logger.debug(f"OpenCV failed for {id_str} — trying FFmpeg fallback")
+    return capture_frame_with_ffmpeg_stream(stream_url, id_str)
 
 def capture_frame_with_opencv_stream(stream_url, id_str, timeout_ms):
-    try:
-        cap = cv2.VideoCapture(stream_url)
-        cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, timeout_ms)
-        cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, timeout_ms)
-        
-        if not cap.isOpened(): return None
-        for _ in range(3): cap.read()
-        ret, frame = cap.read()
-        cap.release()
-        
-        if not ret or frame is None: return None
-        
-        save_dir = f"frames/multi_server/{id_str}"
-        os.makedirs(save_dir, exist_ok=True)
-        img_path = f"{save_dir}/frame_{uuid.uuid4().hex}.jpg"
-        cv2.imwrite(img_path, frame)
-        return img_path
-    except Exception:
+    """
+    Capture frame via OpenCV.
+    
+    IMPORTANT: CAP_PROP_OPEN_TIMEOUT_MSEC / CAP_PROP_READ_TIMEOUT_MSEC are
+    silently ignored by many OpenCV builds (logs show 30s default firing
+    instead of the requested timeout). We therefore run the capture in a daemon
+    thread and join() it with a hard wall-clock timeout so the caller is
+    always unblocked within TIMEOUT_OPENCV_REAL seconds.
+    """
+    result = [None]  # mutable container — thread writes here
+    
+    def _do_capture():
+        try:
+            cap = cv2.VideoCapture(stream_url)
+            # Set props anyway — respected when the build supports it
+            cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, timeout_ms)
+            cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, timeout_ms)
+            
+            if not cap.isOpened():
+                return
+            
+            # Skip a few frames to get a fresh one
+            for _ in range(3):
+                cap.read()
+            
+            ret, frame = cap.read()
+            cap.release()
+            
+            if not ret or frame is None:
+                return
+            
+            save_dir = f"frames/multi_server/{id_str}"
+            os.makedirs(save_dir, exist_ok=True)
+            img_path = f"{save_dir}/frame_{uuid.uuid4().hex}.jpg"
+            cv2.imwrite(img_path, frame)
+            result[0] = img_path
+            
+        except Exception as e:
+            logger.debug(f"OpenCV capture error for {id_str}: {e}")
+    
+    thread = threading.Thread(target=_do_capture, daemon=True)
+    thread.start()
+    thread.join(timeout=TIMEOUT_OPENCV_REAL)  # hard wall-clock kill
+    
+    if thread.is_alive():
+        logger.warning(
+            f"OpenCV hard timeout ({TIMEOUT_OPENCV_REAL}s) triggered for {id_str} "
+            f"— stream likely hanging"
+        )
         return None
+    
+    return result[0]
 
 def capture_frame_with_ffmpeg_stream(stream_url, id_str):
     """
     Capture frame via FFmpeg subprocess.
-    Supports both RTSP and HLS/HTTP streams.
+    
+    Uses both:
+      -timeout  (general I/O timeout, microseconds)
+      -stimeout (RTSP-specific session timeout, microseconds)
+    Plus subprocess.run(timeout=...) as the final hard kill.
     """
     if not shutil.which("ffmpeg"):
         logger.debug("ffmpeg not found in PATH")
@@ -493,26 +568,30 @@ def capture_frame_with_ffmpeg_stream(stream_url, id_str):
         "-timeout",   str(timeout_us),      # general I/O timeout
         "-i",         stream_url,
         "-frames:v",  "1",
-        "-loglevel",  "error",
+        "-loglevel",  "warning",            # warning shows RTSP-level errors
         img_path,
     ]
 
     try:
+        # subprocess timeout is TIMEOUT_FFMPEG + 5 so FFmpeg's own internal timeout
+        # always fires first — this guarantees we capture its stderr error message
         result = subprocess.run(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            timeout=TIMEOUT_FFMPEG + 2,     # +2s buffer over internal timeout
+            timeout=TIMEOUT_FFMPEG + 5,
         )
         if result.returncode != 0 or not os.path.exists(img_path):
             stderr_out = result.stderr.decode('utf-8', errors='replace').strip()
-            logger.debug(f"FFmpeg failed for {id_str}: {stderr_out[:200]}")
+            logger.warning(f"FFmpeg failed for {id_str} (exit={result.returncode}): {stderr_out[:200]}")
             return None
         logger.debug(f"✅ Frame captured with FFmpeg: {img_path}")
         return img_path
 
-    except subprocess.TimeoutExpired:
-        logger.warning(f"FFmpeg hard timeout ({TIMEOUT_FFMPEG}s) for {id_str}")
+    except subprocess.TimeoutExpired as e:
+        # Capture whatever stderr was written before timeout
+        stderr_out = (e.stderr or b'').decode('utf-8', errors='replace').strip()
+        logger.warning(f"FFmpeg hard timeout ({TIMEOUT_FFMPEG}s) for {id_str}: {stderr_out or 'no stderr'}")
         return None
     except Exception as e:
         logger.debug(f"FFmpeg error for {id_str}: {e}")
@@ -708,6 +787,10 @@ def main():
     logger.info(f"Total cameras loaded from DB: {len(cameras)}")
     logger.info(f"Network workers: {MAX_WORKERS_NETWORK}")
     logger.info(f"VLM workers: {MAX_WORKERS_VLM}")
+    logger.info(f"Timeouts → API:{TIMEOUT_API}s  OpenCV(hard):{TIMEOUT_OPENCV_REAL}s  "
+                f"FFmpeg:{TIMEOUT_FFMPEG}s  VLM:{TIMEOUT_VLM}s")
+    if RTSP_PROXY_MAP:
+        logger.info(f"RTSP Proxy enabled: {len(RTSP_PROXY_MAP)} mapping(s)")
     logger.info("="*80)
     
     start_time = time.time()
