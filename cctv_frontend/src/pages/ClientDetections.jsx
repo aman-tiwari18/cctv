@@ -851,6 +851,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, removingId, re
 
 const ClientDetections = () => {
   const { setAllCounts, setUnfilteredCounts, typeFilter, setTypeFilter } = useDetectionCounts();
+  const { user } = useAuth(); // Get user from context
   const [searchParams] = useSearchParams();
 
   const [datePickerOpen, setDatePickerOpen] = useState(false);
@@ -881,6 +882,11 @@ const ClientDetections = () => {
   const fetchAllCounts = useCallback(async () => {
     try {
       const params = new URLSearchParams({ limit: 1 });
+      
+      // Pass user info for filtering
+      if (user?.role) params.append('user_role', user.role);
+      if (user?.company_name) params.append('user_company', user.company_name);
+      
       const res = await axios.get(`${API_BASE_1}/client-detections?${params}`);
       if (res.data.success) {
         setUnfilteredCounts(res.data.counts || {});
@@ -888,7 +894,7 @@ const ClientDetections = () => {
     } catch (err) {
       console.error('Failed to fetch all counts:', err);
     }
-  }, [setUnfilteredCounts]);
+  }, [user, setUnfilteredCounts]);
 
   useEffect(() => {
     fetchAllCounts();
@@ -905,6 +911,10 @@ const ClientDetections = () => {
       if (appliedStartTime) params.append('start_time', appliedStartTime);
       if (appliedEndTime) params.append('end_time', appliedEndTime);
       if (examFilter) params.append('exam_id', examFilter);
+      
+      // Pass user info for filtering
+      if (user?.role) params.append('user_role', user.role);
+      if (user?.company_name) params.append('user_company', user.company_name);
 
       const res = await axios.get(`${API_BASE_1}/client-detections?${params}`);
       if (res.data.success) {
@@ -931,7 +941,7 @@ const ClientDetections = () => {
     } finally {
       setLoading(false);
     }
-  }, [sourceFilter, typeFilter, dateFilter, search, appliedStartTime, appliedEndTime, examFilter, rowsPerPage, setAllCounts]);
+  }, [sourceFilter, typeFilter, dateFilter, search, appliedStartTime, appliedEndTime, examFilter, rowsPerPage, user, setAllCounts]);
 
   // Load exams for filter dropdown
   useEffect(() => {

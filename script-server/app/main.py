@@ -1073,6 +1073,8 @@ def list_client_detections(
     end_time: Optional[str] = None,
     search: Optional[str] = None,
     exam_id: Optional[int] = None,
+    user_role: Optional[str] = None,
+    user_company: Optional[str] = None,
 ):
     rows = []
     
@@ -1081,12 +1083,41 @@ def list_client_detections(
         with conn.cursor() as cur:
             db_rows = []
             
+            # Get user's exam IDs based on role and company
+            user_exam_ids = []
+            if user_role and user_role != 'ADMIN':
+                if user_company:
+                    # Fetch exams for this company
+                    if user_company == 'EY':
+                        cur.execute("SELECT id FROM exams WHERE exam_body IN ('SSC', 'TCS') AND is_active = 1")
+                    else:
+                        cur.execute("SELECT id FROM exams WHERE exam_body = %s AND is_active = 1", (user_company,))
+                    
+                    user_exam_ids = [row['id'] for row in cur.fetchall()]
+                    
+                    # If no exams found for user, return empty
+                    if not user_exam_ids:
+                        return {
+                            "success": True,
+                            "total": 0,
+                            "page": page,
+                            "limit": limit,
+                            "counts": {k: 0 for k in DETECTION_FOLDERS},
+                            "data": [],
+                        }
+            
             # Build HLS query with exam_id filter
             hls_query = "SELECT * FROM camera_report_hls WHERE pushed_to_client = 1 AND remove_from_client = 0"
             hls_params = []
+            
             if exam_id:
                 hls_query += " AND exam_id = %s"
                 hls_params.append(exam_id)
+            elif user_exam_ids:
+                # Filter by user's exams
+                placeholders = ','.join(['%s'] * len(user_exam_ids))
+                hls_query += f" AND exam_id IN ({placeholders})"
+                hls_params.extend(user_exam_ids)
             
             try:
                 cur.execute(hls_query, tuple(hls_params) if hls_params else None)
@@ -1097,9 +1128,15 @@ def list_client_detections(
             # Build RTSP query with exam_id filter
             rtsp_query = "SELECT * FROM camera_report_rtsp WHERE pushed_to_client = 1 AND remove_from_client = 0"
             rtsp_params = []
+            
             if exam_id:
                 rtsp_query += " AND exam_id = %s"
                 rtsp_params.append(exam_id)
+            elif user_exam_ids:
+                # Filter by user's exams
+                placeholders = ','.join(['%s'] * len(user_exam_ids))
+                rtsp_query += f" AND exam_id IN ({placeholders})"
+                rtsp_params.extend(user_exam_ids)
             
             try:
                 cur.execute(rtsp_query, tuple(rtsp_params) if rtsp_params else None)
