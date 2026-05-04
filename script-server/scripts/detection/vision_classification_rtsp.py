@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -57,7 +58,7 @@ TIMEOUT_FFMPEG = 10    # was 5s
 TIMEOUT_VLM    = 120   
 
 AUTH_USERNAME = "system"
-AUTH_PASSWORD = "Coreiseven@@"
+AUTH_PASSWORD = "Sasd@12345"
 
 TOKEN_EXPIRY_SECONDS = 90  
 
@@ -274,48 +275,61 @@ def add_token_to_url(rtsp_url, token):
     return f"{rtsp_url}?token={token}"
 
 def start_video_stream(server_address, device_id, camera_no):
+    """
+    Call Camview StartVideo API and return ALL available RTSP URLs.
+    Returns: (list_of_urls, stream_token, success)
+    """
     token = get_server_token(server_address)
-    if not token: return None, None, False
-    
-    url = f"https://{server_address}/admin/API/MTS/Video/StartVideo?token={token}"
+    if not token:
+        return None, None, False
+
+    url     = f"https://{server_address}/admin/API/MTS/Video/StartVideo?token={token}"
     headers = {"Content-Type": "application/json", "X-Subject-Token": token}
     payload = {
         "clientType": "WINPC_V1", "project": "PSDK", "method": "MTS.Video.StartVideo",
         "data": {
             "streamType": "1",
-            "optional": f"/admin/API/MTS/Video/StartVideo?token={token}",
-            "channelId": f"{device_id}$1$0${camera_no}",
-            "dataType": "2",
-            "enableRtsps": "0"
+            "optional":   f"/admin/API/MTS/Video/StartVideo?token={token}",
+            "channelId":  f"{device_id}$1$0${camera_no}",
+            "dataType":   "2",
+            "enableRtsps":"0"
         }
     }
-    
+
     res = make_api_call(url, payload, headers)
-    if res is None: return None, None, False
-    
-    if res.status_code == 401:
-        with token_lock: server_tokens.pop(server_address, None)
+    if res is None:
         return None, None, False
-    if res.status_code != 200: return None, None, False
-    
+
+    if res.status_code == 401:
+        with token_lock:
+            server_tokens.pop(server_address, None)
+        return None, None, False
+
+    if res.status_code != 200:
+        return None, None, False
+
     try:
-        resp_json = res.json()
-        data = resp_json.get("data")
-        if not data: return None, None, False
-        
+        resp_json    = res.json()
+        data         = resp_json.get("data")
+        if not data:
+            return None, None, False
+
+        # Collect ALL URLs from both "url" and "url2" fields
+        # Each field may also be pipe-separated
         urls = []
         for key in ("url", "url2"):
             raw = data.get(key)
-            if not raw: continue
+            if not raw:
+                continue
             parts = [part.strip() for part in raw.split('|') if part.strip()]
             urls.extend(parts)
-        
+
         stream_token = data.get("token") or token
-        # if urls:
-        #     return urls[0], stream_token, True
+
         if urls:
-              return urls, stream_token, True  
+            return urls, stream_token, True
         return None, None, False
+
     except Exception:
         return None, None, False
 
@@ -369,13 +383,57 @@ def start_video_stream_hls(server_address, device_id, camera_no):
 
 
 def build_rtsp_url(server_address, device_id, camera_no):
+    """
+    Returns a LIST of RTSP URLs (all with auth token appended).
+    Caller should try each URL in sequence until one works.
+    Falls back to HLS if RTSP port is blocked.
+    """
     try:
-        if not server_address or not device_id or not camera_no: return None, False
-        rtsp_urls, stream_token, success = start_video_stream(server_address, device_id, camera_no)
+        if not server_address or not device_id or not camera_no:
+            return None, False
+        
+        # Try RTSP first
+        rtsp_urls, stream_token, success = start_video_stream(
+            server_address, device_id, camera_no
+        )
+        
         if success and rtsp_urls and stream_token:
+            # Filter out private IPs if configured
+            if SKIP_PRIVATE_IPS:
+                public_urls = [u for u in rtsp_urls if not is_private_ip_url(u)]
+                if public_urls:
+                    rtsp_urls = public_urls
+                    logger.debug(f"Filtered to {len(rtsp_urls)} public URL(s)")
+            
+            # Check if port is reachable
+            if rtsp_urls:
+                host, port = extract_host_port(rtsp_urls[0])
+                if host and port:
+                    if not probe_tcp_port(host, port, timeout=2.0):
+                        logger.warning(f"Port {port} on {host} is BLOCKED — trying HLS fallback")
+                        # Try HLS fallback
+                        hls_urls, hls_token, hls_success = start_video_stream_hls(
+                            server_address, device_id, camera_no
+                        )
+                        if hls_success and hls_urls and hls_token:
+                            logger.info(f"✅ HLS fallback succeeded for {device_id}_{camera_no}")
+                            return [add_token_to_url(url, hls_token) for url in hls_urls], True
+                        return None, False
+            
             return [add_token_to_url(url, stream_token) for url in rtsp_urls], True
+        
+        # RTSP failed — try HLS fallback
+        logger.debug(f"RTSP unavailable for {device_id}_{camera_no}, trying HLS...")
+        hls_urls, hls_token, hls_success = start_video_stream_hls(
+            server_address, device_id, camera_no
+        )
+        if hls_success and hls_urls and hls_token:
+            logger.info(f"✅ HLS fallback succeeded for {device_id}_{camera_no}")
+            return [add_token_to_url(url, hls_token) for url in hls_urls], True
+        
         return None, False
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Failed to build URL for {device_id}_{camera_no}: {e}")
         return None, False
 
 # ============================================================
@@ -411,23 +469,53 @@ def capture_frame_with_opencv_stream(stream_url, id_str, timeout_ms):
         return None
 
 def capture_frame_with_ffmpeg_stream(stream_url, id_str):
-    if not shutil.which("ffmpeg"): return None
+    """
+    Capture frame via FFmpeg subprocess.
+    Supports both RTSP and HLS/HTTP streams.
+    """
+    if not shutil.which("ffmpeg"):
+        logger.debug("ffmpeg not found in PATH")
+        return None
+
     save_dir = f"frames/multi_server/{id_str}"
     os.makedirs(save_dir, exist_ok=True)
     img_path = f"{save_dir}/frame_{uuid.uuid4().hex}.jpg"
-    
-    cmd = [
-        "ffmpeg", "-y", "-rtsp_transport", "tcp" if stream_url.startswith('rtsp') else "",
-        "-timeout", str(TIMEOUT_FFMPEG * 1000000), "-i", stream_url,
-        "-frames:v", "1", "-loglevel", "error", img_path
+
+    timeout_us = TIMEOUT_FFMPEG * 1_000_000  # convert seconds → microseconds
+
+    cmd = ["ffmpeg", "-y"]
+    if stream_url.startswith("rtsp"):
+        cmd += [
+            "-rtsp_transport", "tcp",
+            "-stimeout", str(timeout_us),   # RTSP session timeout
+        ]
+    cmd += [
+        "-timeout",   str(timeout_us),      # general I/O timeout
+        "-i",         stream_url,
+        "-frames:v",  "1",
+        "-loglevel",  "error",
+        img_path,
     ]
-    if not stream_url.startswith('rtsp'): cmd.remove("-rtsp_transport"); cmd.remove("tcp")
-        
+
     try:
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=TIMEOUT_FFMPEG)
-        if result.returncode != 0 or not os.path.exists(img_path): return None
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=TIMEOUT_FFMPEG + 2,     # +2s buffer over internal timeout
+        )
+        if result.returncode != 0 or not os.path.exists(img_path):
+            stderr_out = result.stderr.decode('utf-8', errors='replace').strip()
+            logger.debug(f"FFmpeg failed for {id_str}: {stderr_out[:200]}")
+            return None
+        logger.debug(f"✅ Frame captured with FFmpeg: {img_path}")
         return img_path
-    except:
+
+    except subprocess.TimeoutExpired:
+        logger.warning(f"FFmpeg hard timeout ({TIMEOUT_FFMPEG}s) for {id_str}")
+        return None
+    except Exception as e:
+        logger.debug(f"FFmpeg error for {id_str}: {e}")
         return None
 
 # ============================================================
@@ -448,9 +536,13 @@ def is_grey_or_obstructed(image_path):
 
 def classify_with_vlm(image_path):
     is_bad, reason = is_grey_or_obstructed(image_path)
-    if is_bad: return "Uncertain/Obstructed", reason
+    if is_bad:
+        return "Uncertain/Obstructed", reason
 
-    CATEGORIES = ["Server Room", "Outdoor Scene", "Outside Area", "Parking Lot", "Entry", "Computer Lab"]
+    CATEGORIES = [
+        "Server Room", "Outdoor Scene", "Outside Area",
+        "Parking Lot", "Entry", "Computer Lab"
+    ]
     PROMPT = f"""You are an expert computer vision classifier.
 Classify the given image into one of the following categories: {', '.join(CATEGORIES)}.
 Rules:
@@ -468,20 +560,38 @@ Return **only** the JSON response:
     try:
         with open(image_path, 'rb') as f:
             image_data = base64.b64encode(f.read()).decode('utf-8')
-    except:
+    except Exception:
         return "Uncertain", "Failed to read image"
-    
-    payload = {"model": "qwen3-vl:8b", "prompt": PROMPT, "images": [image_data], "stream": False}
-    url = "http://localhost:11434/api/generate"
+
+    payload = {
+        "model":  "qwen3-vl:8b",
+        "prompt": PROMPT,
+        "images": [image_data],
+        "stream": False,
+    }
+    vlm_url = "http://localhost:11434/api/generate"
+
     try:
-        response = requests.post(url, json=payload, timeout=TIMEOUT_VLM)
-        if response.status_code != 200: return "Uncertain", "VLM request failed"
+        response = requests.post(vlm_url, json=payload, timeout=TIMEOUT_VLM)
+        if response.status_code != 200:
+            return "Uncertain", "VLM request failed"
+
+        raw = response.json().get("response", "").strip()
         
-        result_json = json.loads(response.json().get("response", "").strip())
-        category = result_json.get("category", "Uncertain")
+        # Strip qwen3 chain-of-thought tags if present
+        raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+
+        result_json = json.loads(raw)
+        category    = result_json.get("category", "Uncertain")
         if "uncertain" in category.lower() or "unclear" in category.lower():
             return "Uncertain/Obstructed", result_json.get("reason", "")
         return category, "Successfully classified"
+
+    except requests.exceptions.Timeout:
+        return "Uncertain", "VLM timeout"
+    except json.JSONDecodeError:
+        logger.debug(f"Invalid JSON from VLM: {raw[:200] if 'raw' in locals() else 'N/A'}")
+        return "Uncertain", "Invalid JSON from VLM"
     except Exception as e:
         return "Uncertain", str(e)
 
@@ -506,58 +616,79 @@ def _get_runtime_config():
 # Processing logic
 # ============================================================
 def quick_accessibility_check(cam):
-    server_address = cam.get("cctv_url") # Map CCTV URL -> Server Address in RTSP context
-    device_id = cam.get("device_id")
-    camera_no = cam.get("camera_no")
-    
-    stream_url, success = build_rtsp_url(server_address, device_id, camera_no)
-    if success and stream_url:
-        return cam, stream_url, True, None
+    """
+    Pass-1: authenticate with server and get RTSP URL list.
+    No frame capture here — just confirms the API is reachable.
+    Returns list of URLs so Pass-2 can try each one.
+    """
+    server_address = cam.get("cctv_url")  # Map CCTV URL -> Server Address in RTSP context
+    device_id      = cam.get("device_id")
+    camera_no      = cam.get("camera_no")
+
+    stream_urls, success = build_rtsp_url(server_address, device_id, camera_no)
+    if success and stream_urls:
+        return cam, stream_urls, True, None
     else:
-        return cam, None, False, 'Failed to get stream URL from API'
+        return cam, None, False, "Failed to get stream URLs from API"
 
 def process_accessible_camera(cam, stream_urls, exam_id):
+    """
+    Pass-2: try every URL in the list until a frame is captured,
+    then classify with VLM.
+    """
     device_id = cam.get("device_id")
     camera_no = cam.get("camera_no")
-    id_str = f"{device_id}_{camera_no}"
-    
+    id_str    = f"{device_id}_{camera_no}"
+
     result = {
-        'cam': cam,
+        'cam':    cam,
         'status': 'Accessible',
-        'label': 'Uncertain',
-        'error': None
+        'label':  'Uncertain',
+        'error':  None,
     }
-    
+
+    # Normalize: accept a single URL string or a list
+    if isinstance(stream_urls, str):
+        stream_urls = [stream_urls]
+
     try:
-        # Try all available URLs until one works
+        # ── Try each URL until one yields a frame ────────────────────
         img_path = None
-        for url_index, stream_url in enumerate(stream_urls):
-            img_path = capture_frame_from_stream(stream_url, id_str)
+        for idx, url in enumerate(stream_urls, 1):
+            logger.info(
+                f"[{id_str}] Trying URL {idx}/{len(stream_urls)}: "
+                f"{url[:70]}..."
+            )
+            img_path = capture_frame_from_stream(url, id_str)
             if img_path:
-                logger.debug(f"✅ Frame captured from URL #{url_index+1} for {id_str}")
+                logger.info(f"[{id_str}] ✅ Frame captured from URL {idx}")
                 break
             else:
-                logger.debug(f"⚠️ URL #{url_index+1} failed for {id_str}, trying next...")
-        
+                logger.warning(
+                    f"[{id_str}] ❌ URL {idx} failed"
+                    + (f", trying URL {idx+1}..." if idx < len(stream_urls) else " — all URLs exhausted")
+                )
+
         if not img_path:
             result['status'] = 'Not Accessible'
-            result['label'] = 'Failed to Classify'
-            result['error'] = 'Frame capture failed on all URLs'
+            result['label']  = 'Failed to Classify'
+            result['error']  = 'Frame capture failed on all URLs'
         else:
-            label, reason = classify_with_vlm(img_path)
+            label, reason    = classify_with_vlm(img_path)
             result['status'] = 'Accessible'
-            if "Uncertain" in label or "Obstructed" in label:
-                result['label'] = 'Uncertain/Obstructed'
-            else:
-                result['label'] = label
-                
-        # Persist back to DB
+            result['label']  = (
+                'Uncertain/Obstructed'
+                if ("Uncertain" in label or "Obstructed" in label)
+                else label
+            )
+
         update_rtsp_classification(exam_id, device_id, result['label'], result['status'])
         return result
+
     except Exception as e:
         result['status'] = 'Accessible'
-        result['label'] = 'Uncertain'
-        result['error'] = str(e)
+        result['label']  = 'Uncertain'
+        result['error']  = str(e)
         update_rtsp_classification(exam_id, device_id, result['label'], result['status'])
         return result
 
