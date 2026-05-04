@@ -16,22 +16,50 @@ logger = logging.getLogger(__name__)
 
 # ================= ANALYTIC -> CLASSIFICATION MAPPING =================
 # This ensures each script only processes relevant cameras.
+# Updated to match actual database classification values
 SCRIPT_CLASSIFICATION_MAP = {
-    "server":          ["server room", "server", "ups"],
-    "proximity":       ["inside classroom", "inside_classroom", "classroom"],
-    "crowd":           ["entry/exit", "entry_exit", "entryexit", "entry"],
-    "crowd_biometric": ["entry/exit", "entry_exit", "entryexit", "entry"],
-    "intruder":        ["strong room", "strongroom", "strong_room"],
-    "entry_exit":      ["entry/exit", "entry_exit", "entryexit", "entry"],
-    "phone":           ["inside classroom", "inside_classroom", "classroom"],
-    "invigilator":     ["inside classroom", "inside_classroom", "classroom"],
-    "tamper":          ["all"], # Process all cameras for tampering
+    # 1. Intruder detection in exam lab and server room
+    "intruder":        ["inside lab", "server room", "inside lab / server room", "inside server room", "inside lab/server room/outside"],
+    
+    # 2. Improper furniture (not implemented yet, but would use Inside Lab)
+    
+    # 3. Crowd Detection - More than 10 people at entry gate
+    "crowd":           ["entry", "entry/exit", "outside/biometric area", "outside (crowd at entry/ exit gate)"],
+    "crowd_biometric": ["entry", "entry/exit", "outside/biometric area", "outside (crowd at entry/ exit gate)"],
+    
+    # 4. Invigilator Not Moving in exam room or not moving in all lanes
+    "invigilator":     ["inside lab", "computer lab"],
+    
+    # 5. Two or More People in Close Proximity
+    "proximity":       ["inside lab", "computer lab"],
+    
+    # 6. Server Room Threshold - More than or equal to the limit
+    "server":          ["server room", "inside lab / server room", "inside server room"],
+    
+    # 7. Mobile Phone Detection
+    "phone":           ["inside lab", "computer lab", "inside server room"],
+    
+    # 8. Movement at entry/exit during examination
+    "entry_exit":      ["entry", "entry/exit", "outside (crowd at entry/ exit gate)"],
+    
+    # 9. Camera feed is inverted
     "inversion":       ["all"],
-    "blind_spot":      ["all"],
-    "strongroom":      ["strong room", "strongroom", "strong_room"],
-    "qp_box":          ["strong room", "strongroom", "strong_room"],
-    "crowd_zero":      ["inside classroom", "inside_classroom", "classroom"],
-    "crowd_five":      ["inside classroom", "inside_classroom", "classroom"],
+    
+    # 10. 0 candidate in a room
+    "crowd_zero":      ["inside lab", "computer lab"],
+    
+    # 11. Less than 5 candidates in a room
+    "crowd_five":      ["inside lab", "computer lab"],
+    
+    # 12. Blind Spot detected inside lab
+    "blind_spot":      ["inside lab", "computer lab"],
+    
+    # Camera tampering (all cameras)
+    "tamper":          ["all"],
+    
+    # Strong room related
+    "strongroom":      ["server room", "inside lab / server room", "inside server room"],
+    "qp_box":          ["server room", "inside lab / server room", "inside server room"],
 }
 
 def _camera_matches_script(classification, script_code):

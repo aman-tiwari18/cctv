@@ -163,7 +163,8 @@ STOP           = False
 MAX_CONCURRENT = 24  # FIXED: Reduced from 64 to 24 to prevent ffmpeg/system overload
 
 DSS_USER = "system"
-DSS_PASS = "Sasd@12345"
+# DSS_PASS = "Sasd@12345"
+DSS_PASS = "Coreiseven@@"
 
 # ================= CRITICAL FIX: Shared disk-based token cache =================
 TOKEN_CACHE_FILE = os.path.join(PROJECT_ROOT, "server_tokens.json")
