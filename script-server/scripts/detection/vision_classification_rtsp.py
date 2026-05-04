@@ -57,7 +57,7 @@ TIMEOUT_FFMPEG = 10    # was 5s
 TIMEOUT_VLM    = 120   
 
 AUTH_USERNAME = "system"
-AUTH_PASSWORD = "Sasd@12345"
+AUTH_PASSWORD = "Coreiseven@@"
 
 TOKEN_EXPIRY_SECONDS = 90  
 

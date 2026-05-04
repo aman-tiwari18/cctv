@@ -57,6 +57,7 @@ import { useDetectionCounts } from '../contexts/DetectionCountsContext';
 import { useSocket } from '../contexts/SocketContext';
 import { useSearchParams } from 'react-router-dom';
 import { examsAPI } from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
 
 const TYPE_META = {
   proximity: { label: 'Close Proximity', color: '#5cb88a', bg: '#e5f5ed' },
