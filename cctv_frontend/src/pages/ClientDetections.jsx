@@ -877,21 +877,18 @@ const ClientDetections = () => {
   const [removingId, setRemovingId] = useState(null);
   const [keyboardHintShown, setKeyboardHintShown] = useState(false);
 
-  // Fetch unfiltered counts once for sidebar
+  // Fetch unfiltered counts once for sidebar (no filters applied)
   const fetchAllCounts = useCallback(async () => {
     try {
       const params = new URLSearchParams({ limit: 1 });
       const res = await axios.get(`${API_BASE_1}/client-detections?${params}`);
       if (res.data.success) {
         setUnfilteredCounts(res.data.counts || {});
-        if (typeFilter.length === 0) {
-          setAllCounts(res.data.counts || {});
-        }
       }
     } catch (err) {
       console.error('Failed to fetch all counts:', err);
     }
-  }, [setAllCounts, setUnfilteredCounts, typeFilter.length]);
+  }, [setUnfilteredCounts]);
 
   useEffect(() => {
     fetchAllCounts();
@@ -917,17 +914,20 @@ const ClientDetections = () => {
         })));
         setTotal(res.data.total || 0);
         setCounts(res.data.counts || {});
+        // Update context counts with filtered results
         setAllCounts(res.data.counts || {});
       } else {
         setImages([]);
         setCounts({});
         setTotal(0);
+        setAllCounts({});
       }
     } catch (err) {
       console.error('Failed to fetch client images:', err);
       setImages([]);
       setCounts({});
       setTotal(0);
+      setAllCounts({});
     } finally {
       setLoading(false);
     }

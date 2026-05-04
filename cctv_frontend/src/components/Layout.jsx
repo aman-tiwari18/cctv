@@ -322,7 +322,6 @@ function LayoutInner() {
   // Calculate total detections with useMemo for better reactivity
   const totalDetections = React.useMemo(() => {
     const total = Object.values(unfilteredCounts).reduce((a, b) => a + b, 0);
-    console.log('[Layout] Total detections updated:', total, unfilteredCounts);
     return total;
   }, [unfilteredCounts]);
 

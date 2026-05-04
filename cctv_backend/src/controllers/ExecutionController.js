@@ -277,6 +277,7 @@ exports.getAll = async (req, res) => {
         script_id,
         shift_id,
         exam_id,
+        assignment_date,
         limit,
         offset,
     } = req.query;
@@ -285,6 +286,7 @@ exports.getAll = async (req, res) => {
     if (status) where.status = status;
     if (script_id) where.script_id = parseInt(script_id);
     if (shift_id) where.shift_id = parseInt(shift_id);
+    if (assignment_date) where.assignment_date = assignment_date;
 
     const includeShift = {
         model: ExamShift,

@@ -37,6 +37,7 @@ const CATEGORY_COLORS = {
 };
 
 const SCRIPT_CATEGORY_MAP = {
+  // Script IDs (from scripts table)
   proximity: 'people',
   crowd: 'people',
   crowd_biometric: 'people',
@@ -54,9 +55,28 @@ const SCRIPT_CATEGORY_MAP = {
   tampering: 'camera',
   blind_spot: 'camera',
   vision: 'camera',
+  
+  // Folder names (detection_type in database) - ACTUAL VALUES FROM WORKERS
+  proximity_detection: 'people',
+  crowd_detection: 'people',
+  crowd_detection_biometric: 'people',
+  crowd_detection_threshold: 'people',
+  zero_person_detection: 'people',
+  invigilator_detection: 'people',
+  phone_detection: 'people',
+  server_room_detection: 'people',
+  intruder_detection: 'people',
+  strongroom_detection: 'movement',
+  qp_box_missing: 'movement',
+  entry_exit_detection: 'movement',
+  camera_inversion_detection: 'camera',
+  camera_tampering_detection: 'camera',
+  blind_spot_detection: 'camera',
+  vision_detection: 'camera',
 };
 
 const DETECTION_TYPE_LABELS = {
+  // Script IDs
   proximity: 'Close Proximity',
   crowd: 'Crowd Detection (Entry/Exit)',
   crowd_biometric: 'Crowd Detection (Biometric)',
@@ -74,6 +94,24 @@ const DETECTION_TYPE_LABELS = {
   tamper: 'Camera Tampering',
   tampering: 'Camera Tampering',
   vision: 'Vision Detection',
+  
+  // Folder names (detection_type in database) - ACTUAL VALUES FROM WORKERS
+  proximity_detection: 'Close Proximity',
+  crowd_detection: 'Crowd Detection (Entry/Exit)',
+  crowd_detection_biometric: 'Crowd Detection (Biometric)',
+  crowd_detection_threshold: 'Crowd < 5',
+  zero_person_detection: 'Zero Person',
+  server_room_detection: 'Server Room',
+  intruder_detection: 'Intruder',
+  strongroom_detection: 'Strong Room Movement',
+  qp_box_missing: 'QP Box Detection',
+  entry_exit_detection: 'Entry/Exit',
+  phone_detection: 'Phone',
+  blind_spot_detection: 'Blind Spot',
+  invigilator_detection: 'Invigilator',
+  camera_inversion_detection: 'Camera Inversion',
+  camera_tampering_detection: 'Camera Tampering',
+  vision_detection: 'Vision Detection',
 };
 
 const StatCard = ({ title, value, icon, color, loading, onClick }) => (

@@ -1072,6 +1072,7 @@ def list_client_detections(
     start_time: Optional[str] = None,
     end_time: Optional[str] = None,
     search: Optional[str] = None,
+    exam_id: Optional[int] = None,
 ):
     rows = []
     
@@ -1079,14 +1080,29 @@ def list_client_detections(
     try:
         with conn.cursor() as cur:
             db_rows = []
+            
+            # Build HLS query with exam_id filter
+            hls_query = "SELECT * FROM camera_report_hls WHERE pushed_to_client = 1 AND remove_from_client = 0"
+            hls_params = []
+            if exam_id:
+                hls_query += " AND exam_id = %s"
+                hls_params.append(exam_id)
+            
             try:
-                cur.execute("SELECT * FROM camera_report_hls WHERE pushed_to_client = 1 AND remove_from_client = 0")
+                cur.execute(hls_query, tuple(hls_params) if hls_params else None)
                 db_rows.extend(cur.fetchall())
             except Exception as e:
                 logger.error(f"HLS Client Detections fetch failed: {e}")
 
+            # Build RTSP query with exam_id filter
+            rtsp_query = "SELECT * FROM camera_report_rtsp WHERE pushed_to_client = 1 AND remove_from_client = 0"
+            rtsp_params = []
+            if exam_id:
+                rtsp_query += " AND exam_id = %s"
+                rtsp_params.append(exam_id)
+            
             try:
-                cur.execute("SELECT * FROM camera_report_rtsp WHERE pushed_to_client = 1 AND remove_from_client = 0")
+                cur.execute(rtsp_query, tuple(rtsp_params) if rtsp_params else None)
                 db_rows.extend(cur.fetchall())
             except Exception as e:
                 logger.error(f"RTSP Client Detections fetch failed: {e}")
@@ -1125,6 +1141,7 @@ def list_client_detections(
                     "state": row.get("state"),
                     "tcCode": row.get("tc_code"),
                     "category": row.get("camera_category", ""),
+                    "exam_id": row.get("exam_id"),
                     "uid": row.get("unique_id"),
                     "_mtime": _epoch_ms(row.get("created_at")) or 0,
                     "updatedAt": _epoch_ms(row.get("updated_at")),

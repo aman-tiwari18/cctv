@@ -107,7 +107,19 @@ const Executions = () => {
     if (!selectedExamId) { setExecutions([]); return; }
     setLoading(true);
     try {
-      const res = await executionsAPI.getByExam(selectedExamId, { limit: 200 });
+      const params = { limit: 200, exam_id: selectedExamId };
+      
+      // Add date filter if selected
+      if (selectedDate) {
+        params.assignment_date = selectedDate;
+      }
+      
+      // Add status filter if not 'ALL'
+      if (statusFilter && statusFilter !== 'ALL') {
+        params.status = statusFilter;
+      }
+      
+      const res = await executionsAPI.getAll(params);
       const list = Array.isArray(res?.data?.data) ? res.data.data : [];
       setExecutions(list);
     } catch (e) {
@@ -116,9 +128,73 @@ const Executions = () => {
     } finally {
       setLoading(false);
     }
-  }, [selectedExamId]);
+  }, [selectedExamId, selectedDate, statusFilter]);
 
-  useEffect(() => { loadExecutions(); setSelectedDate(''); setStatusFilter('ALL'); }, [selectedExamId]);
+  useEffect(() => { 
+    // When exam changes, fetch all executions first to get available dates
+    const fetchInitialData = async () => {
+      if (!selectedExamId) { 
+        setExecutions([]); 
+        setSelectedDate(''); 
+        setStatusFilter('ALL'); 
+        return; 
+      }
+      
+      setLoading(true);
+      try {
+        // Fetch all executions for this exam to get available dates
+        const res = await executionsAPI.getAll({ limit: 200, exam_id: selectedExamId });
+        const list = Array.isArray(res?.data?.data) ? res.data.data : [];
+        
+        // Get unique dates from executions
+        const dates = [...new Set(list.map((e) => e.assignment_date).filter(Boolean))].sort((a, b) => new Date(b) - new Date(a));
+        
+        if (dates.length > 0) {
+          const today = new Date().toISOString().split('T')[0];
+          
+          // Get exam details to check date range
+          const selectedExam = exams.find((e) => String(e.id) === String(selectedExamId));
+          
+          if (selectedExam && selectedExam.start_date && selectedExam.end_date) {
+            const startDate = new Date(selectedExam.start_date);
+            const endDate = new Date(selectedExam.end_date);
+            const todayDate = new Date(today);
+            
+            // If today is within exam range and has executions, select today
+            if (todayDate >= startDate && todayDate <= endDate && dates.includes(today)) {
+              setSelectedDate(today);
+            } else {
+              // Otherwise select the last date (most recent)
+              setSelectedDate(dates[0]);
+            }
+          } else {
+            // No exam date range, select today if available, otherwise last date
+            setSelectedDate(dates.includes(today) ? today : dates[0]);
+          }
+        } else {
+          setSelectedDate('');
+        }
+        
+        setStatusFilter('ALL');
+      } catch (e) {
+        console.error('fetchInitialData:', e);
+        setExecutions([]);
+        setSelectedDate('');
+        setStatusFilter('ALL');
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    fetchInitialData();
+  }, [selectedExamId, exams]);
+
+  /* Reload executions when date or status filter changes */
+  useEffect(() => {
+    if (selectedDate || statusFilter !== 'ALL') {
+      loadExecutions();
+    }
+  }, [selectedDate, statusFilter, loadExecutions]);
 
   /* Auto-refresh every 10 s when RUNNING */
   useEffect(() => {
@@ -129,40 +205,31 @@ const Executions = () => {
   }, [executions, loadExecutions]);
 
   /* ── Derive available dates from loaded executions ── */
-  const availableDates = [
-    ...new Set(executions.map((e) => e.assignment_date).filter(Boolean)),
-  ].sort((a, b) => new Date(b) - new Date(a));
+  const availableDates = useMemo(() => {
+    // When no filters are applied, we need to fetch all dates
+    // This will be populated during initial load
+    return [
+      ...new Set(executions.map((e) => e.assignment_date).filter(Boolean)),
+    ].sort((a, b) => new Date(b) - new Date(a));
+  }, [executions]);
 
-  /* Auto-select today or first date when exam changes */
-  useEffect(() => {
-    if (!availableDates.length) { setSelectedDate(''); return; }
-    const today = new Date().toISOString().split('T')[0];
-    if (!selectedDate || !availableDates.includes(selectedDate)) {
-      setSelectedDate(availableDates.includes(today) ? today : availableDates[0]);
-    }
-  }, [availableDates.join(',')]);
-
-  /* ── Filter rows ── */
+  /* ── Filter rows (only search filter now, date and status are backend-filtered) ── */
   const visibleRows = useMemo(() => {
-    let filtered = executions.filter((e) => {
-      const dateOk = !selectedDate || e.assignment_date === selectedDate;
-      const statusOk = statusFilter === 'ALL' || e.status === statusFilter;
+    let filtered = executions;
 
-      // Search filter
-      let searchOk = true;
-      if (searchQuery.trim()) {
-        const q = searchQuery.trim().toLowerCase();
+    // Search filter (client-side for better UX)
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      filtered = filtered.filter((e) => {
         const haystack = [
           e.script?.name,
           e.shift?.shift_name,
           e.status,
           String(e.id),
         ].filter(Boolean).join(' ').toLowerCase();
-        searchOk = haystack.includes(q);
-      }
-
-      return dateOk && statusOk && searchOk;
-    });
+        return haystack.includes(q);
+      });
+    }
 
     // Apply sorting
     if (orderBy) {
@@ -194,7 +261,7 @@ const Executions = () => {
     }
 
     return filtered;
-  }, [executions, selectedDate, statusFilter, searchQuery, orderBy, order]);
+  }, [executions, searchQuery, orderBy, order]);
 
   const handleRequestSort = (property) => {
     const isAsc = orderBy === property && order === 'asc';
