@@ -84,13 +84,7 @@ class CameraDistributor:
         elif self.distribution_mode == "auto":
             return self._auto_assignment(camera)
         elif self.distribution_mode == "single":
-            if self.camera_start is not None and self.camera_end is not None:
-                logger.warning(
-                    "DISTRIBUTION_MODE=single with CAMERA_START_ID/CAMERA_END_ID set; "
-                    "using static range assignment to avoid duplicate processing"
-                )
-                return self._static_assignment(camera)
-            return True
+            return True  # Process all cameras on this worker regardless of range settings
         else:
             # Default: process all cameras (single-node mode)
             return True

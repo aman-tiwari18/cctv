@@ -13,6 +13,12 @@ router.get(
     asyncHandler(ExecutionController.getPending)
 );
 
+// Running assignments (for workers restarting mid-shift — no auth required)
+router.get(
+    "/running",
+    asyncHandler(ExecutionController.getRunning)
+);
+
 // Recent assignments
 router.get(
     "/recent",

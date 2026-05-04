@@ -74,12 +74,9 @@ class Poller:
                 running_data = []
                 try:
                     running_response = await client.get(
-                        f"{self.backend_url}/executions",
+                        f"{self.backend_url}/executions/running",
                         headers={"X-API-Key": self.api_key},
-                        params={
-                            "status": "RUNNING",
-                            "limit": 50
-                        }
+                        params={"limit": 50}
                     )
                     if running_response.status_code == 200:
                         running_data = running_response.json().get("data", [])

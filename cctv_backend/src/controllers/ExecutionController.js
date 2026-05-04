@@ -204,6 +204,110 @@ exports.getPending = async (req, res) => {
 
 
 /**
+ * Running assignments — for workers that restart mid-shift.
+ * Returns all RUNNING assignments today with the same field shape as getPending,
+ * so the poller can start them immediately without re-fetching config.
+ * No auth required (mirrors getPending).
+ */
+exports.getRunning = async (req, res) => {
+    const limit = parseInt(req.query.limit) || 50;
+
+    const { sequelize } = require("../config/db");
+
+    const toDateOnly = (value) => {
+        if (!value) return null;
+        if (typeof value === "string") return value.split("T")[0];
+        const d = new Date(value);
+        return Number.isNaN(d.getTime()) ? null : d.toISOString().split("T")[0];
+    };
+
+    const now = new Date();
+    const todayStr = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, "0"),
+        String(now.getDate()).padStart(2, "0"),
+    ].join("-");
+
+    const rows = await sequelize.query(`
+        SELECT
+            ssa.id,
+            ssa.shift_id,
+            ssa.script_id,
+            ssa.assignment_date,
+            s.script_id                AS script_code,
+            ssa.custom_start_time,
+            ssa.custom_end_time,
+            ssa.custom_frequency_minutes,
+            ssa.notes,
+            s.name                     AS task_name,
+            s.default_duration_minutes AS duration_minutes,
+            es.shift_name,
+            es.start_time              AS shift_start_time,
+            es.end_time                AS shift_end_time,
+            e.exam_name,
+            e.link_type,
+            e.id                       AS exam_id
+        FROM shift_script_assignments ssa
+        JOIN scripts     s  ON s.id  = ssa.script_id
+        JOIN exam_shifts es ON es.id = ssa.shift_id
+        JOIN exams       e  ON e.id  = es.exam_id
+        WHERE
+            ssa.status    = 'RUNNING'
+            AND ssa.is_active = TRUE
+            AND e.is_active   = TRUE
+            AND ssa.assignment_date = ?
+        ORDER BY ssa.started_at ASC
+        LIMIT ?
+    `, {
+        replacements: [todayStr, limit],
+        type: sequelize.QueryTypes.SELECT,
+    });
+
+    const data = rows.map((row) => {
+        const assignmentDate = toDateOnly(row.assignment_date) || todayStr;
+        const startTimeStr = row.custom_start_time || row.shift_start_time;
+        const endTimeStr   = row.custom_end_time   || row.shift_end_time;
+
+        let endDateStr = assignmentDate;
+        if (endTimeStr && startTimeStr && endTimeStr <= startTimeStr) {
+            const tomorrow = new Date(`${assignmentDate}T00:00:00Z`);
+            tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+            endDateStr = tomorrow.toISOString().split("T")[0];
+        }
+
+        return {
+            id:               row.id,
+            status:           "RUNNING",
+            task_name:        row.task_name,
+            duration_minutes: row.duration_minutes,
+            shift_name:       row.shift_name,
+            exam_name:        row.exam_name,
+            scheduled_at:     `${assignmentDate}T${startTimeStr}`,
+            end_at:           endTimeStr ? `${endDateStr}T${endTimeStr}` : null,
+            execution_metadata: {
+                assignment_id: row.id,
+                assignment_date: assignmentDate,
+                script_id:     row.script_id,
+                script_code:   row.script_code,
+                script_name:   row.task_name,
+                shift_id:      row.shift_id,
+                shift_name:    row.shift_name,
+                exam_name:     row.exam_name,
+                exam_id:       row.exam_id,
+                link_type:     row.link_type,
+            },
+        };
+    });
+
+    res.json({
+        success: true,
+        count: data.length,
+        data,
+    });
+};
+
+
+/**
  * Update assignment execution status (called by script server)
  */
 exports.updateStatus = async (req, res) => {
