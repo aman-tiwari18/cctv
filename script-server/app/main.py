@@ -870,18 +870,18 @@ def list_detections(
             with conn.cursor() as cur:
                 format_strings = ','.join(['%s'] * len(uids_to_check))
                 
-                # Fetch from HLS
+                # Fetch from HLS - uses idx_unique_id index
                 try:
-                    cur.execute(f"SELECT unique_id FROM camera_report_hls WHERE unique_id IN ({format_strings}) AND pushed_to_client = 1", tuple(uids_to_check))
+                    cur.execute(f"SELECT unique_id FROM camera_report_hls USE INDEX (idx_unique_id) WHERE unique_id IN ({format_strings}) AND pushed_to_client = 1", tuple(uids_to_check))
                     for row in cur.fetchall():
                         if row.get("unique_id"):
                             pushed_uids.add(row["unique_id"])
                 except Exception as e:
                     logger.error(f"HLS pushed uids fetch failed: {e}")
 
-                # Fetch from RTSP
+                # Fetch from RTSP - uses idx_unique_id index
                 try:
-                    cur.execute(f"SELECT unique_id FROM camera_report_rtsp WHERE unique_id IN ({format_strings}) AND pushed_to_client = 1", tuple(uids_to_check))
+                    cur.execute(f"SELECT unique_id FROM camera_report_rtsp USE INDEX (idx_unique_id) WHERE unique_id IN ({format_strings}) AND pushed_to_client = 1", tuple(uids_to_check))
                     for row in cur.fetchall():
                         if row.get("unique_id"):
                             pushed_uids.add(row["unique_id"])
@@ -1107,7 +1107,9 @@ def list_client_detections(
                         }
             
             # Build HLS query with exam_id filter
-            hls_query = "SELECT * FROM camera_report_hls WHERE pushed_to_client = 1 AND remove_from_client = 0"
+            # Uses idx_exam_shift_push (exam_id, shift_id, pushed_to_client, created_at)
+            # PERFECT composite index covering all WHERE conditions
+            hls_query = "SELECT * FROM camera_report_hls USE INDEX (idx_exam_shift_push) WHERE pushed_to_client = 1 AND remove_from_client = 0"
             hls_params = []
             
             if exam_id:
@@ -1126,7 +1128,9 @@ def list_client_detections(
                 logger.error(f"HLS Client Detections fetch failed: {e}")
 
             # Build RTSP query with exam_id filter
-            rtsp_query = "SELECT * FROM camera_report_rtsp WHERE pushed_to_client = 1 AND remove_from_client = 0"
+            # Uses idx_push_status_rtsp (pushed_to_client, created_at)
+            # PERFECT for filtering by push status - most selective column first
+            rtsp_query = "SELECT * FROM camera_report_rtsp USE INDEX (idx_push_status_rtsp) WHERE pushed_to_client = 1 AND remove_from_client = 0"
             rtsp_params = []
             
             if exam_id:

@@ -79,16 +79,16 @@ exports.getClientDashboardStats = async (req, res) => {
 
         const examIds = exams.map(e => e.id);
 
-        // Get total shifts
+        // Get total shifts - use idx_exam_active_shift index
         const shiftsResult = await query(`
             SELECT COUNT(DISTINCT id) as count
-            FROM exam_shifts
+            FROM exam_shifts USE INDEX (idx_exam_active_shift)
             WHERE exam_id IN (?) AND is_active = 1
         `, [examIds]);
 
-        // Get total cameras
-        const hlsCameras = await query(`SELECT COUNT(*) as count FROM camera_links_hls WHERE exam_id IN (?) AND is_active = 1`, [examIds]);
-        const rtspCameras = await query(`SELECT COUNT(*) as count FROM camera_links_rtsp WHERE exam_id IN (?) AND is_active = 1`, [examIds]);
+        // Get total cameras - use idx_exam_id index
+        const hlsCameras = await query(`SELECT COUNT(*) as count FROM camera_links_hls USE INDEX (idx_exam_id) WHERE exam_id IN (?) AND is_active = 1`, [examIds]);
+        const rtspCameras = await query(`SELECT COUNT(*) as count FROM camera_links_rtsp USE INDEX (idx_exam_active_rtsp) WHERE exam_id IN (?) AND is_active = 1`, [examIds]);
         const totalCameras = (hlsCameras[0]?.count || 0) + (rtspCameras[0]?.count || 0);
 
         // Get detection counts by type with accuracy calculation
@@ -97,12 +97,14 @@ exports.getClientDashboardStats = async (req, res) => {
         const detectionDistribution = [];
         
         // Query HLS detections for user's exams (only pushed to client)
+        // Uses idx_exam_shift_push (exam_id, shift_id, pushed_to_client, created_at)
+        // This is the PERFECT index for this query - covers all WHERE conditions
         const hlsDetections = await query(`
             SELECT 
                 detection_type,
                 COUNT(*) as pushed_count,
                 SUM(CASE WHEN remove_from_client = 1 THEN 1 ELSE 0 END) as removed_count
-            FROM camera_report_hls
+            FROM camera_report_hls USE INDEX (idx_exam_shift_push)
             WHERE exam_id IN (?) 
               AND pushed_to_client = 1
               ${dateCondition}
@@ -118,12 +120,14 @@ exports.getClientDashboardStats = async (req, res) => {
         });
         
         // Query RTSP detections for user's exams (only pushed to client)
+        // Uses idx_exam_shift_time_rtsp (exam_id, shift_id, created_at)
+        // This is BETTER than idx_exam_shift because it includes created_at for date filtering
         const rtspDetections = await query(`
             SELECT 
                 detection_type,
                 COUNT(*) as pushed_count,
                 SUM(CASE WHEN remove_from_client = 1 THEN 1 ELSE 0 END) as removed_count
-            FROM camera_report_rtsp
+            FROM camera_report_rtsp USE INDEX (idx_exam_shift_time_rtsp)
             WHERE exam_id IN (?) 
               AND pushed_to_client = 1
               ${dateCondition}

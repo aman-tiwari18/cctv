@@ -67,16 +67,16 @@ exports.getAdminDashboardStats = async (req, res) => {
 
         const examIds = exams.map(e => e.id);
 
-        // Get total shifts
+        // Get total shifts - use idx_exam_active_shift index
         const shiftsResult = await query(`
             SELECT COUNT(DISTINCT id) as count
-            FROM exam_shifts
+            FROM exam_shifts USE INDEX (idx_exam_active_shift)
             WHERE exam_id IN (?) AND is_active = 1
         `, [examIds]);
 
-        // Get total cameras
-        const hlsCameras = await query(`SELECT COUNT(*) as count FROM camera_links_hls WHERE exam_id IN (?) AND is_active = 1`, [examIds]);
-        const rtspCameras = await query(`SELECT COUNT(*) as count FROM camera_links_rtsp WHERE exam_id IN (?) AND is_active = 1`, [examIds]);
+        // Get total cameras - use idx_exam_id and idx_exam_active_rtsp indexes
+        const hlsCameras = await query(`SELECT COUNT(*) as count FROM camera_links_hls USE INDEX (idx_exam_id) WHERE exam_id IN (?) AND is_active = 1`, [examIds]);
+        const rtspCameras = await query(`SELECT COUNT(*) as count FROM camera_links_rtsp USE INDEX (idx_exam_active_rtsp) WHERE exam_id IN (?) AND is_active = 1`, [examIds]);
         const totalCameras = (hlsCameras[0]?.count || 0) + (rtspCameras[0]?.count || 0);
 
         // Get detection counts by type with accuracy calculation
@@ -87,6 +87,8 @@ exports.getAdminDashboardStats = async (req, res) => {
         const rtspExams = exams.filter(e => e.link_type === 'RTSP').map(e => e.id);
         
         // Query HLS detections if there are HLS exams
+        // Uses idx_exam_shift_push (exam_id, shift_id, pushed_to_client, created_at)
+        // PERFECT composite index covering all WHERE conditions
         if (hlsExams.length > 0) {
             const hlsDetections = await query(`
                 SELECT 
@@ -94,7 +96,7 @@ exports.getAdminDashboardStats = async (req, res) => {
                     COUNT(*) as total_count,
                     SUM(CASE WHEN pushed_to_client = 1 THEN 1 ELSE 0 END) as pushed_count,
                     SUM(CASE WHEN remove_from_client = 1 THEN 1 ELSE 0 END) as removed_count
-                FROM camera_report_hls
+                FROM camera_report_hls USE INDEX (idx_exam_shift_push)
                 WHERE exam_id IN (?) ${dateCondition}
                 GROUP BY detection_type
             `, [hlsExams]);
@@ -117,6 +119,8 @@ exports.getAdminDashboardStats = async (req, res) => {
         }
         
         // Query RTSP detections if there are RTSP exams
+        // Uses idx_exam_shift_time_rtsp (exam_id, shift_id, created_at)
+        // BETTER than idx_exam_shift - includes created_at for optimal date filtering
         if (rtspExams.length > 0) {
             const rtspDetections = await query(`
                 SELECT 
@@ -124,7 +128,7 @@ exports.getAdminDashboardStats = async (req, res) => {
                     COUNT(*) as total_count,
                     SUM(CASE WHEN pushed_to_client = 1 THEN 1 ELSE 0 END) as pushed_count,
                     SUM(CASE WHEN remove_from_client = 1 THEN 1 ELSE 0 END) as removed_count
-                FROM camera_report_rtsp
+                FROM camera_report_rtsp USE INDEX (idx_exam_shift_time_rtsp)
                 WHERE exam_id IN (?) ${dateCondition}
                 GROUP BY detection_type
             `, [rtspExams]);

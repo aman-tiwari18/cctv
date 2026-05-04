@@ -408,12 +408,13 @@ def get_hls_cameras(exam_id: int, shift_id: int, exam_date: str) -> list:
         cctv_url, ch_code, classification, camera_name,
         centre_name, city, state, tc_code, camera_category
     """
+    # Uses idx_exam_id and idx_shift_id indexes for optimal filtering
     sql = """
         SELECT
             id, exam_id, shift_id, centre_name, city, state,
             camera_name, ch_code, tc_code, cctv_url,
             camera_category, classification, status, is_active, exam_date
-        FROM camera_links_hls
+        FROM camera_links_hls USE INDEX (idx_exam_id, idx_shift_id)
         WHERE exam_id   = %s
           AND (shift_id = %s OR shift_id IS NULL)
           AND (exam_date = %s OR exam_date IS NULL)
@@ -526,12 +527,13 @@ def get_rtsp_cameras(exam_id: int) -> list:
         cctv_url, device_id, classification, camera_name,
         centre_name, city, state, tc_code
     """
+    # Uses idx_exam_active_rtsp (exam_id, is_active) - perfect composite index
     sql = """
         SELECT
             id, device_id, exam_id, centre_name, tc_code,
             camera_name, camera_no, city, state, cctv_url,
             is_active, classification, status
-        FROM camera_links_rtsp
+        FROM camera_links_rtsp USE INDEX (idx_exam_active_rtsp)
         WHERE exam_id  = %s
           AND is_active = 1
     """
