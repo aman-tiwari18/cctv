@@ -644,8 +644,21 @@ const Cameras = () => {
 
               {/* Upload result alert */}
               {uploadResult && (
-                <Alert severity="success" sx={{ mb: 2 }} onClose={() => setUploadResult(null)}>
-                  {uploadResult.message}
+                <Alert 
+                  severity={uploadResult.message.includes('Skipped') ? 'warning' : 'success'} 
+                  sx={{ mb: 2 }} 
+                  onClose={() => setUploadResult(null)}
+                >
+                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                    {uploadResult.message}
+                  </Typography>
+                  {uploadResult.message.includes('Skipped') && (
+                    <Typography variant="caption" sx={{ display: 'block', mt: 0.5, color: 'inherit' }}>
+                      Duplicate detection based on: {isHLS 
+                        ? 'TC Code + Ch Code' 
+                        : 'Device ID + Camera No + TC Code'}
+                    </Typography>
+                  )}
                 </Alert>
               )}
 
@@ -892,6 +905,12 @@ const Cameras = () => {
                 ? 'Expected HLS columns: TC Code, Centre Name, City, State, Camera Name, ch_no, CCTV URL, Camera Category, Classification (optional)'
                 : 'Expected RTSP columns: Device ID, TC Code, Camera Name, Centre Name, City, State, Server Address, Classification (or Scene Classification / Room Classification - optional)'}
               <br /><strong>Download the template below to get the exact format.</strong>
+              <br />
+              <Typography variant="caption" sx={{ mt: 1, display: 'block', color: '#0288d1' }}>
+                <strong>Duplicate Detection:</strong> {isHLS 
+                  ? 'Cameras with same TC Code + Ch Code will be skipped.' 
+                  : 'Cameras with same Device ID + Camera No + TC Code will be skipped.'}
+              </Typography>
             </Alert>
             <Button variant="outlined" component="label" fullWidth startIcon={<Upload />} sx={{ mb: 2 }}>
               {uploadFile ? uploadFile.name : 'Choose Excel File (.xlsx / .xls)'}

@@ -264,25 +264,73 @@ exports.uploadCameras = async (req, res) => {
             }))
         );
 
-        // Filter out duplicate ch_code for HLS
+        // Filter out duplicates based on unique keys
         let recordsToInsert = validRecords;
+        let skipped = 0;
+
         if (linkType === "HLS") {
-            const existingChCodes = await Model.findAll({
-                where: { exam_id: examId, ch_code: { [Op.ne]: null } },
-                attributes: ['ch_code']
+            // HLS unique key: tc_code + ch_code
+            const existingCameras = await Model.findAll({
+                where: { 
+                    exam_id: examId,
+                    [Op.or]: [
+                        { ch_code: { [Op.ne]: null } },
+                        { tc_code: { [Op.ne]: null } }
+                    ]
+                },
+                attributes: ['tc_code', 'ch_code']
             });
-            const existingSet = new Set(existingChCodes.map(c => c.ch_code));
-            recordsToInsert = validRecords.filter(record => !record.ch_code || !existingSet.has(record.ch_code));
+            
+            // Create set of unique keys from existing cameras
+            const existingKeys = new Set(
+                existingCameras
+                    .filter(c => c.tc_code && c.ch_code)
+                    .map(c => `${c.tc_code}_${c.ch_code}`)
+            );
+            
+            // Filter out records that already exist
+            recordsToInsert = validRecords.filter(record => {
+                if (!record.tc_code || !record.ch_code) return true; // Keep records without complete key
+                const uniqueKey = `${record.tc_code}_${record.ch_code}`;
+                return !existingKeys.has(uniqueKey);
+            });
+            
+            skipped = validRecords.length - recordsToInsert.length;
+            
+        } else {
+            // RTSP unique key: device_id + camera_no + tc_code
+            const existingCameras = await Model.findAll({
+                where: { 
+                    exam_id: examId,
+                    device_id: { [Op.ne]: null }
+                },
+                attributes: ['device_id', 'camera_no', 'tc_code']
+            });
+            
+            // Create set of unique keys from existing cameras
+            const existingKeys = new Set(
+                existingCameras
+                    .filter(c => c.device_id)
+                    .map(c => `${c.device_id}_${c.camera_no || ''}_${c.tc_code || ''}`)
+            );
+            
+            // Filter out records that already exist
+            recordsToInsert = validRecords.filter(record => {
+                if (!record.device_id) return true; // Keep records without device_id
+                const uniqueKey = `${record.device_id}_${record.camera_no || ''}_${record.tc_code || ''}`;
+                return !existingKeys.has(uniqueKey);
+            });
+            
+            skipped = validRecords.length - recordsToInsert.length;
         }
 
         await Model.bulkCreate(recordsToInsert);
         // Cleanup temp file
         try { fs.unlinkSync(req.file.path); } catch (_) { }
 
-        const skipped = linkType === "HLS" ? validRecords.length - recordsToInsert.length : 0;
         const message = skipped > 0
-            ? `Successfully uploaded ${recordsToInsert.length} cameras. Skipped ${skipped} duplicate ch_code entries.`
-            : `Successfully uploaded ${recordsToInsert.length} cameras.`;
+            ? `Successfully uploaded ${recordsToInsert.length} camera${recordsToInsert.length !== 1 ? 's' : ''}. Skipped ${skipped} duplicate${skipped !== 1 ? 's' : ''} (${linkType === 'HLS' ? 'tc_code + ch_code' : 'device_id + camera_no + tc_code'} already exists).`
+            : `Successfully uploaded ${recordsToInsert.length} camera${recordsToInsert.length !== 1 ? 's' : ''}.`;
 
         res.status(200).json({
             success: true,
