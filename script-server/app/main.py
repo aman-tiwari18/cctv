@@ -860,31 +860,40 @@ def list_detections(
             for _, type_key, relative_path, file_path, origin in candidates[start: start + limit]
         ]
 
-    # Fetch pushed_to_client statuses for paginated items securely
+    # Fetch pushed_to_client and gpu_id for paginated items
     uids_to_check = [item.get("uid") for item in paginated if item.get("uid")]
     pushed_uids = set()
+    uid_gpu_map = {}  # uid -> gpu_id
     if uids_to_check:
         try:
             from scripts.detection.utils.db_client import _get_connection
             conn = _get_connection()
             with conn.cursor() as cur:
                 format_strings = ','.join(['%s'] * len(uids_to_check))
-                
+
                 # Fetch from HLS - uses idx_unique_id index
                 try:
-                    cur.execute(f"SELECT unique_id FROM camera_report_hls USE INDEX (idx_unique_id) WHERE unique_id IN ({format_strings}) AND pushed_to_client = 1", tuple(uids_to_check))
+                    cur.execute(f"SELECT unique_id, pushed_to_client, gpu_id FROM camera_report_hls USE INDEX (idx_unique_id) WHERE unique_id IN ({format_strings})", tuple(uids_to_check))
                     for row in cur.fetchall():
-                        if row.get("unique_id"):
-                            pushed_uids.add(row["unique_id"])
+                        uid = row.get("unique_id")
+                        if uid:
+                            if row.get("pushed_to_client") == 1:
+                                pushed_uids.add(uid)
+                            if row.get("gpu_id") is not None:
+                                uid_gpu_map[uid] = row["gpu_id"]
                 except Exception as e:
                     logger.error(f"HLS pushed uids fetch failed: {e}")
 
                 # Fetch from RTSP - uses idx_unique_id index
                 try:
-                    cur.execute(f"SELECT unique_id FROM camera_report_rtsp USE INDEX (idx_unique_id) WHERE unique_id IN ({format_strings}) AND pushed_to_client = 1", tuple(uids_to_check))
+                    cur.execute(f"SELECT unique_id, pushed_to_client, gpu_id FROM camera_report_rtsp USE INDEX (idx_unique_id) WHERE unique_id IN ({format_strings})", tuple(uids_to_check))
                     for row in cur.fetchall():
-                        if row.get("unique_id"):
-                            pushed_uids.add(row["unique_id"])
+                        uid = row.get("unique_id")
+                        if uid:
+                            if row.get("pushed_to_client") == 1:
+                                pushed_uids.add(uid)
+                            if row.get("gpu_id") is not None:
+                                uid_gpu_map[uid] = row["gpu_id"]
                 except Exception as e:
                     logger.error(f"RTSP pushed uids fetch failed: {e}")
             conn.close()
@@ -892,10 +901,9 @@ def list_detections(
             logger.error(f"Failed to fetch pushed uids for paginated data: {e}")
 
     for item in paginated:
-        if item.get("uid") in pushed_uids:
-            item["pushed_to_client"] = 1
-        else:
-            item["pushed_to_client"] = 0
+        uid = item.get("uid")
+        item["pushed_to_client"] = 1 if uid in pushed_uids else 0
+        item["gpu_id"] = uid_gpu_map.get(uid)  # None if not in DB yet
 
     return {
         "success": True,

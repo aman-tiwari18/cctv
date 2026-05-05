@@ -211,20 +211,18 @@ class CameraDistributor:
     def filter_cameras(self, cameras: List[Dict]) -> List[Dict]:
         """
         Filter camera list to only include cameras assigned to this worker.
-        
-        Args:
-            cameras: List of camera dicts
-        
-        Returns:
-            Filtered list of cameras for this worker
+        Uses sequential index-based distribution: each camera is numbered 0..N-1
+        in the order returned by the DB query, then assigned by index % total_workers.
+        This guarantees an equal split regardless of camera type or ID format.
         """
-        assigned = [cam for cam in cameras if self.should_process_camera(cam)]
-        
+        worker_slot = self.worker_index % self.total_workers
+        assigned = [cam for i, cam in enumerate(cameras) if i % self.total_workers == worker_slot]
+
         logger.info(
             f"Worker {self.worker_id}: "
             f"Assigned {len(assigned)}/{len(cameras)} cameras"
         )
-        
+
         return assigned
     
     def get_worker_stats(self) -> Dict:

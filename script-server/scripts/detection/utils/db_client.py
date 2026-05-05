@@ -360,6 +360,33 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+# ── GPU / Worker ID ──────────────────────────────────────────────────────────
+# Derived from WORKER_ID env var: worker-0/main=0, worker-1=1, worker-2=2, ...
+def _get_gpu_id() -> int:
+    wid = os.environ.get("WORKER_ID", "main")
+    if wid in ("main", "worker-0"):
+        return 0
+    m = re.search(r'(\d+)$', wid)
+    return int(m.group(1)) if m else 0
+
+_GPU_ID = _get_gpu_id()
+
+# Base directory for detection results (one level up from this utils/ dir)
+_DETECTION_BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+
+def _embed_gpu_id_in_image(image_path: str, gpu_id: int) -> None:
+    """Embed gpu_id into JPEG EXIF UserComment field."""
+    try:
+        from PIL import Image
+        img = Image.open(image_path)
+        exif = img.getexif()
+        exif[0x9286] = f"gpu_id={gpu_id}"  # 0x9286 = UserComment
+        img.save(image_path, exif=exif.tobytes())
+        img.close()
+    except Exception as e:
+        logger.debug(f"EXIF embed skipped for {image_path}: {e}")
+
 # ================= DB CONFIG =================
 DB_CONFIG = {
     "host":     os.environ.get("DB_HOST", "localhost"),
@@ -827,6 +854,10 @@ def report_to_db_hls(ch_code: str, image_name: str, folder: str = "crowd_detecti
             camera_status    = "Online" if status_raw == 'accessible' else "Offline"
             image_url        = f"{_IMAGE_BASE_URL}/{folder}/{image_name}"
 
+            # Embed gpu_id in image EXIF before committing to DB
+            hls_image_path = os.path.join(_DETECTION_BASE, "results", "tcs_detections", folder, image_name)
+            _embed_gpu_id_in_image(hls_image_path, _GPU_ID)
+
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -834,19 +865,19 @@ def report_to_db_hls(ch_code: str, image_name: str, folder: str = "crowd_detecti
                         exam_id, shift_id, city, center_name, camera_id,
                         camera_name, camera_category, tc_code, ch_code,
                         state, camera_status, events, date_time,
-                        imageurl, detection_type, unique_id
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        imageurl, detection_type, unique_id, gpu_id
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         cam.get('exam_id'), cam.get('shift_id'), cam.get('city'),
                         cam.get('centre_name'), report_camera_id, camera_name,
                         cam.get('camera_category'), cam.get('tc_code'), ch_code,
                         cam.get('state'), camera_status, 1, date_time, image_url, folder,
-                        unique_id,
+                        unique_id, _GPU_ID,
                     ),
                 )
             conn.commit()
-            msg = f"[DB-REPORT] ✅ SUCCESS: {folder} report inserted for ch_code={ch_code} unique_id={unique_id}\n"
+            msg = f"[DB-REPORT] ✅ SUCCESS: {folder} report inserted for ch_code={ch_code} unique_id={unique_id} gpu_id={_GPU_ID}\n"
             logger.info(msg.strip())
             with open(_LOG_FILE, "a") as f:
                 f.write(msg)
@@ -951,6 +982,10 @@ def report_to_db_rtsp(device_id: str, camera_no: str, image_name: str, folder: s
             camera_status    = "Online" if status_raw == 'accessible' else "Offline"
             image_url        = f"{_RTSP_IMAGE_BASE_URL}/{folder}/{image_name}"
 
+            # Embed gpu_id in image EXIF before committing to DB
+            rtsp_image_path = os.path.join(_DETECTION_BASE, "results", folder, image_name)
+            _embed_gpu_id_in_image(rtsp_image_path, _GPU_ID)
+
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -958,19 +993,19 @@ def report_to_db_rtsp(device_id: str, camera_no: str, image_name: str, folder: s
                         exam_id, shift_id, city, center_name, camera_id,
                         device_id, camera_no, camera_name, tc_code,
                         state, camera_status, events, date_time,
-                        imageurl, detection_type, unique_id
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        imageurl, detection_type, unique_id, gpu_id
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         cam.get('exam_id'), shift_id, cam.get('city'),
                         cam.get('centre_name'), f"{device_id}_{camera_no}", device_id, camera_no,
                         camera_name, cam.get('tc_code'), cam.get('state'),
                         camera_status, 1, date_time, image_url, folder,
-                        unique_id,
+                        unique_id, _GPU_ID,
                     ),
                 )
             conn.commit()
-            msg = f"[DB-REPORT-RTSP] ✅ SUCCESS: {folder} report inserted for device_id={device_id} unique_id={unique_id}\n"
+            msg = f"[DB-REPORT-RTSP] ✅ SUCCESS: {folder} report inserted for device_id={device_id} unique_id={unique_id} gpu_id={_GPU_ID}\n"
             logger.info(msg.strip())
             with open(_LOG_FILE, "a") as f:
                 f.write(msg)

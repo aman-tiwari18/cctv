@@ -14,7 +14,7 @@ import {
   WarningAmber, ImageNotSupported, FlipCameraAndroid, SecurityUpdateWarning,
   VisibilityOff, PersonOff,
   ChevronLeft, ChevronRight, ViewList,
-  Check, Close as CloseIcon
+  Check, Close as CloseIcon, Memory
 } from '@mui/icons-material';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
@@ -668,6 +668,15 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
                       Conf: {(item.confidence * 100).toFixed(0)}%
                     </Typography>
                   )}
+
+                  {item.gpu_id != null && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.8 }}>
+                      <Memory sx={{ fontSize: 13, color: '#64748b' }} />
+                      <Typography sx={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>
+                        GPU {item.gpu_id} — {item.gpu_id === 0 ? 'Master' : `Worker ${item.gpu_id}`}
+                      </Typography>
+                    </Box>
+                  )}
                 </CardContent>
 
                 <Box sx={{ mt: 2.5 }}>
@@ -970,12 +979,16 @@ export default function Detections() {
     if (!socket) return;
 
     const handleNewDetection = (item) => {
+      // Filter live detections by typeFilter
+      if (typeFilter.length > 0 && !typeFilter.includes(item.type)) {
+        return; // Skip this detection if it doesn't match the filter
+      }
       mergeLiveDetections(item, { incrementTotal: true });
     };
 
     socket.on('detection:new', handleNewDetection);
     return () => socket.off('detection:new', handleNewDetection);
-  }, [socket, mergeLiveDetections]);
+  }, [socket, mergeLiveDetections, typeFilter]);
 
   // Optimized polling: Only when NOT connected and on page 1
   useEffect(() => {
@@ -999,7 +1012,15 @@ export default function Detections() {
         setTotal(res.data.total || 0);
         setCounts(res.data.counts || {});
         setAllCounts(res.data.counts || {});
-        mergeLiveDetections(res.data.data || []);
+        
+        // Filter polled detections by typeFilter before merging
+        const filteredData = (res.data.data || []).filter(item => {
+          if (typeFilter.length > 0 && !typeFilter.includes(item.type)) {
+            return false;
+          }
+          return true;
+        });
+        mergeLiveDetections(filteredData);
       } catch (err) {
         if (err.name !== 'CanceledError') {
           console.error('Failed to poll latest detections:', err);
@@ -1014,7 +1035,7 @@ export default function Detections() {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [loading, page, connected, rowsPerPage, buildDetectionParams, mergeLiveDetections, setAllCounts]);
+  }, [loading, page, connected, rowsPerPage, buildDetectionParams, mergeLiveDetections, setAllCounts, typeFilter]);
 
   // Debounced fetch on filter changes
   useEffect(() => {
@@ -1026,17 +1047,18 @@ export default function Detections() {
       clearTimeout(fetchTimeoutRef.current);
     }
 
-    // Debounce fetch
+    // Debounce fetch (no debounce for typeFilter changes for instant response)
+    const delay = typeFilter.length > 0 ? 0 : 300;
     fetchTimeoutRef.current = setTimeout(() => {
       fetchDetections(1);
-    }, 300);
+    }, delay);
 
     return () => {
       if (fetchTimeoutRef.current) {
         clearTimeout(fetchTimeoutRef.current);
       }
     };
-  }, [typeFilter, dateFilter, examFilter, appliedStartTime, appliedEndTime, debouncedSearch]);
+  }, [typeFilter, dateFilter, examFilter, appliedStartTime, appliedEndTime, debouncedSearch, fetchDetections]);
 
   // Broadcast push events to other users via socket
   useEffect(() => {

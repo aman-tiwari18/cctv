@@ -46,7 +46,7 @@ import {
   Check,
   Warning,
   Close as CloseIcon,
-  GridView, LocationCity, Close,
+  GridView, LocationCity, Close, Memory,
 } from '@mui/icons-material';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -263,6 +263,15 @@ function DetectionCard({ item, onClick, onRemove, isRemoving, removed }) {
           >
             Conf: {(item.confidence * 100).toFixed(0)}%
           </Typography>
+        )}
+
+        {item.gpu_id != null && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.8 }}>
+            <Memory sx={{ fontSize: 13, color: '#64748b' }} />
+            <Typography sx={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>
+              GPU {item.gpu_id} — {item.gpu_id === 0 ? 'Master' : `Worker ${item.gpu_id}`}
+            </Typography>
+          </Box>
         )}
       </CardContent>
 
@@ -962,9 +971,10 @@ const ClientDetections = () => {
   }, []);
 
   useEffect(() => {
+    setPage(1);
     setListSelectedIndex(0);
     fetchClientImages(1, rowsPerPage);
-  }, [fetchClientImages, rowsPerPage]);
+  }, [typeFilter, sourceFilter, dateFilter, search, appliedStartTime, appliedEndTime, examFilter, rowsPerPage]);
 
   // Socket connection is now handled by SocketContext
   // No need for duplicate socket connection here
@@ -1007,6 +1017,11 @@ const ClientDetections = () => {
     if (!socket) return;
 
     const handleNewClientDetection = (item) => {
+      // Filter by typeFilter FIRST before processing
+      if (typeFilter.length > 0 && !typeFilter.includes(item.type)) {
+        return; // Skip this detection if it doesn't match the filter
+      }
+
       // Process URL if missing base
       const processedItem = {
         ...item,
@@ -1027,7 +1042,7 @@ const ClientDetections = () => {
 
     socket.on('client-detection:new', handleNewClientDetection);
     return () => socket.off('client-detection:new', handleNewClientDetection);
-  }, [socket, matchesFilters, rowsPerPage]);
+  }, [socket, matchesFilters, rowsPerPage, typeFilter]);
 
   const handleRemove = async (item) => {
     if (!item || !item.uid) return;

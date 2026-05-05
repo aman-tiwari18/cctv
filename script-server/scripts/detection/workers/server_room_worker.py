@@ -59,14 +59,14 @@ GPU_BATCH_SIZE      = 64
 GPU_QUEUE_SIZE      = 128
 BATCH_WAIT_TIMEOUT  = 0.2
 THREAD_DELAY        = 0.1
-HLS_SAMPLE_EVERY    = 5
+HLS_SAMPLE_EVERY    = 30  # Sample every 30th frame (1 frame per second at 30fps)
 
 _gpu_queue = queue.Queue(maxsize=GPU_QUEUE_SIZE)
 
 # =====================================================
 # 🚀 GPU BATCH WORKER
 # =====================================================
-def _gpu_batch_worker(stop_event, save_folder, cooldown_time=60):
+def _gpu_batch_worker(stop_event, save_folder, cooldown_time=150):
     """
     GPU batch worker — TRUE batch inference.
     Pulls frames from _gpu_queue and processes them in batches.
@@ -76,6 +76,9 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=60):
     # Warm up model
     server_core.get_yolo_model()
     log_counter = 0
+    
+    # Global cooldown tracking per camera (device_id + ch_no)
+    camera_cooldowns = {}
 
     while not stop_event.is_set():
         batch = []
@@ -122,17 +125,28 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=60):
             if not detected:
                 continue
 
-            state = item.get('state', {})
+            dev_id = item.get("device_id") or item.get("camera_id")
+            ch_no = item.get("ch_no")
+            
+            # Create unique camera key for cooldown tracking
+            camera_key = f"{dev_id}_{ch_no}"
+            
             now = time.time()
-            if now - state.get("last_save", 0) < cooldown_time:
+            last_save = camera_cooldowns.get(camera_key, 0)
+            
+            # Check cooldown - CRITICAL: Must wait full cooldown period
+            if now - last_save < cooldown_time:
+                time_remaining = int(cooldown_time - (now - last_save))
+                if log_counter % 100 == 0:  # Log occasionally to avoid spam
+                    logger.debug(f"[ServerRoom] {camera_key} in cooldown ({time_remaining}s remaining)")
                 continue
 
-            state["last_save"] = now
+            # Update cooldown timestamp
+            camera_cooldowns[camera_key] = now
+            
             ts = time.strftime("%Y%m%d_%H%M%S")
             uid = str(uuid.uuid4())
             
-            dev_id = item.get("device_id") or item.get("camera_id")
-            ch_no = item.get("ch_no")
             exam_id = item.get("exam_id") or "0"
             script_name = item.get("script_name", "server")
             
@@ -144,7 +158,7 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=60):
             
             path = os.path.join(save_folder, fname)
             cv2.imwrite(path, annotated_frame)
-            logger.warning(f"[ServerRoom] 🚨 SAVED persons={person_count} → {path}")
+            logger.warning(f"[ServerRoom] 🚨 SAVED persons={person_count} camera={camera_key} → {path}")
             
             # Report to database
             if item.get("source_type") == "HLS":
@@ -244,19 +258,27 @@ def _hls_camera_thread(cfg, stop_event):
 
     hls = extract_hls_streaming_url(initial_url)
     if not hls or not test_hls_stream(hls):
+        logger.warning(f"[ServerRoom] HLS stream test failed for camera {ch_no}")
         return
 
     cap = open_hls_stream(hls)
     if cap is None:
+        logger.error(f"[ServerRoom] Failed to open HLS stream for camera {ch_no}")
         return
 
+    logger.info(f"[ServerRoom] HLS camera {ch_no} started (sampling every {HLS_SAMPLE_EVERY} frames)")
     frame_count = 0
-    state = {"last_save": 0}
 
     while not stop_event.is_set():
         ret, frame = cap.read()
         if not ret:
-            break
+            logger.warning(f"[ServerRoom] HLS camera {ch_no} read failed, reconnecting...")
+            time.sleep(5)
+            cap.release()
+            cap = open_hls_stream(hls)
+            if cap is None:
+                break
+            continue
 
         frame_count += 1
         if frame_count % HLS_SAMPLE_EVERY != 0:
@@ -270,14 +292,15 @@ def _hls_camera_thread(cfg, stop_event):
                 "exam_id":     exam_id,
                 "script_name": script_name,
                 "source_type": "HLS",
-                "state":       state,
             })
         except queue.Full:
+            # Queue full - skip this frame
             del frame
             continue
         del frame
 
     cap.release()
+    logger.info(f"[ServerRoom] HLS camera {ch_no} stopped")
 
 def server_room_worker_hls(camera_configs, stop_event=None):
     """HLS worker entry point."""
