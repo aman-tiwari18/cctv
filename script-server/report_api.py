@@ -288,6 +288,13 @@ def create_shift_sheets(wb, cameras, shift_counts, shifts):
         for cam in cameras:
             ch    = cam.get("ch_code", "")
             count = shift_counts.get(shift["shift_name"], {}).get(ch, 0)
+            
+            # Camera is online if: is_active = 1 AND status = 'Accessible' (case-insensitive)
+            is_active = cam.get("is_active") == 1
+            status_value = str(cam.get("status", "")).strip().lower()
+            is_accessible = status_value == "accessible"
+            camera_status = "Online" if (is_active and is_accessible) else "Offline"
+            
             ws.append([
                 cam.get("city"),
                 cam.get("state"),
@@ -299,7 +306,7 @@ def create_shift_sheets(wb, cameras, shift_counts, shifts):
                 cam.get("classification"),
                 count,
                 0,
-                "Online" if cam.get("is_active") == 1 else "Offline",
+                camera_status,
             ])
         auto_width(ws)
 
@@ -329,8 +336,14 @@ def create_analysis_sheet(wb, shift_counts, cameras, shifts):
         ws.cell(row=row, column=1, value=f"{sname} ANALYSIS").font = Font(bold=True)
         row += 1
 
-        total_cams  = len(cameras)
-        online_cams = sum(1 for c in cameras if c.get("is_active") == 1)
+        total_cams = len(cameras)
+        
+        # Online cameras: is_active = 1 AND status = 'Accessible' (case-insensitive)
+        online_cams = sum(
+            1 for c in cameras 
+            if c.get("is_active") == 1 and str(c.get("status", "")).strip().lower() == "accessible"
+        )
+        
         total_det   = sum(shift_counts.get(sname, {}).values())
         total_all  += total_det
         online_rate = (online_cams / total_cams * 100) if total_cams else 0
@@ -459,6 +472,48 @@ def generate_report():
         }), 404
 
     print(f"📷 Cameras loaded: {len(cameras)}")
+    
+    # Debug: Check status values
+    status_counts = {}
+    active_counts = {"active": 0, "inactive": 0}
+    
+    for cam in cameras:
+        # Check status field
+        status_val = cam.get("status")
+        if status_val is None:
+            status_key = "NULL"
+        else:
+            status_key = str(status_val).strip().lower()
+        status_counts[status_key] = status_counts.get(status_key, 0) + 1
+        
+        # Check is_active field
+        if cam.get("is_active") == 1:
+            active_counts["active"] += 1
+        else:
+            active_counts["inactive"] += 1
+    
+    print(f"📊 Status distribution: {status_counts}")
+    print(f"📊 Active distribution: {active_counts}")
+    
+    # Debug: Sample camera data (first 3 cameras)
+    print(f"🔍 Sample camera data (first 3):")
+    for i, cam in enumerate(cameras[:3], 1):
+        print(f"  {i}. ch_code={cam.get('ch_code')}, is_active={cam.get('is_active')}, status={repr(cam.get('status'))}")
+    
+    # Debug: Check online cameras (is_active=1 AND status='accessible')
+    online_count = sum(
+        1 for c in cameras 
+        if c.get("is_active") == 1 and str(c.get("status", "")).strip().lower() == "accessible"
+    )
+    print(f"🟢 Online cameras (active + accessible): {online_count}/{len(cameras)}")
+    
+    if online_count == 0:
+        print("⚠️  WARNING: No online cameras found!")
+        print("   Possible reasons:")
+        print("   1. status field is NULL or empty")
+        print("   2. status field has different value (not 'Accessible')")
+        print("   3. is_active is 0 for all cameras")
+        print("   4. Vision classification script hasn't run yet to set status")
 
     # ── Step 4: Scan detections ──
     print("🔍 Scanning detection folders...")

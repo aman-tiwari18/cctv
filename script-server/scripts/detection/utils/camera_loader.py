@@ -3,12 +3,15 @@ Camera Loader for CCTV Pipeline
 =================================
 Unified camera loading — replaces Excel-based approach.
 Fetches pending executions → queries DB → returns camera list.
+
+NOTE: This loader is used by DETECTION WORKERS and loads ONLY accessible cameras.
+Vision classification scripts use get_hls_cameras() / get_rtsp_cameras() directly.
 """
 
 import logging
 from datetime import date
 
-from utils.db_client import get_hls_cameras, get_rtsp_cameras
+from utils.db_client import get_hls_cameras_accessible, get_rtsp_cameras_accessible
 from utils.api_client import get_pending_executions
 
 logger = logging.getLogger(__name__)
@@ -78,6 +81,9 @@ def load_cameras_for_execution(execution: dict) -> list:
     """
     Given a pending execution dict, query the appropriate DB table
     and return a list of camera config dicts ready for workers.
+    
+    IMPORTANT: This function loads ONLY accessible cameras (status = 'Accessible').
+    Vision classification scripts should use get_hls_cameras() / get_rtsp_cameras() directly.
 
     Each returned dict contains:
         - cctv_url:       str   (streaming URL)
@@ -98,7 +104,7 @@ def load_cameras_for_execution(execution: dict) -> list:
     cameras = []
 
     if link_type == "HLS":
-        rows = get_hls_cameras(exam_id, shift_id, today)
+        rows = get_hls_cameras_accessible(exam_id, shift_id, today)
         for row in rows:
             ch_code = str(row.get("ch_code", "")).strip()
             classification = str(row.get("classification", "")).strip()
@@ -125,7 +131,7 @@ def load_cameras_for_execution(execution: dict) -> list:
             })
 
     elif link_type == "RTSP":
-        rows = get_rtsp_cameras(exam_id)
+        rows = get_rtsp_cameras_accessible(exam_id)
         for row in rows:
             device_id = str(row.get("device_id", "")).strip()
             classification = str(row.get("classification", "")).strip()
@@ -164,7 +170,7 @@ def load_cameras_for_execution(execution: dict) -> list:
         return []
 
     logger.info(
-        f"[CameraLoader] Loaded {len(cameras)} cameras "
+        f"[CameraLoader] Loaded {len(cameras)} ACCESSIBLE cameras "
         f"(script={script_code}, link_type={link_type}, "
         f"exam_id={exam_id}, shift_id={shift_id})"
     )

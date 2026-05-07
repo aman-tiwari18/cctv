@@ -296,6 +296,15 @@ function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onS
             Conf: {(item.confidence * 100).toFixed(0)}%
           </Typography>
         )}
+
+        {item.gpu_id != null && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.8 }}>
+            <Memory sx={{ fontSize: 13, color: '#64748b' }} />
+            <Typography sx={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>
+              GPU {item.gpu_id} — {item.gpu_id === 0 ? 'Master' : `Worker ${item.gpu_id}`}
+            </Typography>
+          </Box>
+        )}
       </CardContent>
 
       <Box sx={{ mx: 2, mb: 4, mt: 1 }}>
@@ -544,6 +553,14 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
                     <>
                       <Typography variant="body2" fontWeight={600} color="text.primary" fontSize={13}>{datePart}</Typography>
                       {timePart && <Typography variant="caption" fontWeight={500} color="text.secondary" fontSize={12}>{timePart}</Typography>}
+                      {listItem.gpu_id != null && (
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.3, mt: 0.3 }}>
+                          <Memory sx={{ fontSize: 11, color: '#94a3b8' }} />
+                          <Typography sx={{ fontSize: 10, color: '#94a3b8', fontWeight: 600 }}>
+                            GPU {listItem.gpu_id}
+                          </Typography>
+                        </Box>
+                      )}
                     </>
                   );
                 })()}

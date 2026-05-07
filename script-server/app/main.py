@@ -18,11 +18,13 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+import httpx
 
-from app.config import HTTP_PORT, MAIN_BACKEND_URL, POLL_INTERVAL_MS, SCRIPTS_DIR
+from app.config import HTTP_PORT, MAIN_BACKEND_URL, POLL_INTERVAL_MS, SCRIPTS_DIR, WORKER_ID, WORKER_NAME
 from app.logger import logger
 from app.log_manager import log_manager
 from app.poller import poller_service, IS_MAIN_WORKER
+from app.gpu_monitor import get_local_gpu_stats_data
 from scripts.detection.utils.db_client import get_hls_camera_by_ch_code, get_rtsp_camera_by_id, get_hls_cameras, get_rtsp_cameras, get_rtsp_camera_by_device_and_ch, _get_connection
 
 # Import legacy pipeline functionality from the old backend
@@ -36,6 +38,57 @@ from scripts.detection.backend.pipeline_manager import (
 
 DETECTION_SCAN_INTERVAL_SECONDS = 2
 known_detection_files = {}
+
+# ==========================================
+# GPU Monitoring Configuration
+# ==========================================
+# Load GPU workers from environment or use defaults
+def _load_gpu_workers():
+    """Load GPU worker configuration from environment variables or defaults."""
+    import json
+    
+    # Try to load from JSON environment variable first
+    gpu_workers_json = os.getenv("GPU_WORKERS_JSON")
+    if gpu_workers_json:
+        try:
+            return json.loads(gpu_workers_json)
+        except json.JSONDecodeError:
+            logger.warning("Failed to parse GPU_WORKERS_JSON, using defaults")
+    
+    # Build from individual environment variables
+    workers = []
+    
+    # Master/Main worker (always localhost) - uses main HTTP_PORT, not separate port
+    workers.append({
+        "id": WORKER_ID,
+        "name": WORKER_NAME,
+        "ip": "localhost",
+        "port": HTTP_PORT  # Use main server port
+    })
+    
+    # Additional workers from environment
+    total_workers = int(os.getenv("TOTAL_WORKERS", 4))
+    for i in range(1, total_workers):
+        worker_ip = os.getenv(f"WORKER_{i}_IP")
+        if worker_ip:
+            workers.append({
+                "id": f"worker-{i}",
+                "name": os.getenv(f"WORKER_{i}_NAME", f"Worker {i}"),
+                "ip": worker_ip,
+                "port": int(os.getenv(f"WORKER_{i}_PORT", HTTP_PORT))  # Default to HTTP_PORT
+            })
+    
+    # If no additional workers configured, use hardcoded defaults for backward compatibility
+    if len(workers) == 1:
+        workers.extend([
+            {"id": "worker-1", "name": "Worker 1", "ip": "192.168.19.43", "port": HTTP_PORT},
+            {"id": "worker-2", "name": "Worker 2", "ip": "192.168.19.42", "port": HTTP_PORT},
+            {"id": "worker-3", "name": "Worker 3", "ip": "192.168.19.41", "port": HTTP_PORT},
+        ])
+    
+    return workers
+
+GPU_WORKERS = _load_gpu_workers()
 
 
 def _epoch_ms(value) -> Optional[int]:
@@ -533,6 +586,153 @@ def stop_analytics_route(req: StopRequest):
 def status_analytics_route():
     running, stopped = status_analytics()
     return {"running": running, "stopped": stopped}
+
+
+# ==========================================
+# GPU Monitoring Endpoints
+# ==========================================
+
+@app.get("/gpu-stats")
+async def get_local_gpu_stats():
+    """
+    Get GPU statistics for this local server.
+    This endpoint is called by other workers to fetch GPU stats.
+    """
+    return get_local_gpu_stats_data()
+
+
+async def fetch_worker_gpu_stats(worker: dict) -> dict:
+    """Fetch GPU stats from a single worker server"""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.get(f"http://{worker['ip']}:{worker['port']}/gpu-stats")
+            return {
+                "server_id": worker["id"],
+                "server_name": worker["name"],
+                "ip": worker["ip"],
+                "status": "online",
+                "data": response.json(),
+                "error": None
+            }
+    except httpx.TimeoutException:
+        return {
+            "server_id": worker["id"],
+            "server_name": worker["name"],
+            "ip": worker["ip"],
+            "status": "offline",
+            "data": None,
+            "error": "Connection timeout"
+        }
+    except httpx.ConnectError:
+        return {
+            "server_id": worker["id"],
+            "server_name": worker["name"],
+            "ip": worker["ip"],
+            "status": "offline",
+            "data": None,
+            "error": "Connection refused - Server not running"
+        }
+    except Exception as e:
+        return {
+            "server_id": worker["id"],
+            "server_name": worker["name"],
+            "ip": worker["ip"],
+            "status": "offline",
+            "data": None,
+            "error": str(e)
+        }
+
+
+@app.get("/gpu-monitor/stats")
+async def get_cluster_gpu_stats():
+    """
+    Get GPU statistics from all worker servers.
+    Returns aggregated GPU utilization, processes, and camera counts.
+    """
+    import asyncio
+    
+    # Fetch stats from all workers concurrently
+    tasks = [fetch_worker_gpu_stats(worker) for worker in GPU_WORKERS]
+    results = await asyncio.gather(*tasks)
+    
+    # Aggregate statistics
+    aggregated = {
+        "total_servers": len(GPU_WORKERS),
+        "online_servers": sum(1 for r in results if r["status"] == "online"),
+        "offline_servers": sum(1 for r in results if r["status"] == "offline"),
+        "total_gpus": 0,
+        "total_processes": 0,
+        "total_cameras": 0,
+        "servers": []
+    }
+    
+    for result in results:
+        if result["status"] == "online" and result["data"]:
+            data = result["data"]
+            aggregated["total_gpus"] += data.get("total_gpus", 0)
+            aggregated["total_processes"] += data.get("total_processes", 0)
+            
+            # Calculate total cameras from processes
+            if data.get("processes"):
+                for gpu_procs in data["processes"].values():
+                    for proc in gpu_procs:
+                        aggregated["total_cameras"] += proc.get("camera_count", 0)
+        
+        aggregated["servers"].append(result)
+    
+    return {
+        "success": True,
+        "timestamp": datetime.now().isoformat(),
+        "data": aggregated
+    }
+
+
+@app.get("/gpu-monitor/stats/{server_id}")
+async def get_worker_gpu_stats(server_id: str):
+    """Get GPU statistics from a specific worker server"""
+    worker = next((w for w in GPU_WORKERS if w["id"] == server_id), None)
+    
+    if not worker:
+        raise HTTPException(status_code=404, detail=f"Worker {server_id} not found")
+    
+    result = await fetch_worker_gpu_stats(worker)
+    
+    return {
+        "success": True,
+        "timestamp": datetime.now().isoformat(),
+        "data": result
+    }
+
+
+@app.get("/gpu-monitor/servers")
+async def get_gpu_servers():
+    """Get list of configured GPU worker servers with health status"""
+    import asyncio
+    
+    async def check_health(worker):
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                await client.get(f"http://{worker['ip']}:{worker['port']}/health")
+                return {**worker, "status": "online"}
+        except Exception:
+            return {**worker, "status": "offline"}
+    
+    tasks = [check_health(worker) for worker in GPU_WORKERS]
+    servers = await asyncio.gather(*tasks)
+    
+    return {
+        "success": True,
+        "servers": servers
+    }
+
+
+@app.get("/gpu-monitor/local")
+async def get_local_gpu_monitor():
+    """
+    Get GPU statistics for the local server only (no remote calls).
+    Useful for quick local monitoring without network overhead.
+    """
+    return get_local_gpu_stats_data()
 
 
 # ==========================================

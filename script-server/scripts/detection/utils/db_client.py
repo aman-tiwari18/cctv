@@ -430,6 +430,9 @@ def get_hls_cameras(exam_id: int, shift_id: int, exam_date: str) -> list:
     Query camera_links_hls for cameras matching exam_id, shift_id,
     and exam_date (YYYY-MM-DD).
     Automatically filters cameras based on worker assignment for horizontal scaling.
+    
+    NOTE: This loads ALL cameras regardless of status - used by vision classification scripts.
+    For detection workers, use get_hls_cameras_accessible() instead.
 
     Returns list of dicts with keys:
         cctv_url, ch_code, classification, camera_name,
@@ -482,6 +485,67 @@ def get_hls_cameras(exam_id: int, shift_id: int, exam_date: str) -> list:
                 return rows
     except Exception as e:
         logger.error(f"[DB] Error querying camera_links_hls: {e}")
+        return []
+
+
+def get_hls_cameras_accessible(exam_id: int, shift_id: int, exam_date: str) -> list:
+    """
+    Query camera_links_hls for ACCESSIBLE cameras only (status = 'Accessible').
+    Used by detection workers - no point analyzing unreachable streams.
+    Automatically filters cameras based on worker assignment for horizontal scaling.
+
+    Returns list of dicts with keys:
+        cctv_url, ch_code, classification, camera_name,
+        centre_name, city, state, tc_code, camera_category
+    """
+    # Uses idx_exam_id and idx_shift_id indexes for optimal filtering
+    sql = """
+        SELECT
+            id, exam_id, shift_id, centre_name, city, state,
+            camera_name, ch_code, tc_code, cctv_url,
+            camera_category, classification, status, is_active, exam_date
+        FROM camera_links_hls USE INDEX (idx_exam_id, idx_shift_id)
+        WHERE exam_id   = %s
+          AND (shift_id = %s OR shift_id IS NULL)
+          AND (exam_date = %s OR exam_date IS NULL)
+          AND is_active = 1
+          AND status = 'Accessible'
+    """
+    params = [exam_id, shift_id, exam_date]
+
+    try:
+        conn = _get_connection()
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, tuple(params))
+                rows = cur.fetchall()
+                
+                # Apply camera distribution filter for horizontal scaling
+                try:
+                    try:
+                        from app.camera_distributor import filter_cameras
+                    except ImportError:
+                        # Add parent directory to path to find 'app' package when running as standalone script
+                        import sys
+                        from pathlib import Path
+                        root_dir = str(Path(__file__).resolve().parents[3])
+                        if root_dir not in sys.path:
+                            sys.path.append(root_dir)
+                        from app.camera_distributor import filter_cameras
+                    
+                    rows = filter_cameras(rows)
+                except Exception as e:
+                    logger.warning(f"Failed to apply camera distribution filter: {e}")
+                    # If distributor not available, return all cameras (single-node mode)
+                    pass
+                
+                logger.info(
+                    f"[DB] Loaded {len(rows)} ACCESSIBLE HLS cameras "
+                    f"(exam_id={exam_id}, shift_id={shift_id}, date={exam_date})"
+                )
+                return rows
+    except Exception as e:
+        logger.error(f"[DB] Error querying camera_links_hls (accessible): {e}")
         return []
 
 
@@ -549,6 +613,9 @@ def get_rtsp_cameras(exam_id: int) -> list:
     """
     Query camera_links_rtsp for cameras matching exam_id.
     Automatically filters cameras based on worker assignment for horizontal scaling.
+    
+    NOTE: This loads ALL cameras regardless of status - used by vision classification scripts.
+    For detection workers, use get_rtsp_cameras_accessible() instead.
 
     Returns list of dicts with keys:
         cctv_url, device_id, classification, camera_name,
@@ -586,6 +653,52 @@ def get_rtsp_cameras(exam_id: int) -> list:
                 return rows
     except Exception as e:
         logger.error(f"[DB] Error querying camera_links_rtsp: {e}")
+        return []
+
+
+def get_rtsp_cameras_accessible(exam_id: int) -> list:
+    """
+    Query camera_links_rtsp for ACCESSIBLE cameras only (status = 'Accessible').
+    Used by detection workers - no point analyzing unreachable streams.
+    Automatically filters cameras based on worker assignment for horizontal scaling.
+
+    Returns list of dicts with keys:
+        cctv_url, device_id, classification, camera_name,
+        centre_name, city, state, tc_code
+    """
+    # Uses idx_exam_active_rtsp (exam_id, is_active) - perfect composite index
+    sql = """
+        SELECT
+            id, device_id, exam_id, centre_name, tc_code,
+            camera_name, camera_no, city, state, cctv_url,
+            is_active, classification, status
+        FROM camera_links_rtsp USE INDEX (idx_exam_active_rtsp)
+        WHERE exam_id  = %s
+          AND is_active = 1
+          AND status = 'Accessible'
+    """
+    try:
+        conn = _get_connection()
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (exam_id,))
+                rows = cur.fetchall()
+                
+                # Apply camera distribution filter for horizontal scaling
+                try:
+                    from app.camera_distributor import filter_cameras
+                    rows = filter_cameras(rows)
+                except ImportError:
+                    # If distributor not available, return all cameras (single-node mode)
+                    pass
+                
+                logger.info(
+                    f"[DB] Loaded {len(rows)} ACCESSIBLE RTSP cameras "
+                    f"(exam_id={exam_id})"
+                )
+                return rows
+    except Exception as e:
+        logger.error(f"[DB] Error querying camera_links_rtsp (accessible): {e}")
         return []
 
 def get_rtsp_camera_by_id(camera_id_pk: int) -> dict:

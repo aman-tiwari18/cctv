@@ -273,55 +273,82 @@ exports.uploadCameras = async (req, res) => {
             const existingCameras = await Model.findAll({
                 where: { 
                     exam_id: examId,
-                    [Op.or]: [
-                        { ch_code: { [Op.ne]: null } },
-                        { tc_code: { [Op.ne]: null } }
-                    ]
+                    is_active: true
                 },
                 attributes: ['tc_code', 'ch_code']
             });
             
-            // Create set of unique keys from existing cameras
+            console.log(`[DUPLICATE CHECK] Found ${existingCameras.length} existing HLS cameras for exam ${examId}`);
+            
+            // Create set of unique keys from existing cameras (normalize to string and trim)
             const existingKeys = new Set(
                 existingCameras
                     .filter(c => c.tc_code && c.ch_code)
-                    .map(c => `${c.tc_code}_${c.ch_code}`)
+                    .map(c => {
+                        const key = `${String(c.tc_code).trim()}_${String(c.ch_code).trim()}`;
+                        return key;
+                    })
             );
+            
+            console.log(`[DUPLICATE CHECK] Existing unique keys:`, Array.from(existingKeys).slice(0, 5));
             
             // Filter out records that already exist
             recordsToInsert = validRecords.filter(record => {
                 if (!record.tc_code || !record.ch_code) return true; // Keep records without complete key
-                const uniqueKey = `${record.tc_code}_${record.ch_code}`;
-                return !existingKeys.has(uniqueKey);
+                const uniqueKey = `${String(record.tc_code).trim()}_${String(record.ch_code).trim()}`;
+                const isDuplicate = existingKeys.has(uniqueKey);
+                if (isDuplicate) {
+                    console.log(`[DUPLICATE CHECK] Skipping duplicate: ${uniqueKey}`);
+                }
+                return !isDuplicate;
             });
             
             skipped = validRecords.length - recordsToInsert.length;
+            console.log(`[DUPLICATE CHECK] Total: ${validRecords.length}, To Insert: ${recordsToInsert.length}, Skipped: ${skipped}`);
             
         } else {
             // RTSP unique key: device_id + camera_no + tc_code
             const existingCameras = await Model.findAll({
                 where: { 
                     exam_id: examId,
-                    device_id: { [Op.ne]: null }
+                    is_active: true
                 },
                 attributes: ['device_id', 'camera_no', 'tc_code']
             });
             
-            // Create set of unique keys from existing cameras
+            console.log(`[DUPLICATE CHECK] Found ${existingCameras.length} existing RTSP cameras for exam ${examId}`);
+            
+            // Create set of unique keys from existing cameras (normalize to string and trim)
             const existingKeys = new Set(
                 existingCameras
                     .filter(c => c.device_id)
-                    .map(c => `${c.device_id}_${c.camera_no || ''}_${c.tc_code || ''}`)
+                    .map(c => {
+                        const deviceId = String(c.device_id).trim();
+                        const cameraNo = c.camera_no ? String(c.camera_no).trim() : '';
+                        const tcCode = c.tc_code ? String(c.tc_code).trim() : '';
+                        const key = `${deviceId}_${cameraNo}_${tcCode}`;
+                        return key;
+                    })
             );
+            
+            console.log(`[DUPLICATE CHECK] Existing unique keys:`, Array.from(existingKeys).slice(0, 5));
             
             // Filter out records that already exist
             recordsToInsert = validRecords.filter(record => {
                 if (!record.device_id) return true; // Keep records without device_id
-                const uniqueKey = `${record.device_id}_${record.camera_no || ''}_${record.tc_code || ''}`;
-                return !existingKeys.has(uniqueKey);
+                const deviceId = String(record.device_id).trim();
+                const cameraNo = record.camera_no ? String(record.camera_no).trim() : '';
+                const tcCode = record.tc_code ? String(record.tc_code).trim() : '';
+                const uniqueKey = `${deviceId}_${cameraNo}_${tcCode}`;
+                const isDuplicate = existingKeys.has(uniqueKey);
+                if (isDuplicate) {
+                    console.log(`[DUPLICATE CHECK] Skipping duplicate: ${uniqueKey}`);
+                }
+                return !isDuplicate;
             });
             
             skipped = validRecords.length - recordsToInsert.length;
+            console.log(`[DUPLICATE CHECK] Total: ${validRecords.length}, To Insert: ${recordsToInsert.length}, Skipped: ${skipped}`);
         }
 
         await Model.bulkCreate(recordsToInsert);
