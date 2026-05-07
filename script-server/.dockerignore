@@ -20,6 +20,6 @@ ENV/
 .idea
 results/*
 frames/*
-models/*.pt
+models/
 data/sheets/*.xlsx
 logs/*.log

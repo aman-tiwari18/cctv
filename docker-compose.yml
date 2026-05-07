@@ -102,6 +102,7 @@ services:
       EXAM_ID: 19
       PYTHONUNBUFFERED: 1
       HTTP_PORT: 8000
+      TZ: Asia/Kolkata
       # Worker identification (main server, worker index 0 of 4)
       WORKER_ID: worker-0
       WORKER_NAME: Main Server (Worker 0)

@@ -265,7 +265,8 @@ exports.uploadCameras = async (req, res) => {
         );
 
         // Filter out duplicates based on unique keys
-        let recordsToInsert = validRecords;
+        let recordsToInsert = [];
+        let recordsToUpdate = [];
         let skipped = 0;
 
         if (linkType === "HLS") {
@@ -275,93 +276,168 @@ exports.uploadCameras = async (req, res) => {
                     exam_id: examId,
                     is_active: true
                 },
-                attributes: ['tc_code', 'ch_code']
+                attributes: ['id', 'tc_code', 'ch_code', 'classification']
             });
             
             console.log(`[DUPLICATE CHECK] Found ${existingCameras.length} existing HLS cameras for exam ${examId}`);
             
-            // Create set of unique keys from existing cameras (normalize to string and trim)
-            const existingKeys = new Set(
-                existingCameras
-                    .filter(c => c.tc_code && c.ch_code)
-                    .map(c => {
-                        const key = `${String(c.tc_code).trim()}_${String(c.ch_code).trim()}`;
-                        return key;
-                    })
-            );
-            
-            console.log(`[DUPLICATE CHECK] Existing unique keys:`, Array.from(existingKeys).slice(0, 5));
-            
-            // Filter out records that already exist
-            recordsToInsert = validRecords.filter(record => {
-                if (!record.tc_code || !record.ch_code) return true; // Keep records without complete key
-                const uniqueKey = `${String(record.tc_code).trim()}_${String(record.ch_code).trim()}`;
-                const isDuplicate = existingKeys.has(uniqueKey);
-                if (isDuplicate) {
-                    console.log(`[DUPLICATE CHECK] Skipping duplicate: ${uniqueKey}`);
+            // Create map of unique keys to camera records
+            const existingMap = new Map();
+            existingCameras.forEach(c => {
+                if (c.tc_code && c.ch_code) {
+                    const key = `${String(c.tc_code).trim()}_${String(c.ch_code).trim()}`;
+                    existingMap.set(key, c);
                 }
-                return !isDuplicate;
             });
             
-            skipped = validRecords.length - recordsToInsert.length;
-            console.log(`[DUPLICATE CHECK] Total: ${validRecords.length}, To Insert: ${recordsToInsert.length}, Skipped: ${skipped}`);
+            console.log(`[DUPLICATE CHECK] Existing unique keys:`, Array.from(existingMap.keys()).slice(0, 5));
+            
+            // Separate records into insert vs update
+            for (const record of validRecords) {
+                if (!record.tc_code || !record.ch_code) {
+                    recordsToInsert.push(record);
+                    continue;
+                }
+                
+                const uniqueKey = `${String(record.tc_code).trim()}_${String(record.ch_code).trim()}`;
+                const existingCamera = existingMap.get(uniqueKey);
+                
+                if (existingCamera) {
+                    // Update classification if provided in Excel (regardless of existing value)
+                    if (record.classification) {
+                        recordsToUpdate.push({
+                            id: existingCamera.id,
+                            classification: record.classification,
+                            oldClassification: existingCamera.classification
+                        });
+                        console.log(`[UPDATE] Will update classification for ${uniqueKey}: "${existingCamera.classification}" → "${record.classification}"`);
+                    } else {
+                        skipped++;
+                        console.log(`[SKIP] Skipping duplicate (no classification provided in Excel): ${uniqueKey}`);
+                    }
+                } else {
+                    recordsToInsert.push(record);
+                }
+            }
             
         } else {
-            // RTSP unique key: device_id + camera_no + tc_code
+            // RTSP unique key: device_id + camera_no + tc_code (leading zeros ignored)
             const existingCameras = await Model.findAll({
-                where: { 
+                where: {
                     exam_id: examId,
                     is_active: true
                 },
-                attributes: ['device_id', 'camera_no', 'tc_code']
+                attributes: ['id', 'device_id', 'camera_no', 'tc_code', 'classification']
             });
-            
+
             console.log(`[DUPLICATE CHECK] Found ${existingCameras.length} existing RTSP cameras for exam ${examId}`);
-            
-            // Create set of unique keys from existing cameras (normalize to string and trim)
-            const existingKeys = new Set(
-                existingCameras
-                    .filter(c => c.device_id)
-                    .map(c => {
-                        const deviceId = String(c.device_id).trim();
-                        const cameraNo = c.camera_no ? String(c.camera_no).trim() : '';
-                        const tcCode = c.tc_code ? String(c.tc_code).trim() : '';
-                        const key = `${deviceId}_${cameraNo}_${tcCode}`;
-                        return key;
-                    })
-            );
-            
-            console.log(`[DUPLICATE CHECK] Existing unique keys:`, Array.from(existingKeys).slice(0, 5));
-            
-            // Filter out records that already exist
-            recordsToInsert = validRecords.filter(record => {
-                if (!record.device_id) return true; // Keep records without device_id
-                const deviceId = String(record.device_id).trim();
-                const cameraNo = record.camera_no ? String(record.camera_no).trim() : '';
-                const tcCode = record.tc_code ? String(record.tc_code).trim() : '';
-                const uniqueKey = `${deviceId}_${cameraNo}_${tcCode}`;
-                const isDuplicate = existingKeys.has(uniqueKey);
-                if (isDuplicate) {
-                    console.log(`[DUPLICATE CHECK] Skipping duplicate: ${uniqueKey}`);
+
+            // Create map of unique keys to camera records
+            const existingMap = new Map();
+            existingCameras.forEach(c => {
+                if (c.device_id) {
+                    const deviceId = String(c.device_id).trim();
+                    const cameraNo = c.camera_no != null ? String(c.camera_no).trim() : '';
+                    const tcCode = c.tc_code ? String(c.tc_code).trim().replace(/^0+/, '') : '';
+                    const key = `${deviceId}_${cameraNo}_${tcCode}`;
+                    existingMap.set(key, c);
                 }
-                return !isDuplicate;
             });
-            
-            skipped = validRecords.length - recordsToInsert.length;
-            console.log(`[DUPLICATE CHECK] Total: ${validRecords.length}, To Insert: ${recordsToInsert.length}, Skipped: ${skipped}`);
+
+            console.log(`[DUPLICATE CHECK] Existing unique keys:`, Array.from(existingMap.keys()).slice(0, 5));
+
+            // Separate records into insert vs update
+            for (const record of validRecords) {
+                if (!record.device_id) {
+                    recordsToInsert.push(record);
+                    continue;
+                }
+
+                const deviceId = String(record.device_id).trim();
+                const cameraNo = record.camera_no != null ? String(record.camera_no).trim() : '';
+                const tcCode = record.tc_code ? String(record.tc_code).trim().replace(/^0+/, '') : '';
+                const uniqueKey = `${deviceId}_${cameraNo}_${tcCode}`;
+                const existingCamera = existingMap.get(uniqueKey);
+                
+                if (existingCamera) {
+                    // Update classification if provided in Excel (regardless of existing value)
+                    if (record.classification) {
+                        recordsToUpdate.push({
+                            id: existingCamera.id,
+                            classification: record.classification,
+                            oldClassification: existingCamera.classification
+                        });
+                        console.log(`[UPDATE] Will update classification for ${uniqueKey}: "${existingCamera.classification}" → "${record.classification}"`);
+                    } else {
+                        skipped++;
+                        console.log(`[SKIP] Skipping duplicate (no classification provided in Excel): ${uniqueKey}`);
+                    }
+                } else {
+                    recordsToInsert.push(record);
+                }
+            }
         }
 
-        await Model.bulkCreate(recordsToInsert);
+        console.log(`[SUMMARY] Total: ${validRecords.length}, To Insert: ${recordsToInsert.length}, To Update: ${recordsToUpdate.length}, Skipped: ${skipped}`);
+
+        // Insert new records
+        if (recordsToInsert.length > 0) {
+            await Model.bulkCreate(recordsToInsert);
+        }
+
+        // Update existing records with classification
+        if (recordsToUpdate.length > 0) {
+            for (const update of recordsToUpdate) {
+                await Model.update(
+                    { classification: update.classification },
+                    { where: { id: update.id } }
+                );
+            }
+        }
         // Cleanup temp file
         try { fs.unlinkSync(req.file.path); } catch (_) { }
 
-        const message = skipped > 0
-            ? `Successfully uploaded ${recordsToInsert.length} camera${recordsToInsert.length !== 1 ? 's' : ''}. Skipped ${skipped} duplicate${skipped !== 1 ? 's' : ''} (${linkType === 'HLS' ? 'tc_code + ch_code' : 'device_id + camera_no + tc_code'} already exists).`
-            : `Successfully uploaded ${recordsToInsert.length} camera${recordsToInsert.length !== 1 ? 's' : ''}.`;
+        // Count how many were actually updated vs overwritten
+        const newClassifications = recordsToUpdate.filter(r => !r.oldClassification).length;
+        const overwrittenClassifications = recordsToUpdate.filter(r => r.oldClassification).length;
+
+        let message = '';
+        const parts = [];
+
+        if (recordsToInsert.length > 0) {
+            parts.push(`${recordsToInsert.length} new camera${recordsToInsert.length !== 1 ? 's' : ''} created`);
+        }
+
+        if (newClassifications > 0) {
+            parts.push(`${newClassifications} camera${newClassifications !== 1 ? 's' : ''} classified`);
+        }
+
+        if (overwrittenClassifications > 0) {
+            parts.push(`${overwrittenClassifications} classification${overwrittenClassifications !== 1 ? 's' : ''} updated`);
+        }
+
+        if (parts.length > 0) {
+            message = `Successfully processed: ${parts.join(', ')}.`;
+        } else {
+            message = `No changes made.`;
+        }
+
+        if (skipped > 0) {
+            message += ` ${skipped} duplicate${skipped !== 1 ? 's' : ''} skipped (no classification provided in Excel).`;
+        }
+
+        console.log(`[UPLOAD SUMMARY] Inserted: ${recordsToInsert.length}, Updated: ${recordsToUpdate.length} (${newClassifications} new, ${overwrittenClassifications} overwritten), Skipped: ${skipped}`);
 
         res.status(200).json({
             success: true,
             message,
+            details: {
+                inserted: recordsToInsert.length,
+                updated: recordsToUpdate.length,
+                newClassifications,
+                overwrittenClassifications,
+                skipped
+            }
         });
     } catch (error) {
         if (error?.name && error.name.includes("Sequelize")) {

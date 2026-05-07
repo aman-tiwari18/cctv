@@ -1,9 +1,11 @@
 import os
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from app.config import LOGS_DIR
 from app.logger import logger
+
+IST = timezone(timedelta(hours=5, minutes=30))
 
 class LogManager:
     def __init__(self):
@@ -17,7 +19,7 @@ class LogManager:
 
     def get_log_file_path(self, execution_id, date=None):
         if date is None:
-            date = datetime.now()
+            date = datetime.now(IST)
         date_str = date.strftime("%Y-%m-%d")
         day_dir = self.logs_dir / date_str
         
@@ -29,7 +31,7 @@ class LogManager:
     def write_log(self, execution_id, message, level="INFO"):
         try:
             log_path = self.get_log_file_path(execution_id)
-            timestamp = datetime.now().isoformat()
+            timestamp = datetime.now(IST).isoformat()
             log_entry = f"[{timestamp}] [{level}] {message}\n"
             
             with open(log_path, "a", encoding="utf-8") as f:
@@ -50,7 +52,7 @@ class LogManager:
 
     def get_log_files_for_date(self, date=None):
         if date is None:
-            date = datetime.now()
+            date = datetime.now(IST)
         date_str = date.strftime("%Y-%m-%d")
         day_dir = self.logs_dir / date_str
         

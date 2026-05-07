@@ -1,7 +1,9 @@
 import asyncio
 import os
 import httpx
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+
+IST = timezone(timedelta(hours=5, minutes=30))
 from app.config import MAIN_BACKEND_URL, API_KEY, POLL_INTERVAL_MS, LOOKAHEAD_MINUTES, GRACE_MINUTES
 from app.logger import logger
 from app.script_runner import script_runner
@@ -130,14 +132,16 @@ class Poller:
             return
 
         try:
-            # Handle ISO timestamp parsing
+            # Handle ISO timestamp parsing — always compare in IST
             if scheduled_at_str.endswith("Z"):
                 scheduled_at_str = scheduled_at_str[:-1] + "+00:00"
             scheduled_at = datetime.fromisoformat(scheduled_at_str)
             if scheduled_at.tzinfo is not None:
-                now = datetime.now(timezone.utc)
+                scheduled_at = scheduled_at.astimezone(IST)
             else:
-                now = datetime.now()
+                # Treat naive datetime as IST (backend always sends IST)
+                scheduled_at = scheduled_at.replace(tzinfo=IST)
+            now = datetime.now(IST)
             delay_s = (scheduled_at - now).total_seconds()
         except Exception as e:
             logger.error(f"Failed to parse time for assignment {assignment_id}: {e}")

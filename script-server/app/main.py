@@ -90,6 +90,11 @@ def _load_gpu_workers():
 
 GPU_WORKERS = _load_gpu_workers()
 
+# Per-worker state for flap suppression: track consecutive failures and last good data
+_worker_fail_count: dict[str, int] = {}
+_worker_last_good: dict[str, dict] = {}
+_WORKER_OFFLINE_THRESHOLD = 2  # mark offline only after this many consecutive failures
+
 
 def _epoch_ms(value) -> Optional[int]:
     if not value:
@@ -603,44 +608,79 @@ async def get_local_gpu_stats():
 
 async def fetch_worker_gpu_stats(worker: dict) -> dict:
     """Fetch GPU stats from a single worker server"""
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get(f"http://{worker['ip']}:{worker['port']}/gpu-stats")
+    worker_id = worker["id"]
+
+    # If this is the local server (localhost), call the function directly instead of HTTP request
+    if worker['ip'] in ('localhost', '127.0.0.1', '0.0.0.0'):
+        try:
+            local_data = get_local_gpu_stats_data()
+            _worker_fail_count[worker_id] = 0
+            _worker_last_good[worker_id] = local_data
             return {
-                "server_id": worker["id"],
+                "server_id": worker_id,
                 "server_name": worker["name"],
                 "ip": worker["ip"],
                 "status": "online",
-                "data": response.json(),
+                "data": local_data,
+                "error": None
+            }
+        except Exception as e:
+            return {
+                "server_id": worker_id,
+                "server_name": worker["name"],
+                "ip": worker["ip"],
+                "status": "offline",
+                "data": None,
+                "error": f"Local GPU stats error: {str(e)}"
+            }
+
+    # For remote workers, make HTTP request
+    error_msg = None
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            response = await client.get(f"http://{worker['ip']}:{worker['port']}/gpu-stats")
+            data = response.json()
+            _worker_fail_count[worker_id] = 0
+            _worker_last_good[worker_id] = data
+            return {
+                "server_id": worker_id,
+                "server_name": worker["name"],
+                "ip": worker["ip"],
+                "status": "online",
+                "data": data,
                 "error": None
             }
     except httpx.TimeoutException:
-        return {
-            "server_id": worker["id"],
-            "server_name": worker["name"],
-            "ip": worker["ip"],
-            "status": "offline",
-            "data": None,
-            "error": "Connection timeout"
-        }
+        error_msg = "Connection timeout"
     except httpx.ConnectError:
-        return {
-            "server_id": worker["id"],
-            "server_name": worker["name"],
-            "ip": worker["ip"],
-            "status": "offline",
-            "data": None,
-            "error": "Connection refused - Server not running"
-        }
+        error_msg = "Connection refused - Server not running"
     except Exception as e:
+        error_msg = str(e)
+
+    # Increment failure counter; only go offline after threshold consecutive failures
+    fails = _worker_fail_count.get(worker_id, 0) + 1
+    _worker_fail_count[worker_id] = fails
+
+    if fails < _WORKER_OFFLINE_THRESHOLD and worker_id in _worker_last_good:
+        # Return cached data with a stale warning — transient blip
         return {
-            "server_id": worker["id"],
+            "server_id": worker_id,
             "server_name": worker["name"],
             "ip": worker["ip"],
-            "status": "offline",
-            "data": None,
-            "error": str(e)
+            "status": "online",
+            "data": _worker_last_good[worker_id],
+            "error": None,
+            "stale": True
         }
+
+    return {
+        "server_id": worker_id,
+        "server_name": worker["name"],
+        "ip": worker["ip"],
+        "status": "offline",
+        "data": None,
+        "error": error_msg
+    }
 
 
 @app.get("/gpu-monitor/stats")

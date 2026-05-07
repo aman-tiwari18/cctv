@@ -52,6 +52,7 @@ services:
       # Python configuration
       PYTHONUNBUFFERED: 1
       HTTP_PORT: 8000
+      TZ: Asia/Kolkata
       
       # H200 GPU Optimization
       CUDA_VISIBLE_DEVICES: 0

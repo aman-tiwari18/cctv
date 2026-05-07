@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s --connect-timeout 5 \"http://192.168.19.30:8000/health\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('worker-0 timestamp:', d['timestamp']\\)\")",
+      "Bash(curl -s --connect-timeout 5 \"http://192.168.19.43:8000/health\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('worker-1 timestamp:', d['timestamp']\\)\")",
+      "Bash(curl -s --connect-timeout 5 \"http://192.168.19.42:8000/health\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('worker-2 timestamp:', d['timestamp']\\)\")",
+      "Bash(curl -s --connect-timeout 5 \"http://192.168.19.41:8000/health\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('worker-3 timestamp:', d['timestamp']\\)\")",
+      "Bash(curl -s --connect-timeout 8 \"http://192.168.19.43:8000/health\")",
+      "Bash(curl -s --connect-timeout 8 \"http://192.168.19.42:8000/health\")",
+      "Bash(curl -s --connect-timeout 8 \"http://192.168.19.41:8000/health\")",
+      "Bash(curl -s --connect-timeout 8 \"http://192.168.19.42:8000/status\")",
+      "Bash(curl -s --connect-timeout 8 \"http://192.168.19.30:8000/status\")"
+    ]
+  }
+}

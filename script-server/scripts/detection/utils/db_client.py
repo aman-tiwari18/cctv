@@ -400,18 +400,18 @@ DB_CONFIG = {
 
 
 def _ensure_status_column(conn):
-    try:
-        with conn.cursor() as cur:
-            cur.execute("ALTER TABLE camera_links_hls ADD COLUMN status VARCHAR(255) DEFAULT NULL")
-        conn.commit()
-    except Exception:
-        pass
-    try:
-        with conn.cursor() as cur:
-            cur.execute("ALTER TABLE camera_links_rtsp ADD COLUMN status VARCHAR(255) DEFAULT NULL")
-        conn.commit()
-    except Exception:
-        pass
+    migrations = [
+        "ALTER TABLE camera_links_hls ADD COLUMN status VARCHAR(255) DEFAULT NULL",
+        "ALTER TABLE camera_links_rtsp ADD COLUMN status VARCHAR(255) DEFAULT NULL",
+        "ALTER TABLE camera_links_rtsp ADD COLUMN frame_path TEXT DEFAULT NULL",
+    ]
+    for sql in migrations:
+        try:
+            with conn.cursor() as cur:
+                cur.execute(sql)
+            conn.commit()
+        except Exception:
+            pass
 
 def _get_connection():
     """Create a new MySQL connection."""
@@ -727,44 +727,46 @@ def get_rtsp_camera_by_id(camera_id_pk: int) -> dict:
         logger.error(f"[DB] Error fetching camera_links_rtsp by ID ({camera_id_pk}): {e}")
         return {}
 
-def update_rtsp_classification(exam_id: int, device_id: str, classification: str, status: str = None) -> int:
-    """Update classification and status in camera_links_rtsp for one camera."""
+def update_rtsp_classification(exam_id: int, device_id: str, camera_no: str, classification: str, status: str = None, frame_path: str = None) -> int:
+    """Update classification, status, and frame_path in camera_links_rtsp for one camera."""
     sql = """
         UPDATE camera_links_rtsp
-        SET classification = %s, status = %s
+        SET classification = %s, status = %s, frame_path = %s
         WHERE exam_id = %s
           AND device_id = %s
+          AND camera_no = %s
           AND is_active = 1
     """
     try:
         conn = _get_connection()
         with conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (classification, status, exam_id, device_id))
+                cur.execute(sql, (classification, status, frame_path, exam_id, device_id, camera_no))
                 conn.commit()
                 return cur.rowcount
     except Exception as e:
-        logger.error(f"[DB] Error updating camera_links_rtsp classification (device_id={device_id}): {e}")
+        logger.error(f"[DB] Error updating camera_links_rtsp classification (device_id={device_id}, camera_no={camera_no}): {e}")
         return 0
 
-def update_rtsp_status(exam_id: int, device_id: str, status: str) -> int:
+def update_rtsp_status(exam_id: int, device_id: str, camera_no: str, status: str) -> int:
     """Update only status in camera_links_rtsp for one camera."""
     sql = """
         UPDATE camera_links_rtsp
         SET status = %s
         WHERE exam_id = %s
           AND device_id = %s
+          AND camera_no = %s
           AND is_active = 1
     """
     try:
         conn = _get_connection()
         with conn:
             with conn.cursor() as cur:
-                cur.execute(sql, (status, exam_id, device_id))
+                cur.execute(sql, (status, exam_id, device_id, camera_no))
                 conn.commit()
                 return cur.rowcount
     except Exception as e:
-        logger.error(f"[DB] Error updating camera_links_rtsp status (device_id={device_id}): {e}")
+        logger.error(f"[DB] Error updating camera_links_rtsp status (device_id={device_id}, camera_no={camera_no}): {e}")
         return 0
 
 

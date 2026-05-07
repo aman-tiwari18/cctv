@@ -31,8 +31,12 @@ import {
   VideoLibrary,
 } from '@mui/icons-material';
 import axios from 'axios';
+import { API_BASE_1 } from '../constants/data';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+
+const API_BASE_URL = API_BASE_1;
+
+
 
 const GPUMonitor = () => {
   const [clusterData, setClusterData] = useState(null);

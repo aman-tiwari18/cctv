@@ -6,11 +6,13 @@ import logging
 import signal
 import sys
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 from app.config import SCRIPTS_DIR, MAX_CONCURRENT_SCRIPTS
 from app.logger import logger
 from app.log_manager import log_manager
+
+IST = timezone(timedelta(hours=5, minutes=30))
 
 # Named script log files: scripts/logs/{ScriptName}_{Exam}_{Shift}_{Date}.log
 SCRIPT_LOGS_DIR = Path(SCRIPTS_DIR).resolve() / "logs"
@@ -26,7 +28,7 @@ def _get_named_log_path(execution: dict) -> Path:
     script_name = re.sub(r'\s+', '', meta.get("script_name", "Script"))
     exam_name   = re.sub(r'\s+', '', meta.get("exam_name",   "Exam"))
     shift_name  = re.sub(r'\s+', '', meta.get("shift_name",  "Shift"))
-    date_str    = datetime.now().strftime("%Y%m%d")
+    date_str    = datetime.now(IST).strftime("%Y%m%d")
     filename    = f"{script_name}_{exam_name}_{shift_name}_{date_str}.log"
     return SCRIPT_LOGS_DIR / filename
 
@@ -36,6 +38,9 @@ def _compute_timeout(execution: dict) -> float | None:
     Calculate seconds until end_at (ISO datetime from backend),
     falling back to duration_minutes if end_at is absent.
 
+    Backend always sends end_at as naive IST. We attach IST explicitly so
+    all workers compute the same timeout regardless of their OS timezone.
+
     Handles overnight shifts: if end_at is in the past but within 24 h,
     it was an overnight assignment whose end is on the next day.
     Returns None if no timeout should be applied.
@@ -44,7 +49,12 @@ def _compute_timeout(execution: dict) -> float | None:
     if end_at_str:
         try:
             end_at = datetime.fromisoformat(end_at_str)
-            remaining = (end_at - datetime.now()).total_seconds()
+            # Attach IST if naive — backend always sends IST naive strings
+            if end_at.tzinfo is None:
+                end_at = end_at.replace(tzinfo=IST)
+
+            now = datetime.now(IST)
+            remaining = (end_at - now).total_seconds()
 
             if remaining > 0:
                 return remaining
@@ -52,9 +62,8 @@ def _compute_timeout(execution: dict) -> float | None:
             # end_at is in the past — overnight shift guard:
             # if it's within 24 h behind us, add one day to get the real stop time.
             if remaining > -86400:
-                from datetime import timedelta
                 overnight_end = end_at + timedelta(days=1)
-                remaining_overnight = (overnight_end - datetime.now()).total_seconds()
+                remaining_overnight = (overnight_end - datetime.now(IST)).total_seconds()
                 if remaining_overnight > 0:
                     logger.info(
                         f"Overnight shift detected: end_at {end_at_str} was in the past "
@@ -152,7 +161,7 @@ class ScriptRunner:
             f"  Script   : {meta.get('script_name', script_code)}\n"
             f"  Exam     : {meta.get('exam_name', 'N/A')}\n"
             f"  Shift    : {meta.get('shift_name', 'N/A')}\n"
-            f"  Started  : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"  Started  : {datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S')} IST\n"
         )
         end_at_str = execution.get("end_at")
         if end_at_str:
@@ -290,7 +299,7 @@ class ScriptRunner:
                 f"Script ran for {timeout_s/60:.1f}min — marking COMPLETED"
             )
             logger.info(f"⏹ Assignment {execution_id}: {msg}")
-            named_log.info(f"\n{'='*70}\n  {msg}\n  Stopped at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n{'='*70}\n")
+            named_log.info(f"\n{'='*70}\n  {msg}\n  Stopped at: {datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S')} IST\n{'='*70}\n")
             file_handler.close()
             named_log.removeHandler(file_handler)
             raise Exception("__TIMEOUT_COMPLETED__")
@@ -306,7 +315,7 @@ class ScriptRunner:
 
         if process.returncode == 0:
             logger.info(f"Script {execution_id} completed successfully")
-            named_log.info(f"\n{'='*70}\n  COMPLETED (exit code 0)\n  Finished at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n{'='*70}\n")
+            named_log.info(f"\n{'='*70}\n  COMPLETED (exit code 0)\n  Finished at: {datetime.now(IST).strftime('%Y-%m-%d %H:%M:%S')} IST\n{'='*70}\n")
             log_manager.write_log(execution_id, f"Script completed (exit code 0)", "INFO")
             out_str = str(stdout_result).strip() if stdout_result else ""
             try:
