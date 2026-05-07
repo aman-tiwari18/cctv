@@ -43,6 +43,7 @@ import {
   Download,
   TrendingUp,
   VerifiedUser,
+  Memory,
 } from '@mui/icons-material';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import { useAuth } from '../contexts/AuthContext';
@@ -98,6 +99,7 @@ const menuItems = [
   { text: 'Shifts', icon: <ShiftSvgIcon />, path: '/shifts' },
   { text: 'Schedule Analysis', icon: <Analytics />, path: '/analytics' },
   { text: 'Executions', icon: <Slideshow />, path: '/executions' },
+  { text: 'GPU Monitor', icon: <Memory />, path: '/gpu-monitor' },
   { text: 'Detections', icon: <CustomSvgIcon />, path: '/detections', hasSubItems: true },
   { text: 'Client Detections', icon: <Visibility />, path: '/client-detections', hasSubItems: true },
   { text: 'Client Dashboard', icon: <Dashboard />, path: '/client-dashboard' },

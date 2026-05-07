@@ -22,6 +22,7 @@ import ClientDetectionDashboard from './pages/ClientDetectionDashboard';
 import ClientExams from './pages/ClientExams';
 import ClientCameras from './pages/ClientCameras';
 import UserVerification from './pages/UserVerification';
+import GPUMonitor from './pages/GPUMonitor';
 
 // Role-based route wrapper
 const RoleBasedRoute = ({ AdminComp, ViewerComp, OperatorComp }) => {
@@ -172,6 +173,7 @@ function App() {
                 <Route path="shifts" element={<RoleBasedRoute AdminComp={Shifts} />} />
                 <Route path="analytics" element={<RoleBasedRoute AdminComp={Analytics} />} />
                 <Route path="executions" element={<RoleBasedRoute AdminComp={Executions} />} />
+                <Route path="gpu-monitor" element={<RoleBasedRoute AdminComp={GPUMonitor} />} />
                 <Route path="detections" element={<RoleBasedRoute AdminComp={Detections} ViewerComp={ClientDetections} OperatorComp={Detections} />} />
                 <Route path="user-verification" element={<UserVerification />} />
               </Route>
