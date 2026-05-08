@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState, useRef } from 'r
 import { io } from 'socket.io-client';
 import { SOCKET_URL, SOCKET_PATH } from '../constants/data';
 import { useDetectionCounts } from './DetectionCountsContext';
+import { useLocation } from 'react-router-dom';
 
 const SocketContext = createContext(null);
 
@@ -10,6 +11,7 @@ export const SocketProvider = ({ children }) => {
   const [socket, setSocket] = useState(null);
   const [connected, setConnected] = useState(false);
   const clientExamsRef = useRef([]);
+  const location = useLocation();
 
   useEffect(() => {
     const resolvedPath = SOCKET_PATH || '/cctv_dev/socket.io';
@@ -58,15 +60,18 @@ export const SocketProvider = ({ children }) => {
       adminQueue.push(item);
     });
 
-    // Listen to detection counts updates - THIS IS THE SOURCE OF TRUTH FOR COUNTS
+    // Listen to detection counts updates - FOR ADMIN DETECTIONS PAGE
     newSocket.on('detection:counts', (counts) => {
-      console.log('📊 Received detection:counts from backend:', counts);
+      console.log('📊 Received detection:counts (ADMIN) from backend:', counts);
       
-      // Set absolute counts (not incremental)
-      setUnfilteredCounts(counts);
-      setAllCounts(counts);
-      
-      console.log('✅ Counts updated in context');
+      // Only update if we're on the admin detections page
+      if (location.pathname === '/detections') {
+        setAllCounts(counts);
+        setUnfilteredCounts(counts);
+        console.log('✅ Admin counts updated in context (on /detections page)');
+      } else {
+        console.log('⏭️  Skipping admin count update (not on /detections page)');
+      }
     });
 
     // Listen to client detections (for live feed display only)
@@ -77,15 +82,18 @@ export const SocketProvider = ({ children }) => {
       }
     });
 
-    // Listen to client detection counts updates
+    // Listen to client detection counts updates - FOR CLIENT DETECTIONS PAGE
     newSocket.on('client-detection:counts', (counts) => {
-      console.log('📊 Received client-detection:counts from backend:', counts);
+      console.log('📊 Received client-detection:counts (CLIENT) from backend:', counts);
       
-      // Set absolute counts (not incremental)
-      setUnfilteredCounts(counts);
-      setAllCounts(counts);
-      
-      console.log('✅ Client counts updated in context');
+      // Only update if we're on the client detections page
+      if (location.pathname === '/client-detections') {
+        setUnfilteredCounts(counts);
+        setAllCounts(counts);
+        console.log('✅ Client counts updated in context (on /client-detections page)');
+      } else {
+        console.log('⏭️  Skipping client count update (not on /client-detections page)');
+      }
     });
 
     setSocket(newSocket);
@@ -95,7 +103,7 @@ export const SocketProvider = ({ children }) => {
       newSocket.disconnect();
       console.log('🔌 Socket cleanup completed');
     };
-  }, [setUnfilteredCounts, setAllCounts]);
+  }, [setUnfilteredCounts, setAllCounts, location.pathname]);
 
   // Method to set client exams for filtering
   const setClientExams = (examIds) => {

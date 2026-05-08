@@ -888,30 +888,37 @@ const ClientDetections = () => {
   const [removingId, setRemovingId] = useState(null);
   const [keyboardHintShown, setKeyboardHintShown] = useState(false);
 
-  // Fetch unfiltered counts once for sidebar (no filters applied)
-  // For ClientDetections page, we don't update sidebar counts with filtered data
+  // Fetch counts with date filter applied (like Detections page)
+  // This ensures AppBar shows date-specific counts, not total counts
   const fetchUnfilteredCounts = useCallback(async () => {
     try {
-      const params = new URLSearchParams({ limit: 1 });
+      const params = new URLSearchParams({ page: 1, limit: 1 });
+      
+      // ✅ Apply date filter to get date-specific counts
+      if (dateFilter) params.append('date', parseDateForQuery(dateFilter));
+      if (examFilter) params.append('exam_id', examFilter);
       
       // Pass user info for filtering
       if (user?.role) params.append('user_role', user.role);
       if (user?.company_name) params.append('user_company', user.company_name);
       
-      console.log('[ClientDetections] Fetching unfiltered counts for sidebar');
+      console.log('[ClientDetections] Fetching date-specific counts for sidebar:', Object.fromEntries(params));
       
       const res = await axios.get(`${API_BASE_1}/client-detections?${params}`);
       if (res.data.success) {
         setUnfilteredCounts(res.data.counts || {});
       }
     } catch (err) {
-      console.error('Failed to fetch unfiltered counts:', err);
+      console.error('Failed to fetch counts:', err);
     }
-  }, [user?.role, user?.company_name, setUnfilteredCounts]);
+  }, [dateFilter, examFilter, user?.role, user?.company_name, setUnfilteredCounts]);
 
-  // Fetch unfiltered counts only once on mount
+  // Debounced counts fetch - updates when date or exam changes
   useEffect(() => {
-    fetchUnfilteredCounts();
+    const timer = setTimeout(() => {
+      fetchUnfilteredCounts();
+    }, 300);
+    return () => clearTimeout(timer);
   }, [fetchUnfilteredCounts]);
 
   const fetchClientImages = useCallback(async (pg = 1, rpp = rowsPerPage) => {
