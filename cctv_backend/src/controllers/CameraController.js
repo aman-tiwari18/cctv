@@ -232,7 +232,7 @@ exports.uploadCameras = async (req, res) => {
                     centre_name: pick(row, "Centre Name", "Center Name", "center_name", "centre_name", "TC Name", "TC NAME", "Tc_name"),
                     tc_code: pick(row, "TC Code", "tc_code", "TC_CODE", "TC code"),
                     camera_name,
-                    camera_no: camera_no || null,
+                    camera_no: camera_no !== "" ? camera_no : null,
                     city: pick(row, "City", "city", "CITY"),
                     state: pick(row, "State", "state", "STATE"),
                     cctv_url,
