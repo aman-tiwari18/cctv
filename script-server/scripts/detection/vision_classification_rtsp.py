@@ -387,10 +387,42 @@ def _sync_camview_start_video(server: str, device_id: str, camera_no: str) -> Tu
 
             if res.status_code == 401:
                 logger.warning(f"[Camview] StartVideo 401 — refreshing token and retrying ({cam_label}, attempt {attempt})")
-                # Evict stale token via _local_cache_lock + negative-cache marker
-                with _local_cache_lock:
-                    _camview_tokens[server]     = "FAILED"
-                    _camview_timestamps[server] = time.time()
+                # Evict the stale stream token and force a fresh auth.
+                # Do NOT poison with "FAILED" — that triggers the 5s negative-cache
+                # backoff in _sync_camview_get_token, which would block both this
+                # retry AND every other concurrent Pass-1 worker on the same server.
+                # Hold the per-server lock so concurrent callers wait for the new
+                # token instead of stampeding the auth endpoint.
+                lock = _get_camview_server_lock(server)
+                with lock:
+                    with _local_cache_lock:
+                        cur_tok = _camview_tokens.get(server)
+                        # Only evict if the stale token is still the one cached.
+                        # Another thread may have already refreshed it.
+                        if cur_tok == token:
+                            _camview_tokens.pop(server, None)
+                            _camview_timestamps.pop(server, None)
+                    fresh = _sync_camview_authenticate(server)
+                    now = time.time()
+                    if fresh:
+                        with _local_cache_lock:
+                            _camview_tokens[server]     = fresh
+                            _camview_timestamps[server] = now
+                        try:
+                            f_lock = open(_TOKEN_LOCK_FILE, "w")
+                            _fcntl.flock(f_lock, _fcntl.LOCK_EX)
+                            _token_cache_save()
+                            _fcntl.flock(f_lock, _fcntl.LOCK_UN)
+                            f_lock.close()
+                        except Exception:
+                            pass
+                        _start_camview_keepalive(server)
+                    else:
+                        # Auth itself failed — fall back to negative cache
+                        # so we don't hammer a genuinely-down server.
+                        with _local_cache_lock:
+                            _camview_tokens[server]     = "FAILED"
+                            _camview_timestamps[server] = now
                 continue   # retry with fresh token
 
             if res.status_code != 200:
@@ -889,12 +921,13 @@ async def _classify_with_vlm(
             return category, reason
 
     except asyncio.TimeoutError:
+        logger.warning(f"VLM timeout after {TIMEOUT_VLM}s")
         return "Uncertain", "VLM timeout"
     except json.JSONDecodeError as e:
-        logger.debug(f"VLM JSON parse error: {e}")
+        logger.warning(f"VLM JSON parse error: {e}")
         return "Uncertain", "Invalid JSON from VLM"
     except Exception as e:
-        logger.debug(f"VLM error: {e}")
+        logger.warning(f"VLM error: {e}")
         return "Uncertain", str(e)
 
 
@@ -1043,6 +1076,10 @@ async def _process_camera(
             # Pass-1 tokens are short-lived; by the time Pass-2 runs (~225s
             # later) they may be expired → 401 → frame_capture_failed.
             # Re-call StartVideo here to get a fresh token before capturing.
+            # If refresh fails the cached Pass-1 URLs are almost certainly stale,
+            # so we mark the camera Not Accessible instead of attempting capture
+            # with a guaranteed-401 token.
+            token_refresh_failed = False
             if is_rtsp and cam.get("cctv_url") and not str(cam.get("cctv_url", "")).lower().startswith("rtsp://"):
                 device_id = str(cam.get("device_id") or "").strip()
                 _cn_raw   = cam.get("camera_no")
@@ -1062,18 +1099,34 @@ async def _process_camera(
                             url       = fresh_urls[0]
                             logger.debug(f"[Pass-2] Refreshed RTSP token for {cam_id}")
                         else:
-                            logger.warning(f"[Pass-2] Token refresh failed for {cam_id} — using cached URLs")
+                            token_refresh_failed = True
+                            logger.warning(f"[Pass-2] Token refresh failed for {cam_id}")
                     except asyncio.TimeoutError:
-                        logger.warning(f"[Pass-2] Token refresh timed out for {cam_id} — using cached URLs")
+                        token_refresh_failed = True
+                        logger.warning(f"[Pass-2] Token refresh timed out for {cam_id}")
                     except Exception as e:
-                        logger.warning(f"[Pass-2] Token refresh error for {cam_id}: {e} — using cached URLs")
+                        token_refresh_failed = True
+                        logger.warning(f"[Pass-2] Token refresh error for {cam_id}: {e}")
             # ───────────────────────────────────────────────────────────────
+
+            if token_refresh_failed:
+                return {
+                    "camera_id":      cam_id,
+                    "device_id":      str(cam.get("device_id") or ""),
+                    "camera_no":      str(cam.get("camera_no") or ""),
+                    "camera_name":    cam.get("camera_name"),
+                    "classification": "Uncertain",
+                    "status":         "Not Accessible",
+                    "detail":         "token_refresh_failed",
+                    "frame_path":     None,
+                }
 
             jpeg, frame_path = await _capture_frame_with_save(
                 url, cam_id, is_rtsp=is_rtsp,
                 rtsp_url_list=rtsp_urls if is_rtsp else None,
             )
             if not jpeg:
+                logger.warning(f"[Pass-2] Frame capture failed for {cam_id}")
                 return {
                     "camera_id":      cam_id,
                     "device_id":      str(cam.get("device_id") or ""),
@@ -1098,15 +1151,15 @@ async def _process_camera(
             }
 
         except Exception as e:
-            logger.error(f"Processing error for {cam_id}: {e}")
+            logger.error(f"[Pass-2] Processing error for {cam_id}: {e}", exc_info=True)
             return {
                 "camera_id":      cam_id,
                 "device_id":      str(cam.get("device_id") or ""),
                 "camera_no":      str(cam.get("camera_no") or ""),
                 "camera_name":    cam.get("camera_name"),
                 "classification": "Uncertain",
-                "status":         "Accessible",
-                "detail":         str(e),
+                "status":         "Not Accessible",
+                "detail":         f"processing_error: {e}",
                 "frame_path":     None,
             }
 
@@ -1123,11 +1176,12 @@ def _bulk_persist(runtime: dict, classifications: List[dict]) -> int:
         label      = str(item.get("classification") or "").strip()
         status     = str(item.get("status") or "").strip() or None
         frame_path = str(item.get("frame_path") or "").strip() or None
-        detail     = str(item.get("detail") or "").strip()
         if not cam_id or not label:
             continue
-        # Don't pollute DB with Uncertain/Not Accessible from transient capture failures
-        if detail == "frame_capture_failed" or frame_path is None and label == "Uncertain" and status == "Not Accessible":
+        # Only persist when the camera classified successfully. Transient
+        # failures (token refresh, frame capture, processing errors) keep
+        # status == "Not Accessible" — Pass-1 already wrote that, no overwrite.
+        if status != "Accessible":
             skipped += 1
             continue
         try:
@@ -1415,6 +1469,27 @@ async def run_assignment_mode() -> dict:
                 failed.append({"camera_id": res["camera_id"], "reason": res.get("detail")})
 
         logger.info(f"Pass-2 done {time.time()-p2_start:.1f}s")
+
+    # Re-persist DB status for cameras that passed Pass-1 but failed Pass-2.
+    # Without this, the DB ends up with status="Accessible" (from the Pass-1
+    # status persist above) but classification stays null because _bulk_persist
+    # skips non-Accessible items — leaving rows in an inconsistent state.
+    pass2_failed_statuses = [
+        {
+            "camera_id": c["camera_id"],
+            "device_id": str(c.get("device_id") or ""),
+            "camera_no": str(c.get("camera_no") or ""),
+            "status":    "Not Accessible",
+        }
+        for c in classifications
+        if c.get("status") != "Accessible"
+    ]
+    if pass2_failed_statuses:
+        logger.info(
+            f"Pass-2: {len(pass2_failed_statuses)} cameras failed after Pass-1 success — "
+            f"reverting DB status to Not Accessible"
+        )
+        _bulk_persist_status(runtime, pass2_failed_statuses)
 
     # Bulk persist — one round-trip at the end
     updated = _bulk_persist(runtime, classifications)

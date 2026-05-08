@@ -66,10 +66,11 @@ _gpu_queue = queue.Queue(maxsize=GPU_QUEUE_SIZE)
 # =====================================================
 # 🚀 GPU BATCH WORKER
 # =====================================================
-def _gpu_batch_worker(stop_event, save_folder, cooldown_time=150):
+def _gpu_batch_worker(stop_event, save_folder, cooldown_time=60):
     """
     GPU batch worker — TRUE batch inference.
     Pulls frames from _gpu_queue and processes them in batches.
+    Cooldown reduced to 60s (1 minute) for faster server room alerts.
     """
     logger.info("🚀 [ServerRoom] GPU worker started (true batch mode)")
     
