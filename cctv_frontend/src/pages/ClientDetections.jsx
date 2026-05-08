@@ -860,7 +860,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, removingId, re
 }
 
 const ClientDetections = () => {
-  const { setAllCounts, setUnfilteredCounts, typeFilter, setTypeFilter } = useDetectionCounts();
+  const { setUnfilteredCounts, typeFilter, setTypeFilter } = useDetectionCounts();
   const { user } = useAuth(); // Get user from context
   const [searchParams] = useSearchParams();
 
@@ -889,7 +889,8 @@ const ClientDetections = () => {
   const [keyboardHintShown, setKeyboardHintShown] = useState(false);
 
   // Fetch unfiltered counts once for sidebar (no filters applied)
-  const fetchAllCounts = useCallback(async () => {
+  // For ClientDetections page, we don't update sidebar counts with filtered data
+  const fetchUnfilteredCounts = useCallback(async () => {
     try {
       const params = new URLSearchParams({ limit: 1 });
       
@@ -897,18 +898,21 @@ const ClientDetections = () => {
       if (user?.role) params.append('user_role', user.role);
       if (user?.company_name) params.append('user_company', user.company_name);
       
+      console.log('[ClientDetections] Fetching unfiltered counts for sidebar');
+      
       const res = await axios.get(`${API_BASE_1}/client-detections?${params}`);
       if (res.data.success) {
         setUnfilteredCounts(res.data.counts || {});
       }
     } catch (err) {
-      console.error('Failed to fetch all counts:', err);
+      console.error('Failed to fetch unfiltered counts:', err);
     }
-  }, [user, setUnfilteredCounts]);
+  }, [user?.role, user?.company_name, setUnfilteredCounts]);
 
+  // Fetch unfiltered counts only once on mount
   useEffect(() => {
-    fetchAllCounts();
-  }, [fetchAllCounts]);
+    fetchUnfilteredCounts();
+  }, [fetchUnfilteredCounts]);
 
   const fetchClientImages = useCallback(async (pg = 1, rpp = rowsPerPage) => {
     setLoading(true);
@@ -926,6 +930,8 @@ const ClientDetections = () => {
       if (user?.role) params.append('user_role', user.role);
       if (user?.company_name) params.append('user_company', user.company_name);
 
+      console.log('[ClientDetections] Fetching with params:', Object.fromEntries(params));
+
       const res = await axios.get(`${API_BASE_1}/client-detections?${params}`);
       if (res.data.success) {
         setImages((res.data.data || []).map((item) => ({
@@ -934,24 +940,21 @@ const ClientDetections = () => {
         })));
         setTotal(res.data.total || 0);
         setCounts(res.data.counts || {});
-        // Update context counts with filtered results
-        setAllCounts(res.data.counts || {});
+        // Don't update context counts with filtered results - only unfiltered counts should go to context
       } else {
         setImages([]);
         setCounts({});
         setTotal(0);
-        setAllCounts({});
       }
     } catch (err) {
       console.error('Failed to fetch client images:', err);
       setImages([]);
       setCounts({});
       setTotal(0);
-      setAllCounts({});
     } finally {
       setLoading(false);
     }
-  }, [sourceFilter, typeFilter, dateFilter, search, appliedStartTime, appliedEndTime, examFilter, rowsPerPage, user, setAllCounts]);
+  }, [sourceFilter, typeFilter, dateFilter, search, appliedStartTime, appliedEndTime, examFilter, rowsPerPage, user?.role, user?.company_name]);
 
   // Load exams for filter dropdown
   useEffect(() => {
@@ -968,55 +971,84 @@ const ClientDetections = () => {
   useEffect(() => {
     const examId = searchParams.get('exam_id');
     if (examId) setExamFilter(examId);
-  }, []);
+  }, [searchParams]);
 
+  // Fetch images when filters change
   useEffect(() => {
     setPage(1);
     setListSelectedIndex(0);
     fetchClientImages(1, rowsPerPage);
-  }, [typeFilter, sourceFilter, dateFilter, search, appliedStartTime, appliedEndTime, examFilter, rowsPerPage]);
+  }, [fetchClientImages, rowsPerPage]);
 
-  // Socket connection is now handled by SocketContext
-  // No need for duplicate socket connection here
-
+  // Memoized filter function to check if an item matches current filters
   const matchesFilters = useCallback((item) => {
-    if (examFilter && String(item.exam_id) !== String(examFilter)) return false;
-    if (typeFilter.length > 0 && !typeFilter.includes(item.type)) return false;
-    if (sourceFilter && item.source !== sourceFilter) return false;
-    if (dateFilter) {
-      const normalized = parseDateForQuery(dateFilter);
-      if (item.date && item.date !== normalized) return false;
-      if (item.examDate && item.examDate !== dateFilter) return false;
-    }
+    // Search filter
     if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      const haystack = [
-        item.filename, item.type, item.source,
-        item.cameraName, item.centerName, item.city, item.state, item.tcCode,
-      ].filter(Boolean).join(' ').toLowerCase();
-      if (!haystack.includes(q)) return false;
-    }
-    // Time range filter (client-side on detected_at)
-    if (dateFilter && (appliedStartTime || appliedEndTime)) {
-      const itemSec = parseDetectedAtTime(item.detected_at);
-      if (itemSec !== null) {
-        const startSec = timeStringToSeconds(appliedStartTime);
-        const endSec = timeStringToSeconds(appliedEndTime);
-        if (startSec !== null && itemSec < startSec) return false;
-        if (endSec !== null && itemSec > endSec + 59) return false;
+      const searchLower = search.toLowerCase();
+      const cameraName = (item.cameraName || item.camera_name || item.camera_id || '').toLowerCase();
+      const centerName = (item.centerName || item.centre_name || '').toLowerCase();
+      const city = (item.city || '').toLowerCase();
+      if (!cameraName.includes(searchLower) && !centerName.includes(searchLower) && !city.includes(searchLower)) {
+        return false;
       }
     }
+
+    // Type filter
+    if (typeFilter.length > 0 && !typeFilter.includes(item.type)) {
+      return false;
+    }
+
+    // Source filter
+    if (sourceFilter && item.source !== sourceFilter) {
+      return false;
+    }
+
+    // Date filter
+    if (dateFilter) {
+      const itemDate = item.date || (item.detected_at ? item.detected_at.split(',')[0] : '');
+      const filterDateFormatted = formatDateDDMMYYYY(parseDDMMYYYYToDate(dateFilter));
+      if (itemDate !== filterDateFormatted && itemDate !== dateFilter) {
+        return false;
+      }
+    }
+
+    // Time range filter
+    if (appliedStartTime || appliedEndTime) {
+      const itemTimeSec = parseDetectedAtTime(item.detected_at);
+      if (itemTimeSec !== null) {
+        if (appliedStartTime) {
+          const startSec = timeStringToSeconds(appliedStartTime);
+          if (startSec !== null && itemTimeSec < startSec) return false;
+        }
+        if (appliedEndTime) {
+          const endSec = timeStringToSeconds(appliedEndTime);
+          if (endSec !== null && itemTimeSec > endSec) return false;
+        }
+      }
+    }
+
+    // Exam filter
+    if (examFilter && item.exam_id !== examFilter && String(item.exam_id) !== String(examFilter)) {
+      return false;
+    }
+
     return true;
   }, [search, typeFilter, sourceFilter, dateFilter, appliedStartTime, appliedEndTime, examFilter]);
 
-  const filteredImages = useMemo(() => images.filter(matchesFilters), [images, matchesFilters]);
-
-  // Handle live updates for client detections
+  // Handle live socket updates for client detections
   const { socket } = useSocket();
   useEffect(() => {
     if (!socket) return;
 
     const handleNewClientDetection = (item) => {
+      console.log('[ClientDetections] New detection received:', item.type);
+      
+      // Update unfiltered counts immediately for sidebar
+      setUnfilteredCounts(prev => ({
+        ...prev,
+        [item.type]: (prev[item.type] || 0) + 1
+      }));
+
       // Filter by typeFilter FIRST before processing
       if (typeFilter.length > 0 && !typeFilter.includes(item.type)) {
         return; // Skip this detection if it doesn't match the filter
@@ -1037,12 +1069,37 @@ const ClientDetections = () => {
           return next.slice(0, rowsPerPage);
         });
         setTotal(t => t + 1);
+        setCounts(prev => ({
+          ...prev,
+          [item.type]: (prev[item.type] || 0) + 1
+        }));
       }
     };
 
+    const handleClientDetectionRemove = (data) => {
+      console.log('[ClientDetections] Detection removed:', data.uid);
+      
+      // Refresh unfiltered counts
+      fetchUnfilteredCounts();
+      
+      // Remove from current view if present
+      setImages(prev => prev.filter(i => i.uid !== data.uid));
+      setTotal(t => Math.max(0, t - 1));
+    };
+
     socket.on('client-detection:new', handleNewClientDetection);
-    return () => socket.off('client-detection:new', handleNewClientDetection);
-  }, [socket, matchesFilters, rowsPerPage, typeFilter]);
+    socket.on('client-detection:remove', handleClientDetectionRemove);
+    
+    return () => {
+      socket.off('client-detection:new', handleNewClientDetection);
+      socket.off('client-detection:remove', handleClientDetectionRemove);
+    };
+  }, [socket, matchesFilters, rowsPerPage, typeFilter, setUnfilteredCounts, fetchUnfilteredCounts]);
+
+  // Memoize filtered images to prevent unnecessary recalculations
+  const filteredImages = useMemo(() => {
+    return images.filter(item => !removedUids.has(item.uid));
+  }, [images, removedUids]);
 
   const handleRemove = async (item) => {
     if (!item || !item.uid) return;
