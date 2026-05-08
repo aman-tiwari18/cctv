@@ -107,7 +107,8 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=120):
         except Exception as e:
             logger.error(f"[CrowdFive] Batch inference error: {e}")
             for item in batch:
-                if 'frame' in item: del item['frame']
+                item.pop('frame',None)
+            del batch
             continue
 
         # Process results
@@ -261,7 +262,7 @@ def _hls_camera_thread(cfg, stop_event):
 
         try:
             _gpu_queue.put_nowait({
-                "frame":       frame,
+                "frame":       frame.copy(),
                 "camera_id":   camera_id,
                 "ch_no":       ch_no,
                 "exam_id":     exam_id,
@@ -270,9 +271,9 @@ def _hls_camera_thread(cfg, stop_event):
                 "state":       state,
             })
         except queue.Full:
+            pass
+        finally:
             del frame
-            continue
-        del frame
 
     cap.release()
 

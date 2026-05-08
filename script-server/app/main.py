@@ -166,19 +166,30 @@ _RTSP_SCRIPT_PREFIXES = {
     "server", "crowd", "intruder", "entry", "phone", "proximity",
     "invigilator", "tamper", "inversion", "blind", "zero", "five",
     "tampering", "violation", "entry_exit", "server_room", "blind_spot",
-    "inversion", "tamper", "zero_person", "detection", "crowd_zero", "crowd_five",
-    "blindspot", "crowd_five", "entry_exit"
+    "zero_person", "detection", "crowd_zero", "crowd_five", "blindspot",
+    "crowd_biometric", "strongroom", "qp_box",
 }
 
 
-def _is_rtsp_filename(stem: str) -> bool:
-    """Check if filename matches RTSP naming: {prefix}_{pk}_{cam_no}_{date}_{time}..."""
+def _split_rtsp_stem(stem: str):
+    """Return (prefix, device_id, camera_no) for RTSP filenames, or None.
+
+    RTSP files are named: {prefix}_{device_id}_{camera_no}_{date}_{time}_{extra}.jpg
+    The prefix may contain underscores (qp_box, crowd_biometric, entry_exit),
+    so we find the first all-digit segment instead of assuming a fixed word count.
+    """
     parts = stem.split("_")
-    if len(parts) >= 3:
-        prefix = parts[0].lower()
-        if prefix in _RTSP_SCRIPT_PREFIXES and parts[1].isdigit():
-            return True
-    return False
+    for i in range(1, len(parts) - 1):
+        if parts[i].isdigit() and parts[i + 1].isdigit():
+            prefix = "_".join(parts[:i]).lower()
+            if prefix in _RTSP_SCRIPT_PREFIXES:
+                return prefix, parts[i], parts[i + 1]
+            return None
+    return None
+
+
+def _is_rtsp_filename(stem: str) -> bool:
+    return _split_rtsp_stem(stem) is not None
 
 
 def _extract_rtsp_pk(stem: str) -> int:
@@ -857,11 +868,9 @@ def parse_detection_filename(
 
     # ── Try RTSP naming pattern: {prefix}_{pk}_{camNo}_{date}_{time}... ──
     # Now agnostic to the source directory to handle complex samarth-style paths
-    if _is_rtsp_filename(stem):
-        # rtsp_pk = _extract_rtsp_pk(stem)
-        parts = stem.split("_")
-        rtsp_device_id = parts[1]
-        rtsp_camera_no = parts[2]
+    rtsp_split = _split_rtsp_stem(stem)
+    if rtsp_split:
+        _, rtsp_device_id, rtsp_camera_no = rtsp_split
         dt_match = re.search(r'(\d{8})_(\d{6})', stem)
         if dt_match:
             date_str = dt_match.group(1)
@@ -917,11 +926,10 @@ def parse_detection_filename(
 
     # ── Metadata lookup: RTSP uses device_id+camera_no, HLS uses ch_code ──
     cam_meta = {}
-    if source == "rtsp" and _is_rtsp_filename(stem):
-        parts = stem.split("_")
-        if len(parts) >= 3 and parts[1].isdigit() and parts[2].isdigit():
-            dev_id = parts[1]
-            cam_no_part = parts[2]
+    if source == "rtsp":
+        rtsp_split = _split_rtsp_stem(stem)
+        if rtsp_split:
+            _, dev_id, cam_no_part = rtsp_split
             cam_meta = _camera_meta_for_rtsp_device_ch(dev_id, cam_no_part)
             logger.debug(f"RTSP metadata lookup: dev_id={dev_id}, cam_no={cam_no_part}, found={bool(cam_meta)}")
     

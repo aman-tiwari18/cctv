@@ -224,15 +224,15 @@ def _hls_camera_thread(cfg, stop_event):
 
         try:
             _gpu_queue.put_nowait({
-                "frame":       frame,
+                "frame":       frame.copy(),
                 "camera_id":   camera_id,
                 "ch_no":       ch_no,
                 "source_type": "HLS",
             })
         except queue.Full:
+            pass
+        finally:
             del frame
-            continue
-        del frame
 
     cap.release()
 
