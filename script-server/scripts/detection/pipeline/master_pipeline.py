@@ -862,7 +862,8 @@ def rtsp_producer(cam_configs, queues, pre_fetched_token=None):
                 # ... queue frame ...
                 
                 fail_count = 0
-                packet = (frame, device_id, camera_no, camera_id_pk, exam_id)
+                frame_snapshot = frame.copy()  # Avoid issues if OpenCV reuses buffers
+                packet = (frame_snapshot, device_id, camera_no, camera_id_pk, exam_id)
                 
                 for q in queues:
                     try:
@@ -870,6 +871,7 @@ def rtsp_producer(cam_configs, queues, pre_fetched_token=None):
                     except queue_module.Full:
                         # FIXED: Queue full is expected if GPU is behind; drop frame gracefully
                         pass
+                del frame_snapshot  # Free memory immediately after queuing
                 
                 # FIXED: 5 FPS instead of 25 FPS (0.2s sleep) to prevent GPU queue overflow
                 time.sleep(0.2)

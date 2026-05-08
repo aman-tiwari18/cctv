@@ -82,6 +82,8 @@ const pick = (row, ...keys) => {
     return "";
 };
 
+const normalizeTcCode = (val) => val ? String(val).trim().replace(/^0+/, '') : '';
+
 /**
  * Pick value from a header that contains all provided tokens.
  * Useful for merged headers like "ch_no(unique key value)".
@@ -338,7 +340,7 @@ exports.uploadCameras = async (req, res) => {
                 if (c.device_id) {
                     const deviceId = String(c.device_id).trim();
                     const cameraNo = c.camera_no != null ? String(c.camera_no).trim() : '';
-                    const tcCode = c.tc_code ? String(c.tc_code).trim().replace(/^0+/, '') : '';
+                    const tcCode = c.tc_code ? normalizeTcCode(c.tc_code) : '';
                     const key = `${deviceId}_${cameraNo}_${tcCode}`;
                     existingMap.set(key, c);
                 }
@@ -355,7 +357,7 @@ exports.uploadCameras = async (req, res) => {
 
                 const deviceId = String(record.device_id).trim();
                 const cameraNo = record.camera_no != null ? String(record.camera_no).trim() : '';
-                const tcCode = record.tc_code ? String(record.tc_code).trim().replace(/^0+/, '') : '';
+                const tcCode = record.tc_code ? normalizeTcCode(record.tc_code) : '';
                 const uniqueKey = `${deviceId}_${cameraNo}_${tcCode}`;
                 const existingCamera = existingMap.get(uniqueKey);
                 

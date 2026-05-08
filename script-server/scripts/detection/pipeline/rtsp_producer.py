@@ -19,7 +19,7 @@ def rtsp_frame_producer(rtsp_url, frame_queue, stop_event):
             break
 
         if not frame_queue.full():
-            frame_queue.put(frame)
+            frame_queue.put(frame.copy())
 
     cap.release()
     logging.info("🎬 RTSP producer stopped")
