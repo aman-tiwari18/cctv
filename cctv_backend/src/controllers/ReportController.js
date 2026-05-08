@@ -220,6 +220,11 @@ exports.downloadReport = async (req, res) => {
                             'Camera Status': agg.status,
                         };
                     } else {
+                        // Camera is online if: classification IS NOT NULL AND status = 'Accessible' (case-insensitive)
+                        const hasClassification = cam.classification && cam.classification.trim() !== '';
+                        const isAccessible = (cam.status || '').toLowerCase() === 'accessible';
+                        const isOnline = hasClassification && isAccessible;
+                        
                         return {
                             'City': cam.city || '',
                             'Center': cam.centre_name || '',
@@ -229,7 +234,7 @@ exports.downloadReport = async (req, res) => {
                             'TC Code': cam.tc_code || '',
                             'Events (Excluding Rejected)': 0,
                             'Rejected Events': 0,
-                            'Camera Status': cam.status === 'accessible' ? 'Online' : 'Offline',
+                            'Camera Status': isOnline ? 'Online' : 'Offline',
                         };
                     }
                 });
@@ -256,6 +261,11 @@ exports.downloadReport = async (req, res) => {
                             'Camera Status': agg.status,
                         };
                     } else {
+                        // Camera is online if: classification IS NOT NULL AND status = 'Accessible' (case-insensitive)
+                        const hasClassification = cam.camera_category && cam.camera_category.trim() !== '';
+                        const isAccessible = (cam.status || '').toLowerCase() === 'accessible';
+                        const isOnline = hasClassification && isAccessible;
+                        
                         return {
                             'City': cam.city || '',
                             'Center': cam.centre_name || '',
@@ -265,7 +275,7 @@ exports.downloadReport = async (req, res) => {
                             'TC Code': cam.tc_code || '',
                             'Events (Excluding Rejected)': 0,
                             'Rejected Events': 0,
-                            'Camera Status': cam.status === 'accessible' ? 'Online' : 'Offline',
+                            'Camera Status': isOnline ? 'Online' : 'Offline',
                         };
                     }
                 });
@@ -337,7 +347,14 @@ exports.downloadReport = async (req, res) => {
             const shiftDets = detections.filter(d => d.shift_id === shiftId);
 
             const total = shiftCams.length;
-            const online = shiftCams.filter(c => c.status === 'accessible').length;
+            // Camera is online if: classification IS NOT NULL AND status = 'Accessible' (case-insensitive)
+            const online = shiftCams.filter(c => {
+                const hasClassification = isRTSP 
+                    ? (c.classification && c.classification.trim() !== '')
+                    : (c.camera_category && c.camera_category.trim() !== '');
+                const isAccessible = (c.status || '').toLowerCase() === 'accessible';
+                return hasClassification && isAccessible;
+            }).length;
             const offline = total - online;
             const detCount = shiftDets.length;
             const rate = total > 0 ? ((online / total) * 100).toFixed(2) + '%' : '0%';

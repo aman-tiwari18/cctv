@@ -289,11 +289,12 @@ def create_shift_sheets(wb, cameras, shift_counts, shifts):
             ch    = cam.get("ch_code", "")
             count = shift_counts.get(shift["shift_name"], {}).get(ch, 0)
             
-            # Camera is online if: is_active = 1 AND status = 'Accessible' (case-insensitive)
-            is_active = cam.get("is_active") == 1
+            # Camera is online if: classification IS NOT NULL AND status = 'Accessible' (case-insensitive)
+            classification = cam.get("classification")
+            has_classification = classification is not None and str(classification).strip() != ""
             status_value = str(cam.get("status", "")).strip().lower()
             is_accessible = status_value == "accessible"
-            camera_status = "Online" if (is_active and is_accessible) else "Offline"
+            camera_status = "Online" if (has_classification and is_accessible) else "Offline"
             
             ws.append([
                 cam.get("city"),
@@ -338,10 +339,11 @@ def create_analysis_sheet(wb, shift_counts, cameras, shifts):
 
         total_cams = len(cameras)
         
-        # Online cameras: is_active = 1 AND status = 'Accessible' (case-insensitive)
+        # Online cameras: classification IS NOT NULL AND status = 'Accessible' (case-insensitive)
         online_cams = sum(
             1 for c in cameras 
-            if c.get("is_active") == 1 and str(c.get("status", "")).strip().lower() == "accessible"
+            if (c.get("classification") is not None and str(c.get("classification")).strip() != "" 
+                and str(c.get("status", "")).strip().lower() == "accessible")
         )
         
         total_det   = sum(shift_counts.get(sname, {}).values())
@@ -473,9 +475,9 @@ def generate_report():
 
     print(f"📷 Cameras loaded: {len(cameras)}")
     
-    # Debug: Check status values
+    # Debug: Check status and classification values
     status_counts = {}
-    active_counts = {"active": 0, "inactive": 0}
+    classification_counts = {"has_classification": 0, "no_classification": 0}
     
     for cam in cameras:
         # Check status field
@@ -486,34 +488,36 @@ def generate_report():
             status_key = str(status_val).strip().lower()
         status_counts[status_key] = status_counts.get(status_key, 0) + 1
         
-        # Check is_active field
-        if cam.get("is_active") == 1:
-            active_counts["active"] += 1
+        # Check classification field
+        classification = cam.get("classification")
+        if classification is not None and str(classification).strip() != "":
+            classification_counts["has_classification"] += 1
         else:
-            active_counts["inactive"] += 1
+            classification_counts["no_classification"] += 1
     
     print(f"📊 Status distribution: {status_counts}")
-    print(f"📊 Active distribution: {active_counts}")
+    print(f"📊 Classification distribution: {classification_counts}")
     
     # Debug: Sample camera data (first 3 cameras)
     print(f"🔍 Sample camera data (first 3):")
     for i, cam in enumerate(cameras[:3], 1):
-        print(f"  {i}. ch_code={cam.get('ch_code')}, is_active={cam.get('is_active')}, status={repr(cam.get('status'))}")
+        print(f"  {i}. ch_code={cam.get('ch_code')}, classification={repr(cam.get('classification'))}, status={repr(cam.get('status'))}")
     
-    # Debug: Check online cameras (is_active=1 AND status='accessible')
+    # Debug: Check online cameras (classification NOT NULL AND status='accessible')
     online_count = sum(
         1 for c in cameras 
-        if c.get("is_active") == 1 and str(c.get("status", "")).strip().lower() == "accessible"
+        if (c.get("classification") is not None and str(c.get("classification")).strip() != "" 
+            and str(c.get("status", "")).strip().lower() == "accessible")
     )
-    print(f"🟢 Online cameras (active + accessible): {online_count}/{len(cameras)}")
+    print(f"🟢 Online cameras (classification + accessible): {online_count}/{len(cameras)}")
     
     if online_count == 0:
         print("⚠️  WARNING: No online cameras found!")
         print("   Possible reasons:")
-        print("   1. status field is NULL or empty")
-        print("   2. status field has different value (not 'Accessible')")
-        print("   3. is_active is 0 for all cameras")
-        print("   4. Vision classification script hasn't run yet to set status")
+        print("   1. classification field is NULL or empty")
+        print("   2. status field is NULL, empty, or not 'Accessible'")
+        print("   3. Vision classification script hasn't run yet to set status")
+        print("   4. Classification upload hasn't been done yet")
 
     # ── Step 4: Scan detections ──
     print("🔍 Scanning detection folders...")
