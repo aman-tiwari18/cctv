@@ -1043,11 +1043,9 @@ const ClientDetections = () => {
     const handleNewClientDetection = (item) => {
       console.log('[ClientDetections] New detection received:', item.type);
       
-      // Update unfiltered counts immediately for sidebar
-      setUnfilteredCounts(prev => ({
-        ...prev,
-        [item.type]: (prev[item.type] || 0) + 1
-      }));
+      // DON'T manually update counts here - SocketContext handles it via 'client-detection:counts' event
+      // The backend emits both 'client-detection:new' AND 'client-detection:counts' events
+      // We only need to update the live feed display here
 
       // Filter by typeFilter FIRST before processing
       if (typeFilter.length > 0 && !typeFilter.includes(item.type)) {
@@ -1079,8 +1077,7 @@ const ClientDetections = () => {
     const handleClientDetectionRemove = (data) => {
       console.log('[ClientDetections] Detection removed:', data.uid);
       
-      // Refresh unfiltered counts
-      fetchUnfilteredCounts();
+      // DON'T manually refresh counts - SocketContext handles it via 'client-detection:counts' event
       
       // Remove from current view if present
       setImages(prev => prev.filter(i => i.uid !== data.uid));
@@ -1094,7 +1091,7 @@ const ClientDetections = () => {
       socket.off('client-detection:new', handleNewClientDetection);
       socket.off('client-detection:remove', handleClientDetectionRemove);
     };
-  }, [socket, matchesFilters, rowsPerPage, typeFilter, setUnfilteredCounts, fetchUnfilteredCounts]);
+  }, [socket, matchesFilters, rowsPerPage, typeFilter]);
 
   // Memoize filtered images to prevent unnecessary recalculations
   const filteredImages = useMemo(() => {

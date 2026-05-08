@@ -1302,9 +1302,24 @@ async def copy_client_detections(payload: ClientDetectionCopyRequest):
             # Re-fetch total client counts for today
             try:
                 today_iso = datetime.now().date().isoformat()
-                cur.execute("SELECT camera_category, COUNT(*) as count FROM camera_report_hls WHERE exam_date = %s AND pushed_to_client = 1 GROUP BY camera_category", (today_iso,))
+                cur.execute("""
+                    SELECT camera_category, COUNT(*) as count 
+                    FROM camera_report_hls 
+                    WHERE exam_date = %s 
+                    AND pushed_to_client = 1 
+                    AND (remove_from_client IS NULL OR remove_from_client = 0)
+                    GROUP BY camera_category
+                """, (today_iso,))
                 hls_c = cur.fetchall()
-                cur.execute("SELECT camera_category, COUNT(*) as count FROM camera_report_rtsp WHERE exam_date = %s AND pushed_to_client = 1 GROUP BY camera_category", (today_iso,))
+                
+                cur.execute("""
+                    SELECT camera_category, COUNT(*) as count 
+                    FROM camera_report_rtsp 
+                    WHERE exam_date = %s 
+                    AND pushed_to_client = 1 
+                    AND (remove_from_client IS NULL OR remove_from_client = 0)
+                    GROUP BY camera_category
+                """, (today_iso,))
                 rtsp_c = cur.fetchall()
                 
                 client_counts = {}
@@ -1313,6 +1328,7 @@ async def copy_client_detections(payload: ClientDetectionCopyRequest):
                     client_counts[cat] = client_counts.get(cat, 0) + row["count"]
                 
                 await sio.emit("client-detection:counts", client_counts)
+                logger.info(f"Emitted client counts after copy: {client_counts}")
             except Exception as e:
                 logger.error(f"Failed to emit client counts: {e}")
                 
@@ -1516,6 +1532,41 @@ async def remove_client_detection(payload: ClientDetectionRemoveRequest):
                 sql_rtsp = "UPDATE camera_report_rtsp SET remove_from_client = 1 WHERE unique_id = %s"
                 cur.execute(sql_rtsp, (payload.uid,))
             except Exception: pass
+            
+            # Re-fetch total client counts after removal
+            try:
+                today_iso = datetime.now().date().isoformat()
+                cur.execute("""
+                    SELECT camera_category, COUNT(*) as count 
+                    FROM camera_report_hls 
+                    WHERE exam_date = %s 
+                    AND pushed_to_client = 1 
+                    AND (remove_from_client IS NULL OR remove_from_client = 0)
+                    GROUP BY camera_category
+                """, (today_iso,))
+                hls_c = cur.fetchall()
+                
+                cur.execute("""
+                    SELECT camera_category, COUNT(*) as count 
+                    FROM camera_report_rtsp 
+                    WHERE exam_date = %s 
+                    AND pushed_to_client = 1 
+                    AND (remove_from_client IS NULL OR remove_from_client = 0)
+                    GROUP BY camera_category
+                """, (today_iso,))
+                rtsp_c = cur.fetchall()
+                
+                client_counts = {}
+                for row in hls_c + rtsp_c:
+                    cat = row["camera_category"]
+                    client_counts[cat] = client_counts.get(cat, 0) + row["count"]
+                
+                # Emit updated counts to all connected clients
+                await sio.emit("client-detection:counts", client_counts)
+                logger.info(f"Emitted updated client counts after removal: {client_counts}")
+            except Exception as e:
+                logger.error(f"Failed to emit client counts after removal: {e}")
+        
         conn.commit()
         
         await sio.emit("client-detection:remove", {"uid": payload.uid, "success": True})
