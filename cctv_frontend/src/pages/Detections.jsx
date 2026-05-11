@@ -995,17 +995,34 @@ export default function Detections() {
   useEffect(() => {
     if (!socket) return;
 
+    const bumpCounts = (typeKey) => {
+      if (!typeKey) return;
+      // Bump the local page-level + shared context counts on every live event
+      // so the sidebar per-type counters and the header "TOTAL DETECTIONS" pill
+      // tick up immediately, instead of waiting up to
+      // DETECTION_SCAN_INTERVAL_SECONDS (2s) for the next backend
+      // detection:counts snapshot. The trailing snapshot then confirms the
+      // running total — same value, no double-count.
+      setCounts(prev => ({ ...prev, [typeKey]: (prev[typeKey] || 0) + 1 }));
+      setUnfilteredCounts(prev => ({ ...prev, [typeKey]: (prev[typeKey] || 0) + 1 }));
+      setAllCounts(prev => ({ ...prev, [typeKey]: (prev[typeKey] || 0) + 1 }));
+    };
+
     const handleNewDetection = (item) => {
-      // Filter live detections by typeFilter
+      // Always reflect the new detection in the unfiltered counters — the live
+      // event represents a real new detection regardless of the user's filter.
+      bumpCounts(item?.type);
+
+      // Filter live detections by typeFilter for the data list / total
       if (typeFilter.length > 0 && !typeFilter.includes(item.type)) {
-        return; // Skip this detection if it doesn't match the filter
+        return; // Skip from data list if it doesn't match the filter
       }
       mergeLiveDetections(item, { incrementTotal: true });
     };
 
     socket.on('detection:new', handleNewDetection);
     return () => socket.off('detection:new', handleNewDetection);
-  }, [socket, mergeLiveDetections, typeFilter]);
+  }, [socket, mergeLiveDetections, typeFilter, setUnfilteredCounts, setAllCounts]);
 
   // Optimized polling: Only when NOT connected and on page 1
   useEffect(() => {

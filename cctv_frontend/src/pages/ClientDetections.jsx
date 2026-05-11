@@ -1049,14 +1049,23 @@ const ClientDetections = () => {
 
     const handleNewClientDetection = (item) => {
       console.log('[ClientDetections] New detection received:', item.type);
-      
-      // DON'T manually update counts here - SocketContext handles it via 'client-detection:counts' event
-      // The backend emits both 'client-detection:new' AND 'client-detection:counts' events
-      // We only need to update the live feed display here
 
-      // Filter by typeFilter FIRST before processing
+      // Bump the page-local + shared context unfiltered counts on EVERY live
+      // event (before any filter gate). The backend's client-detection:counts
+      // event is the eventual source of truth but it only fires at the end of
+      // /client-detections/copy — relying on it alone caused the sidebar
+      // per-type counters and the header "TOTAL DETECTIONS" pill to never
+      // tick up between snapshots. Bumping here drives instant UI feedback;
+      // the trailing client-detection:counts snapshot (when it arrives)
+      // overwrites with the authoritative value — same final number.
+      if (item?.type) {
+        setCounts(prev => ({ ...prev, [item.type]: (prev[item.type] || 0) + 1 }));
+        setUnfilteredCounts(prev => ({ ...prev, [item.type]: (prev[item.type] || 0) + 1 }));
+      }
+
+      // Filter by typeFilter FIRST before processing the data list
       if (typeFilter.length > 0 && !typeFilter.includes(item.type)) {
-        return; // Skip this detection if it doesn't match the filter
+        return; // Skip from data list if it doesn't match the filter
       }
 
       // Process URL if missing base
@@ -1074,18 +1083,21 @@ const ClientDetections = () => {
           return next.slice(0, rowsPerPage);
         });
         setTotal(t => t + 1);
-        setCounts(prev => ({
-          ...prev,
-          [item.type]: (prev[item.type] || 0) + 1
-        }));
       }
     };
 
     const handleClientDetectionRemove = (data) => {
       console.log('[ClientDetections] Detection removed:', data.uid);
-      
-      // DON'T manually refresh counts - SocketContext handles it via 'client-detection:counts' event
-      
+
+      // Decrement counts for the removed item if we know its type. The next
+      // client-detection:counts snapshot will reconcile any drift, but this
+      // gives the sidebar/header immediate feedback when admin un-pushes.
+      const removedType = data?.type;
+      if (removedType) {
+        setCounts(prev => ({ ...prev, [removedType]: Math.max(0, (prev[removedType] || 0) - 1) }));
+        setUnfilteredCounts(prev => ({ ...prev, [removedType]: Math.max(0, (prev[removedType] || 0) - 1) }));
+      }
+
       // Remove from current view if present
       setImages(prev => prev.filter(i => i.uid !== data.uid));
       setTotal(t => Math.max(0, t - 1));
@@ -1098,7 +1110,7 @@ const ClientDetections = () => {
       socket.off('client-detection:new', handleNewClientDetection);
       socket.off('client-detection:remove', handleClientDetectionRemove);
     };
-  }, [socket, matchesFilters, rowsPerPage, typeFilter]);
+  }, [socket, matchesFilters, rowsPerPage, typeFilter, setUnfilteredCounts]);
 
   // Memoize filtered images to prevent unnecessary recalculations
   const filteredImages = useMemo(() => {
