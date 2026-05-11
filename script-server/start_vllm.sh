@@ -12,5 +12,5 @@ vllm serve Qwen/Qwen2.5-VL-7B-Instruct \
     --port 8001 \
     --host 0.0.0.0 \
     --max-model-len 2048 \
-    --gpu-memory-utilization 0.90 \
+    --gpu-memory-utilization 0.25 \
     --dtype bfloat16
