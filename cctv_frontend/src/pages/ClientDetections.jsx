@@ -1050,22 +1050,13 @@ const ClientDetections = () => {
     const handleNewClientDetection = (item) => {
       console.log('[ClientDetections] New detection received:', item.type);
 
-      // Bump the page-local + shared context unfiltered counts on EVERY live
-      // event (before any filter gate). The backend's client-detection:counts
-      // event is the eventual source of truth but it only fires at the end of
-      // /client-detections/copy — relying on it alone caused the sidebar
-      // per-type counters and the header "TOTAL DETECTIONS" pill to never
-      // tick up between snapshots. Bumping here drives instant UI feedback;
-      // the trailing client-detection:counts snapshot (when it arrives)
-      // overwrites with the authoritative value — same final number.
-      if (item?.type) {
-        setCounts(prev => ({ ...prev, [item.type]: (prev[item.type] || 0) + 1 }));
-        setUnfilteredCounts(prev => ({ ...prev, [item.type]: (prev[item.type] || 0) + 1 }));
-      }
+      // NOTE: sidebar / header pill counter bumps are handled centrally in
+      // SocketContext (one place, always mounted). Here we only update the
+      // page-local data list and the page-local per-type chip count.
 
       // Filter by typeFilter FIRST before processing the data list
       if (typeFilter.length > 0 && !typeFilter.includes(item.type)) {
-        return; // Skip from data list if it doesn't match the filter
+        return;
       }
 
       // Process URL if missing base
@@ -1083,22 +1074,21 @@ const ClientDetections = () => {
           return next.slice(0, rowsPerPage);
         });
         setTotal(t => t + 1);
+        if (item?.type) {
+          setCounts(prev => ({ ...prev, [item.type]: (prev[item.type] || 0) + 1 }));
+        }
       }
     };
 
     const handleClientDetectionRemove = (data) => {
       console.log('[ClientDetections] Detection removed:', data.uid);
 
-      // Decrement counts for the removed item if we know its type. The next
-      // client-detection:counts snapshot will reconcile any drift, but this
-      // gives the sidebar/header immediate feedback when admin un-pushes.
+      // Page-local list / total decrement only; the sidebar/header counter
+      // decrement is handled in SocketContext.
       const removedType = data?.type;
       if (removedType) {
         setCounts(prev => ({ ...prev, [removedType]: Math.max(0, (prev[removedType] || 0) - 1) }));
-        setUnfilteredCounts(prev => ({ ...prev, [removedType]: Math.max(0, (prev[removedType] || 0) - 1) }));
       }
-
-      // Remove from current view if present
       setImages(prev => prev.filter(i => i.uid !== data.uid));
       setTotal(t => Math.max(0, t - 1));
     };
@@ -1110,7 +1100,7 @@ const ClientDetections = () => {
       socket.off('client-detection:new', handleNewClientDetection);
       socket.off('client-detection:remove', handleClientDetectionRemove);
     };
-  }, [socket, matchesFilters, rowsPerPage, typeFilter, setUnfilteredCounts]);
+  }, [socket, matchesFilters, rowsPerPage, typeFilter]);
 
   // Memoize filtered images to prevent unnecessary recalculations
   const filteredImages = useMemo(() => {
