@@ -818,19 +818,21 @@ export default function Detections() {
     setData((prev) => prev.filter(i => getDetectionKey(i) !== getDetectionKey(itemToRemove)));
   }, [getDetectionKey]);
 
-  // Optimized: Only fetch counts when filters change, not on every render
+  // Fetch the unfiltered totals used by the sidebar per-type chips and the
+  // header "TOTAL DETECTIONS" pill. Runs WITHOUT the typeFilter param so the
+  // result always represents the full picture, regardless of what the user is
+  // filtering the data list to.
   const fetchAllCounts = useCallback(async () => {
-    if (typeFilter.length === 0) return;
-
     try {
       const params = new URLSearchParams({ page: 1, limit: 1 });
       if (dateFilter) params.append('date', parseDateForQuery(dateFilter));
       if (examFilter) params.append('exam_id', examFilter);
-      
+      // NOTE: deliberately NOT appending `type` — we want the global counts.
+
       const res = await axios.get(`${API_BASE_1}/detections?${params}`, {
         signal: abortControllerRef.current?.signal
       });
-      
+
       if (res.data.success) {
         setUnfilteredCounts(res.data.counts || {});
         if (typeFilter.length === 0) {
@@ -844,12 +846,23 @@ export default function Detections() {
     }
   }, [dateFilter, examFilter, setAllCounts, setUnfilteredCounts, typeFilter.length]);
 
-  // Debounced counts fetch
+  // Debounced fetch on filter change
   useEffect(() => {
     const timer = setTimeout(() => {
       fetchAllCounts();
     }, 300);
     return () => clearTimeout(timer);
+  }, [fetchAllCounts]);
+
+  // SAFETY NET: refetch unfiltered counts every 3 seconds while the page is
+  // open. This guarantees the sidebar/header always tick up live, regardless
+  // of socket connection state, dropped events, or any race in optimistic
+  // increments. Backend cost is one cheap COUNT query per tick — negligible.
+  useEffect(() => {
+    const id = setInterval(() => {
+      fetchAllCounts();
+    }, 3000);
+    return () => clearInterval(id);
   }, [fetchAllCounts]);
 
   const loadExams = useCallback(async () => {
@@ -1032,7 +1045,17 @@ export default function Detections() {
         setTotal(res.data.total || 0);
         setCounts(res.data.counts || {});
         setAllCounts(res.data.counts || {});
-        
+        // CRITICAL: also push the latest counts into unfilteredCounts so the
+        // sidebar per-type chips and the header "TOTAL DETECTIONS" pill in
+        // Layout.jsx (which read from unfilteredCounts) update during polling.
+        // Without this line, when the socket is disconnected the polling
+        // fallback refreshes the data list every 15s but the counters froze
+        // at the initial-fetch value — which is exactly the symptom of
+        // "images appear but counts only update on refresh".
+        if (typeFilter.length === 0) {
+          setUnfilteredCounts(res.data.counts || {});
+        }
+
         // Filter polled detections by typeFilter before merging
         const filteredData = (res.data.data || []).filter(item => {
           if (typeFilter.length > 0 && !typeFilter.includes(item.type)) {
@@ -1055,7 +1078,7 @@ export default function Detections() {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [loading, page, connected, rowsPerPage, buildDetectionParams, mergeLiveDetections, setAllCounts, typeFilter]);
+  }, [loading, page, connected, rowsPerPage, buildDetectionParams, mergeLiveDetections, setAllCounts, setUnfilteredCounts, typeFilter]);
 
   // Debounced fetch on filter changes
   useEffect(() => {
