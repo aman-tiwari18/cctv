@@ -310,6 +310,15 @@ def list_detection_files() -> dict:
     return snapshot
 
 
+def _tagged_detection_matches(tagged_path: str, date: Optional[str] = None) -> bool:
+    """Return whether a tagged detection path matches a cheap date filter."""
+    try:
+        _, relative_path = tagged_path.split(":", 1)
+    except ValueError:
+        relative_path = tagged_path
+    return _basic_detection_matches(relative_path, date=date)
+
+
 async def detection_watch_loop():
     global known_detection_files
 
@@ -350,8 +359,15 @@ async def detection_watch_loop():
 
                     logger.info(f"Live detections emitted: {type_key} count={emitted} new_files={len(new_files)}")
 
-            # Always emit updated counts.
-            counts = {k: len(v) for k, v in current_snapshot.items()}
+            # Always emit updated counts for today's dashboard/sidebar total.
+            # The REST /detections endpoint can still return historical counts
+            # when a date filter is provided; this live snapshot is intentionally
+            # scoped to today so Layout.jsx does not show all-time totals.
+            today_iso = datetime.now().date().isoformat()
+            counts = {
+                k: sum(1 for tagged_path in v if _tagged_detection_matches(tagged_path, today_iso))
+                for k, v in current_snapshot.items()
+            }
             await sio.emit("detection:counts", counts)
 
             known_detection_files = current_snapshot

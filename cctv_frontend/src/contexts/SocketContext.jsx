@@ -5,6 +5,30 @@ import { useDetectionCounts } from './DetectionCountsContext';
 
 const SocketContext = createContext(null);
 
+const todayIso = () => new Date().toISOString().slice(0, 10);
+
+const normalizeDateValue = (value) => {
+  if (!value) return '';
+  const text = String(value).trim();
+
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) {
+    return text.slice(0, 10);
+  }
+
+  const ddmmyyyy = text.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (ddmmyyyy) {
+    return `${ddmmyyyy[3]}-${ddmmyyyy[2]}-${ddmmyyyy[1]}`;
+  }
+
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString().slice(0, 10);
+};
+
+const isTodayDetection = (item) => {
+  const itemDate = normalizeDateValue(item?.date || item?.examDate || item?.exam_date);
+  return !itemDate || itemDate === todayIso();
+};
+
 export const SocketProvider = ({ children }) => {
   const { setUnfilteredCounts, setAllCounts } = useDetectionCounts();
   const [socket, setSocket] = useState(null);
@@ -40,6 +64,7 @@ export const SocketProvider = ({ children }) => {
     // The trailing `detection:counts` snapshot reconciles to the backend's
     // authoritative total on every 2s tick.
     newSocket.on('detection:new', (item) => {
+      if (!isTodayDetection(item)) return;
       const t = item?.type;
       if (!t) return;
       console.log(`[Socket] detection:new type=${t} → bumping counts +1`);
@@ -63,6 +88,7 @@ export const SocketProvider = ({ children }) => {
 
     // === CLIENT: client-detection:new ===================================
     newSocket.on('client-detection:new', (item) => {
+      if (!isTodayDetection(item)) return;
       // Security check: only process if belongs to client's exams
       if (
         clientExamsRef.current.length > 0 &&
