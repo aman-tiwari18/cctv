@@ -913,7 +913,9 @@ const ClientDetections = () => {
     }
   }, [dateFilter, examFilter, user?.role, user?.company_name, setUnfilteredCounts]);
 
-  // Debounced counts fetch - updates when date or exam changes
+  // Debounced counts fetch - updates when date or exam changes. After that,
+  // unfilteredCounts is driven purely by socket events in SocketContext
+  // (client-detection:new bumps it, client-detection:counts reconciles it).
   useEffect(() => {
     const timer = setTimeout(() => {
       fetchUnfilteredCounts();
@@ -1049,14 +1051,14 @@ const ClientDetections = () => {
 
     const handleNewClientDetection = (item) => {
       console.log('[ClientDetections] New detection received:', item.type);
-      
-      // DON'T manually update counts here - SocketContext handles it via 'client-detection:counts' event
-      // The backend emits both 'client-detection:new' AND 'client-detection:counts' events
-      // We only need to update the live feed display here
 
-      // Filter by typeFilter FIRST before processing
+      // NOTE: sidebar / header pill counter bumps are handled centrally in
+      // SocketContext (one place, always mounted). Here we only update the
+      // page-local data list and the page-local per-type chip count.
+
+      // Filter by typeFilter FIRST before processing the data list
       if (typeFilter.length > 0 && !typeFilter.includes(item.type)) {
-        return; // Skip this detection if it doesn't match the filter
+        return;
       }
 
       // Process URL if missing base
@@ -1074,19 +1076,21 @@ const ClientDetections = () => {
           return next.slice(0, rowsPerPage);
         });
         setTotal(t => t + 1);
-        setCounts(prev => ({
-          ...prev,
-          [item.type]: (prev[item.type] || 0) + 1
-        }));
+        if (item?.type) {
+          setCounts(prev => ({ ...prev, [item.type]: (prev[item.type] || 0) + 1 }));
+        }
       }
     };
 
     const handleClientDetectionRemove = (data) => {
       console.log('[ClientDetections] Detection removed:', data.uid);
-      
-      // DON'T manually refresh counts - SocketContext handles it via 'client-detection:counts' event
-      
-      // Remove from current view if present
+
+      // Page-local list / total decrement only; the sidebar/header counter
+      // decrement is handled in SocketContext.
+      const removedType = data?.type;
+      if (removedType) {
+        setCounts(prev => ({ ...prev, [removedType]: Math.max(0, (prev[removedType] || 0) - 1) }));
+      }
       setImages(prev => prev.filter(i => i.uid !== data.uid));
       setTotal(t => Math.max(0, t - 1));
     };

@@ -2,7 +2,6 @@ import React, { createContext, useContext, useEffect, useState, useRef } from 'r
 import { io } from 'socket.io-client';
 import { SOCKET_URL, SOCKET_PATH } from '../constants/data';
 import { useDetectionCounts } from './DetectionCountsContext';
-import { useLocation } from 'react-router-dom';
 
 const SocketContext = createContext(null);
 
@@ -11,7 +10,6 @@ export const SocketProvider = ({ children }) => {
   const [socket, setSocket] = useState(null);
   const [connected, setConnected] = useState(false);
   const clientExamsRef = useRef([]);
-  const location = useLocation();
 
   useEffect(() => {
     const resolvedPath = SOCKET_PATH || '/cctv_dev/socket.io';
@@ -23,87 +21,94 @@ export const SocketProvider = ({ children }) => {
       reconnectionDelay: 1000,
     });
 
-    let adminQueue = [];
-    let clientQueue = [];
-    let syncInterval;
-
     newSocket.on('connect', () => {
       setConnected(true);
       console.log('✅ Socket connected');
-
-      // Process queues every 2 seconds for consistent batching
-      syncInterval = setInterval(() => {
-        // Process admin detections (for live feed display, not for counts)
-        if (adminQueue.length > 0) {
-          const batch = [...adminQueue];
-          adminQueue = [];
-          console.log(`📊 Processed ${batch.length} admin detections (for live feed)`);
-        }
-
-        // Process client detections (for live feed display, not for counts)
-        if (clientQueue.length > 0) {
-          const batch = [...clientQueue];
-          clientQueue = [];
-          console.log(`📊 Processed ${batch.length} client detections (for live feed)`);
-        }
-      }, 2000); // Consistent 2-second batching
     });
 
     newSocket.on('disconnect', () => {
       setConnected(false);
-      if (syncInterval) clearInterval(syncInterval);
       console.log('❌ Socket disconnected');
     });
 
-    // Listen to admin detections (for live feed display only)
+    // === ADMIN: detection:new ===========================================
+    // Each live admin detection bumps the per-type counter immediately.
+    // This is the SINGLE source of truth for incremental count updates —
+    // running it here (in the always-mounted SocketProvider) instead of in
+    // the Detections page ensures the sidebar and header pill update even
+    // if the page is mid-mount, mid-remount, or behind a route transition.
+    // The trailing `detection:counts` snapshot reconciles to the backend's
+    // authoritative total on every 2s tick.
     newSocket.on('detection:new', (item) => {
-      adminQueue.push(item);
+      const t = item?.type;
+      if (!t) return;
+      console.log(`[Socket] detection:new type=${t} → bumping counts +1`);
+      setUnfilteredCounts(prev => ({ ...prev, [t]: (prev[t] || 0) + 1 }));
+      setAllCounts(prev => ({ ...prev, [t]: (prev[t] || 0) + 1 }));
     });
 
-    // Listen to detection counts updates - FOR ADMIN DETECTIONS PAGE
+    // === ADMIN: detection:counts snapshot ===============================
+    // Authoritative count snapshot from the backend (every ~2s). Always
+    // apply it — no path gating. The sidebar/header in Layout.jsx consume
+    // unfilteredCounts on every page (Dashboard, Detections, etc.) and
+    // must reflect reality everywhere. The previous gating
+    // (`if (location.pathname === '/detections')`) was also fragile under
+    // the `basename='/cctv_analytics'` Router config and was the reason
+    // counters froze until a manual refresh.
     newSocket.on('detection:counts', (counts) => {
-      console.log('📊 Received detection:counts (ADMIN) from backend:', counts);
-      
-      // Only update if we're on the admin detections page
-      if (location.pathname === '/detections') {
-        setAllCounts(counts);
-        setUnfilteredCounts(counts);
-        console.log('✅ Admin counts updated in context (on /detections page)');
-      } else {
-        console.log('⏭️  Skipping admin count update (not on /detections page)');
-      }
+      console.log('📊 detection:counts snapshot:', counts);
+      setUnfilteredCounts(counts || {});
+      setAllCounts(counts || {});
     });
 
-    // Listen to client detections (for live feed display only)
+    // === CLIENT: client-detection:new ===================================
     newSocket.on('client-detection:new', (item) => {
       // Security check: only process if belongs to client's exams
-      if (clientExamsRef.current.length === 0 || clientExamsRef.current.includes(String(item.exam_id))) {
-        clientQueue.push(item);
+      if (
+        clientExamsRef.current.length > 0 &&
+        !clientExamsRef.current.includes(String(item?.exam_id))
+      ) {
+        return;
       }
+      const t = item?.type;
+      if (!t) return;
+      console.log(`[Socket] client-detection:new type=${t} → bumping counts +1`);
+      setUnfilteredCounts(prev => ({ ...prev, [t]: (prev[t] || 0) + 1 }));
+      setAllCounts(prev => ({ ...prev, [t]: (prev[t] || 0) + 1 }));
     });
 
-    // Listen to client detection counts updates - FOR CLIENT DETECTIONS PAGE
+    // === CLIENT: client-detection:counts snapshot =======================
+    // Authoritative snapshot for client-pushed counts. Applied
+    // unconditionally too — the client sidebar/header should always reflect
+    // the latest pushed totals when this event arrives.
     newSocket.on('client-detection:counts', (counts) => {
-      console.log('📊 Received client-detection:counts (CLIENT) from backend:', counts);
-      
-      // Only update if we're on the client detections page
-      if (location.pathname === '/client-detections') {
-        setUnfilteredCounts(counts);
-        setAllCounts(counts);
-        console.log('✅ Client counts updated in context (on /client-detections page)');
-      } else {
-        console.log('⏭️  Skipping client count update (not on /client-detections page)');
-      }
+      console.log('📊 client-detection:counts snapshot:', counts);
+      setUnfilteredCounts(counts || {});
+      setAllCounts(counts || {});
+    });
+
+    // === CLIENT: client-detection:remove ================================
+    // When admin un-pushes, decrement the per-type counter immediately;
+    // the next client-detection:counts snapshot will reconcile.
+    newSocket.on('client-detection:remove', (data) => {
+      const t = data?.type;
+      if (!t) return;
+      console.log(`[Socket] client-detection:remove type=${t} → bumping counts -1`);
+      setUnfilteredCounts(prev => ({ ...prev, [t]: Math.max(0, (prev[t] || 0) - 1) }));
+      setAllCounts(prev => ({ ...prev, [t]: Math.max(0, (prev[t] || 0) - 1) }));
     });
 
     setSocket(newSocket);
 
     return () => {
-      if (syncInterval) clearInterval(syncInterval);
       newSocket.disconnect();
       console.log('🔌 Socket cleanup completed');
     };
-  }, [setUnfilteredCounts, setAllCounts, location.pathname]);
+    // Deps are ONLY the stable setState setters. No pathname / no router
+    // state — the socket lives for the entire app session and is never
+    // recreated mid-flight (which previously dropped events during the
+    // polling reconnect window).
+  }, [setUnfilteredCounts, setAllCounts]);
 
   // Method to set client exams for filtering
   const setClientExams = (examIds) => {

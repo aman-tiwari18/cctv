@@ -818,19 +818,21 @@ export default function Detections() {
     setData((prev) => prev.filter(i => getDetectionKey(i) !== getDetectionKey(itemToRemove)));
   }, [getDetectionKey]);
 
-  // Optimized: Only fetch counts when filters change, not on every render
+  // Fetch the unfiltered totals used by the sidebar per-type chips and the
+  // header "TOTAL DETECTIONS" pill. Runs WITHOUT the typeFilter param so the
+  // result always represents the full picture, regardless of what the user is
+  // filtering the data list to.
   const fetchAllCounts = useCallback(async () => {
-    if (typeFilter.length === 0) return;
-
     try {
       const params = new URLSearchParams({ page: 1, limit: 1 });
       if (dateFilter) params.append('date', parseDateForQuery(dateFilter));
       if (examFilter) params.append('exam_id', examFilter);
-      
+      // NOTE: deliberately NOT appending `type` — we want the global counts.
+
       const res = await axios.get(`${API_BASE_1}/detections?${params}`, {
         signal: abortControllerRef.current?.signal
       });
-      
+
       if (res.data.success) {
         setUnfilteredCounts(res.data.counts || {});
         if (typeFilter.length === 0) {
@@ -844,7 +846,10 @@ export default function Detections() {
     }
   }, [dateFilter, examFilter, setAllCounts, setUnfilteredCounts, typeFilter.length]);
 
-  // Debounced counts fetch
+  // Debounced fetch on filter change. After the initial fetch, the sidebar
+  // and header counters are driven purely by socket events (no polling) —
+  // see SocketContext.jsx where detection:new and detection:counts update
+  // unfilteredCounts directly.
   useEffect(() => {
     const timer = setTimeout(() => {
       fetchAllCounts();
@@ -996,9 +1001,12 @@ export default function Detections() {
     if (!socket) return;
 
     const handleNewDetection = (item) => {
-      // Filter live detections by typeFilter
+      // NOTE: per-type counter bumps for the sidebar/header pill are handled
+      // centrally in SocketContext (one place, always mounted). Here we only
+      // care about the page-local data list and pagination total — gate by
+      // typeFilter so the visible feed respects the user's filter view.
       if (typeFilter.length > 0 && !typeFilter.includes(item.type)) {
-        return; // Skip this detection if it doesn't match the filter
+        return;
       }
       mergeLiveDetections(item, { incrementTotal: true });
     };
@@ -1029,7 +1037,17 @@ export default function Detections() {
         setTotal(res.data.total || 0);
         setCounts(res.data.counts || {});
         setAllCounts(res.data.counts || {});
-        
+        // CRITICAL: also push the latest counts into unfilteredCounts so the
+        // sidebar per-type chips and the header "TOTAL DETECTIONS" pill in
+        // Layout.jsx (which read from unfilteredCounts) update during polling.
+        // Without this line, when the socket is disconnected the polling
+        // fallback refreshes the data list every 15s but the counters froze
+        // at the initial-fetch value — which is exactly the symptom of
+        // "images appear but counts only update on refresh".
+        if (typeFilter.length === 0) {
+          setUnfilteredCounts(res.data.counts || {});
+        }
+
         // Filter polled detections by typeFilter before merging
         const filteredData = (res.data.data || []).filter(item => {
           if (typeFilter.length > 0 && !typeFilter.includes(item.type)) {
@@ -1052,7 +1070,7 @@ export default function Detections() {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [loading, page, connected, rowsPerPage, buildDetectionParams, mergeLiveDetections, setAllCounts, typeFilter]);
+  }, [loading, page, connected, rowsPerPage, buildDetectionParams, mergeLiveDetections, setAllCounts, setUnfilteredCounts, typeFilter]);
 
   // Debounced fetch on filter changes
   useEffect(() => {
