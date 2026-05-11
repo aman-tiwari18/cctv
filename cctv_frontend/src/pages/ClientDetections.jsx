@@ -913,23 +913,14 @@ const ClientDetections = () => {
     }
   }, [dateFilter, examFilter, user?.role, user?.company_name, setUnfilteredCounts]);
 
-  // Debounced counts fetch - updates when date or exam changes
+  // Debounced counts fetch - updates when date or exam changes. After that,
+  // unfilteredCounts is driven purely by socket events in SocketContext
+  // (client-detection:new bumps it, client-detection:counts reconciles it).
   useEffect(() => {
     const timer = setTimeout(() => {
       fetchUnfilteredCounts();
     }, 300);
     return () => clearTimeout(timer);
-  }, [fetchUnfilteredCounts]);
-
-  // SAFETY NET: refetch unfiltered counts every 3 seconds while the page is
-  // open so the sidebar per-type chips and the header "TOTAL DETECTIONS"
-  // pill always reflect live values — regardless of socket connection state
-  // or dropped client-detection:counts events.
-  useEffect(() => {
-    const id = setInterval(() => {
-      fetchUnfilteredCounts();
-    }, 3000);
-    return () => clearInterval(id);
   }, [fetchUnfilteredCounts]);
 
   const fetchClientImages = useCallback(async (pg = 1, rpp = rowsPerPage) => {

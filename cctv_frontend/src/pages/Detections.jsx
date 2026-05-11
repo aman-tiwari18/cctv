@@ -846,23 +846,15 @@ export default function Detections() {
     }
   }, [dateFilter, examFilter, setAllCounts, setUnfilteredCounts, typeFilter.length]);
 
-  // Debounced fetch on filter change
+  // Debounced fetch on filter change. After the initial fetch, the sidebar
+  // and header counters are driven purely by socket events (no polling) —
+  // see SocketContext.jsx where detection:new and detection:counts update
+  // unfilteredCounts directly.
   useEffect(() => {
     const timer = setTimeout(() => {
       fetchAllCounts();
     }, 300);
     return () => clearTimeout(timer);
-  }, [fetchAllCounts]);
-
-  // SAFETY NET: refetch unfiltered counts every 3 seconds while the page is
-  // open. This guarantees the sidebar/header always tick up live, regardless
-  // of socket connection state, dropped events, or any race in optimistic
-  // increments. Backend cost is one cheap COUNT query per tick — negligible.
-  useEffect(() => {
-    const id = setInterval(() => {
-      fetchAllCounts();
-    }, 3000);
-    return () => clearInterval(id);
   }, [fetchAllCounts]);
 
   const loadExams = useCallback(async () => {
