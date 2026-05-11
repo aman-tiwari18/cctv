@@ -1003,6 +1003,7 @@ export default function Detections() {
       // DETECTION_SCAN_INTERVAL_SECONDS (2s) for the next backend
       // detection:counts snapshot. The trailing snapshot then confirms the
       // running total — same value, no double-count.
+      console.log(`[Detections] bumpCounts +1 for type=${typeKey}`);
       setCounts(prev => ({ ...prev, [typeKey]: (prev[typeKey] || 0) + 1 }));
       setUnfilteredCounts(prev => ({ ...prev, [typeKey]: (prev[typeKey] || 0) + 1 }));
       setAllCounts(prev => ({ ...prev, [typeKey]: (prev[typeKey] || 0) + 1 }));

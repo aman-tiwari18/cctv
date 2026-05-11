@@ -12,6 +12,13 @@ export const SocketProvider = ({ children }) => {
   const [connected, setConnected] = useState(false);
   const clientExamsRef = useRef([]);
   const location = useLocation();
+  // Keep the current pathname in a ref so socket handlers can read its LATEST
+  // value without needing pathname in the effect's deps. With pathname in deps,
+  // every route change tore down and reconnected the socket — and the polling
+  // reconnect window swallowed the next detection:counts emission, which is
+  // exactly why the live counters stopped ticking until a manual refresh.
+  const pathnameRef = useRef(location.pathname);
+  useEffect(() => { pathnameRef.current = location.pathname; }, [location.pathname]);
 
   useEffect(() => {
     const resolvedPath = SOCKET_PATH || '/cctv_dev/socket.io';
@@ -60,18 +67,26 @@ export const SocketProvider = ({ children }) => {
       adminQueue.push(item);
     });
 
-    // Listen to detection counts updates - FOR ADMIN DETECTIONS PAGE
+    // Listen to detection counts updates — authoritative snapshot from backend.
+    // Apply it whenever the user is on a page that consumes detection counters
+    // (admin /detections, /dashboard, etc.). Do NOT hard-gate to a single path
+    // — the sidebar and header pill in Layout.jsx consume unfilteredCounts on
+    // every page and must reflect reality. The page-level handlers in
+    // Detections.jsx do their own optimistic per-event bumps; this snapshot
+    // reconciles the running total.
     newSocket.on('detection:counts', (counts) => {
       console.log('📊 Received detection:counts (ADMIN) from backend:', counts);
-      
-      // Only update if we're on the admin detections page
-      if (location.pathname === '/detections') {
-        setAllCounts(counts);
-        setUnfilteredCounts(counts);
-        console.log('✅ Admin counts updated in context (on /detections page)');
-      } else {
-        console.log('⏭️  Skipping admin count update (not on /detections page)');
+      const path = pathnameRef.current;
+      // Skip only when the client-detections page is the active view — that
+      // page is driven by client-detection:counts and shouldn't be clobbered
+      // by the admin-side snapshot.
+      if (path === '/client-detections') {
+        console.log('⏭️  Skipping admin count update (on /client-detections page)');
+        return;
       }
+      setAllCounts(counts);
+      setUnfilteredCounts(counts);
+      console.log('✅ Admin counts updated in context');
     });
 
     // Listen to client detections (for live feed display only)
@@ -82,18 +97,18 @@ export const SocketProvider = ({ children }) => {
       }
     });
 
-    // Listen to client detection counts updates - FOR CLIENT DETECTIONS PAGE
+    // Listen to client detection counts updates — only apply on the client
+    // page, otherwise we'd overwrite admin counters with client-only totals.
     newSocket.on('client-detection:counts', (counts) => {
       console.log('📊 Received client-detection:counts (CLIENT) from backend:', counts);
-      
-      // Only update if we're on the client detections page
-      if (location.pathname === '/client-detections') {
-        setUnfilteredCounts(counts);
-        setAllCounts(counts);
-        console.log('✅ Client counts updated in context (on /client-detections page)');
-      } else {
+      const path = pathnameRef.current;
+      if (path !== '/client-detections') {
         console.log('⏭️  Skipping client count update (not on /client-detections page)');
+        return;
       }
+      setUnfilteredCounts(counts);
+      setAllCounts(counts);
+      console.log('✅ Client counts updated in context (on /client-detections page)');
     });
 
     setSocket(newSocket);
@@ -103,7 +118,10 @@ export const SocketProvider = ({ children }) => {
       newSocket.disconnect();
       console.log('🔌 Socket cleanup completed');
     };
-  }, [setUnfilteredCounts, setAllCounts, location.pathname]);
+    // IMPORTANT: pathname is intentionally NOT a dep — the handlers read it
+    // from pathnameRef at fire time. Keeping it as a dep caused the socket to
+    // reconnect on every navigation, dropping events during the reconnect.
+  }, [setUnfilteredCounts, setAllCounts]);
 
   // Method to set client exams for filtering
   const setClientExams = (examIds) => {
