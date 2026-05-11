@@ -89,9 +89,8 @@ TIMEOUT_FFMPEG:      int = int(os.getenv("VISION_TIMEOUT_FFMPEG", "15"))  # was 
 TIMEOUT_VLM:         int = int(os.getenv("VISION_TIMEOUT_VLM", "120"))
 TIMEOUT_API:         int = int(os.getenv("VISION_TIMEOUT_API",  "10"))
 
-OLLAMA_URL:     str = os.getenv("VISION_OLLAMA_URL",         "http://localhost:11434/api/generate")
-OLLAMA_MODEL:   str = os.getenv("VISION_OLLAMA_MODEL",       "qwen3-vl:8b")
-OLLAMA_NUM_CTX: int = int(os.getenv("VISION_OLLAMA_NUM_CTX", "2048"))
+VLLM_URL:       str = os.getenv("VISION_VLLM_URL",             "http://localhost:8001/v1/chat/completions")
+VLLM_MODEL:     str = os.getenv("VISION_VLLM_MODEL",           "Qwen/Qwen2.5-VL-7B-Instruct")
 
 DEFAULT_EXAM_ID:   int = 2
 DEFAULT_SHIFT_ID:  int = 7
@@ -399,31 +398,45 @@ def _sync_camview_start_video(server: str, device_id: str, camera_no: str) -> Tu
                         cur_tok = _camview_tokens.get(server)
                         # Only evict if the stale token is still the one cached.
                         # Another thread may have already refreshed it.
-                        if cur_tok == token:
+                        needs_refresh = (cur_tok == token)
+                        if needs_refresh:
                             _camview_tokens.pop(server, None)
                             _camview_timestamps.pop(server, None)
-                    fresh = _sync_camview_authenticate(server)
-                    now = time.time()
-                    if fresh:
-                        with _local_cache_lock:
-                            _camview_tokens[server]     = fresh
-                            _camview_timestamps[server] = now
-                        try:
-                            f_lock = open(_TOKEN_LOCK_FILE, "w")
-                            _fcntl.flock(f_lock, _fcntl.LOCK_EX)
-                            _token_cache_save()
-                            _fcntl.flock(f_lock, _fcntl.LOCK_UN)
-                            f_lock.close()
-                        except Exception:
-                            pass
-                        _start_camview_keepalive(server)
+                    
+                    if needs_refresh:
+                        fresh = _sync_camview_authenticate(server)
+                        now = time.time()
+                        if fresh:
+                            with _local_cache_lock:
+                                _camview_tokens[server]     = fresh
+                                _camview_timestamps[server] = now
+                            try:
+                                f_lock = open(_TOKEN_LOCK_FILE, "w")
+                                _fcntl.flock(f_lock, _fcntl.LOCK_EX)
+                                _token_cache_save()
+                                _fcntl.flock(f_lock, _fcntl.LOCK_UN)
+                                f_lock.close()
+                            except Exception:
+                                pass
+                            _start_camview_keepalive(server)
+                            logger.info(f"[Camview] Token refreshed successfully for {server}")
+                        else:
+                            # Auth itself failed — fall back to negative cache
+                            # so we don't hammer a genuinely-down server.
+                            with _local_cache_lock:
+                                _camview_tokens[server]     = "FAILED"
+                                _camview_timestamps[server] = now
+                            logger.warning(f"[Camview] Token refresh failed for {server} — giving up on {cam_label}")
+                            if attempt >= 2:
+                                return None, None, False
                     else:
-                        # Auth itself failed — fall back to negative cache
-                        # so we don't hammer a genuinely-down server.
-                        with _local_cache_lock:
-                            _camview_tokens[server]     = "FAILED"
-                            _camview_timestamps[server] = now
-                continue   # retry with fresh token
+                        # Another thread refreshed it, just reuse it
+                        logger.info(f"[Camview] Reusing token refreshed by another thread for {server}")
+                        token = cur_tok
+                # Retry the StartVideo call with the fresh token (or fail if auth failed)
+                if attempt < 2:
+                    time.sleep(1)
+                continue
 
             if res.status_code != 200:
                 logger.warning(f"[Camview] StartVideo HTTP {res.status_code} for {cam_label} (attempt {attempt})")
@@ -481,8 +494,8 @@ logger.info(f"  Network workers  : {MAX_WORKERS_NETWORK}")
 logger.info(f"  VLM workers      : {MAX_WORKERS_VLM}")
 logger.info(f"  Thread pool      : {THREAD_POOL_SIZE}")
 logger.info(f"  VLM timeout      : {TIMEOUT_VLM}s")
-logger.info(f"  Ollama model     : {OLLAMA_MODEL}")
-logger.info(f"  Ollama num_ctx   : {OLLAMA_NUM_CTX}  (46GB → ~8GB VRAM fix)")
+logger.info(f"  vLLM model       : {VLLM_MODEL}")
+logger.info(f"  vLLM URL         : {VLLM_URL}")
 logger.info("=" * 80)
 
 # ===========================================================================
@@ -768,22 +781,23 @@ async def _capture_frame_bytes(url: str, is_rtsp: bool = False) -> Optional[byte
     hangs that bleed through the daemon thread). Falls back to OpenCV for HLS.
     """
     loop = asyncio.get_event_loop()
-    decoded_url = unquote(url)  # %24→$, %26→& etc — no-op for clean URLs
+    # DO NOT unquote RTSP URLs! DSS servers require %24 for $ and %26 for & in the token
+    process_url = url if is_rtsp else unquote(url)
 
     if is_rtsp:
         # Go straight to FFmpeg for RTSP — it respects -timeout properly
-        jpeg = await loop.run_in_executor(_THREAD_POOL, _sync_ffmpeg_capture, decoded_url, True)
+        jpeg = await loop.run_in_executor(_THREAD_POOL, _sync_ffmpeg_capture, process_url, True)
         if jpeg:
             return jpeg
         logger.debug("FFmpeg failed for RTSP — trying OpenCV as last resort")
-        return await loop.run_in_executor(_THREAD_POOL, _sync_opencv_capture, decoded_url)
+        return await loop.run_in_executor(_THREAD_POOL, _sync_opencv_capture, process_url)
 
     # HLS: OpenCV first (faster), then FFmpeg fallback
-    jpeg = await loop.run_in_executor(_THREAD_POOL, _sync_opencv_capture, decoded_url)
+    jpeg = await loop.run_in_executor(_THREAD_POOL, _sync_opencv_capture, process_url)
     if jpeg:
         return jpeg
     logger.debug("OpenCV failed → FFmpeg fallback")
-    return await loop.run_in_executor(_THREAD_POOL, _sync_ffmpeg_capture, decoded_url, False)
+    return await loop.run_in_executor(_THREAD_POOL, _sync_ffmpeg_capture, process_url, False)
 
 
 async def _capture_frame_with_save(
@@ -879,26 +893,41 @@ async def _classify_with_vlm(
     )
 
     payload = {
-        "model":  OLLAMA_MODEL,
-        "prompt": VLM_PROMPT,
-        "images": [image_b64],
-        "stream": False,
-        "options": {
-            "num_ctx":        OLLAMA_NUM_CTX,  # KEY VRAM fix
-            "num_predict":    256,
-            "temperature":    0.0,
-            "repeat_penalty": 1.0,
-        },
+        "model": VLLM_MODEL,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": VLM_PROMPT
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{image_b64}"
+                        }
+                    }
+                ]
+            }
+        ],
+        "max_tokens": 256,
+        "temperature": 0.0,
     }
 
     try:
         timeout = aiohttp.ClientTimeout(total=TIMEOUT_VLM)
-        async with session.post(OLLAMA_URL, json=payload, timeout=timeout) as resp:
+        async with session.post(VLLM_URL, json=payload, timeout=timeout) as resp:
             if resp.status != 200:
-                return "Uncertain", f"VLM HTTP {resp.status}"
+                body = await resp.text()
+                return "Uncertain", f"VLM HTTP {resp.status}: {body}"
 
             data   = await resp.json(content_type=None)
-            result = data.get("response", "").strip()
+            choices = data.get("choices", [])
+            if not choices:
+                return "Uncertain", "Empty choices from VLM"
+            
+            result = choices[0].get("message", {}).get("content", "").strip()
             if not result:
                 return "Uncertain", "Empty VLM response"
 
@@ -1441,7 +1470,7 @@ async def run_assignment_mode() -> dict:
 
         logger.info(
             f"Pass-2 | {len(accessible)} cameras | "
-            f"{MAX_WORKERS_VLM} concurrent VLM | num_ctx={OLLAMA_NUM_CTX}"
+            f"{MAX_WORKERS_VLM} concurrent vLLM"
         )
         p2_coros = [
             _process_camera(r, session, sem_vlm, is_rtsp=is_rtsp)
@@ -1555,7 +1584,7 @@ async def _default_pipeline(cameras: List[dict], runtime: dict) -> None:
         # Pass-2
         logger.info(
             f"Pass-2 | {len(accessible)} cameras | "
-            f"{MAX_WORKERS_VLM} VLM workers | num_ctx={OLLAMA_NUM_CTX}"
+            f"{MAX_WORKERS_VLM} vLLM workers"
         )
         p2_coros = [
             _process_camera(r, session, sem_vlm, is_rtsp=is_rtsp)
@@ -1673,10 +1702,42 @@ Success Rate             : {accessible / max(len(_df), 1) * 100:.1f}%
 # ===========================================================================
 # Entry point
 # ===========================================================================
+def _ensure_vllm_running():
+    try:
+        if requests.get("http://localhost:8001/health", timeout=2).status_code == 200:
+            logger.info("vLLM server is already running in background.")
+            return None
+    except:
+        pass
+
+    logger.info("Starting temporary vLLM server process. Please wait (~20 seconds)...")
+    proc = subprocess.Popen(
+        ["/bin/bash", "/data/cctv_dev/cctv/script-server/start_vllm.sh"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        preexec_fn=os.setsid
+    )
+    for _ in range(300):
+        try:
+            if requests.get("http://localhost:8001/health", timeout=2).status_code == 200:
+                logger.info("Temporary vLLM server successfully started!")
+                return proc
+        except:
+            pass
+        time.sleep(2)
+        if proc.poll() is not None:
+            logger.error("vLLM server crashed during startup.")
+            return proc
+    logger.error("vLLM server timed out during startup.")
+    return proc
+
 if __name__ == "__main__":
     logger.info("=" * 80)
     logger.info("TCS Camera Classification — starting")
     logger.info("=" * 80)
+    
+    vllm_proc = _ensure_vllm_running()
+    
     try:
         if VISION_ASSIGNMENT_PAYLOAD:
             result = asyncio.run(run_assignment_mode())
@@ -1690,3 +1751,11 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"Fatal error: {e}", exc_info=True)
         sys.exit(1)
+    finally:
+        if vllm_proc and vllm_proc.poll() is None:
+            logger.info("Shutting down temporary vLLM server to free RAM/GPU...")
+            import signal
+            try:
+                os.killpg(os.getpgid(vllm_proc.pid), signal.SIGTERM)
+            except Exception as e:
+                logger.error(f"Failed to kill vLLM process: {e}")

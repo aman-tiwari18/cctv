@@ -23,6 +23,7 @@ class Poller:
         
         self.running_scripts = set()
         self.scheduled_scripts = {}  # id -> Task
+        self.completed_scripts = set()
         self._poll_task = None
 
     async def start(self):
@@ -121,6 +122,10 @@ class Poller:
             logger.debug(f"Assignment {assignment_id} already queued/running — skipping")
             return
             
+        if assignment_id in self.completed_scripts:
+            logger.debug(f"Assignment {assignment_id} already completed locally — skipping to prevent loop")
+            return
+            
         scheduled_at_str = assignment.get("scheduled_at")
         
         # RUNNING status or missing scheduled_at = run immediately
@@ -184,6 +189,13 @@ class Poller:
                 await self.update_assignment_status(assignment_id, "COMPLETED", {"result_data": result})
             
             logger.info(f"✔ Assignment {assignment_id} completed")
+            
+            # Remember that this completed successfully so we never restart it
+            # ONLY FOR VISION scripts! Other scripts should restart if they exit early.
+            meta = assignment.get("execution_metadata", {})
+            raw_code = str(meta.get("script_code") or assignment.get("script_code") or "").strip().lower()
+            if raw_code in ("vision", "scene_classification"):
+                self.completed_scripts.add(assignment_id)
             
         except Exception as e:
             if "__TIMEOUT_COMPLETED__" in str(e):
