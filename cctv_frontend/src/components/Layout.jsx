@@ -47,7 +47,7 @@ import {
 } from '@mui/icons-material';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import { useAuth } from '../contexts/AuthContext';
-import { DetectionCountsProvider, useDetectionCounts } from '../contexts/DetectionCountsContext';
+import { useDetectionCounts } from '../contexts/DetectionCountsContext';
 import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
 import { CustomSvgIcon } from './DetectionSvgIcon';
 import { ShiftSvgIcon } from './ShiftSvgIcon';
@@ -606,10 +606,13 @@ function LayoutInner() {
   );
 }
 
-const Layout = () => (
-  <DetectionCountsProvider>
-    <LayoutInner />
-  </DetectionCountsProvider>
-);
+// Layout used to wrap its children in its own <DetectionCountsProvider>,
+// but App.jsx already wraps the entire app in one. Having two providers
+// meant SocketProvider (outside Layout) was writing to the outer store
+// while LayoutInner / pages were reading from the inner store — so live
+// socket events updated state nobody was reading, and the counters froze
+// until a manual refresh repopulated the inner store via REST. Removing
+// the inner provider here makes the outer one the single source of truth.
+const Layout = () => <LayoutInner />;
 
 export default Layout;
