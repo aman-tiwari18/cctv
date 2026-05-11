@@ -207,16 +207,67 @@ class CameraDistributor:
                 return int(match.group())
         
         return None
+
+    def _stable_camera_row_id(self, camera: Dict) -> Optional[int]:
+        """
+        Resolve a stable per-camera ID for list filtering.
+
+        DB camera rows expose the table primary key as ``id``. Camera configs
+        produced later in the pipeline keep that same value in ``camera_id_pk``.
+        Those fields are preferred so worker assignment is independent of DB
+        row order and stays stable even when camera rows are added or removed.
+        """
+        for key in ("id", "camera_id_pk", "camera_id", "ch_code", "device_id"):
+            camera_id = self._extract_numeric_id(camera.get(key))
+            if camera_id is not None:
+                return camera_id
+
+        return None
     
     def filter_cameras(self, cameras: List[Dict]) -> List[Dict]:
         """
         Filter camera list to only include cameras assigned to this worker.
-        Uses sequential index-based distribution: each camera is numbered 0..N-1
-        in the order returned by the DB query, then assigned by index % total_workers.
-        This guarantees an equal split regardless of camera type or ID format.
+        Uses stable camera IDs instead of list indexes, so assignment does not
+        change when the database returns the same rows in a different order.
         """
-        worker_slot = self.worker_index % self.total_workers
-        assigned = [cam for i, cam in enumerate(cameras) if i % self.total_workers == worker_slot]
+        if self.distribution_mode == "single":
+            assigned = list(cameras)
+        elif self.distribution_mode == "auto":
+            if self.total_workers <= 1:
+                assigned = list(cameras)
+            else:
+                worker_slot = self.worker_index % self.total_workers
+                assigned = []
+
+                for cam in cameras:
+                    camera_id = self._stable_camera_row_id(cam)
+
+                    if camera_id is None:
+                        # Fall back to the mode-aware path for non-standard camera
+                        # payloads. This preserves existing behavior for global
+                        # assignments that intentionally run on every worker.
+                        if self.should_process_camera(cam):
+                            assigned.append(cam)
+                        continue
+
+                    if camera_id % self.total_workers == worker_slot:
+                        assigned.append(cam)
+        elif self.distribution_mode in ("static", "range"):
+            if self.camera_start is None or self.camera_end is None:
+                assigned = list(cameras)
+            else:
+                assigned = []
+                for cam in cameras:
+                    camera_id = self._stable_camera_row_id(cam)
+                    if camera_id is None:
+                        if self.should_process_camera(cam):
+                            assigned.append(cam)
+                        continue
+
+                    if self.camera_start <= camera_id <= self.camera_end:
+                        assigned.append(cam)
+        else:
+            assigned = [cam for cam in cameras if self.should_process_camera(cam)]
 
         logger.info(
             f"Worker {self.worker_id}: "

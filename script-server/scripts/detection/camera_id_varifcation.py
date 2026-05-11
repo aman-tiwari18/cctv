@@ -103,7 +103,9 @@ except ImportError:
 # ══════════════════════════════════════════════════════════════════════════
 # LOGGING
 # ══════════════════════════════════════════════════════════════════════════
-LOG_FILE = f"ocr_verify_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+LOG_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "logs", "camera_id_verification"))
+os.makedirs(LOG_DIR, exist_ok=True)
+LOG_FILE = os.path.join(LOG_DIR, f"ocr_verify_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",

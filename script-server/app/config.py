@@ -28,7 +28,12 @@ GRACE_MINUTES = int(os.getenv("GRACE_MINUTES", 30))
 
 # Script Configuration
 SCRIPTS_DIR = os.getenv("SCRIPTS_DIR", "./scripts")
-LOGS_DIR = os.getenv("LOGS_DIR", "./logs/executions")
+_LOGS_DIR_RAW = os.getenv("LOGS_DIR", "./scripts/logs/executions")
+LOGS_DIR = (
+    os.path.join(SCRIPTS_DIR, "logs", "executions")
+    if _LOGS_DIR_RAW.strip().replace("\\", "/") in ("./logs/executions", "logs/executions")
+    else _LOGS_DIR_RAW
+)
 
 # HTTP Server Port
 HTTP_PORT = int(os.getenv("HTTP_PORT", 8000))

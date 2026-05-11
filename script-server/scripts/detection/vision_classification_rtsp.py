@@ -8,6 +8,7 @@ import multiprocessing
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -59,7 +60,7 @@ except ImportError:
 # Logging
 # ===========================================================================
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-LOG_DIR      = os.path.join(PROJECT_ROOT, "logs/vision")
+LOG_DIR      = os.path.join(PROJECT_ROOT, "scripts/logs/vision")
 os.makedirs(LOG_DIR, exist_ok=True)
 LOG_FILENAME = os.path.join(
     LOG_DIR, f"vision_db_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
@@ -91,6 +92,7 @@ TIMEOUT_API:         int = int(os.getenv("VISION_TIMEOUT_API",  "10"))
 
 VLLM_URL:       str = os.getenv("VISION_VLLM_URL",             "http://localhost:8001/v1/chat/completions")
 VLLM_MODEL:     str = os.getenv("VISION_VLLM_MODEL",           "Qwen/Qwen2.5-VL-7B-Instruct")
+STOP_VLLM_ON_EXIT: bool = os.getenv("VISION_STOP_VLLM_ON_EXIT", "1") == "1"
 
 DEFAULT_EXAM_ID:   int = 2
 DEFAULT_SHIFT_ID:  int = 7
@@ -1702,10 +1704,146 @@ Success Rate             : {accessible / max(len(_df), 1) * 100:.1f}%
 # ===========================================================================
 # Entry point
 # ===========================================================================
+_VLLM_PROC: Optional[subprocess.Popen] = None
+_VLLM_CLEANUP_DONE = False
+
+
+def _find_vllm_pids() -> List[int]:
+    """Find local vLLM processes for the classification server."""
+    patterns = (
+        "vllm serve",
+        "vllm.entrypoints.openai.api_server",
+        "VLLM::EngineCore",
+    )
+    try:
+        result = subprocess.run(
+            ["ps", "-eo", "pid,cmd"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            check=False,
+        )
+    except Exception as e:
+        logger.debug(f"Unable to inspect vLLM processes: {e}")
+        return []
+
+    pids: List[int] = []
+    for line in result.stdout.splitlines()[1:]:
+        parts = line.strip().split(None, 1)
+        if len(parts) != 2:
+            continue
+
+        pid_text, cmd = parts
+        if not any(pattern in cmd for pattern in patterns):
+            continue
+
+        # Keep the match scoped to this classification server/model.
+        if "VLLM::EngineCore" not in cmd and "--port 8001" not in cmd and VLLM_MODEL not in cmd:
+            continue
+
+        try:
+            pid = int(pid_text)
+        except ValueError:
+            continue
+
+        if pid != os.getpid() and pid not in pids:
+            pids.append(pid)
+
+    return pids
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def _shutdown_vllm(reason: str) -> None:
+    """
+    Stop the vLLM server used by classification.
+
+    The scheduler stops classification with SIGTERM at shift end. Without a
+    signal-aware cleanup path, the vLLM server can stay alive and keep GPU RAM.
+    """
+    global _VLLM_CLEANUP_DONE
+    if _VLLM_CLEANUP_DONE:
+        return
+    _VLLM_CLEANUP_DONE = True
+
+    pids = set()
+    if _VLLM_PROC and _VLLM_PROC.poll() is None:
+        pids.add(_VLLM_PROC.pid)
+
+    if STOP_VLLM_ON_EXIT:
+        pids.update(_find_vllm_pids())
+
+    if not pids:
+        return
+
+    logger.info(f"Shutting down vLLM server ({reason}) to free GPU memory: pids={sorted(pids)}")
+
+    if _VLLM_PROC and _VLLM_PROC.poll() is None:
+        try:
+            os.killpg(os.getpgid(_VLLM_PROC.pid), signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        except Exception as e:
+            logger.warning(f"Failed to SIGTERM owned vLLM process group: {e}")
+
+    for pid in sorted(pids):
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        except Exception as e:
+            logger.warning(f"Failed to SIGTERM vLLM pid={pid}: {e}")
+
+    deadline = time.time() + 15
+    while time.time() < deadline:
+        if not any(_pid_alive(pid) for pid in pids):
+            return
+        time.sleep(0.5)
+
+    alive = [pid for pid in pids if _pid_alive(pid)]
+    if not alive:
+        return
+
+    logger.warning(f"vLLM did not stop after SIGTERM; escalating to SIGKILL: pids={alive}")
+    if _VLLM_PROC and _VLLM_PROC.poll() is None:
+        try:
+            os.killpg(os.getpgid(_VLLM_PROC.pid), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        except Exception as e:
+            logger.warning(f"Failed to SIGKILL owned vLLM process group: {e}")
+
+    for pid in alive:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        except Exception as e:
+            logger.warning(f"Failed to SIGKILL vLLM pid={pid}: {e}")
+
+
+def _handle_shutdown_signal(signum, frame):
+    logger.warning(f"Received signal {signum}; cleaning up classification vLLM before exit")
+    _shutdown_vllm(f"signal {signum}")
+    raise SystemExit(128 + signum)
+
+
 def _ensure_vllm_running():
+    global _VLLM_PROC
     try:
         if requests.get("http://localhost:8001/health", timeout=2).status_code == 200:
-            logger.info("vLLM server is already running in background.")
+            if STOP_VLLM_ON_EXIT:
+                logger.info("vLLM server is already running; it will be stopped when classification exits.")
+            else:
+                logger.info("vLLM server is already running in background and will be left running.")
             return None
     except:
         pass
@@ -1717,6 +1855,7 @@ def _ensure_vllm_running():
         stderr=subprocess.DEVNULL,
         preexec_fn=os.setsid
     )
+    _VLLM_PROC = proc
     for _ in range(300):
         try:
             if requests.get("http://localhost:8001/health", timeout=2).status_code == 200:
@@ -1732,6 +1871,9 @@ def _ensure_vllm_running():
     return proc
 
 if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, _handle_shutdown_signal)
+    signal.signal(signal.SIGINT, _handle_shutdown_signal)
+
     logger.info("=" * 80)
     logger.info("TCS Camera Classification — starting")
     logger.info("=" * 80)
@@ -1752,10 +1894,4 @@ if __name__ == "__main__":
         logger.error(f"Fatal error: {e}", exc_info=True)
         sys.exit(1)
     finally:
-        if vllm_proc and vllm_proc.poll() is None:
-            logger.info("Shutting down temporary vLLM server to free RAM/GPU...")
-            import signal
-            try:
-                os.killpg(os.getpgid(vllm_proc.pid), signal.SIGTERM)
-            except Exception as e:
-                logger.error(f"Failed to kill vLLM process: {e}")
+        _shutdown_vllm("classification exit")

@@ -17,6 +17,7 @@ IST = timezone(timedelta(hours=5, minutes=30))
 # Named script log files: scripts/logs/{ScriptName}_{Exam}_{Shift}_{Date}.log
 SCRIPT_LOGS_DIR = Path(SCRIPTS_DIR).resolve() / "logs"
 SCRIPT_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+SCRIPT_TERMINATE_GRACE_SECONDS = float(os.getenv("SCRIPT_TERMINATE_GRACE_SECONDS", "20"))
 
 
 def _get_named_log_path(execution: dict) -> Path:
@@ -286,6 +287,10 @@ class ScriptRunner:
         except asyncio.TimeoutError:
             try:
                 os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+                logger.info(
+                    f"⏹ Assignment {execution_id}: timeout reached; "
+                    "SIGTERM sent to process group"
+                )
             except ProcessLookupError:
                 pass
             except Exception:
@@ -293,6 +298,28 @@ class ScriptRunner:
                     process.terminate()
                 except ProcessLookupError:
                     pass
+
+            try:
+                await asyncio.wait_for(process.wait(), timeout=SCRIPT_TERMINATE_GRACE_SECONDS)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    f"Assignment {execution_id} did not exit after "
+                    f"{SCRIPT_TERMINATE_GRACE_SECONDS:.0f}s; escalating to SIGKILL"
+                )
+                try:
+                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                except Exception:
+                    try:
+                        process.kill()
+                    except ProcessLookupError:
+                        pass
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    logger.error(f"Assignment {execution_id} did not terminate after SIGKILL")
+
             msg = (
                 f"Script ran until end_at {end_at_str} — marking COMPLETED"
                 if end_at_str else
@@ -393,7 +420,7 @@ class ScriptRunner:
 
         # Wait for the process to exit after SIGTERM.
         try:
-            await asyncio.wait_for(process.wait(), timeout=5.0)
+            await asyncio.wait_for(process.wait(), timeout=SCRIPT_TERMINATE_GRACE_SECONDS)
             return True
         except asyncio.TimeoutError:
             logger.warning(f"Script {execution_id} did not exit after SIGTERM; escalating to SIGKILL")

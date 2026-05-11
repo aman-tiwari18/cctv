@@ -25,7 +25,7 @@ import urllib.parse
 # Logging Setup
 # ============================================================
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-log_dir = os.path.join(SCRIPT_DIR, "logs")
+log_dir = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "logs", "vision"))
 os.makedirs(log_dir, exist_ok=True)
 log_filename = os.path.join(log_dir, f"multi_server_classification_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
 

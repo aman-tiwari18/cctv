@@ -44,7 +44,7 @@ sys.path.insert(0, BASE_DIR)
 from utils.db_client import get_rtsp_cameras
 
 # ── Logging ──────────────────────────────────────────────────────────────────
-LOG_DIR = os.path.join(PROJECT_ROOT, "logs/test_frames")
+LOG_DIR = os.path.join(PROJECT_ROOT, "scripts/logs/test_frames")
 os.makedirs(LOG_DIR, exist_ok=True)
 LOG_FILE = os.path.join(LOG_DIR, f"test_frames_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
 

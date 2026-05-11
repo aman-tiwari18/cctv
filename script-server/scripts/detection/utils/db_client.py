@@ -449,6 +449,7 @@ def get_hls_cameras(exam_id: int, shift_id: int, exam_date: str) -> list:
           AND (shift_id = %s OR shift_id IS NULL)
           AND (exam_date = %s OR exam_date IS NULL)
           AND is_active = 1
+        ORDER BY id
     """
     params = [exam_id, shift_id, exam_date]
 
@@ -510,6 +511,7 @@ def get_hls_cameras_accessible(exam_id: int, shift_id: int, exam_date: str) -> l
           AND (exam_date = %s OR exam_date IS NULL)
           AND is_active = 1
           AND status = 'Accessible'
+        ORDER BY id
     """
     params = [exam_id, shift_id, exam_date]
 
@@ -630,6 +632,7 @@ def get_rtsp_cameras(exam_id: int) -> list:
         FROM camera_links_rtsp USE INDEX (idx_exam_active_rtsp)
         WHERE exam_id  = %s
           AND is_active = 1
+        ORDER BY id
     """
     try:
         conn = _get_connection()
@@ -676,6 +679,7 @@ def get_rtsp_cameras_accessible(exam_id: int) -> list:
         WHERE exam_id  = %s
           AND is_active = 1
           AND status = 'Accessible'
+        ORDER BY id
     """
     try:
         conn = _get_connection()
@@ -864,8 +868,9 @@ _RTSP_IMAGE_BASE_URL = os.environ.get(
     "http://examscctvmonitoring.com/cctv_dev/serve-rtsp-detection-images"
 )
 
-# Path to the shared log file (script-server/db_reports.log)
-_LOG_FILE = os.path.join(os.path.dirname(__file__), "../../db_reports.log")
+# Path to the shared DB report log (script-server/scripts/logs/db_reports.log)
+_LOG_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../logs/db_reports.log"))
+os.makedirs(os.path.dirname(_LOG_FILE), exist_ok=True)
 
 
 def _extract_unique_id_from_image_name(image_name: str) -> Optional[str]:
