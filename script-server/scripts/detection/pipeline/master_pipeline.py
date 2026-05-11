@@ -161,6 +161,8 @@ from utils.camera_loader import load_all_pending_cameras, load_cameras_for_execu
 QUEUE_SIZE     = 5
 STOP           = False
 MAX_CONCURRENT = 24  # FIXED: Reduced from 64 to 24 to prevent ffmpeg/system overload
+_ACTIVE_CHILD_PROCESSES = set()
+_ACTIVE_CHILD_LOCK = threading.Lock()
 
 DSS_USER = "system"
 # DSS_PASS = "Sasd@12345"
@@ -203,6 +205,57 @@ def _save_token_cache():
         logger.error(f"Failed to save token cache: {e}")
 
 
+def _register_child_process(proc):
+    if not proc:
+        return
+    with _ACTIVE_CHILD_LOCK:
+        _ACTIVE_CHILD_PROCESSES.add(proc)
+
+
+def _unregister_child_process(proc):
+    if not proc:
+        return
+    with _ACTIVE_CHILD_LOCK:
+        _ACTIVE_CHILD_PROCESSES.discard(proc)
+
+
+def _shutdown_child_processes(timeout=3):
+    with _ACTIVE_CHILD_LOCK:
+        processes = list(_ACTIVE_CHILD_PROCESSES)
+
+    if not processes:
+        return
+
+    logger.warning(f"Stopping {len(processes)} child process(es)...")
+
+    for proc in processes:
+        try:
+            if proc.is_alive():
+                logger.warning(f"Sending SIGTERM to child {proc.name} (pid={proc.pid})")
+                proc.terminate()
+        except Exception:
+            pass
+
+    deadline = time.time() + max(timeout, 0)
+    for proc in processes:
+        remaining = max(0, deadline - time.time())
+        try:
+            proc.join(timeout=remaining)
+        except Exception:
+            pass
+
+    for proc in processes:
+        try:
+            if proc.is_alive():
+                logger.warning(f"Sending SIGKILL to child {proc.name} (pid={proc.pid})")
+                proc.kill()
+                proc.join(timeout=1)
+        except Exception:
+            pass
+        finally:
+            _unregister_child_process(proc)
+
+
 # ================= GRACEFUL SHUTDOWN =================
 def handle_sigterm(sig, frame):
     global STOP
@@ -234,6 +287,8 @@ def handle_sigterm(sig, frame):
                 mod._STOP_EVENT.set()
         except Exception:
             pass
+
+    _shutdown_child_processes()
 
 signal.signal(signal.SIGTERM, handle_sigterm)
 signal.signal(signal.SIGINT,  handle_sigterm)
@@ -956,6 +1011,7 @@ def run_rtsp_pipeline(camera_group, max_concurrent=MAX_CONCURRENT):
             daemon=True
         )
         p.start()
+        _register_child_process(p)
         worker_processes.append(p)
         logger.info(f"Started shared worker for: {script} (pid={p.pid})")
 
@@ -1005,11 +1061,13 @@ def run_rtsp_pipeline(camera_group, max_concurrent=MAX_CONCURRENT):
                 daemon=True
             )
             proc.start()
+            _register_child_process(proc)
             active_producers.append(proc)
             
             # FIXED: Responsive join loop — checks STOP every second instead of blocking forever
             while proc.is_alive() and not STOP:
                 proc.join(timeout=1.0)
+            _unregister_child_process(proc)
 
     threads = []
     for label, configs in grouped.items():
@@ -1038,6 +1096,7 @@ def run_rtsp_pipeline(camera_group, max_concurrent=MAX_CONCURRENT):
                 logger.warning(f"Force terminating worker {p.name}")
                 p.terminate()
                 p.join(timeout=2)
+        _unregister_child_process(p)
 
 
 # ============================================================

@@ -13,6 +13,7 @@ Date: 2026-04-29
 
 import os
 import logging
+import zlib
 from typing import List, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -223,6 +224,36 @@ class CameraDistributor:
                 return camera_id
 
         return None
+
+    def _camera_partition_key(self, camera: Dict) -> Optional[int]:
+        """
+        Build a stable, evenly-distributed partition key for auto mode.
+
+        Using DB primary keys (`id`) can become badly skewed after downstream
+        filters like exam/status/classification. For camera sharding we prefer
+        the logical camera identity:
+        - HLS: `ch_code`
+        - RTSP: `device_id:camera_no`
+        and hash it deterministically.
+        """
+        ch_code = str(camera.get("ch_code") or "").strip()
+        if ch_code:
+            return zlib.crc32(ch_code.encode("utf-8")) & 0xFFFFFFFF
+
+        device_id = str(camera.get("device_id") or "").strip()
+        camera_no = str(camera.get("camera_no") or "").strip()
+        if device_id and camera_no:
+            return zlib.crc32(f"{device_id}:{camera_no}".encode("utf-8")) & 0xFFFFFFFF
+
+        camera_id = str(camera.get("camera_id") or "").strip()
+        if camera_id:
+            return zlib.crc32(camera_id.encode("utf-8")) & 0xFFFFFFFF
+
+        camera_id_pk = self._stable_camera_row_id(camera)
+        if camera_id_pk is not None:
+            return camera_id_pk
+
+        return None
     
     def filter_cameras(self, cameras: List[Dict]) -> List[Dict]:
         """
@@ -240,7 +271,7 @@ class CameraDistributor:
                 assigned = []
 
                 for cam in cameras:
-                    camera_id = self._stable_camera_row_id(cam)
+                    camera_id = self._camera_partition_key(cam)
 
                     if camera_id is None:
                         # Fall back to the mode-aware path for non-standard camera
