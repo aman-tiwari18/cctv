@@ -401,10 +401,10 @@ const ShiftScriptManager = ({
         >
             <DialogTitle sx={{ pb: 0.5, pt: 3, px: 3 }}>
                 <Typography variant="h5" fontWeight={800} color="#0f172a" gutterBottom>
-                    Add Detection Script
+                    Add Script
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                    Select a detection type and configure the monitoring window.
+                    Select a script type and configure the monitoring window.
                 </Typography>
             </DialogTitle>
 
@@ -504,7 +504,7 @@ const ShiftScriptManager = ({
                                                     pr: configured ? 3 : 0,
                                                 }}
                                             >
-                                                {script.name}
+                                                {script.name.replace(/\bDetection\b/gi, '').trim()}
                                             </Typography>
                                         </Box>
 

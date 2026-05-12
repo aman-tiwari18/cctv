@@ -86,7 +86,7 @@ const Exams = () => {
       const response = await examsAPI.getAll({ is_active: true });
       const examsList = response.data.data;
       setExams(examsList);
-      
+
       // Fetch counts for each exam
       const countsPromises = examsList.map(async (exam) => {
         try {
@@ -105,7 +105,7 @@ const Exams = () => {
             const scriptCounts = await Promise.all(scriptCountPromises);
             totalScripts = scriptCounts.reduce((sum, count) => sum + count, 0);
           }
-          
+
           // Fetch detection count
           let detectionCount = 0;
           try {
@@ -114,7 +114,7 @@ const Exams = () => {
           } catch (err) {
             console.error(`Error fetching detections for exam ${exam.id}:`, err);
           }
-          
+
           return {
             examId: exam.id,
             scriptCount: totalScripts,
@@ -129,7 +129,7 @@ const Exams = () => {
           };
         }
       });
-      
+
       const counts = await Promise.all(countsPromises);
       const countsMap = counts.reduce((acc, item) => {
         acc[item.examId] = {
@@ -138,7 +138,7 @@ const Exams = () => {
         };
         return acc;
       }, {});
-      
+
       setExamCounts(countsMap);
     } catch (error) {
       console.error('Error loading exams:', error);
@@ -221,7 +221,7 @@ const Exams = () => {
       const skipDate = new Date(parsedDate);
       const startDate = parseDDMMYYYYToDate(formData.start_date);
       const endDate = parseDDMMYYYYToDate(formData.end_date);
-      
+
       if (skipDate < startDate || skipDate > endDate) {
         setError('Skip date must be within the exam date range');
         return;
@@ -247,7 +247,7 @@ const Exams = () => {
   const handleShiftChange = (index, field, value) => {
     const newShifts = [...formData.shifts];
     newShifts[index] = { ...newShifts[index], [field]: value };
-    
+
     // Real-time validation for shift times
     if (field === 'start_time' || field === 'end_time') {
       const shift = newShifts[index];
@@ -257,7 +257,7 @@ const Exams = () => {
         setError('');
       }
     }
-    
+
     setFormData({ ...formData, shifts: newShifts });
   };
 
@@ -471,7 +471,7 @@ const Exams = () => {
           const dateInfo = getExamDateInfo(exam);
           const isHLS = exam.link_type === 'HLS';
           const isActive = exam.is_active !== false;
-          
+
           // Check if exam is currently live
           const now = new Date();
           const examStart = exam.start_date ? new Date(exam.start_date) : null;
@@ -601,43 +601,43 @@ const Exams = () => {
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                     <Box
                       onClick={() => navigate(`/cameras?exam=${exam.id}`)}
-                      sx={{ display: 'flex', alignItems: 'center', gap: 0.8, cursor: 'pointer', '&:hover': { opacity: 0.75,  color : '#3c81f6'} }}
+                      sx={{ display: 'flex', alignItems: 'center', gap: 0.8, cursor: 'pointer', '&:hover': { opacity: 0.75, color: '#3c81f6' } }}
                     >
                       <CameraAltIcon sx={{ fontSize: 20, color: '#8b929cff' }} />
-                      <Typography sx={{ fontSize: '0.8rem', fontWeight: 500, color: '#475569','&:hover': {   color : '#3c81f6'} }}>
-                       {String(exam.camera_count || 0).padStart(2, '0')}
+                      <Typography sx={{ fontSize: '0.8rem', fontWeight: 500, color: '#475569', '&:hover': { color: '#3c81f6' } }}>
+                        {String(exam.camera_count || 0).padStart(2, '0')}
                       </Typography>
                     </Box>
                     <Box
                       onClick={() => navigate(`/shifts?exam=${exam.id}`)}
-                      sx={{ display: 'flex', alignItems: 'center', gap: 0.8, cursor: 'pointer', '&:hover': { opacity: 0.75, color : '#3c81f6' } }}
+                      sx={{ display: 'flex', alignItems: 'center', gap: 0.8, cursor: 'pointer', '&:hover': { opacity: 0.75, color: '#3c81f6' } }}
                     >
-                       <ShiftSvgIcon sx={{ fontSize: 20, color: '#8b929cff' }} />
+                      <ShiftSvgIcon sx={{ fontSize: 20, color: '#8b929cff' }} />
 
-                      <Typography sx={{ fontSize: '0.8rem', fontWeight: 600, color: '#333' ,'&:hover': {   color : '#3c81f6'} }}>
+                      <Typography sx={{ fontSize: '0.8rem', fontWeight: 600, color: '#333', '&:hover': { color: '#3c81f6' } }}>
                         {String(exam.examShifts?.length || 0).padStart(2, '0')}
                       </Typography>
                     </Box>
                     <Box
                       onClick={() => navigate(`/analytics?exam=${exam.id}`)}
-                      sx={{ display: 'flex', alignItems: 'center', gap: 0.8, cursor: 'pointer', '&:hover': { opacity: 0.75, color : '#3c81f6' } }}
+                      sx={{ display: 'flex', alignItems: 'center', gap: 0.8, cursor: 'pointer', '&:hover': { opacity: 0.75, color: '#3c81f6' } }}
                     >
                       <Analytics sx={{ fontSize: 20, color: '#8b929cff' }} />
 
 
-                      <Typography sx={{ fontSize: '0.8rem', fontWeight: 600, color: '#333' ,'&:hover': {   color : '#3c81f6'} }}>
-                     {String(examCounts[exam.id]?.scripts || 0).padStart(2, '0')}
+                      <Typography sx={{ fontSize: '0.8rem', fontWeight: 600, color: '#333', '&:hover': { color: '#3c81f6' } }}>
+                        {String(examCounts[exam.id]?.scripts || 0).padStart(2, '0')}
                       </Typography>
                     </Box>
                     <Box
                       onClick={() => navigate(`/detections?exam_id=${exam.id}`)}
-                      sx={{ display: 'flex', alignItems: 'center', gap: 0.8, cursor: 'pointer', '&:hover': { opacity: 0.75, color : '#3c81f6' } }}
+                      sx={{ display: 'flex', alignItems: 'center', gap: 0.8, cursor: 'pointer', '&:hover': { opacity: 0.75, color: '#3c81f6' } }}
                     >
                       <ReportProblemIcon sx={{ fontSize: 20, color: '#8b929cff' }} />
 
 
-                      <Typography sx={{ fontSize: '0.8rem', fontWeight: 600, color: '#333' ,'&:hover': {   color : '#3c81f6'} }}>
-                     {String(examCounts[exam.id]?.detections || 0).padStart(2, '0')}
+                      <Typography sx={{ fontSize: '0.8rem', fontWeight: 600, color: '#333', '&:hover': { color: '#3c81f6' } }}>
+                        {String(examCounts[exam.id]?.detections || 0).padStart(2, '0')}
                       </Typography>
                     </Box>
                   </Box>
@@ -778,7 +778,7 @@ const Exams = () => {
                       const val = e.target.value;
                       const newStartDate = val ? val.split('-').reverse().join('-') : '';
                       setFormData({ ...formData, start_date: newStartDate });
-                      
+
                       // Clear error if dates are now valid
                       if (newStartDate && formData.end_date) {
                         const start = parseDDMMYYYYToDate(newStartDate);
@@ -794,6 +794,8 @@ const Exams = () => {
                         color: 'transparent',
                         paddingRight: '6px',
                         '& fieldset': { border: 'none' },
+                        '& input': { color: 'transparent', caretColor: 'transparent' },
+                        '& input::-webkit-datetime-edit': { opacity: 0 },
                         '&::-webkit-calendar-picker-indicator': { cursor: 'pointer', opacity: 0.6, '&:hover': { opacity: 1 } }
                       }
                     }}
@@ -824,7 +826,7 @@ const Exams = () => {
                       const val = e.target.value;
                       const newEndDate = val ? val.split('-').reverse().join('-') : '';
                       setFormData({ ...formData, end_date: newEndDate });
-                      
+
                       // Clear error if dates are now valid
                       if (formData.start_date && newEndDate) {
                         const start = parseDDMMYYYYToDate(formData.start_date);
@@ -843,6 +845,8 @@ const Exams = () => {
                         color: 'transparent',
                         paddingRight: '6px',
                         '& fieldset': { border: 'none' },
+                        '& input': { color: 'transparent', caretColor: 'transparent' },
+                        '& input::-webkit-datetime-edit': { opacity: 0 },
                         '&::-webkit-calendar-picker-indicator': { cursor: 'pointer', opacity: 0.6, '&:hover': { opacity: 1 } }
                       }
                     }}
@@ -924,6 +928,8 @@ const Exams = () => {
                       color: 'transparent',
                       paddingRight: '6px',
                       '& fieldset': { border: 'none' },
+                      '& input': { color: 'transparent', caretColor: 'transparent' },
+                      '& input::-webkit-datetime-edit': { opacity: 0 },
                       '&::-webkit-calendar-picker-indicator': { cursor: 'pointer', opacity: 0.6, '&:hover': { opacity: 1 } }
                     }
                   }}
