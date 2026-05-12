@@ -619,22 +619,19 @@ const Dashboard = () => {
             }}
           >
             <Typography
-              variant="subtitle1"
+              variant="h6"
               sx={{
                 fontWeight: 700,
-                letterSpacing: '0.04em',
                 color: '#0f172a',
-                textTransform: 'uppercase',
-                fontSize: '0.85rem',
               }}
             >
               Execution Details
             </Typography>
-            <Typography variant="caption" sx={{ color: '#94a3b8', mb: 3 }}>
+            <Typography sx={{ color: '#64748b', mb: 3, fontSize: '0.85rem' }}>
               Live cycle monitoring
             </Typography>
 
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 7, mt: 1 }}>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 4, mt: 1 }}>
               {EXECUTION_DETAIL_ITEMS.map((item) => (
                 <Box key={item.key} sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                   <Box
@@ -652,17 +649,14 @@ const Dashboard = () => {
                     {item.icon}
                   </Box>
                   <Box>
-                    <Typography variant="h5" fontWeight={700} sx={{ color: '#0f172a', lineHeight: 1.2 }}>
+                    <Typography sx={{ color: '#0f172a', lineHeight: 1.2, fontWeight: 700, fontSize: '1.5rem' }}>
                       {loading ? <CircularProgress size={20} /> : (stats.executions?.[item.key] || 0)}
                     </Typography>
                     <Typography
-                      variant="caption"
                       sx={{
                         fontWeight: 600,
-                        letterSpacing: '0.05em',
-                        color: item.bgColor,
-                        textTransform: 'uppercase',
-                        fontSize: '0.65rem',
+                        color: '#64748b',
+                        fontSize: '0.85rem',
                       }}
                     >
                       {item.label}

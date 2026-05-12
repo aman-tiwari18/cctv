@@ -46,6 +46,41 @@ const formatDateDDMMYYYY = (dateStr) => {
 
 const truncate = (str, n = 40) => str && str.length > n ? str.slice(0, n) + '…' : str;
 
+const getStatusChipProps = (status) => {
+  const normalized = String(status || '').trim().toLowerCase();
+
+  if (normalized === 'accessible' || normalized === 'online') {
+    return {
+      label: 'Accessible',
+      sx: {
+        bgcolor: '#eaf3ff',
+        color: '#2563eb',
+        border: '1px solid #bfdbfe',
+      },
+    };
+  }
+
+  if (normalized === 'not accessible' || normalized === 'inaccessible' || normalized === 'offline') {
+    return {
+      label: 'Not Accessible',
+      sx: {
+        bgcolor: '#f8fafc',
+        color: '#64748b',
+        border: '1px solid #cbd5e1',
+      },
+    };
+  }
+
+  return {
+    label: status || 'Unknown',
+    sx: {
+      bgcolor: '#f9fafb',
+      color: '#6b7280',
+      border: '1px solid #e5e7eb',
+    },
+  };
+};
+
 const parseDDMMYYYYToISO = (value) => {
   if (!value) return '';
   const match = /^([0-3]\d)-([0-1]\d)-(\d{4})$/.exec(value);
@@ -307,7 +342,7 @@ const ClientCameras = () => {
                       <TableRow>
                         {isHLS ? (
                           <>
-                            {['centre_name', 'tc_code', 'state', 'camera_name', 'ch_code', 'camera_category', 'classification', 'exam_date', 'shift_name'].map((col) => (
+                            {['centre_name', 'tc_code', 'state', 'camera_name', 'ch_code', 'camera_category', 'classification', 'status', 'exam_date', 'shift_name'].map((col) => (
                               <TableCell key={col} sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b' }}>
                                 <TableSortLabel active={camOrderBy === col} direction={camOrderBy === col ? camOrder : 'asc'} onClick={() => handleCamSort(col)}>
                                   {col.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
@@ -317,7 +352,7 @@ const ClientCameras = () => {
                           </>
                         ) : (
                           <>
-                            {['device_id', 'camera_no', 'tc_code', 'camera_name', 'centre_name', 'state', 'classification'].map((col) => (
+                            {['device_id', 'camera_no', 'tc_code', 'camera_name', 'centre_name', 'state', 'classification', 'status'].map((col) => (
                               <TableCell key={col} sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b' }}>
                                 <TableSortLabel active={camOrderBy === col} direction={camOrderBy === col ? camOrder : 'asc'} onClick={() => handleCamSort(col)}>
                                   {col.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
@@ -341,6 +376,13 @@ const ClientCameras = () => {
                               <TableCell>{cam.ch_code ? <Chip label={cam.ch_code} size="small" variant="outlined" /> : '-'}</TableCell>
                               <TableCell><Chip label={cam.camera_category || 'N/A'} size="small" /></TableCell>
                               <TableCell sx={{ fontSize: '0.85rem' }}>{cam.classification || '-'}</TableCell>
+                              <TableCell>
+                                <Chip
+                                  size="small"
+                                  {...getStatusChipProps(cam.status)}
+                                  sx={{ fontWeight: 600, fontSize: '0.72rem', ...getStatusChipProps(cam.status).sx }}
+                                />
+                              </TableCell>
                               <TableCell sx={{ fontSize: '0.85rem' }}>{formatDateDDMMYYYY(cam.exam_date) || '-'}</TableCell>
                               <TableCell sx={{ fontSize: '0.85rem' }}>
                                 {cam.shift_id ? (camShifts.find(s => s.id === cam.shift_id)?.shift_name || `#${cam.shift_id}`) : <Chip label="All shifts" size="small" variant="outlined" />}
@@ -355,6 +397,13 @@ const ClientCameras = () => {
                               <TableCell sx={{ fontSize: '0.85rem' }}>{cam.centre_name || cam.tc_name || '-'}</TableCell>
                               <TableCell sx={{ fontSize: '0.85rem' }}>{cam.state || '-'}</TableCell>
                               <TableCell sx={{ fontSize: '0.85rem' }}>{cam.classification || '-'}</TableCell>
+                              <TableCell>
+                                <Chip
+                                  size="small"
+                                  {...getStatusChipProps(cam.status)}
+                                  sx={{ fontWeight: 600, fontSize: '0.72rem', ...getStatusChipProps(cam.status).sx }}
+                                />
+                              </TableCell>
                             </>
                           )}
                           <TableCell sx={{ maxWidth: 200 }}>

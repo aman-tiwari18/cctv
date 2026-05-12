@@ -51,6 +51,41 @@ const parseDDMMYYYYToDate = (value) => {
   return new Date(yyyy, mm - 1, dd);
 };
 
+const getStatusChipProps = (status) => {
+  const normalized = String(status || '').trim().toLowerCase();
+
+  if (normalized === 'accessible' || normalized === 'online') {
+    return {
+      label: 'Accessible',
+      sx: {
+        bgcolor: '#eaf3ff',
+        color: '#2563eb',
+        border: '1px solid #bfdbfe',
+      },
+    };
+  }
+
+  if (normalized === 'not accessible' || normalized === 'inaccessible' || normalized === 'offline') {
+    return {
+      label: 'Not Accessible',
+      sx: {
+        bgcolor: '#f8fafc',
+        color: '#64748b',
+        border: '1px solid #cbd5e1',
+      },
+    };
+  }
+
+  return {
+    label: status || 'Unknown',
+    sx: {
+      bgcolor: '#f9fafb',
+      color: '#6b7280',
+      border: '1px solid #e5e7eb',
+    },
+  };
+};
+
 const HLS_EMPTY = {
   centre_name: '', tc_code: '', city: '', state: '',
   camera_name: '', ch_code: '', cctv_url: '', camera_category: '',
@@ -736,6 +771,15 @@ const Cameras = () => {
                                   Classification
                                 </TableSortLabel>
                               </TableCell>
+                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 130 }}>
+                                <TableSortLabel
+                                  active={orderBy === 'status'}
+                                  direction={orderBy === 'status' ? order : 'asc'}
+                                  onClick={() => handleRequestSort('status')}
+                                >
+                                  Status
+                                </TableSortLabel>
+                              </TableCell>
                               <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 110 }}>
                                 <TableSortLabel
                                   active={orderBy === 'exam_date'}
@@ -820,6 +864,15 @@ const Cameras = () => {
                                   Classification
                                 </TableSortLabel>
                               </TableCell>
+                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 130 }}>
+                                <TableSortLabel
+                                  active={orderBy === 'status'}
+                                  direction={orderBy === 'status' ? order : 'asc'}
+                                  onClick={() => handleRequestSort('status')}
+                                >
+                                  Status
+                                </TableSortLabel>
+                              </TableCell>
                             </>
                           )}
                           <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 250 }}>CCTV URL</TableCell>
@@ -841,6 +894,13 @@ const Cameras = () => {
                                   <Chip label={cam.camera_category || 'N/A'} size="small" />
                                 </TableCell>
                                 <TableCell sx={{ fontSize: '0.85rem' }}>{cam.classification || '-'}</TableCell>
+                                <TableCell>
+                                  <Chip
+                                    size="small"
+                                    {...getStatusChipProps(cam.status)}
+                                    sx={{ fontWeight: 600, fontSize: '0.72rem', ...getStatusChipProps(cam.status).sx }}
+                                  />
+                                </TableCell>
                                 <TableCell sx={{ fontSize: '0.85rem' }}>{formatDateDDMMYYYY(cam.exam_date) || '-'}</TableCell>
                                 <TableCell sx={{ fontSize: '0.85rem' }}>
                                   {cam.shift_id
@@ -857,6 +917,13 @@ const Cameras = () => {
                                 <TableCell sx={{ fontSize: '0.85rem' }}>{cam.centre_name || cam.tc_name || '-'}</TableCell>
                                 <TableCell sx={{ fontSize: '0.85rem' }}>{cam.state || '-'}</TableCell>
                                 <TableCell sx={{ fontSize: '0.85rem' }}>{cam.classification || '-'}</TableCell>
+                                <TableCell>
+                                  <Chip
+                                    size="small"
+                                    {...getStatusChipProps(cam.status)}
+                                    sx={{ fontWeight: 600, fontSize: '0.72rem', ...getStatusChipProps(cam.status).sx }}
+                                  />
+                                </TableCell>
                               </>
                             )}
                             <TableCell sx={{ maxWidth: 250 }}>
