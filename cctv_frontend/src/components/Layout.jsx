@@ -99,7 +99,6 @@ const menuItems = [
   { text: 'Shifts', icon: <ShiftSvgIcon />, path: '/shifts' },
   { text: 'Schedule Analysis', icon: <Analytics />, path: '/analytics' },
   { text: 'Executions', icon: <Slideshow />, path: '/executions' },
-  { text: 'GPU Monitor', icon: <Memory />, path: '/gpu-monitor' },
   { text: 'Detections', icon: <CustomSvgIcon />, path: '/detections', hasSubItems: true },
   { text: 'Client Detections', icon: <Visibility />, path: '/client-detections', hasSubItems: true },
   { text: 'Client Dashboard', icon: <Dashboard />, path: '/client-dashboard' },
@@ -194,8 +193,13 @@ function DetectionSubItems({ counts, typeFilter, onTypeSelect }) {
   );
 }
 
+const adminFooterItems = [
+  { text: 'GPU Monitor', icon: <Memory />, path: '/gpu-monitor' },
+  { text: 'User Verification', icon: <VerifiedUser />, path: '/user-verification' },
+];
+
 /* ── Sidebar Content ── */
-function SidebarContent({ items, currentPath, onNavigate }) {
+function SidebarContent({ items, currentPath, onNavigate, user }) {
   const { unfilteredCounts, typeFilter, setTypeFilter, } = useDetectionCounts();
   const [detectionsOpen, setDetectionsOpen] = useState(false);
 
@@ -204,6 +208,8 @@ function SidebarContent({ items, currentPath, onNavigate }) {
   useEffect(() => {
     if (isDetectionPage) setDetectionsOpen(true);
   }, [isDetectionPage]);
+
+  const footerItems = user?.role === 'ADMIN' ? adminFooterItems : [];
 
   return (
     <Box
@@ -306,6 +312,53 @@ function SidebarContent({ items, currentPath, onNavigate }) {
           );
         })}
       </List>
+
+      {footerItems.length > 0 && (
+        <>
+          <Divider sx={{ borderColor: sidebarPalette.border }} />
+          <List sx={{ py: 1, flexShrink: 0 }}>
+            {footerItems.map((item) => {
+              const isActive = currentPath === item.path;
+              return (
+                <ListItem key={item.text} disablePadding sx={{ px: 1, py: 0.3 }}>
+                  <ListItemButton
+                    selected={isActive}
+                    onClick={() => onNavigate(item.path)}
+                    sx={{
+                      minHeight: 44,
+                      px: 1.5,
+                      borderRadius: 1.5,
+                      '& .MuiListItemIcon-root': {
+                        minWidth: 36,
+                        mr: 1.5,
+                        color: isActive ? sidebarPalette.itemActiveText : sidebarPalette.itemIcon,
+                      },
+                      '&.Mui-selected': {
+                        backgroundColor: sidebarPalette.itemActiveBg,
+                        '&:hover': { backgroundColor: sidebarPalette.itemActiveBg },
+                      },
+                      '&:hover': {
+                        backgroundColor: isActive ? sidebarPalette.itemActiveBg : sidebarPalette.itemHoverBg,
+                      },
+                    }}
+                  >
+                    <ListItemIcon>{item.icon}</ListItemIcon>
+                    <ListItemText
+                      primary={item.text}
+                      primaryTypographyProps={{
+                        fontSize: '0.875rem',
+                        fontWeight: isActive ? 600 : 500,
+                        color: isActive ? sidebarPalette.itemActiveText : sidebarPalette.itemText,
+                        whiteSpace: 'nowrap',
+                      }}
+                    />
+                  </ListItemButton>
+                </ListItem>
+              );
+            })}
+          </List>
+        </>
+      )}
     </Box>
   );
 }
@@ -360,8 +413,8 @@ function LayoutInner() {
       ? operatorMenuItems
       : menuItems.filter(item => item.text !== 'Client Detections' && item.text !== 'Client Dashboard');
 
-  // Allow certain paths that are not in menu (like user-verification)
-  const allowedPaths = ['/user-verification'];
+  // Allow certain paths that are not in the main menu (footer items)
+  const allowedPaths = ['/user-verification', '/gpu-monitor'];
 
   useEffect(() => {
     const isAllowedPath = allowedPaths.includes(location.pathname);
@@ -386,9 +439,10 @@ function LayoutInner() {
     navigate('/login');
   };
 
-  const currentPageTitle = location.pathname === '/user-verification'
-    ? 'User Verification'
-    : (filteredMenuItems.find((item) => item.path === location.pathname)?.text || '');
+  const currentPageTitle =
+    adminFooterItems.find((item) => item.path === location.pathname)?.text ||
+    filteredMenuItems.find((item) => item.path === location.pathname)?.text ||
+    '';
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh' }}>
@@ -538,15 +592,6 @@ function LayoutInner() {
           </Box>
         </MenuItem>
         <Divider />
-        {user?.role === 'ADMIN' && (
-          <>
-            <MenuItem onClick={() => { navigate('/user-verification'); setAnchorEl(null); }}>
-              <VerifiedUser sx={{ mr: 1, fontSize: 18, color: '#3b82f6' }} />
-              Verify Users
-            </MenuItem>
-            <Divider />
-          </>
-        )}
         <MenuItem onClick={handleLogout} sx={{ color: '#ef4444' }}>
           <Logout sx={{ mr: 1, fontSize: 18 }} />
           Logout
@@ -568,6 +613,7 @@ function LayoutInner() {
             items={filteredMenuItems}
             currentPath={location.pathname}
             onNavigate={handleNavigate}
+            user={user}
           />
         </Drawer>
 
@@ -586,6 +632,7 @@ function LayoutInner() {
             items={filteredMenuItems}
             currentPath={location.pathname}
             onNavigate={handleNavigate}
+            user={user}
           />
         </Drawer>
       </Box>
