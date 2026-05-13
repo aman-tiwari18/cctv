@@ -1,0 +1,85 @@
+# ============================================================
+# Development Server Docker Compose - script-server only
+# ============================================================
+# Dockerises ONLY the script-server on a development VM where MySQL,
+# the Node backend, and Ollama (if used) run NATIVELY on the host —
+# not in containers.
+#
+# Network mode = host:
+#   The container shares the VM's network stack. This means:
+#   - DB_HOST=localhost / 127.0.0.1 in .env reaches the host's MySQL
+#     with no extra config (no port mapping, no host.docker.internal).
+#   - MAIN_BACKEND_URL=http://localhost:3000/... reaches the host's
+#     Node backend the same way.
+#   - The container's HTTP_PORT (default 8000) is exposed directly on
+#     the host — port 8000 must be free before `docker-compose up`.
+#
+# Volumes:
+#   - Detection results bind-mounted to ./scripts/detection/results so
+#     other host processes (Node backend serving images) see them too.
+#   - Models / logs / data / frames persisted on the host so they
+#     survive container rebuilds.
+#
+# Prerequisites on the host:
+#   - Docker + nvidia-container-toolkit configured (nvidia runtime
+#     listed in `docker info`).
+#   - GPU visible: `nvidia-smi` works on host AND inside a container.
+#   - MySQL running on the host, credentials match what's in .env.
+#   - Port 8000 free (no PM2 script-server / nothing else binding it).
+#
+# Usage:
+#   docker-compose up -d --build
+#   docker-compose logs -f script-server
+# ============================================================
+
+version: '3.8'
+
+services:
+  script-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cctv/script-server:dev
+    container_name: cctv_script_server
+    restart: unless-stopped
+    shm_size: '8gb'                # large shared memory for PyTorch / GPU ops
+    network_mode: host             # see header — reaches host's MySQL / backend
+    env_file:
+      - .env
+    environment:
+      PYTHONUNBUFFERED: '1'
+      TZ: Asia/Kolkata
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: 'compute,utility,video'
+    runtime: nvidia                # v1-compose-compatible GPU access
+    volumes:
+      # Host timezone sync — container time matches host time
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+
+      # Detection images — Node backend (running natively on host) reads
+      # these from the same path, so they MUST be a host bind-mount.
+      - ./scripts/detection/results:/app/scripts/detection/results
+
+      # All log output (script_runner + vLLM) goes here
+      - ./scripts/logs:/app/scripts/logs
+
+      # Heavy model weights (YOLO already inside scripts/, vLLM HF cache
+      # downloaded into ./models/hf_cache on first run of start_vllm.sh)
+      - ./models:/app/models
+
+      # Excel sheets / lookup data
+      - ./data:/app/data
+
+      # Captured frame snapshots
+      - ./frames:/app/frames
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+        limits:
+          memory: 32g              # H200 has 141 GB VRAM but limit system RAM
