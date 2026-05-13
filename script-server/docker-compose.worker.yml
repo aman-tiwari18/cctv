@@ -28,64 +28,70 @@ services:
     ports:
       - "${WORKER_HTTP_PORT:-8000}:8000"
     environment:
+      # Timezone configuration
+      TZ: Asia/Kolkata
+
       # Database connection to main server
       DB_HOST: ${DB_HOST:-192.168.19.30}
       DB_PORT: ${DB_PORT:-3306}
       DB_USER: ${DB_USER:-root}
       DB_PASSWORD: ${DB_PASSWORD:-rootpassword123}
       DB_NAME: ${DB_NAME:-cctv_monitoring}
-      
+
       # Worker identification
       WORKER_ID: ${WORKER_ID:-worker-1}
       WORKER_NAME: ${WORKER_NAME:-GPU Worker 1}
       DISTRIBUTION_MODE: ${DISTRIBUTION_MODE:-auto}
       TOTAL_WORKERS: ${TOTAL_WORKERS:-4}
-      
+
       # Camera assignment range (only used when DISTRIBUTION_MODE=static/range)
       CAMERA_START_ID: ${CAMERA_START_ID:-1}
       CAMERA_END_ID: ${CAMERA_END_ID:-5000}
-      
+
       # Exam configuration
       EXAM_ID: ${EXAM_ID:-19}
       SHIFT_ID: ${SHIFT_ID}
-      
+
       # Python configuration
       PYTHONUNBUFFERED: 1
       HTTP_PORT: 8000
-      TZ: Asia/Kolkata
-      
+
       # H200 GPU Optimization
       CUDA_VISIBLE_DEVICES: 0
       PYTORCH_CUDA_ALLOC_CONF: max_split_size_mb:512
       TORCH_CUDNN_V8_API_ENABLED: 1
       NVIDIA_TF32_OVERRIDE: 1
-      
+
       # Backend API connection
       MAIN_BACKEND_URL: ${MAIN_BACKEND_URL:-http://192.168.19.30:3000/cctv_analytics/api}
       API_KEY: ${API_KEY:-your_script_server_api_key}
-      
+
       # Polling configuration
       POLL_INTERVAL_MS: ${POLL_INTERVAL_MS:-30000}
       LOOKAHEAD_MINUTES: ${LOOKAHEAD_MINUTES:-3}
       GRACE_MINUTES: ${GRACE_MINUTES:-30}
-      
+
       # NFS image storage path
       NFS_MOUNT_PATH: /mnt/nfs/cctv_images
       DETECTION_IMAGE_BASE_URL: ${DETECTION_IMAGE_BASE_URL:-http://192.168.19.30:3000/cctv_dev/serve-detection-images}
       DETECTION_RTSP_IMAGE_BASE_URL: ${DETECTION_RTSP_IMAGE_BASE_URL:-http://192.168.19.30:3000/cctv_dev/serve-rtsp-detection-images}
-      
+
     volumes:
+      # Timezone synchronization with host
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+
       # NFS mount for shared image storage (detection scripts save to scripts/detection/results/)
       - /mnt/nfs/cctv_images:/app/scripts/detection/results
-      
+
       # Local volumes for models and logs
       - ./models:/app/models
-      - ./logs:/app/logs
+      - ./scripts/logs:/app/scripts/logs  # All logs (script_runner + vLLM) go here
       - ./data:/app/data
-      
+
     networks:
       - cctv_worker_network
-      
+
     deploy:
       resources:
         reservations:
@@ -95,7 +101,7 @@ services:
               capabilities: [gpu]
         limits:
           memory: 32g  # RAM limit (H200 has 141GB VRAM, but limit system RAM)
-          
+
     healthcheck:
       test: ["CMD", "nvidia-smi"]
       interval: 30s
