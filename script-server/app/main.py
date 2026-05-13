@@ -38,6 +38,9 @@ from scripts.detection.backend.pipeline_manager import (
 
 DETECTION_SCAN_INTERVAL_SECONDS = 2
 known_detection_files = {}
+# Secondary index: type_key → date_str → Set[tagged_path]
+# Allows O(k) date-filtered lookups instead of O(N) full scans.
+known_detection_by_date: dict = {}
 
 # ==========================================
 # GPU Monitoring Configuration
@@ -221,6 +224,7 @@ def _extract_ch_no(camera_id: str) -> str:
     return m.group(1) if m else ""
 
 
+@lru_cache(maxsize=65536)
 def _basic_detection_meta(filename: str) -> dict:
     """Extract cheap filter fields from filename without DB metadata lookups."""
     stem = Path(filename).stem
@@ -310,6 +314,23 @@ def list_detection_files() -> dict:
     return snapshot
 
 
+def _build_date_index(snapshot: dict) -> dict:
+    """Build a type_key → date_str → set[tagged_path] index from a snapshot."""
+    by_date: dict = {}
+    for type_key, tagged_paths in snapshot.items():
+        date_map: dict = {}
+        for tagged_path in tagged_paths:
+            try:
+                _, relative_path = tagged_path.split(":", 1)
+            except ValueError:
+                continue
+            d = _basic_detection_meta(relative_path).get("date")
+            if d:
+                date_map.setdefault(d, set()).add(tagged_path)
+        by_date[type_key] = date_map
+    return by_date
+
+
 def _tagged_detection_matches(tagged_path: str, date: Optional[str] = None) -> bool:
     """Return whether a tagged detection path matches a cheap date filter."""
     try:
@@ -320,7 +341,7 @@ def _tagged_detection_matches(tagged_path: str, date: Optional[str] = None) -> b
 
 
 async def detection_watch_loop():
-    global known_detection_files
+    global known_detection_files, known_detection_by_date
 
     while True:
         await asyncio.sleep(DETECTION_SCAN_INTERVAL_SECONDS)
@@ -329,7 +350,31 @@ async def detection_watch_loop():
 
             for type_key, current_files in current_snapshot.items():
                 previous_files = known_detection_files.get(type_key, set())
-                new_files = sorted(current_files - previous_files)
+                new_files = current_files - previous_files
+                removed_files = previous_files - current_files
+
+                # Incrementally maintain the date index for added/removed files.
+                if type_key not in known_detection_by_date:
+                    known_detection_by_date[type_key] = {}
+                date_map = known_detection_by_date[type_key]
+
+                for tagged_path in new_files:
+                    try:
+                        _, relative_path = tagged_path.split(":", 1)
+                    except ValueError:
+                        continue
+                    d = _basic_detection_meta(relative_path).get("date")
+                    if d:
+                        date_map.setdefault(d, set()).add(tagged_path)
+
+                for tagged_path in removed_files:
+                    try:
+                        _, relative_path = tagged_path.split(":", 1)
+                    except ValueError:
+                        continue
+                    d = _basic_detection_meta(relative_path).get("date")
+                    if d and d in date_map:
+                        date_map[d].discard(tagged_path)
 
                 if new_files:
                     def _new_file_mtime(tagged_path: str) -> float:
@@ -343,7 +388,6 @@ async def detection_watch_loop():
                     emitted = 0
                     for tagged_path in sorted(new_files, key=_new_file_mtime):
                         try:
-                            # tagged_path is "hls:relative" or "rtsp:relative"
                             origin, relative_path = tagged_path.split(":", 1)
                             base_dir = RTSP_RESULTS_DIR if origin == "rtsp" else RESULTS_DIR
                             file_path = base_dir / DETECTION_FOLDERS[type_key] / relative_path
@@ -351,7 +395,6 @@ async def detection_watch_loop():
                                 relative_path, type_key, file_path,
                                 is_new_image=True, source=origin,
                             )
-
                             await sio.emit("detection:new", payload)
                             emitted += 1
                         except Exception as exc:
@@ -359,14 +402,11 @@ async def detection_watch_loop():
 
                     logger.info(f"Live detections emitted: {type_key} count={emitted} new_files={len(new_files)}")
 
-            # Always emit updated counts for today's dashboard/sidebar total.
-            # The REST /detections endpoint can still return historical counts
-            # when a date filter is provided; this live snapshot is intentionally
-            # scoped to today so Layout.jsx does not show all-time totals.
+            # O(1) today count via date index — no more O(N) iteration every 2 s.
             today_iso = datetime.now().date().isoformat()
             counts = {
-                k: sum(1 for tagged_path in v if _tagged_detection_matches(tagged_path, today_iso))
-                for k, v in current_snapshot.items()
+                k: len(known_detection_by_date.get(k, {}).get(today_iso, set()))
+                for k in current_snapshot
             }
             await sio.emit("detection:counts", counts)
 
@@ -394,8 +434,9 @@ async def lifespan(app: FastAPI):
     # Start poller
     await poller_service.start()
 
-    global known_detection_files
+    global known_detection_files, known_detection_by_date
     known_detection_files = list_detection_files()
+    known_detection_by_date = _build_date_index(known_detection_files)
     
     # Background log cleanup task
     async def cleanup_loop():
@@ -1050,94 +1091,123 @@ def list_detections(
     page: int = 1,
     limit: int = 50,
 ):
-    rows = []
-    candidates = []
-    counts = {k: 0 for k in DETECTION_FOLDERS}
-    needs_full_scan_parse = bool(search)
-    
-    # Handle comma-separated type query
-    selected_types = type.split(',') if type else []
-    folders = {k: v for k, v in DETECTION_FOLDERS.items() if k in selected_types} if selected_types else DETECTION_FOLDERS
+    selected_types = set(type.split(',')) if type else set()
+    check_types = selected_types if selected_types else set(DETECTION_FOLDERS.keys())
+    needs_search = bool(search)
+    has_extra_filters = bool(exam_id or start_time or end_time)
 
-    def _scan_dir(base_dir: Path, origin: str):
-        for type_key, folder_name in folders.items():
-            folder = base_dir / folder_name
-            if not folder.exists():
+    # Take stable references to avoid races with the background watcher.
+    snapshot = known_detection_files
+    date_index = known_detection_by_date
+
+    # Single pass: compute counts for ALL types (for the sidebar / header pill)
+    # AND build the candidate list for the requested type(s) only.
+    # When a date filter is provided and the index is populated we iterate only
+    # the O(k) bucket for that date instead of the full O(N) snapshot.
+    all_counts = {k: 0 for k in DETECTION_FOLDERS}
+    candidates = []  # (sort_key, type_key, relative_path, origin)
+
+    for type_key in DETECTION_FOLDERS:
+        # Use date index for O(k) lookup; fall back to full snapshot when the
+        # index isn't ready yet or when no date filter is given.
+        using_date_index = bool(date and date_index and type_key in date_index)
+        if using_date_index:
+            tagged_paths = date_index[type_key].get(date, set())
+        else:
+            tagged_paths = snapshot.get(type_key, set())
+
+        for tagged_path in tagged_paths:
+            try:
+                origin, relative_path = tagged_path.split(":", 1)
+            except ValueError:
                 continue
-            for f in _iter_detection_files(type_key, folder):
-                relative_path = str(f.relative_to(folder).as_posix())
-                if not _basic_detection_matches(relative_path, date, exam_id, start_time, end_time):
-                    continue
 
-                try:
-                    mtime = f.stat().st_mtime
-                except FileNotFoundError:
-                    continue
+            if source == "rtsp" and origin != "rtsp":
+                continue
+            if source == "hls" and origin != "hls":
+                continue
 
-                if not needs_full_scan_parse:
-                    counts[type_key] = counts.get(type_key, 0) + 1
-                    candidates.append((mtime, type_key, relative_path, f, origin))
-                    continue
+            # Date is pre-filtered by the index; only run the regex for the
+            # remaining filters to avoid redundant filename parsing.
+            check_date = None if using_date_index else date
+            if (check_date or has_extra_filters) and not _basic_detection_matches(
+                relative_path, check_date, exam_id, start_time, end_time
+            ):
+                continue
 
-                item = parse_detection_filename(
-                    relative_path, type_key, f,
-                    is_new_image=False, source=origin,
-                )
+            all_counts[type_key] += 1
 
-                if search:
-                    q = search.lower()
-                    haystack = " ".join([
-                        str(item.get("camera_id") or ""),
-                        str(item.get("cameraName") or ""),
-                        str(item.get("centerName") or ""),
-                        str(item.get("city") or ""),
-                        str(item.get("state") or ""),
-                        str(item.get("tcCode") or ""),
-                    ]).lower()
-                    if q not in haystack:
-                        continue
+            if type_key in check_types:
+                basic = _basic_detection_meta(relative_path)
+                sort_key = (basic.get("date") or "") + (basic.get("time") or "")
+                candidates.append((sort_key, type_key, relative_path, origin))
 
-                counts[item["type"]] = counts.get(item["type"], 0) + 1
-                rows.append((mtime, item))
+    # Sort newest first (YYYYMMDDHHMMSS lexicographic == chronological)
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    start_idx = (page - 1) * limit
 
-    # Scan based on source filter or both
-    if source != "rtsp":
-        _scan_dir(RESULTS_DIR, "hls")
-    if source != "hls":
-        _scan_dir(RTSP_RESULTS_DIR, "rtsp")
-
-    start = (page - 1) * limit
-    if needs_full_scan_parse:
-        # Search needs enriched camera metadata, so all surviving candidates were parsed.
-        rows.sort(key=lambda x: x[0], reverse=True)
-        results = [item for _, item in rows]
-        total = len(results)
-        paginated = results[start: start + limit]
-    else:
-        candidates.sort(key=lambda x: x[0], reverse=True)
-        total = len(candidates)
-        paginated = [
-            parse_detection_filename(
+    if needs_search:
+        # Search path: parse all filtered candidates, apply text filter, paginate.
+        rows = []
+        q = search.lower()
+        for _, type_key, relative_path, origin in candidates:
+            base_dir = RTSP_RESULTS_DIR if origin == "rtsp" else RESULTS_DIR
+            file_path = base_dir / DETECTION_FOLDERS[type_key] / relative_path
+            item = parse_detection_filename(
                 relative_path, type_key, file_path,
                 is_new_image=False, source=origin,
             )
-            for _, type_key, relative_path, file_path, origin in candidates[start: start + limit]
-        ]
+            haystack = " ".join([
+                str(item.get("camera_id") or ""),
+                str(item.get("cameraName") or ""),
+                str(item.get("centerName") or ""),
+                str(item.get("city") or ""),
+                str(item.get("state") or ""),
+                str(item.get("tcCode") or ""),
+            ]).lower()
+            if q in haystack:
+                rows.append(item)
 
-    # Fetch pushed_to_client and gpu_id for paginated items
+        # Recompute counts from the search-filtered result set.
+        all_counts = {k: 0 for k in DETECTION_FOLDERS}
+        for item in rows:
+            t = item.get("type", "")
+            if t in all_counts:
+                all_counts[t] += 1
+
+        total = len(rows)
+        paginated = rows[start_idx: start_idx + limit]
+    else:
+        # Fast path: only parse the `limit` items on this page.
+        total = len(candidates)
+        page_candidates = candidates[start_idx: start_idx + limit]
+        paginated = []
+        for _, type_key, relative_path, origin in page_candidates:
+            base_dir = RTSP_RESULTS_DIR if origin == "rtsp" else RESULTS_DIR
+            file_path = base_dir / DETECTION_FOLDERS[type_key] / relative_path
+            item = parse_detection_filename(
+                relative_path, type_key, file_path,
+                is_new_image=False, source=origin,
+            )
+            paginated.append(item)
+
+    # ── DB: pushed_to_client + gpu_id for the paginated slice only ─────────────
     uids_to_check = [item.get("uid") for item in paginated if item.get("uid")]
     pushed_uids = set()
-    uid_gpu_map = {}  # uid -> gpu_id
+    uid_gpu_map = {}
     if uids_to_check:
         try:
             from scripts.detection.utils.db_client import _get_connection
             conn = _get_connection()
             with conn.cursor() as cur:
-                format_strings = ','.join(['%s'] * len(uids_to_check))
+                fmt = ','.join(['%s'] * len(uids_to_check))
 
-                # Fetch from HLS - uses idx_unique_id index
                 try:
-                    cur.execute(f"SELECT unique_id, pushed_to_client, gpu_id FROM camera_report_hls USE INDEX (idx_unique_id) WHERE unique_id IN ({format_strings})", tuple(uids_to_check))
+                    cur.execute(
+                        f"SELECT unique_id, pushed_to_client, gpu_id FROM camera_report_hls "
+                        f"USE INDEX (idx_unique_id) WHERE unique_id IN ({fmt})",
+                        tuple(uids_to_check)
+                    )
                     for row in cur.fetchall():
                         uid = row.get("unique_id")
                         if uid:
@@ -1148,9 +1218,12 @@ def list_detections(
                 except Exception as e:
                     logger.error(f"HLS pushed uids fetch failed: {e}")
 
-                # Fetch from RTSP - uses idx_unique_id index
                 try:
-                    cur.execute(f"SELECT unique_id, pushed_to_client, gpu_id FROM camera_report_rtsp USE INDEX (idx_unique_id) WHERE unique_id IN ({format_strings})", tuple(uids_to_check))
+                    cur.execute(
+                        f"SELECT unique_id, pushed_to_client, gpu_id FROM camera_report_rtsp "
+                        f"USE INDEX (idx_unique_id) WHERE unique_id IN ({fmt})",
+                        tuple(uids_to_check)
+                    )
                     for row in cur.fetchall():
                         uid = row.get("unique_id")
                         if uid:
@@ -1167,14 +1240,14 @@ def list_detections(
     for item in paginated:
         uid = item.get("uid")
         item["pushed_to_client"] = 1 if uid in pushed_uids else 0
-        item["gpu_id"] = uid_gpu_map.get(uid)  # None if not in DB yet
+        item["gpu_id"] = uid_gpu_map.get(uid)
 
     return {
         "success": True,
         "total":   total,
         "page":    page,
         "limit":   limit,
-        "counts":  counts,
+        "counts":  all_counts,
         "data":    paginated,
     }
 
@@ -1373,7 +1446,8 @@ def list_client_detections(
     user_company: Optional[str] = None,
 ):
     rows = []
-    
+    all_counts = {k: 0 for k in DETECTION_FOLDERS}
+
     conn = _get_connection()
     try:
         with conn.cursor() as cur:
@@ -1402,62 +1476,70 @@ def list_client_detections(
                             "data": [],
                         }
             
-            # Build HLS query with exam_id filter
-            # Uses idx_exam_shift_push (exam_id, shift_id, pushed_to_client, created_at)
-            # PERFECT composite index covering all WHERE conditions
-            hls_query = "SELECT * FROM camera_report_hls USE INDEX (idx_exam_shift_push) WHERE pushed_to_client = 1 AND remove_from_client = 0"
-            hls_params = []
-            
-            if exam_id:
-                hls_query += " AND exam_id = %s"
-                hls_params.append(exam_id)
-            elif user_exam_ids:
-                # Filter by user's exams
-                placeholders = ','.join(['%s'] * len(user_exam_ids))
-                hls_query += f" AND exam_id IN ({placeholders})"
-                hls_params.extend(user_exam_ids)
-            
-            try:
-                cur.execute(hls_query, tuple(hls_params) if hls_params else None)
-                db_rows.extend(cur.fetchall())
-            except Exception as e:
-                logger.error(f"HLS Client Detections fetch failed: {e}")
+            # Resolve detection_type folder names for SQL filtering.
+            sql_folder_names: List[str] = []
+            if type:
+                sql_folder_names = [
+                    DETECTION_FOLDERS[k] for k in type.split(',')
+                    if k.strip() in DETECTION_FOLDERS
+                ]
 
-            # Build RTSP query with exam_id filter
-            # Uses idx_push_status_rtsp (pushed_to_client, created_at)
-            # PERFECT for filtering by push status - most selective column first
-            rtsp_query = "SELECT * FROM camera_report_rtsp USE INDEX (idx_push_status_rtsp) WHERE pushed_to_client = 1 AND remove_from_client = 0"
-            rtsp_params = []
-            
-            if exam_id:
-                rtsp_query += " AND exam_id = %s"
-                rtsp_params.append(exam_id)
-            elif user_exam_ids:
-                # Filter by user's exams
-                placeholders = ','.join(['%s'] * len(user_exam_ids))
-                rtsp_query += f" AND exam_id IN ({placeholders})"
-                rtsp_params.extend(user_exam_ids)
-            
-            try:
-                cur.execute(rtsp_query, tuple(rtsp_params) if rtsp_params else None)
-                db_rows.extend(cur.fetchall())
-            except Exception as e:
-                logger.error(f"RTSP Client Detections fetch failed: {e}")
+            def _build_client_query(base_query: str, base_params: list, include_type: bool = True) -> tuple:
+                """Append shared WHERE clauses (exam, optionally type) to a query.
+
+                NOTE: date is intentionally NOT pushed into SQL because exam_date
+                is NULL on many legacy rows. Date filtering is handled in Python
+                using the date extracted from the filename, which is always correct.
+                """
+                q, p = base_query, list(base_params)
+                if exam_id:
+                    q += " AND exam_id = %s"
+                    p.append(exam_id)
+                elif user_exam_ids:
+                    placeholders = ','.join(['%s'] * len(user_exam_ids))
+                    q += f" AND exam_id IN ({placeholders})"
+                    p.extend(user_exam_ids)
+                if include_type and sql_folder_names:
+                    placeholders = ','.join(['%s'] * len(sql_folder_names))
+                    q += f" AND detection_type IN ({placeholders})"
+                    p.extend(sql_folder_names)
+                return q, p
+
+            # HLS — skip entirely when caller only wants RTSP results.
+            if source != "rtsp":
+                hls_base = (
+                    "SELECT * FROM camera_report_hls USE INDEX (idx_exam_shift_push)"
+                    " WHERE pushed_to_client = 1 AND remove_from_client = 0"
+                )
+                hls_query, hls_params = _build_client_query(hls_base, [], include_type=False)
+                try:
+                    cur.execute(hls_query, tuple(hls_params) if hls_params else None)
+                    db_rows.extend(cur.fetchall())
+                except Exception as e:
+                    logger.error(f"HLS Client Detections fetch failed: {e}")
+
+            # RTSP — skip entirely when caller only wants HLS results.
+            if source != "hls":
+                rtsp_base = (
+                    "SELECT * FROM camera_report_rtsp USE INDEX (idx_push_status_rtsp)"
+                    " WHERE pushed_to_client = 1 AND remove_from_client = 0"
+                )
+                rtsp_query, rtsp_params = _build_client_query(rtsp_base, [], include_type=False)
+                try:
+                    cur.execute(rtsp_query, tuple(rtsp_params) if rtsp_params else None)
+                    db_rows.extend(cur.fetchall())
+                except Exception as e:
+                    logger.error(f"RTSP Client Detections fetch failed: {e}")
 
             db_rows.sort(key=lambda x: str(x.get("created_at", "")), reverse=True)
-            
+
             for row in db_rows:
                 imageurl_full = str(row.get("imageurl", ""))
                 filename = imageurl_full.split("/")[-1] if "/" in imageurl_full else imageurl_full
                 folder_name = row.get("detection_type", "")
-                
+
                 type_key = next((k for k, v in DETECTION_FOLDERS.items() if v == folder_name), folder_name)
                 source_part = "rtsp" if "rtsp" in imageurl_full else "hls"
-                
-                if source and source != source_part:
-                    continue
-                if type and type_key not in type.split(','):
-                    continue
 
                 item = parse_detection_filename(
                     filename,
@@ -1510,6 +1592,16 @@ def list_client_detections(
                     if q not in haystack:
                         continue
 
+                # Accumulate sidebar counts for ALL types that pass date/time/search
+                # filters — this must happen before the type-filter check below so the
+                # sidebar shows the distribution across all types, not just the selected one.
+                if type_key in all_counts:
+                    all_counts[type_key] += 1
+
+                # Python-side type filter (SQL omits it so we can count all types above)
+                if sql_folder_names and folder_name not in sql_folder_names:
+                    continue
+
                 rows.append(item)
     finally:
         conn.close()
@@ -1518,16 +1610,12 @@ def list_client_detections(
     start = (page - 1) * limit
     paginated = rows[start: start + limit]
 
-    counts = {k: 0 for k in DETECTION_FOLDERS}
-    for row in rows:
-        counts[row["type"]] = counts.get(row["type"], 0) + 1
-
     return {
         "success": True,
         "total": total,
         "page": page,
         "limit": limit,
-        "counts": counts,
+        "counts": all_counts,
         "data": paginated,
     }
 

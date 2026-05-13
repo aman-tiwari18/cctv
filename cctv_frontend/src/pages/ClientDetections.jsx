@@ -888,41 +888,6 @@ const ClientDetections = () => {
   const [removingId, setRemovingId] = useState(null);
   const [keyboardHintShown, setKeyboardHintShown] = useState(false);
 
-  // Fetch counts with date filter applied (like Detections page)
-  // This ensures AppBar shows date-specific counts, not total counts
-  const fetchUnfilteredCounts = useCallback(async () => {
-    try {
-      const params = new URLSearchParams({ page: 1, limit: 1 });
-      
-      // ✅ Apply date filter to get date-specific counts
-      if (dateFilter) params.append('date', parseDateForQuery(dateFilter));
-      if (examFilter) params.append('exam_id', examFilter);
-      
-      // Pass user info for filtering
-      if (user?.role) params.append('user_role', user.role);
-      if (user?.company_name) params.append('user_company', user.company_name);
-      
-      console.log('[ClientDetections] Fetching date-specific counts for sidebar:', Object.fromEntries(params));
-      
-      const res = await axios.get(`${API_BASE_1}/client-detections?${params}`);
-      if (res.data.success) {
-        setUnfilteredCounts(res.data.counts || {});
-      }
-    } catch (err) {
-      console.error('Failed to fetch counts:', err);
-    }
-  }, [dateFilter, examFilter, user?.role, user?.company_name, setUnfilteredCounts]);
-
-  // Debounced counts fetch - updates when date or exam changes. After that,
-  // unfilteredCounts is driven purely by socket events in SocketContext
-  // (client-detection:new bumps it, client-detection:counts reconciles it).
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      fetchUnfilteredCounts();
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [fetchUnfilteredCounts]);
-
   const fetchClientImages = useCallback(async (pg = 1, rpp = rowsPerPage) => {
     setLoading(true);
     try {
@@ -949,7 +914,9 @@ const ClientDetections = () => {
         })));
         setTotal(res.data.total || 0);
         setCounts(res.data.counts || {});
-        // Don't update context counts with filtered results - only unfiltered counts should go to context
+        // Backend now returns counts for ALL types regardless of the type filter,
+        // so we can drive the sidebar directly from this response.
+        setUnfilteredCounts(res.data.counts || {});
       } else {
         setImages([]);
         setCounts({});
@@ -1069,6 +1036,10 @@ const ClientDetections = () => {
       };
 
       if (matchesFilters(processedItem)) {
+        if (item?.type) {
+          setCounts(prev => ({ ...prev, [item.type]: (prev[item.type] || 0) + 1 }));
+          setUnfilteredCounts(prev => ({ ...prev, [item.type]: (prev[item.type] || 0) + 1 }));
+        }
         setImages(prev => {
           const exists = prev.some(i => (i.uid || i.id) === (processedItem.uid || processedItem.id));
           if (exists) return prev;
@@ -1076,20 +1047,16 @@ const ClientDetections = () => {
           return next.slice(0, rowsPerPage);
         });
         setTotal(t => t + 1);
-        if (item?.type) {
-          setCounts(prev => ({ ...prev, [item.type]: (prev[item.type] || 0) + 1 }));
-        }
       }
     };
 
     const handleClientDetectionRemove = (data) => {
       console.log('[ClientDetections] Detection removed:', data.uid);
 
-      // Page-local list / total decrement only; the sidebar/header counter
-      // decrement is handled in SocketContext.
       const removedType = data?.type;
       if (removedType) {
         setCounts(prev => ({ ...prev, [removedType]: Math.max(0, (prev[removedType] || 0) - 1) }));
+        setUnfilteredCounts(prev => ({ ...prev, [removedType]: Math.max(0, (prev[removedType] || 0) - 1) }));
       }
       setImages(prev => prev.filter(i => i.uid !== data.uid));
       setTotal(t => Math.max(0, t - 1));
@@ -1172,7 +1139,7 @@ const ClientDetections = () => {
               '& input': { color: '#334155', '&::placeholder': { color: '#94a3b8', opacity: 1 } }
             }
           }}
-          sx={{ minWidth: 260, maxWidth: 600, flex: 1 }}
+          sx={{ minWidth: 200, maxWidth: 400, flex: 1 }}
         />
         {/* Exam Filter */}
         <FormControl size="small" sx={{ minWidth: 160 }}>
@@ -1189,7 +1156,7 @@ const ClientDetections = () => {
             ))}
           </Select>
         </FormControl>
-        <Box sx={{ position: 'relative', minWidth: 350 }}>
+        <Box sx={{ position: 'relative', minWidth: 100, maxWidth: 150 }}>
           <TextField
             type="date"
             size="small"

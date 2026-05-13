@@ -818,45 +818,6 @@ export default function Detections() {
     setData((prev) => prev.filter(i => getDetectionKey(i) !== getDetectionKey(itemToRemove)));
   }, [getDetectionKey]);
 
-  // Fetch the unfiltered totals used by the sidebar per-type chips and the
-  // header "TOTAL DETECTIONS" pill. Runs WITHOUT the typeFilter param so the
-  // result always represents the full picture, regardless of what the user is
-  // filtering the data list to.
-  const fetchAllCounts = useCallback(async () => {
-    try {
-      const params = new URLSearchParams({ page: 1, limit: 1 });
-      if (dateFilter) params.append('date', parseDateForQuery(dateFilter));
-      if (examFilter) params.append('exam_id', examFilter);
-      // NOTE: deliberately NOT appending `type` — we want the global counts.
-
-      const res = await axios.get(`${API_BASE_1}/detections?${params}`, {
-        signal: abortControllerRef.current?.signal
-      });
-
-      if (res.data.success) {
-        setUnfilteredCounts(res.data.counts || {});
-        if (typeFilter.length === 0) {
-          setAllCounts(res.data.counts || {});
-        }
-      }
-    } catch (err) {
-      if (err.name !== 'CanceledError') {
-        console.error('Failed to fetch all counts:', err);
-      }
-    }
-  }, [dateFilter, examFilter, setAllCounts, setUnfilteredCounts, typeFilter.length]);
-
-  // Debounced fetch on filter change. After the initial fetch, the sidebar
-  // and header counters are driven purely by socket events (no polling) —
-  // see SocketContext.jsx where detection:new and detection:counts update
-  // unfilteredCounts directly.
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      fetchAllCounts();
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [fetchAllCounts]);
-
   const loadExams = useCallback(async () => {
     try {
       const response = await examsAPI.getAll({ is_active: true });
@@ -928,10 +889,9 @@ export default function Detections() {
         setTotal(detectionsRes.data.total);
         setCounts(detectionsRes.data.counts || {});
         setAllCounts(detectionsRes.data.counts || {});
-        
-        if (typeFilter.length === 0) {
-          setUnfilteredCounts(detectionsRes.data.counts || {});
-        }
+        // Backend now always returns counts for ALL types (not just the
+        // filtered type), so we can always drive the sidebar from this response.
+        setUnfilteredCounts(detectionsRes.data.counts || {});
       }
 
       if (clientRes.data.success) {
@@ -944,7 +904,7 @@ export default function Detections() {
     } finally {
       setLoading(false);
     }
-  }, [buildDetectionParams, rowsPerPage, setAllCounts, setUnfilteredCounts, typeFilter.length]);
+  }, [buildDetectionParams, rowsPerPage, setAllCounts, setUnfilteredCounts]);
 
   // Optimized: Only filter on server-side, remove client-side filtering
   const filteredData = useMemo(() => data, [data]); // Server already filtered
@@ -1001,19 +961,25 @@ export default function Detections() {
     if (!socket) return;
 
     const handleNewDetection = (item) => {
-      // NOTE: per-type counter bumps for the sidebar/header pill are handled
-      // centrally in SocketContext (one place, always mounted). Here we only
-      // care about the page-local data list and pagination total — gate by
-      // typeFilter so the visible feed respects the user's filter view.
       if (typeFilter.length > 0 && !typeFilter.includes(item.type)) {
         return;
       }
+
+      // Bump sidebar counts only when this detection belongs to the currently
+      // viewed date. New detections are always "today", so they only apply
+      // when dateFilter is today or empty (all dates).
+      const itemDateIso = item?.date;
+      const filterDateIso = parseDateForQuery(dateFilter);
+      if (!filterDateIso || itemDateIso === filterDateIso) {
+        setUnfilteredCounts(prev => ({ ...prev, [item.type]: (prev[item.type] || 0) + 1 }));
+      }
+
       mergeLiveDetections(item, { incrementTotal: true });
     };
 
     socket.on('detection:new', handleNewDetection);
     return () => socket.off('detection:new', handleNewDetection);
-  }, [socket, mergeLiveDetections, typeFilter]);
+  }, [socket, mergeLiveDetections, typeFilter, dateFilter, setUnfilteredCounts]);
 
   // Optimized polling: Only when NOT connected and on page 1
   useEffect(() => {
@@ -1037,16 +1003,7 @@ export default function Detections() {
         setTotal(res.data.total || 0);
         setCounts(res.data.counts || {});
         setAllCounts(res.data.counts || {});
-        // CRITICAL: also push the latest counts into unfilteredCounts so the
-        // sidebar per-type chips and the header "TOTAL DETECTIONS" pill in
-        // Layout.jsx (which read from unfilteredCounts) update during polling.
-        // Without this line, when the socket is disconnected the polling
-        // fallback refreshes the data list every 15s but the counters froze
-        // at the initial-fetch value — which is exactly the symptom of
-        // "images appear but counts only update on refresh".
-        if (typeFilter.length === 0) {
-          setUnfilteredCounts(res.data.counts || {});
-        }
+        setUnfilteredCounts(res.data.counts || {});
 
         // Filter polled detections by typeFilter before merging
         const filteredData = (res.data.data || []).filter(item => {
@@ -1366,7 +1323,7 @@ export default function Detections() {
             </Select>
           </FormControl>
         )}
-        <Box sx={{ position: 'relative', minWidth: 150, maxWidth: 100 }}>
+        <Box sx={{ position: 'relative', minWidth: 100, maxWidth: 150 }}>
           <TextField
             type="date"
             size="small"
