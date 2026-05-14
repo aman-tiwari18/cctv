@@ -315,7 +315,6 @@ function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onS
               fullWidth
               disableElevation
               onClick={(e) => { e.stopPropagation(); if (onSkip) onSkip(item); }}
-              startIcon={<img src="/arrow-left.png" alt="left" style={{ width: 16, height: 16 }} />}
               sx={{
                 borderColor: '#c3c5d8', color: '#475569', fontWeight: 900,
                 width: "80px",
@@ -330,7 +329,6 @@ function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onS
 
           <Button
             variant="contained"
-            endIcon={!isPushed && <img src="/arrow-right.png" alt="right" style={{ width: 16, height: 16 }} />}
             disableElevation
             onClick={(e) => {
               e.stopPropagation();
@@ -705,21 +703,39 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
                         fullWidth
                         disableElevation
                         onClick={handleSkip}
-                        startIcon={<img src="/arrow-left.png" alt="left" style={{ width: 18, height: 18 }} />}
                         sx={{
                           borderColor: '#c3c5d8', color: '#475569', fontWeight: 900,
                           width: "100px",
                           height: "40px",
                           borderRadius: 2, textTransform: 'none', fontSize: 14,
-                          '&:hover': { bgcolor: '#c3c5d8', borderColor: '#c3c5d8' },
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          pl: 1,
+                          pr: 0.5,
+                          '&:hover': { bgcolor: '#fff', borderColor: '#c3c5d8' },
                         }}
                       >
-                        Skip
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <Box
+                            sx={{
+                              width: 32,
+                              height: 32,
+                              borderRadius: 1.5,
+                              bgcolor: 'rgba(153, 154, 155, 0.6)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              color: '#999',
+                              justifyContent: 'center',
+                            }}
+                          >
+                            <Box component="img" src="/cctv_analytics/icon.svg" alt="left" sx={{ width: 16, height: 16, display: 'block', transform: 'scaleX(-1)' }} />
+                          </Box>
+                          <span sx = {{color: '#fff'}}>Skip</span>
+                        </Box>
                       </Button>
                     )}
                     <Button
                       variant="contained"
-                      endIcon={!isPushed && <img src="/arrow-right.png" alt="right" style={{ width: 18, height: 18 }} />}
                       disableElevation
                       onClick={handlePush}
                       disabled={copyingToClient || isPushed}
@@ -728,6 +744,10 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
                         height: "40px",
                         width: "180px",
                         borderRadius: 2, textTransform: 'none', fontSize: 14,
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        pl: 2,
+                        pr: 1,
                         '&:hover': { bgcolor: isPushed ? '#94a3b8' : '#1e40af' },
                         '&.Mui-disabled': {
                           bgcolor: '#94a3b8',
@@ -737,7 +757,22 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
                         }
                       }}
                     >
-                      {copyingToClient ? 'Pushing...' : (isPushed ? 'Pushed to client' : 'Push to client')}
+                      <span>{copyingToClient ? 'Pushing...' : (isPushed ? 'Pushed to client' : 'Push to client')}</span>
+                      {!isPushed && (
+                        <Box
+                          sx={{
+                            width: 32,
+                            height: 32,
+                            borderRadius: 1.5,
+                            bgcolor: 'rgba(147, 197, 253, 0.4)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                        >
+                          <Box component="img" src="/cctv_analytics/icon.svg" alt="right" sx={{ width: 16, height: 16, display: 'block' }} />
+                        </Box>
+                      )}
                     </Button>
                   </Box>
                 </Box>

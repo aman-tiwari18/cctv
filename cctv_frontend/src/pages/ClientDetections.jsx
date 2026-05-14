@@ -280,7 +280,6 @@ function DetectionCard({ item, onClick, onRemove, isRemoving, removed }) {
           <Button
             variant="contained"
             disableElevation
-            endIcon={!removed && <img src="/arrow-right.png" alt="right" style={{ width: 16, height: 16 }} />}
             onClick={(e) => {
               e.stopPropagation();
               if (onRemove && !isRemoving && !removed) onRemove(item);
@@ -831,7 +830,6 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, removingId, re
                     <Button
                       variant="contained"
                       disableElevation
-                      endIcon={!removed && <img src="/arrow-right.png" alt="right" style={{ width: 18, height: 18 }} />}
                       onClick={() => {
                         if (onRemove && !isRemoving && !removed) onRemove(item);
                       }}
@@ -841,10 +839,29 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, removingId, re
                         height: "40px",
                         width: "160px",
                         borderRadius: 2, textTransform: 'none', fontSize: 14,
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        pl: 2,
+                        pr: 0.5,
                         '&:hover': { bgcolor: removed ? '#94a3b8' : '#dc2626' },
                       }}
                     >
-                      {isRemoving ? 'Removing...' : (removed ? 'Removed' : 'Remove')}
+                      <span>{isRemoving ? 'Removing...' : (removed ? 'Removed' : 'Remove')}</span>
+                      {!removed && (
+                        <Box
+                          sx={{
+                            width: 32,
+                            height: 32,
+                            borderRadius: 1.5,
+                            bgcolor: 'rgba(252, 165, 165, 0.4)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                        >
+                          <Box component="img" src="/cctv_analytics/icon.svg" alt="right" sx={{ width: 16, height: 16, display: 'block' }} />
+                        </Box>
+                      )}
                     </Button>
                   </Box>
                 </Box>
