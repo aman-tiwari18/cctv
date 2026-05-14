@@ -491,9 +491,9 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
   }, [selectedIndex]);
 
   return (
-    <Box sx={{ display: 'flex', gap: 2, height: 'calc(100vh - 260px)', minHeight: 500 }}>
-
-      <Box sx={{
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <Box sx={{ display: 'flex', gap: 2, height: 'calc(100vh - 310px)', minHeight: 500 }}>
+        <Box sx={{
         width: 300, flexShrink: 0, overflowY: 'auto',
         borderRight: '1px solid #e2e8f0', pr: 1,
         bgcolor: '#ffffff',
@@ -721,10 +721,9 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
                               width: 32,
                               height: 32,
                               borderRadius: 1.5,
-                              bgcolor: 'rgba(153, 154, 155, 0.6)',
+                              bgcolor: 'rgba(191, 219, 254, 0.6)',
                               display: 'flex',
                               alignItems: 'center',
-                              color: '#999',
                               justifyContent: 'center',
                             }}
                           >
@@ -784,6 +783,34 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
             <Typography color="text.secondary">Select a detection to preview</Typography>
           </Box>
         )}
+      </Box>
+      </Box>
+      
+      {/* Tip Banner */}
+      <Box sx={{ 
+        bgcolor: '#e3f2fd', 
+        borderRadius: 2, 
+        p: 1.5, 
+        display: 'flex', 
+        alignItems: 'center', 
+        gap: 1,
+        border: '1px solid #90caf9'
+      }}>
+        <Box sx={{ 
+          color: '#1976d2', 
+          fontSize: 20, 
+          display: 'flex', 
+          alignItems: 'center' 
+        }}>
+          💡
+        </Box>
+        <Typography sx={{ 
+          fontSize: 14, 
+          color: '#1565c0', 
+          fontWeight: 500 
+        }}>
+          <strong>Tip:</strong> Use ↑ and ↓ arrow keys to quickly review detections without using your mouse.
+        </Typography>
       </Box>
     </Box>
   );

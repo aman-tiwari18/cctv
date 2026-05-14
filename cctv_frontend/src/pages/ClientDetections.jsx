@@ -628,7 +628,9 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, removingId, re
   }, [selectedIndex]);
 
   return (
-    <Box sx={{ display: 'flex', gap: 2, height: 'calc(100vh - 260px)', minHeight: 500 }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <Box sx={{ display: 'flex', gap: 2, height: 'calc(100vh - 310px)', minHeight: 500 }}>
+
       <Box
         sx={{
           width: 300, flexShrink: 0, overflowY: 'auto',
@@ -873,6 +875,34 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, removingId, re
             <Typography color="text.secondary">Select a detection to preview</Typography>
           </Box>
         )}
+      </Box>
+      </Box>
+      
+      {/* Tip Banner */}
+      <Box sx={{ 
+        bgcolor: '#e3f2fd', 
+        borderRadius: 2, 
+        p: 1.5, 
+        display: 'flex', 
+        alignItems: 'center', 
+        gap: 1,
+        border: '1px solid #90caf9'
+      }}>
+        <Box sx={{ 
+          color: '#1976d2', 
+          fontSize: 20, 
+          display: 'flex', 
+          alignItems: 'center' 
+        }}>
+          💡
+        </Box>
+        <Typography sx={{ 
+          fontSize: 14, 
+          color: '#1565c0', 
+          fontWeight: 500 
+        }}>
+          <strong>Tip:</strong> Use ↑ and ↓ arrow keys to quickly review detections without using your mouse.
+        </Typography>
       </Box>
     </Box>
   );
