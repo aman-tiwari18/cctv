@@ -56,12 +56,49 @@ app.get('/cctv_analytics/health', (req, res) => {
 const swaggerUi = require('swagger-ui-express');
 const openapiSpec = require('./docs');
 
+// Runs in the browser on the docs page. Wraps fetch so that whenever a
+// POST /api/auth/login returns 200, the token from data.token is fed
+// straight into Swagger UI's Authorize state — no manual copy/paste.
+const autoAuthScript = `
+(function () {
+    function attach() {
+        if (!window.ui || typeof window.ui.preauthorizeApiKey !== 'function') {
+            return setTimeout(attach, 100);
+        }
+        var origFetch = window.fetch.bind(window);
+        window.fetch = function (input, init) {
+            var url = typeof input === 'string' ? input : (input && input.url) || '';
+            var p = origFetch(input, init);
+            if (url.indexOf('/api/auth/login') !== -1) {
+                p.then(function (res) {
+                    if (!res.ok) return;
+                    res.clone().json().then(function (body) {
+                        var token = body && body.data && body.data.token;
+                        if (token) {
+                            window.ui.preauthorizeApiKey('bearerAuth', token);
+                            console.log('[swagger] Bearer token captured from /login response');
+                        }
+                    }).catch(function () {});
+                }).catch(function () {});
+            }
+            return p;
+        };
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', attach);
+    } else {
+        attach();
+    }
+})();
+`;
+
 app.use(
     '/cctv_analytics/api-docs',
     swaggerUi.serve,
     swaggerUi.setup(openapiSpec, {
         explorer: false,
         customSiteTitle: 'CCTV Analytics API Docs',
+        customJsStr: autoAuthScript,
         swaggerOptions: {
             persistAuthorization: true,
             displayRequestDuration: true,
