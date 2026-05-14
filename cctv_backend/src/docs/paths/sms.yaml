@@ -1,0 +1,75 @@
+/api/sms/send-push-alert:
+  post:
+    tags: [SMS]
+    summary: Trigger SMS push alert (internal)
+    description: |
+      Called by the Python script-server when a detection occurs. Looks up the
+      detection report row (using `uid` + `source`) and dispatches alert SMS
+      to configured ALERT_PHONE_NUMBERS using the appropriate DLT template.
+
+      **Auth:** No middleware in the route definition; intended for internal
+      use from the script-server. If exposed externally, protect via firewall.
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SendPushAlertRequest'
+          example:
+            uid: 65d2a8e9-aabbcc
+            source: hls
+    responses:
+      '200':
+        description: Alert processed (may be skipped if SMS is disabled in config).
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean }
+                message: { type: string, example: Alert processed }
+                details:
+                  type: array
+                  nullable: true
+                  items:
+                    type: object
+                    additionalProperties: true
+      '400':
+        $ref: '#/components/responses/ValidationError'
+      '404':
+        description: Detection report not found for this UID.
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ErrorResponse' }
+      '500':
+        $ref: '#/components/responses/ServerError'
+
+/api/sms/test:
+  post:
+    tags: [SMS]
+    summary: Test SMS sending (manual)
+    description: |
+      Manual test endpoint for SMS dispatch. Currently the handler body is
+      stubbed out (see `SMSController.testSMSSending` in the source).
+      No authentication is enforced.
+    security: []
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TestSmsRequest'
+          example:
+            type: proximity
+            phone: '+919999999999'
+    responses:
+      '200':
+        description: Test result (varies based on stub implementation).
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      '500':
+        $ref: '#/components/responses/ServerError'

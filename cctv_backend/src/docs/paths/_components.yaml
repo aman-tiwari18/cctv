@@ -1,0 +1,637 @@
+securitySchemes:
+  bearerAuth:
+    type: http
+    scheme: bearer
+    bearerFormat: JWT
+    description: |
+      JWT issued by `POST /api/auth/login`. Send as `Authorization: Bearer <token>`.
+      Token payload includes `id`, `username`, `role`. Default expiry: 24h.
+  apiKeyAuth:
+    type: apiKey
+    in: header
+    name: X-API-Key
+    description: |
+      Static key used by the Python script-server to call backend endpoints
+      that accept the `authenticate` middleware. Value comes from the
+      `SCRIPT_SERVER_API_KEY` env var on the backend.
+
+parameters:
+  ExamIdPath:
+    name: id
+    in: path
+    required: true
+    description: Exam ID
+    schema: { type: integer, minimum: 1 }
+  ExamIdParentPath:
+    name: examId
+    in: path
+    required: true
+    description: Parent Exam ID for nested resources
+    schema: { type: integer, minimum: 1 }
+  ShiftIdPath:
+    name: shiftId
+    in: path
+    required: true
+    description: Exam shift ID
+    schema: { type: integer, minimum: 1 }
+  ScriptIdPath:
+    name: id
+    in: path
+    required: true
+    description: Script ID (primary key)
+    schema: { type: integer, minimum: 1 }
+  CameraIdPath:
+    name: id
+    in: path
+    required: true
+    description: Camera link ID
+    schema: { type: integer, minimum: 1 }
+  CameraTypePath:
+    name: type
+    in: path
+    required: true
+    description: Camera link type
+    schema:
+      type: string
+      enum: [RTSP, HLS, rtsp, hls]
+  AssignmentIdPath:
+    name: id
+    in: path
+    required: true
+    description: ShiftScriptAssignment ID
+    schema: { type: integer, minimum: 1 }
+  ExecutionIdPath:
+    name: id
+    in: path
+    required: true
+    description: Execution / assignment ID
+    schema: { type: integer, minimum: 1 }
+  UserIdPath:
+    name: userId
+    in: path
+    required: true
+    description: User ID
+    schema: { type: integer, minimum: 1 }
+  ExamBodyPath:
+    name: examBody
+    in: path
+    required: true
+    description: Exam body identifier (e.g. SSC, TCS, EY, CDIS)
+    schema: { type: string }
+
+responses:
+  Unauthorized:
+    description: Missing, invalid, or expired authentication credentials.
+    content:
+      application/json:
+        schema: { $ref: '#/components/schemas/ErrorResponse' }
+        example:
+          success: false
+          message: No token provided
+  Forbidden:
+    description: Authenticated but lacks the required role.
+    content:
+      application/json:
+        schema: { $ref: '#/components/schemas/ErrorResponse' }
+        example:
+          success: false
+          message: Insufficient permissions
+  NotFound:
+    description: Resource not found.
+    content:
+      application/json:
+        schema: { $ref: '#/components/schemas/ErrorResponse' }
+        example:
+          success: false
+          message: Resource not found
+  ValidationError:
+    description: Request failed validation (express-validator).
+    content:
+      application/json:
+        schema: { $ref: '#/components/schemas/ValidationErrorResponse' }
+        example:
+          success: false
+          message: Validation failed
+          errors:
+            - msg: Exam name is required
+              path: exam_name
+              location: body
+  Conflict:
+    description: Duplicate resource (unique constraint violation).
+    content:
+      application/json:
+        schema: { $ref: '#/components/schemas/ErrorResponse' }
+        example:
+          success: false
+          message: Duplicate entry
+  ServerError:
+    description: Unhandled server error.
+    content:
+      application/json:
+        schema: { $ref: '#/components/schemas/ErrorResponse' }
+        example:
+          success: false
+          message: Internal server error
+
+schemas:
+
+  # ── Generic response envelopes ─────────────────────────────────
+  SuccessResponse:
+    type: object
+    properties:
+      success: { type: boolean, example: true }
+      message: { type: string, example: Operation successful }
+      data: {}
+    required: [success]
+
+  ErrorResponse:
+    type: object
+    properties:
+      success: { type: boolean, example: false }
+      message: { type: string, example: Something went wrong }
+      stack:
+        type: string
+        description: Only present in non-production environments.
+        nullable: true
+    required: [success, message]
+
+  ValidationErrorResponse:
+    allOf:
+      - $ref: '#/components/schemas/ErrorResponse'
+      - type: object
+        properties:
+          errors:
+            type: array
+            items:
+              type: object
+              properties:
+                msg: { type: string }
+                path: { type: string }
+                location: { type: string }
+                value: {}
+
+  # ── Domain entities (mirror Sequelize / users table) ───────────
+  User:
+    type: object
+    properties:
+      id: { type: integer, example: 1 }
+      username: { type: string, example: admin }
+      email: { type: string, format: email, example: admin@example.com }
+      full_name: { type: string, nullable: true, example: Admin User }
+      phone: { type: string, nullable: true, example: '+919999999999' }
+      company_name: { type: string, nullable: true, example: CDIS }
+      verified: { type: boolean, example: true }
+      verified_date:
+        type: string
+        format: date-time
+        nullable: true
+      role:
+        type: string
+        enum: [ADMIN, OPERATOR, VIEWER]
+        example: ADMIN
+      last_login:
+        type: string
+        format: date-time
+        nullable: true
+      created_at:
+        type: string
+        format: date-time
+
+  Exam:
+    type: object
+    properties:
+      id: { type: integer, example: 1 }
+      exam_name: { type: string, example: SSC CGL 2026 }
+      exam_body: { type: string, nullable: true, example: SSC }
+      link_type:
+        type: string
+        enum: [RTSP, HLS]
+        example: RTSP
+      description: { type: string, nullable: true }
+      start_date: { type: string, format: date, nullable: true, example: '2026-05-15' }
+      end_date: { type: string, format: date, nullable: true, example: '2026-06-30' }
+      skip_days:
+        type: array
+        items:
+          type: string
+          enum: [Sunday, Monday, Tuesday, Wednesday, Thursday, Friday, Saturday]
+        example: [Saturday, Sunday]
+      skip_dates:
+        type: array
+        items: { type: string, format: date }
+        example: ['2026-05-20']
+      is_active: { type: boolean, example: true }
+      created_at: { type: string, format: date-time }
+      updated_at: { type: string, format: date-time }
+      examShifts:
+        type: array
+        items: { $ref: '#/components/schemas/ExamShift' }
+        description: Included only when the response embeds shifts.
+
+  ExamShift:
+    type: object
+    properties:
+      id: { type: integer, example: 1 }
+      exam_id: { type: integer, example: 1 }
+      shift_name: { type: string, example: Morning }
+      start_time: { type: string, example: '09:00:00' }
+      end_time: { type: string, example: '12:00:00' }
+      is_active: { type: boolean, example: true }
+      created_at: { type: string, format: date-time }
+      updated_at: { type: string, format: date-time }
+
+  Script:
+    type: object
+    properties:
+      id: { type: integer, example: 1 }
+      script_id:
+        type: string
+        description: Technical identifier (unique), e.g. `face_detection`.
+        example: face_detection
+      name: { type: string, example: Face Detection }
+      default_frequency_minutes: { type: integer, example: 5 }
+      default_duration_minutes: { type: integer, example: 1 }
+      is_active: { type: boolean, example: true }
+      created_at: { type: string, format: date-time }
+      updated_at: { type: string, format: date-time }
+
+  ShiftScriptAssignment:
+    type: object
+    properties:
+      id: { type: integer, example: 1 }
+      shift_id: { type: integer, example: 1 }
+      script_id: { type: integer, description: FK to scripts.id, example: 1 }
+      analytics_task_id:
+        type: integer
+        nullable: true
+        description: Legacy field; new assignments use `script_id`.
+      status:
+        type: string
+        enum: [PENDING, RUNNING, COMPLETED, FAILED, CANCELLED]
+        example: PENDING
+      assignment_date: { type: string, format: date, example: '2026-05-14' }
+      custom_start_time: { type: string, nullable: true, example: '09:00:00' }
+      custom_end_time: { type: string, nullable: true, example: '12:00:00' }
+      custom_frequency_minutes: { type: integer, nullable: true, example: 5 }
+      notes: { type: string, nullable: true }
+      started_at: { type: string, format: date-time, nullable: true }
+      completed_at: { type: string, format: date-time, nullable: true }
+      error_log: { type: string, nullable: true }
+      result_data: { type: object, nullable: true, additionalProperties: true }
+      is_active: { type: boolean, example: true }
+      created_at: { type: string, format: date-time }
+      updated_at: { type: string, format: date-time }
+      shift:
+        $ref: '#/components/schemas/ExamShift'
+      script:
+        $ref: '#/components/schemas/Script'
+
+  ScriptExecution:
+    type: object
+    properties:
+      id: { type: integer, example: 1 }
+      shift_id: { type: integer, nullable: true }
+      camera_link_id: { type: integer, nullable: true }
+      script_id: { type: integer, nullable: true }
+      analytics_task_id: { type: integer, nullable: true }
+      status:
+        type: string
+        enum: [PENDING, RUNNING, COMPLETED, FAILED, CANCELLED]
+      scheduled_time: { type: string, format: date-time }
+      started_at: { type: string, format: date-time, nullable: true }
+      completed_at: { type: string, format: date-time, nullable: true }
+      error_log: { type: string, nullable: true }
+      result_data: { type: object, nullable: true, additionalProperties: true }
+      execution_metadata: { type: object, nullable: true, additionalProperties: true }
+      created_at: { type: string, format: date-time }
+      updated_at: { type: string, format: date-time }
+
+  CameraHLS:
+    type: object
+    properties:
+      id: { type: integer, example: 1 }
+      exam_id: { type: integer, example: 1 }
+      centre_name: { type: string, nullable: true, example: Test Centre A }
+      tc_code: { type: string, nullable: true, example: TC001 }
+      city: { type: string, nullable: true }
+      state: { type: string, nullable: true }
+      camera_name: { type: string, nullable: true, example: Hall-1 Cam }
+      ch_code:
+        type: string
+        nullable: true
+        description: Unique channel key (ch_no from Excel)
+        example: CH01
+      cctv_url:
+        type: string
+        format: uri
+        example: https://stream.example.com/hls/cam01.m3u8
+      camera_category: { type: string, nullable: true }
+      classification:
+        type: string
+        nullable: true
+        example: SAFE
+      status: { type: string, nullable: true }
+      exam_date: { type: string, format: date, nullable: true }
+      shift_id:
+        type: integer
+        nullable: true
+        description: When NULL, the camera applies to all shifts of the exam.
+      is_active: { type: boolean, example: true }
+      created_at: { type: string, format: date-time }
+      updated_at: { type: string, format: date-time }
+
+  CameraRTSP:
+    type: object
+    properties:
+      id: { type: integer, example: 1 }
+      device_id: { type: string, example: DEV001 }
+      exam_id: { type: integer, example: 1 }
+      centre_name: { type: string, nullable: true }
+      tc_code: { type: string, nullable: true }
+      camera_name: { type: string, nullable: true }
+      camera_no: { type: string, nullable: true }
+      city: { type: string, nullable: true }
+      state: { type: string, nullable: true }
+      cctv_url:
+        type: string
+        example: rtsp://192.168.1.10:554/stream
+      classification: { type: string, nullable: true }
+      status: { type: string, nullable: true }
+      is_active: { type: boolean, example: true }
+      created_at: { type: string, format: date-time }
+      updated_at: { type: string, format: date-time }
+
+  # ── Request bodies ─────────────────────────────────────────────
+  LoginRequest:
+    type: object
+    required: [username, password]
+    properties:
+      username: { type: string, example: admin }
+      password: { type: string, format: password, example: admin123 }
+
+  RegisterRequest:
+    type: object
+    required: [username, email, password]
+    properties:
+      username: { type: string, example: jdoe }
+      email: { type: string, format: email, example: jdoe@example.com }
+      password: { type: string, format: password, minLength: 6 }
+      full_name: { type: string }
+      phone: { type: string }
+      company_name: { type: string }
+      role:
+        type: string
+        enum: [ADMIN, OPERATOR, VIEWER]
+        default: VIEWER
+
+  SignupRequest:
+    type: object
+    required: [name, email, phone, password]
+    properties:
+      name: { type: string, example: Jane Doe }
+      email: { type: string, format: email, example: jane@example.com }
+      phone: { type: string, example: '+919999999999' }
+      password: { type: string, format: password, minLength: 6 }
+      companyName: { type: string, example: CDIS }
+
+  UpdateProfileRequest:
+    type: object
+    properties:
+      full_name: { type: string }
+      phone: { type: string }
+      company_name: { type: string }
+
+  VerifyUserRequest:
+    type: object
+    properties:
+      verified: { type: boolean }
+      role:
+        type: string
+        enum: [ADMIN, OPERATOR, VIEWER]
+    description: At least one of `verified` or `role` must be provided.
+
+  OtpSendRequest:
+    type: object
+    required: [identifier, type]
+    properties:
+      identifier:
+        type: string
+        description: Email address or phone number depending on `type`.
+        example: jane@example.com
+      type:
+        type: string
+        enum: [email, phone]
+
+  OtpVerifyRequest:
+    type: object
+    required: [identifier, otp, type]
+    properties:
+      identifier: { type: string, example: jane@example.com }
+      otp: { type: string, example: '123456' }
+      type:
+        type: string
+        enum: [email, phone]
+
+  ForgotPasswordRequest:
+    type: object
+    required: [email]
+    properties:
+      email: { type: string, format: email }
+
+  ResetPasswordRequest:
+    type: object
+    required: [email, otp, newPassword]
+    properties:
+      email: { type: string, format: email }
+      otp: { type: string, example: '123456' }
+      newPassword: { type: string, format: password, minLength: 6 }
+
+  CreateExamRequest:
+    type: object
+    required: [exam_name, exam_body, link_type]
+    properties:
+      exam_name: { type: string, example: SSC CGL 2026 }
+      exam_body: { type: string, example: SSC }
+      link_type:
+        type: string
+        enum: [RTSP, HLS]
+      description: { type: string }
+      start_date: { type: string, format: date, example: '2026-05-15' }
+      end_date: { type: string, format: date, example: '2026-06-30' }
+      skip_days:
+        type: array
+        items:
+          type: string
+          enum: [Sunday, Monday, Tuesday, Wednesday, Thursday, Friday, Saturday]
+      skip_dates:
+        type: array
+        items: { type: string, format: date }
+      shifts:
+        type: array
+        items:
+          type: object
+          properties:
+            shift_name: { type: string, example: Morning }
+            start_time: { type: string, example: '09:00' }
+            end_time: { type: string, example: '12:00' }
+
+  UpdateExamRequest:
+    type: object
+    properties:
+      exam_name: { type: string }
+      exam_body: { type: string }
+      link_type:
+        type: string
+        enum: [RTSP, HLS]
+      description: { type: string }
+      is_active: { type: boolean }
+      start_date: { type: string, format: date }
+      end_date: { type: string, format: date }
+      skip_days:
+        type: array
+        items:
+          type: string
+          enum: [Sunday, Monday, Tuesday, Wednesday, Thursday, Friday, Saturday]
+      skip_dates:
+        type: array
+        items: { type: string, format: date }
+      shifts:
+        type: array
+        items:
+          type: object
+          properties:
+            shift_name: { type: string }
+            start_time: { type: string }
+            end_time: { type: string }
+
+  CreateCameraRequest:
+    type: object
+    description: |
+      Fields depend on the exam's `link_type`.
+      For **HLS**: `ch_code`, `cctv_url`, plus centre/location fields.
+      For **RTSP**: `device_id`, `cctv_url`, plus centre/location fields.
+    properties:
+      device_id: { type: string, description: Required for RTSP. }
+      ch_code: { type: string, description: Required for HLS. }
+      cctv_url: { type: string }
+      centre_name: { type: string }
+      tc_code: { type: string }
+      city: { type: string }
+      state: { type: string }
+      camera_name: { type: string }
+      camera_no: { type: string }
+      camera_category: { type: string }
+      exam_date: { type: string, format: date }
+      shift_id: { type: integer, nullable: true }
+
+  UpdateCameraRequest:
+    allOf:
+      - $ref: '#/components/schemas/CreateCameraRequest'
+      - type: object
+        properties:
+          classification: { type: string }
+          status: { type: string }
+          is_active: { type: boolean }
+
+  BulkCameraRequest:
+    type: object
+    required: [cameras]
+    properties:
+      cameras:
+        type: array
+        items: { $ref: '#/components/schemas/CreateCameraRequest' }
+
+  CreateScriptRequest:
+    type: object
+    required: [script_id, name]
+    properties:
+      script_id: { type: string, example: face_detection }
+      name: { type: string, example: Face Detection }
+      default_frequency_minutes: { type: integer, minimum: 1, default: 5 }
+      default_duration_minutes: { type: integer, minimum: 1, default: 1 }
+
+  UpdateScriptRequest:
+    type: object
+    properties:
+      name: { type: string }
+      default_frequency_minutes: { type: integer, minimum: 1 }
+      default_duration_minutes: { type: integer, minimum: 1 }
+      is_active: { type: boolean }
+
+  AssignScriptRequest:
+    type: object
+    required: [script_id, assignment_date]
+    properties:
+      script_id: { type: integer, description: FK to scripts.id, example: 1 }
+      assignment_date: { type: string, format: date, example: '2026-05-14' }
+      custom_start_time: { type: string, nullable: true, example: '09:00:00' }
+      custom_end_time: { type: string, nullable: true, example: '12:00:00' }
+      custom_frequency_minutes: { type: integer, nullable: true }
+      notes: { type: string }
+
+  BulkAssignRequest:
+    type: object
+    required: [assignments]
+    properties:
+      assignments:
+        type: array
+        items: { $ref: '#/components/schemas/AssignScriptRequest' }
+
+  UpdateAssignmentRequest:
+    type: object
+    properties:
+      script_id: { type: integer }
+      assignment_date: { type: string, format: date }
+      custom_start_time: { type: string }
+      custom_end_time: { type: string }
+      custom_frequency_minutes: { type: integer }
+      status:
+        type: string
+        enum: [PENDING, RUNNING, COMPLETED, FAILED, CANCELLED]
+      notes: { type: string }
+      is_active: { type: boolean }
+
+  BulkDeleteRequest:
+    type: object
+    required: [ids]
+    properties:
+      ids:
+        type: array
+        items: { type: integer }
+        example: [1, 2, 3]
+
+  UpdateExecutionStatusRequest:
+    type: object
+    required: [status]
+    properties:
+      status:
+        type: string
+        enum: [PENDING, RUNNING, COMPLETED, FAILED, CANCELLED]
+      error_log: { type: string }
+      result_data:
+        type: object
+        additionalProperties: true
+        description: |
+          Free-form JSON. For vision scripts, typically includes a
+          `classifications` array of `{ camera_id, classification }`.
+
+  SendPushAlertRequest:
+    type: object
+    required: [uid, source]
+    properties:
+      uid:
+        type: string
+        description: unique_id from camera_report_(hls|rtsp) table.
+        example: abc123-uid
+      source:
+        type: string
+        enum: [hls, rtsp, HLS, RTSP]
+
+  TestSmsRequest:
+    type: object
+    properties:
+      type:
+        type: string
+        description: Detection type (movement, proximity, mobile, serverroom, invigilator).
+        example: proximity
+      phone: { type: string, example: '+919999999999' }

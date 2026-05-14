@@ -1,0 +1,48 @@
+/api/dashboard/admin-stats:
+  get:
+    tags: [Dashboard]
+    summary: Admin dashboard statistics
+    description: |
+      Returns aggregate counts (exams, shifts, cameras, detections, executions)
+      for the admin dashboard. Supports optional `timeRange` query (e.g. `24h`,
+      `7d`, `30d`).
+    parameters:
+      - name: timeRange
+        in: query
+        required: false
+        description: Time window for detection/execution counts.
+        schema:
+          type: string
+          example: 24h
+    responses:
+      '200':
+        description: Aggregate stats
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                data:
+                  type: object
+                  additionalProperties: true
+                  example:
+                    active_exams: 5
+                    total_shifts: 20
+                    total_cameras: 150
+                    detections:
+                      total: 1250
+                      by_type:
+                        movement: 500
+                        proximity: 400
+                        mobile: 300
+                        invigilator: 50
+                    executions:
+                      pending: 10
+                      running: 5
+                      completed: 1200
+                      failed: 35
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '500':
+        $ref: '#/components/responses/ServerError'

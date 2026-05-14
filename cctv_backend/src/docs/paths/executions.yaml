@@ -1,0 +1,283 @@
+/api/executions:
+  get:
+    tags: [Executions]
+    summary: List assignments (with filters)
+    description: |
+      Returns ShiftScriptAssignment rows with optional filters.
+    parameters:
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [PENDING, RUNNING, COMPLETED, FAILED, CANCELLED]
+      - name: shift_id
+        in: query
+        required: false
+        schema: { type: integer }
+      - name: script_id
+        in: query
+        required: false
+        schema: { type: integer }
+      - name: from
+        in: query
+        required: false
+        description: assignment_date >= from (YYYY-MM-DD).
+        schema: { type: string, format: date }
+      - name: to
+        in: query
+        required: false
+        description: assignment_date <= to (YYYY-MM-DD).
+        schema: { type: string, format: date }
+      - name: limit
+        in: query
+        required: false
+        schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+    responses:
+      '200':
+        description: Array of assignments.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                data:
+                  type: array
+                  items: { $ref: '#/components/schemas/ShiftScriptAssignment' }
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+
+/api/executions/pending:
+  get:
+    tags: [Executions]
+    summary: Pending assignments (script-server polling)
+    description: |
+      Returns PENDING assignments whose computed start time falls within a
+      window (default: now - 30 min … now + 3 min). Used by the script-server
+      poller to schedule firing. **Note:** the `authenticate` middleware is
+      currently commented out on this route, so it is effectively public.
+    security: []
+    parameters:
+      - name: limit
+        in: query
+        required: false
+        schema: { type: integer, minimum: 1, default: 50 }
+      - name: lookahead
+        in: query
+        required: false
+        description: Minutes ahead of "now" to include (default 3).
+        schema: { type: integer, minimum: 0, default: 3 }
+      - name: grace
+        in: query
+        required: false
+        description: Minutes overdue still considered pending (default 30).
+        schema: { type: integer, minimum: 0, default: 30 }
+    responses:
+      '200':
+        description: Pending assignments enriched with script/shift/exam metadata.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                data:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: true
+      '500':
+        $ref: '#/components/responses/ServerError'
+
+/api/executions/running:
+  get:
+    tags: [Executions]
+    summary: Currently running assignments
+    description: |
+      Returns assignments with `status = RUNNING`. Used by workers that
+      restart mid-shift to resume in-flight jobs. **No authentication
+      required** in the route handler.
+    security: []
+    responses:
+      '200':
+        description: Array of running assignments.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                data:
+                  type: array
+                  items: { $ref: '#/components/schemas/ShiftScriptAssignment' }
+
+/api/executions/recent:
+  get:
+    tags: [Executions]
+    summary: Recent assignments
+    description: Returns the latest assignments (any status), ordered by `updated_at` DESC.
+    parameters:
+      - name: limit
+        in: query
+        required: false
+        schema: { type: integer, minimum: 1, maximum: 200, default: 20 }
+    responses:
+      '200':
+        description: Array of recent assignments.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                data:
+                  type: array
+                  items: { $ref: '#/components/schemas/ShiftScriptAssignment' }
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+
+/api/executions/stats/summary:
+  get:
+    tags: [Executions]
+    summary: Execution statistics summary
+    description: Aggregate counts of assignments by status for the configured window.
+    responses:
+      '200':
+        description: Status-bucketed counts.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                data:
+                  type: object
+                  properties:
+                    pending: { type: integer, example: 10 }
+                    running: { type: integer, example: 5 }
+                    completed: { type: integer, example: 1200 }
+                    failed: { type: integer, example: 35 }
+                    cancelled: { type: integer, example: 2 }
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+
+/api/executions/shifts/{shiftId}:
+  parameters:
+    - $ref: '#/components/parameters/ShiftIdPath'
+  get:
+    tags: [Executions]
+    summary: Assignments for a specific shift
+    responses:
+      '200':
+        description: Array of assignments for the shift.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                data:
+                  type: array
+                  items: { $ref: '#/components/schemas/ShiftScriptAssignment' }
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '404':
+        $ref: '#/components/responses/NotFound'
+
+/api/executions/{id}:
+  parameters:
+    - $ref: '#/components/parameters/ExecutionIdPath'
+  get:
+    tags: [Executions]
+    summary: Get assignment by ID
+    responses:
+      '200':
+        description: Assignment with shift, exam, and script joins.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                data: { $ref: '#/components/schemas/ShiftScriptAssignment' }
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '404':
+        $ref: '#/components/responses/NotFound'
+
+/api/executions/{id}/cameras:
+  parameters:
+    - $ref: '#/components/parameters/ExecutionIdPath'
+  get:
+    tags: [Executions]
+    summary: Cameras eligible for this assignment
+    description: |
+      Returns the camera list the script should run against for this
+      assignment (filtered by the assignment's exam, shift, and date).
+    responses:
+      '200':
+        description: Cameras list (HLS or RTSP).
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                data:
+                  type: array
+                  items:
+                    oneOf:
+                      - $ref: '#/components/schemas/CameraHLS'
+                      - $ref: '#/components/schemas/CameraRTSP'
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '404':
+        $ref: '#/components/responses/NotFound'
+
+/api/executions/{id}/status:
+  parameters:
+    - $ref: '#/components/parameters/ExecutionIdPath'
+  put:
+    tags: [Executions]
+    summary: Update assignment status (script-server callback)
+    description: |
+      Called by the script-server to update the lifecycle status of an
+      assignment. When `status = COMPLETED` with a `result_data.classifications`
+      payload (vision scripts), the backend also persists per-camera
+      classifications into the camera_links_(hls|rtsp) tables.
+
+      Accepts either a JWT (Bearer) or the static script-server API key.
+    security:
+      - bearerAuth: []
+      - apiKeyAuth: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/UpdateExecutionStatusRequest' }
+          example:
+            status: COMPLETED
+            result_data:
+              classifications:
+                - camera_id: CAM001
+                  classification: SAFE
+                - camera_id: CAM002
+                  classification: SUSPICIOUS
+    responses:
+      '200':
+        description: Assignment status updated.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                message: { type: string, example: Execution status updated }
+                data: { $ref: '#/components/schemas/ShiftScriptAssignment' }
+      '400':
+        $ref: '#/components/responses/ValidationError'
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '404':
+        $ref: '#/components/responses/NotFound'

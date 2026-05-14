@@ -1,0 +1,17 @@
+/health:
+  get:
+    tags: [Health]
+    summary: Liveness probe
+    description: Plain liveness probe. Always returns 200 if the process is up.
+    security: []
+    responses:
+      '200':
+        description: Service is alive.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                message: { type: string, example: CCTV Monitoring Backend is running }
+                timestamp: { type: string, format: date-time }

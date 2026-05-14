@@ -1,0 +1,154 @@
+/api/exams:
+  get:
+    tags: [Exams]
+    summary: List all exams
+    responses:
+      '200':
+        description: Array of exams with their shifts.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                data:
+                  type: array
+                  items: { $ref: '#/components/schemas/Exam' }
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+  post:
+    tags: [Exams]
+    summary: Create an exam
+    description: Requires `ADMIN` or `OPERATOR` role. Shifts can be created inline.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/CreateExamRequest' }
+          example:
+            exam_name: SSC CGL 2026
+            exam_body: SSC
+            link_type: RTSP
+            description: Optional description
+            start_date: '2026-05-15'
+            end_date: '2026-06-30'
+            skip_days: [Saturday, Sunday]
+            skip_dates: ['2026-05-20']
+            shifts:
+              - shift_name: Morning
+                start_time: '09:00'
+                end_time: '12:00'
+    responses:
+      '201':
+        description: Exam created (with examShifts when provided).
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                message: { type: string, example: Exam created successfully }
+                data: { $ref: '#/components/schemas/Exam' }
+      '400':
+        $ref: '#/components/responses/ValidationError'
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '403':
+        $ref: '#/components/responses/Forbidden'
+
+/api/exams/{id}:
+  parameters:
+    - $ref: '#/components/parameters/ExamIdPath'
+  get:
+    tags: [Exams]
+    summary: Get an exam by ID
+    responses:
+      '200':
+        description: The exam, including shifts.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                data: { $ref: '#/components/schemas/Exam' }
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '404':
+        $ref: '#/components/responses/NotFound'
+  put:
+    tags: [Exams]
+    summary: Update an exam
+    description: Requires `ADMIN` or `OPERATOR` role.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/UpdateExamRequest' }
+    responses:
+      '200':
+        description: Updated exam.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                message: { type: string, example: Exam updated successfully }
+                data: { $ref: '#/components/schemas/Exam' }
+      '400':
+        $ref: '#/components/responses/ValidationError'
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '403':
+        $ref: '#/components/responses/Forbidden'
+      '404':
+        $ref: '#/components/responses/NotFound'
+  delete:
+    tags: [Exams]
+    summary: Delete an exam
+    description: Requires `ADMIN` role.
+    responses:
+      '200':
+        description: Exam deleted.
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SuccessResponse' }
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '403':
+        $ref: '#/components/responses/Forbidden'
+      '404':
+        $ref: '#/components/responses/NotFound'
+
+/api/exams/{id}/detections/count:
+  parameters:
+    - $ref: '#/components/parameters/ExamIdPath'
+  get:
+    tags: [Exams]
+    summary: Detection count for an exam
+    description: |
+      Total number of detection rows recorded for this exam across all
+      detection report tables.
+    responses:
+      '200':
+        description: Detection count.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                data:
+                  type: object
+                  properties:
+                    exam_id: { type: integer, example: 1 }
+                    total: { type: integer, example: 1234 }
+                    by_type:
+                      type: object
+                      additionalProperties: { type: integer }
+                      example: { movement: 500, proximity: 400 }
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '404':
+        $ref: '#/components/responses/NotFound'
