@@ -1,0 +1,29 @@
+/api/report/download:
+  get:
+    tags: [Reports]
+    summary: Download detection report (Excel)
+    description: |
+      Returns an `.xlsx` workbook for the given date.
+      Date format: `dd-mm-yyyy` (e.g. `15-04-2026`).
+    parameters:
+      - name: date
+        in: query
+        required: true
+        description: Date for the report in `dd-mm-yyyy` format.
+        schema:
+          type: string
+          example: 15-04-2026
+    responses:
+      '200':
+        description: Excel workbook (.xlsx).
+        content:
+          application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+            schema:
+              type: string
+              format: binary
+      '400':
+        $ref: '#/components/responses/ValidationError'
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '500':
+        $ref: '#/components/responses/ServerError'

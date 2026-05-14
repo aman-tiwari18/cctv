@@ -1,0 +1,53 @@
+openapi: 3.0.3
+
+info:
+  title: CCTV Analytics API
+  version: 1.0.0
+  description: |
+    REST API for the CCTV exam-monitoring backend.
+
+    Three-service architecture:
+      * Node/Express backend (this service) — schedules and reports
+      * React/Vite frontend — operator dashboard
+      * Python FastAPI script-server — GPU detection scripts
+
+    All endpoints below are mounted under the base path `/cctv_analytics`.
+  contact:
+    name: CCTV Analytics Team
+
+servers:
+  - url: /cctv_analytics
+    description: Same-origin (production / reverse-proxy)
+  - url: http://localhost:3000/cctv_analytics
+    description: Local development
+
+tags:
+  - name: Auth
+    description: Login, signup, OTP flows, password reset, user management
+  - name: Exams
+    description: Exam definitions, schedules, and shifts
+  - name: Cameras
+    description: HLS / RTSP camera links per exam (CRUD, bulk import, templates)
+  - name: Scripts
+    description: Master registry of analytics scripts (face detection, proximity, etc.)
+  - name: Shift Scripts
+    description: Assignment of analytics scripts to exam shifts
+  - name: Executions
+    description: Run state of scheduled assignments — polled by the script-server
+  - name: Reports
+    description: Downloadable detection / camera reports
+  - name: Dashboard
+    description: Aggregate stats for the admin dashboard
+  - name: Client Dashboard
+    description: Aggregate stats grouped by exam_body for client-facing dashboard
+  - name: SMS
+    description: SMS alert delivery to subscribers (script-server callbacks)
+  - name: Health
+    description: Liveness probe
+
+security:
+  - bearerAuth: []
+
+paths: {}
+
+components: {}

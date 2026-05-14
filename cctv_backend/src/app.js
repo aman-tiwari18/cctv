@@ -49,6 +49,31 @@ app.get('/cctv_analytics/health', (req, res) => {
 });
 
 // ==========================
+// API Docs (Swagger UI)
+// Must be mounted BEFORE the SPA static + wildcard below,
+// otherwise /api-docs* would be hijacked by the React index.html.
+// ==========================
+const swaggerUi = require('swagger-ui-express');
+const openapiSpec = require('./docs');
+
+app.use(
+    '/cctv_analytics/api-docs',
+    swaggerUi.serve,
+    swaggerUi.setup(openapiSpec, {
+        explorer: false,
+        customSiteTitle: 'CCTV Analytics API Docs',
+        swaggerOptions: {
+            persistAuthorization: true,
+            displayRequestDuration: true,
+        },
+    })
+);
+
+app.get('/cctv_analytics/api-docs.json', (req, res) => {
+    res.json(openapiSpec);
+});
+
+// ==========================
 // API Routes (MAIN PREFIX)
 // ==========================
 const BASE = '/cctv_analytics';

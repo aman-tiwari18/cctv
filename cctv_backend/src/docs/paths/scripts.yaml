@@ -1,0 +1,112 @@
+/api/scripts:
+  get:
+    tags: [Scripts]
+    summary: List all scripts
+    description: Returns every script in the master registry, used for dropdowns.
+    responses:
+      '200':
+        description: Array of scripts.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                data:
+                  type: array
+                  items: { $ref: '#/components/schemas/Script' }
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+  post:
+    tags: [Scripts]
+    summary: Create a script
+    description: Requires `ADMIN` or `OPERATOR` role.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/CreateScriptRequest' }
+    responses:
+      '201':
+        description: Script created.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                message: { type: string, example: Script created successfully }
+                data: { $ref: '#/components/schemas/Script' }
+      '400':
+        $ref: '#/components/responses/ValidationError'
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '403':
+        $ref: '#/components/responses/Forbidden'
+      '409':
+        $ref: '#/components/responses/Conflict'
+
+/api/scripts/{id}:
+  parameters:
+    - $ref: '#/components/parameters/ScriptIdPath'
+  get:
+    tags: [Scripts]
+    summary: Get script by ID
+    responses:
+      '200':
+        description: The script.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                data: { $ref: '#/components/schemas/Script' }
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '404':
+        $ref: '#/components/responses/NotFound'
+  put:
+    tags: [Scripts]
+    summary: Update a script
+    description: Requires `ADMIN` or `OPERATOR` role.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/UpdateScriptRequest' }
+    responses:
+      '200':
+        description: Updated script.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                message: { type: string, example: Script updated successfully }
+                data: { $ref: '#/components/schemas/Script' }
+      '400':
+        $ref: '#/components/responses/ValidationError'
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '403':
+        $ref: '#/components/responses/Forbidden'
+      '404':
+        $ref: '#/components/responses/NotFound'
+  delete:
+    tags: [Scripts]
+    summary: Delete a script (soft delete)
+    description: Requires `ADMIN` role.
+    responses:
+      '200':
+        description: Script deleted (is_active set to false).
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SuccessResponse' }
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '403':
+        $ref: '#/components/responses/Forbidden'
+      '404':
+        $ref: '#/components/responses/NotFound'

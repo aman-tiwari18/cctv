@@ -1,0 +1,95 @@
+/api/client-dashboard/stats:
+  get:
+    tags: [Client Dashboard]
+    summary: Client dashboard statistics
+    description: Aggregate stats grouped by `exam_body` (e.g. SSC, TCS, EY, CDIS).
+    responses:
+      '200':
+        description: Per-exam_body stats payload.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                data:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: true
+                    example:
+                      exam_body: SSC
+                      total_exams: 5
+                      total_cameras: 120
+                      detections_total: 432
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '500':
+        $ref: '#/components/responses/ServerError'
+
+/api/client-dashboard/camera-accessibility:
+  get:
+    tags: [Client Dashboard]
+    summary: Camera accessibility statistics
+    description: |
+      Returns counts of cameras grouped by accessibility classification
+      (e.g. SAFE, SUSPICIOUS, NOT_ACCESSIBLE) per exam_body / centre.
+    responses:
+      '200':
+        description: Accessibility breakdown.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                data:
+                  type: object
+                  additionalProperties: true
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '500':
+        $ref: '#/components/responses/ServerError'
+
+/api/client-dashboard/camera-accessibility/download:
+  get:
+    tags: [Client Dashboard]
+    summary: Download camera accessibility report (Excel)
+    description: Returns an `.xlsx` workbook with the accessibility breakdown.
+    responses:
+      '200':
+        description: Excel workbook (.xlsx).
+        content:
+          application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+            schema:
+              type: string
+              format: binary
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '500':
+        $ref: '#/components/responses/ServerError'
+
+/api/client-dashboard/exam-body/{examBody}/details:
+  get:
+    tags: [Client Dashboard]
+    summary: Detailed stats for a specific exam body
+    parameters:
+      - $ref: '#/components/parameters/ExamBodyPath'
+    responses:
+      '200':
+        description: Detailed stats for the given exam_body.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                data:
+                  type: object
+                  additionalProperties: true
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '404':
+        $ref: '#/components/responses/NotFound'
+      '500':
+        $ref: '#/components/responses/ServerError'

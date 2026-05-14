@@ -1,0 +1,292 @@
+/api/exams/{examId}/cameras:
+  parameters:
+    - $ref: '#/components/parameters/ExamIdParentPath'
+  get:
+    tags: [Cameras]
+    summary: List cameras for an exam
+    description: |
+      Returns cameras associated with the exam. The exam's `link_type` (RTSP or
+      HLS) determines which table is queried and the resulting schema shape.
+    responses:
+      '200':
+        description: Array of cameras (HLS or RTSP, based on exam's link_type).
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                data:
+                  type: array
+                  items:
+                    oneOf:
+                      - $ref: '#/components/schemas/CameraHLS'
+                      - $ref: '#/components/schemas/CameraRTSP'
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '404':
+        $ref: '#/components/responses/NotFound'
+  post:
+    tags: [Cameras]
+    summary: Create a camera
+    description: Requires `ADMIN` or `OPERATOR` role.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/CreateCameraRequest' }
+          examples:
+            hls:
+              summary: HLS camera
+              value:
+                ch_code: CH01
+                cctv_url: https://stream.example.com/hls/cam01.m3u8
+                centre_name: Centre A
+                tc_code: TC001
+                camera_name: Hall-1 Cam
+                exam_date: '2026-05-15'
+                shift_id: 1
+            rtsp:
+              summary: RTSP camera
+              value:
+                device_id: DEV001
+                cctv_url: rtsp://192.168.1.10:554/stream
+                centre_name: Centre B
+                tc_code: TC002
+                camera_no: '01'
+                camera_name: Entrance Cam
+    responses:
+      '201':
+        description: Camera created.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                message: { type: string, example: Camera created successfully }
+                data:
+                  oneOf:
+                    - $ref: '#/components/schemas/CameraHLS'
+                    - $ref: '#/components/schemas/CameraRTSP'
+      '400':
+        $ref: '#/components/responses/ValidationError'
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '403':
+        $ref: '#/components/responses/Forbidden'
+
+/api/exams/{examId}/cameras/upload:
+  parameters:
+    - $ref: '#/components/parameters/ExamIdParentPath'
+  post:
+    tags: [Cameras]
+    summary: Bulk import cameras from Excel
+    description: |
+      Upload an `.xlsx` / `.xls` / `.ods` file (max 10 MB) of camera rows.
+      Requires `ADMIN` or `OPERATOR` role. The file is parsed by
+      `excelParser` service; rows are upserted by unique key
+      (`ch_code` for HLS, `device_id` for RTSP).
+    requestBody:
+      required: true
+      content:
+        multipart/form-data:
+          schema:
+            type: object
+            required: [file]
+            properties:
+              file:
+                type: string
+                format: binary
+                description: Excel workbook (.xlsx / .xls / .ods).
+    responses:
+      '201':
+        description: Import summary.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                message: { type: string, example: Cameras imported successfully }
+                data:
+                  type: object
+                  properties:
+                    inserted: { type: integer, example: 50 }
+                    updated: { type: integer, example: 5 }
+                    failed: { type: integer, example: 2 }
+                    errors:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          row: { type: integer }
+                          message: { type: string }
+      '400':
+        $ref: '#/components/responses/ValidationError'
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '403':
+        $ref: '#/components/responses/Forbidden'
+      '413':
+        description: Uploaded file exceeds MAX_FILE_SIZE (default 10 MB).
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+/api/exams/{examId}/cameras/template/{type}:
+  parameters:
+    - $ref: '#/components/parameters/ExamIdParentPath'
+    - $ref: '#/components/parameters/CameraTypePath'
+  get:
+    tags: [Cameras]
+    summary: Download blank Excel template
+    description: |
+      Returns an `.xlsx` workbook with the column headers expected by the
+      bulk upload endpoint. `type` must be `RTSP` or `HLS`.
+    responses:
+      '200':
+        description: Excel template (.xlsx).
+        content:
+          application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+            schema:
+              type: string
+              format: binary
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '404':
+        $ref: '#/components/responses/NotFound'
+
+/api/exams/{examId}/cameras/bulk:
+  parameters:
+    - $ref: '#/components/parameters/ExamIdParentPath'
+  post:
+    tags: [Cameras]
+    summary: Bulk create cameras (JSON)
+    description: Requires `ADMIN` or `OPERATOR` role.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/BulkCameraRequest' }
+    responses:
+      '201':
+        description: Cameras created.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                message: { type: string, example: Cameras created }
+                data:
+                  type: object
+                  properties:
+                    inserted: { type: integer }
+                    failed: { type: integer }
+      '400':
+        $ref: '#/components/responses/ValidationError'
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '403':
+        $ref: '#/components/responses/Forbidden'
+
+/api/exams/{examId}/cameras/type/{type}:
+  parameters:
+    - $ref: '#/components/parameters/ExamIdParentPath'
+    - $ref: '#/components/parameters/CameraTypePath'
+  get:
+    tags: [Cameras]
+    summary: List cameras by exam and explicit type
+    description: |
+      Forces the result set to either the HLS or RTSP table regardless of
+      the exam's primary `link_type` (useful for centres that mix types).
+    responses:
+      '200':
+        description: Array of cameras of the requested type.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                data:
+                  type: array
+                  items:
+                    oneOf:
+                      - $ref: '#/components/schemas/CameraHLS'
+                      - $ref: '#/components/schemas/CameraRTSP'
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+
+/api/exams/{examId}/cameras/{id}:
+  parameters:
+    - $ref: '#/components/parameters/ExamIdParentPath'
+    - $ref: '#/components/parameters/CameraIdPath'
+  get:
+    tags: [Cameras]
+    summary: Get camera by ID
+    responses:
+      '200':
+        description: Single camera.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                data:
+                  oneOf:
+                    - $ref: '#/components/schemas/CameraHLS'
+                    - $ref: '#/components/schemas/CameraRTSP'
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '404':
+        $ref: '#/components/responses/NotFound'
+  put:
+    tags: [Cameras]
+    summary: Update a camera
+    description: Requires `ADMIN` or `OPERATOR` role.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/UpdateCameraRequest' }
+    responses:
+      '200':
+        description: Updated camera.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                message: { type: string, example: Camera updated successfully }
+                data:
+                  oneOf:
+                    - $ref: '#/components/schemas/CameraHLS'
+                    - $ref: '#/components/schemas/CameraRTSP'
+      '400':
+        $ref: '#/components/responses/ValidationError'
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '403':
+        $ref: '#/components/responses/Forbidden'
+      '404':
+        $ref: '#/components/responses/NotFound'
+  delete:
+    tags: [Cameras]
+    summary: Delete a camera
+    description: Requires `ADMIN` role.
+    responses:
+      '200':
+        description: Camera deleted.
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SuccessResponse' }
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '403':
+        $ref: '#/components/responses/Forbidden'
+      '404':
+        $ref: '#/components/responses/NotFound'

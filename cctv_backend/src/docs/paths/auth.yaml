@@ -1,0 +1,382 @@
+/api/auth/login:
+  post:
+    tags: [Auth]
+    summary: Log in (returns JWT)
+    description: |
+      Verifies username + password. On success returns a signed JWT and
+      the user profile. The user must be `verified = TRUE` to log in.
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/LoginRequest' }
+    responses:
+      '200':
+        description: Login successful.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                message: { type: string, example: Login successful }
+                data:
+                  type: object
+                  properties:
+                    token:
+                      type: string
+                      example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+                    user: { $ref: '#/components/schemas/User' }
+      '400':
+        $ref: '#/components/responses/ValidationError'
+      '401':
+        description: Invalid credentials, or account is pending verification.
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+/api/auth/register:
+  post:
+    tags: [Auth]
+    summary: Create a user (admin only)
+    description: |
+      Admin-only endpoint to provision a new user account. The created
+      user is **unverified** by default; an admin must call
+      `PUT /api/auth/verify/{userId}` to activate it.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/RegisterRequest' }
+    responses:
+      '201':
+        description: User created (unverified).
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                message: { type: string, example: User created successfully }
+                data: { $ref: '#/components/schemas/User' }
+      '400':
+        $ref: '#/components/responses/ValidationError'
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '403':
+        $ref: '#/components/responses/Forbidden'
+      '409':
+        $ref: '#/components/responses/Conflict'
+
+/api/auth/me:
+  get:
+    tags: [Auth]
+    summary: Get current user profile
+    responses:
+      '200':
+        description: The authenticated user's profile.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                data: { $ref: '#/components/schemas/User' }
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '404':
+        $ref: '#/components/responses/NotFound'
+
+/api/auth/profile:
+  put:
+    tags: [Auth]
+    summary: Update own profile
+    description: Updates `full_name`, `phone`, and/or `company_name`.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/UpdateProfileRequest' }
+    responses:
+      '200':
+        description: Updated profile.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                message: { type: string, example: Profile updated successfully }
+                data: { $ref: '#/components/schemas/User' }
+      '400':
+        $ref: '#/components/responses/ValidationError'
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+
+/api/auth/verify/{userId}:
+  parameters:
+    - $ref: '#/components/parameters/UserIdPath'
+  put:
+    tags: [Auth]
+    summary: Verify / change role of a user (admin only)
+    description: |
+      Admin sets `verified` (boolean) and/or `role` for any user.
+      When verifying, `verified_date` is set to NOW(); when un-verifying,
+      it is cleared.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/VerifyUserRequest' }
+    responses:
+      '200':
+        description: User updated.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                message: { type: string, example: User updated successfully }
+                data: { $ref: '#/components/schemas/User' }
+      '400':
+        $ref: '#/components/responses/ValidationError'
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '403':
+        $ref: '#/components/responses/Forbidden'
+      '404':
+        $ref: '#/components/responses/NotFound'
+
+/api/auth/signup:
+  post:
+    tags: [Auth]
+    summary: Public self-signup
+    description: |
+      Public registration endpoint. Creates an unverified `VIEWER` account
+      with the email as the username. Verification flow uses the `/send-otp`
+      and `/verify-otp` endpoints below.
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/SignupRequest' }
+    responses:
+      '201':
+        description: Account created (pending verification).
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                message:
+                  type: string
+                  example: Account created successfully. Please verify your email and phone.
+                data: { $ref: '#/components/schemas/User' }
+      '400':
+        $ref: '#/components/responses/ValidationError'
+      '409':
+        $ref: '#/components/responses/Conflict'
+
+/api/auth/send-otp:
+  post:
+    tags: [Auth]
+    summary: Send OTP (existing user)
+    description: |
+      Sends an OTP to the user's email or phone. The identifier must already
+      belong to a registered user (returns 404 otherwise).
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/OtpSendRequest' }
+    responses:
+      '200':
+        description: OTP dispatched.
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SuccessResponse' }
+      '400':
+        $ref: '#/components/responses/ValidationError'
+      '404':
+        $ref: '#/components/responses/NotFound'
+      '500':
+        $ref: '#/components/responses/ServerError'
+
+/api/auth/send-registration-otp:
+  post:
+    tags: [Auth]
+    summary: Send OTP (registration flow)
+    description: |
+      Sends an OTP for the registration flow. The identifier must **not**
+      already belong to a registered user (returns 409 otherwise).
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/OtpSendRequest' }
+    responses:
+      '200':
+        description: OTP dispatched.
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SuccessResponse' }
+      '400':
+        $ref: '#/components/responses/ValidationError'
+      '409':
+        $ref: '#/components/responses/Conflict'
+
+/api/auth/verify-otp:
+  post:
+    tags: [Auth]
+    summary: Verify OTP (existing user)
+    description: |
+      Verifies an OTP previously sent via `/send-otp`. On success, marks
+      the user as `verified` in the database. Bypass OTP `000000` is
+      accepted in non-production.
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/OtpVerifyRequest' }
+    responses:
+      '200':
+        description: OTP verified.
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SuccessResponse' }
+      '400':
+        $ref: '#/components/responses/ValidationError'
+
+/api/auth/verify-registration-otp:
+  post:
+    tags: [Auth]
+    summary: Verify OTP (registration flow)
+    description: |
+      Verifies an OTP sent via `/send-registration-otp`. Does **not** flip
+      the `verified` flag on its own — the caller is expected to subsequently
+      hit `/signup` (or vice versa).
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/OtpVerifyRequest' }
+    responses:
+      '200':
+        description: OTP verified.
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SuccessResponse' }
+      '400':
+        $ref: '#/components/responses/ValidationError'
+
+/api/auth/forgot-password:
+  post:
+    tags: [Auth]
+    summary: Request password reset OTP
+    description: |
+      Sends a password-reset OTP to the email if it exists. **Always** returns
+      a 200 with a generic message — does not reveal whether the email is
+      registered.
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ForgotPasswordRequest' }
+    responses:
+      '200':
+        description: Generic acknowledgement.
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SuccessResponse' }
+      '400':
+        $ref: '#/components/responses/ValidationError'
+
+/api/auth/reset-password:
+  post:
+    tags: [Auth]
+    summary: Reset password using OTP
+    description: Completes the password reset flow. New password must be >= 6 chars.
+    security: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ResetPasswordRequest' }
+    responses:
+      '200':
+        description: Password reset successfully.
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SuccessResponse' }
+      '400':
+        $ref: '#/components/responses/ValidationError'
+      '404':
+        $ref: '#/components/responses/NotFound'
+
+/api/auth/users:
+  get:
+    tags: [Auth]
+    summary: List all users (admin only)
+    description: Filters: `verified`, `role`, `search` (matches `full_name` or `email`).
+    parameters:
+      - name: verified
+        in: query
+        required: false
+        schema: { type: boolean }
+      - name: role
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [ADMIN, OPERATOR, VIEWER]
+      - name: search
+        in: query
+        required: false
+        schema: { type: string }
+    responses:
+      '200':
+        description: Array of users.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                data:
+                  type: array
+                  items: { $ref: '#/components/schemas/User' }
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '403':
+        $ref: '#/components/responses/Forbidden'
+
+/api/auth/companies:
+  get:
+    tags: [Auth]
+    summary: List available companies
+    description: |
+      Returns the fixed list of companies offered during registration.
+      Public — no authentication required.
+    security: []
+    responses:
+      '200':
+        description: Companies list.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                data:
+                  type: array
+                  items: { type: string }
+                  example: [EY, SSC, TCS, CDIS]

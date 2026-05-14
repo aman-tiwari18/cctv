@@ -1,0 +1,187 @@
+/api/shifts/{shiftId}/scripts:
+  parameters:
+    - $ref: '#/components/parameters/ShiftIdPath'
+  get:
+    tags: [Shift Scripts]
+    summary: List script assignments for a shift
+    responses:
+      '200':
+        description: Array of assignments.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                data:
+                  type: array
+                  items: { $ref: '#/components/schemas/ShiftScriptAssignment' }
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '404':
+        $ref: '#/components/responses/NotFound'
+  post:
+    tags: [Shift Scripts]
+    summary: Assign a script to a shift
+    description: Requires `ADMIN` or `OPERATOR` role.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/AssignScriptRequest' }
+    responses:
+      '201':
+        description: Assignment created.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                message: { type: string, example: Script assigned successfully }
+                data: { $ref: '#/components/schemas/ShiftScriptAssignment' }
+      '400':
+        $ref: '#/components/responses/ValidationError'
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '403':
+        $ref: '#/components/responses/Forbidden'
+      '409':
+        $ref: '#/components/responses/Conflict'
+
+/api/shifts/{shiftId}/scripts/bulk:
+  parameters:
+    - $ref: '#/components/parameters/ShiftIdPath'
+  post:
+    tags: [Shift Scripts]
+    summary: Bulk assign scripts to a shift
+    description: Requires `ADMIN` or `OPERATOR` role.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/BulkAssignRequest' }
+    responses:
+      '201':
+        description: Assignments created.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                message: { type: string, example: Assignments created }
+                data:
+                  type: array
+                  items: { $ref: '#/components/schemas/ShiftScriptAssignment' }
+      '400':
+        $ref: '#/components/responses/ValidationError'
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '403':
+        $ref: '#/components/responses/Forbidden'
+
+/api/exams/{examId}/shift-scripts:
+  parameters:
+    - $ref: '#/components/parameters/ExamIdParentPath'
+  get:
+    tags: [Shift Scripts]
+    summary: List all shift-script assignments for an exam
+    description: |
+      Returns every assignment across all shifts of the given exam.
+      Useful for the schedule overview screen.
+    responses:
+      '200':
+        description: Array of assignments grouped at the exam level.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                data:
+                  type: array
+                  items: { $ref: '#/components/schemas/ShiftScriptAssignment' }
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '404':
+        $ref: '#/components/responses/NotFound'
+
+/api/shift-scripts/{id}:
+  parameters:
+    - $ref: '#/components/parameters/AssignmentIdPath'
+  put:
+    tags: [Shift Scripts]
+    summary: Update an assignment
+    description: Requires `ADMIN` or `OPERATOR` role.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/UpdateAssignmentRequest' }
+    responses:
+      '200':
+        description: Updated assignment.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                message: { type: string, example: Assignment updated }
+                data: { $ref: '#/components/schemas/ShiftScriptAssignment' }
+      '400':
+        $ref: '#/components/responses/ValidationError'
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '403':
+        $ref: '#/components/responses/Forbidden'
+      '404':
+        $ref: '#/components/responses/NotFound'
+  delete:
+    tags: [Shift Scripts]
+    summary: Delete an assignment
+    description: Requires `ADMIN` or `OPERATOR` role.
+    responses:
+      '200':
+        description: Assignment deleted.
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SuccessResponse' }
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '403':
+        $ref: '#/components/responses/Forbidden'
+      '404':
+        $ref: '#/components/responses/NotFound'
+
+/api/shift-scripts/bulk-delete:
+  post:
+    tags: [Shift Scripts]
+    summary: Bulk delete assignments
+    description: Requires `ADMIN` or `OPERATOR` role.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/BulkDeleteRequest' }
+    responses:
+      '200':
+        description: Bulk deletion summary.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                message: { type: string, example: Assignments deleted }
+                data:
+                  type: object
+                  properties:
+                    deleted: { type: integer, example: 5 }
+      '400':
+        $ref: '#/components/responses/ValidationError'
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '403':
+        $ref: '#/components/responses/Forbidden'
