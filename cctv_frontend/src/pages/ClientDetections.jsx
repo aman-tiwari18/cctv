@@ -280,6 +280,7 @@ function DetectionCard({ item, onClick, onRemove, isRemoving, removed }) {
           <Button
             variant="contained"
             disableElevation
+            endIcon={!removed && <img src="/arrow-right.png" alt="right" style={{ width: 16, height: 16 }} />}
             onClick={(e) => {
               e.stopPropagation();
               if (onRemove && !isRemoving && !removed) onRemove(item);
@@ -830,6 +831,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, removingId, re
                     <Button
                       variant="contained"
                       disableElevation
+                      endIcon={!removed && <img src="/arrow-right.png" alt="right" style={{ width: 18, height: 18 }} />}
                       onClick={() => {
                         if (onRemove && !isRemoving && !removed) onRemove(item);
                       }}

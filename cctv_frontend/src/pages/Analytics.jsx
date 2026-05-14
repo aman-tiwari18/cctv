@@ -21,18 +21,18 @@ import {
 import {
   AccessTime,
   Refresh,
-  ChevronRight,
   Description as DescriptionIcon,
   Add,
   Close,
   CalendarMonth,
   ChevronLeft,
+  ChevronRight,
   DeleteOutline,
   Analytics as AnalyticsIcon
 } from '@mui/icons-material';
 import { examsAPI, shiftScriptsAPI } from '../services/api';
 import ShiftScriptManager from '../components/ShiftScriptManager';
-import { ExamsSvgIcon } from '../components/ExamsSvgIcon'
+import ExamSidebar from '../components/ExamSidebar';
 import { ShiftSvgIcon } from '../components/ShiftSvgIcon';
 
 /* ── Script chip colors keyed by script_id (exact TYPE_META from Detections.jsx) ── */
@@ -64,6 +64,8 @@ const Analytics = () => {
   const [searchParams] = useSearchParams();
   const examId = searchParams.get('exam');
 
+  /* ── Sidebar state ── */
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [exams, setExams] = useState([]);
   const [selectedExamId, setSelectedExamId] = useState(examId || '');
   const [shifts, setShifts] = useState([]);
@@ -318,111 +320,19 @@ const Analytics = () => {
   return (
     <Box sx={{ display: 'flex', minHeight: 'calc(100vh - 120px)', bgcolor: '#f8fafc' }}>
 
-      <Box
-        sx={{
-          width: 280,
-          flexShrink: 0,
-          borderRight: '1px solid #e8ecf1',
-          bgcolor: '#ffffff',
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
+      {/* ════ EXAM SIDEBAR ════ */}
+      <ExamSidebar
+        open={sidebarOpen}
+        onToggle={() => setSidebarOpen(!sidebarOpen)}
+        exams={exams}
+        selectedExamId={selectedExamId}
+        onSelectExam={setSelectedExamId}
+        viewingArchived={viewingArchived}
+        onToggleArchived={() => {
+          setViewingArchived(!viewingArchived);
+          setSelectedExamId('');
         }}
-      >
-        {/* Header */}
-        <Box sx={{ px: 2.5, pt: 2.5, pb: 1.5 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <ExamsSvgIcon sx={{ fontSize: 18, color: '#64748b' }} />
-            <Typography
-              sx={{
-                fontSize: '0.72rem',
-                fontWeight: 700,
-                letterSpacing: '0.08em',
-                textTransform: 'uppercase',
-                color: '#334155',
-              }}
-            >
-              {viewingArchived ? 'Archived Exams' : 'Available Exams'}
-            </Typography>
-          </Box>
-        </Box>
-
-        {/* Exam items */}
-        <Box
-          sx={{
-            flex: 1,
-            overflowY: 'auto',
-            scrollbarWidth: 'none',
-            '&::-webkit-scrollbar': { display: 'none' },
-          }}
-        >
-          {exams.map((exam) => {
-            const isActive = String(exam.id) === String(selectedExamId);
-            return (
-              <Box
-                key={exam.id}
-                onClick={() => setSelectedExamId(exam.id)}
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  px: 2.5,
-                  py: 1.8,
-                  cursor: 'pointer',
-                  borderLeft: isActive ? '3px solid #3b82f6' : '3px solid transparent',
-                  bgcolor: isActive ? '#f0f6ff' : 'transparent',
-                  transition: 'all 0.15s ease',
-                  '&:hover': { bgcolor: isActive ? '#f0f6ff' : '#f8fafc' },
-                }}
-              >
-                <Typography
-                  sx={{
-                    fontSize: '0.88rem',
-                    fontWeight: isActive ? 600 : 400,
-                    color: isActive ? '#3b82f6' : '#334155',
-                    lineHeight: 1.4,
-                    pr: 1,
-                  }}
-                >
-                  {exam.exam_name} ({exam.exam_body})
-                </Typography>
-                <ChevronRight
-                  sx={{
-                    fontSize: 20,
-                    color: isActive ? '#3b82f6' : '#94a3b8',
-                    flexShrink: 0,
-                  }}
-                />
-              </Box>
-            );
-          })}
-        </Box>
-
-        {/* Bottom button */}
-        <Box sx={{ px: 2.5, py: 2 }}>
-          <Button
-            variant="outlined"
-            fullWidth
-            onClick={() => {
-              setViewingArchived(!viewingArchived);
-              setSelectedExamId('');
-            }}
-            sx={{
-              textTransform: 'uppercase',
-              fontWeight: 500,
-              fontSize: '0.72rem',
-              letterSpacing: '0.04em',
-              borderColor: '#cbd5e1',
-              color: '#777',
-              borderRadius: 2,
-              py: 1,
-              '&:hover': { bgcolor: '#f1f5f9', borderColor: '#94a3b8' },
-            }}
-          >
-            {viewingArchived ? 'View Active Exams' : 'View Archived Exams'}
-          </Button>
-        </Box>
-      </Box>
+      />
 
       <Box sx={{ flex: 1, p: 3.5, overflowY: 'auto' }}>
         {error && (

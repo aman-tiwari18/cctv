@@ -9,17 +9,15 @@ import {
 } from '@mui/material';
 import {
   Add, Edit, Delete, Upload, CloudUpload, Download,
-  TableChart, ChevronRight, Search,
+  TableChart, Search,
   Videocam as VideocamIcon,
-  KeyboardArrowLeft,
-  KeyboardArrowRight,
 } from '@mui/icons-material';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import AssignmentIcon from '@mui/icons-material/Assignment';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { camerasAPI, examsAPI } from '../services/api';
-import { ExamsSvgIcon } from '../components/ExamsSvgIcon'
+import ExamSidebar from '../components/ExamSidebar';
 
 
 const truncate = (str, n = 40) =>
@@ -320,111 +318,19 @@ const Cameras = () => {
     <LocalizationProvider dateAdapter={AdapterDateFns}>
       <Box sx={{ display: 'flex', minHeight: 'calc(100vh - 120px)', bgcolor: '#f8fafc' }}>
 
-
-        <Box sx={{
-          width: sidebarOpen ? 280 : 56, flexShrink: 0,
-          borderRight: '1px solid #e8ecf1', bgcolor: '#fff',
-          display: 'flex', flexDirection: 'column', overflow: 'hidden',
-          transition: 'width 0.22s cubic-bezier(0.4,0,0.2,1)',
-        }}>
-
-          {/* Sidebar header + collapse toggle */}
-          <Box sx={{ px: sidebarOpen ? 2.5 : 1, pt: 2.5, pb: 1.5, display: 'flex', alignItems: 'center', justifyContent: sidebarOpen ? 'space-between' : 'center' }}>
-            {sidebarOpen && (
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap:1 }}>
-                <ExamsSvgIcon sx={{ fontSize: 17, color: '#64748b' }} />
-                <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#334155' }}>
-                  {viewingArchived ? 'Archived Exams' : 'Available Exams'}
-                </Typography>
-              </Box>
-            )}
-            <Tooltip title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'} placement="right">
-              <IconButton
-                size="small"
-                onClick={() => setSidebarOpen(!sidebarOpen)}
-                sx={{
-                  color: '#fff',
-                  bgcolor: 'primary.main',
-                  '&:hover': { bgcolor: 'primary.dark' },
-                  borderRadius: 2,
-                  width: 32,
-                  height: 32,
-                }}
-              >
-                {sidebarOpen ? (
-                  <KeyboardArrowLeft sx={{ fontSize: 20 }} />
-                ) : (
-                  <KeyboardArrowRight sx={{ fontSize: 20 }} />
-                )}
-              </IconButton>
-            </Tooltip>
-          </Box>
-
-          {/* Exam list */}
-          <Box sx={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', scrollbarWidth: 'none', '&::-webkit-scrollbar': { display: 'none' } }}>
-            {exams.map((exam) => {
-              const active = String(exam.id) === String(selectedExamId);
-              return (
-                <Tooltip key={exam.id} title={!sidebarOpen ? `${exam.exam_name} (${exam.exam_body})` : ''} placement="right">
-                  <Box
-                    onClick={() => setSelectedExamId(String(exam.id))}
-                    sx={{
-                      display: 'flex', alignItems: 'center',
-                      justifyContent: sidebarOpen ? 'space-between' : 'center',
-                      px: sidebarOpen ? 2.5 : 0, py: 1.8, cursor: 'pointer',
-                      borderLeft: active ? '3px solid #3b82f6' : '3px solid transparent',
-                      bgcolor: active ? '#f0f6ff' : 'transparent',
-                      transition: 'all 0.15s ease',
-                      '&:hover': { bgcolor: active ? '#f0f6ff' : '#f8fafc' },
-                    }}
-                  >
-                    {sidebarOpen ? (
-                      <>
-                        <Typography sx={{ fontSize: '0.88rem', fontWeight: active ? 600 : 400, color: active ? '#3b82f6' : '#334155', lineHeight: 1.4, pr: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {exam.exam_name} ({exam.exam_body})
-                        </Typography>
-                        <ChevronRight sx={{ fontSize: 20, color: active ? '#3b82f6' : '#94a3b8', flexShrink: 0 }} />
-                      </>
-                    ) : (
-                      /* Collapsed: show first letter of exam name in a styled box */
-                      <Box sx={{
-                        width: 34, height: 34, borderRadius: 2,
-                        bgcolor: active ? '#2563eb' : '#f1f5f9',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        transition: 'background 0.15s',
-                        border: active ? 'none' : '1px solid #e2e8f0',
-                      }}>
-                        <Typography sx={{ 
-                          fontSize: '0.9rem', 
-                          fontWeight: 700, 
-                          color: active ? '#fff' : '#64748b',
-                          textTransform: 'uppercase'
-                        }}>
-                          {exam.exam_name.charAt(0)}
-                        </Typography>
-                      </Box>
-                    )}
-                  </Box>
-                </Tooltip>
-              );
-            })}
-            {exams.length === 0 && sidebarOpen && (
-              <Typography sx={{ px: 2.5, py: 2, fontSize: '0.82rem', color: '#94a3b8' }}>No exams found.</Typography>
-            )}
-          </Box>
-
-          {/* Toggle archived */}
-          {sidebarOpen && (
-            <Box sx={{ px: 2.5, py: 2 }}>
-              <Button variant="outlined" fullWidth
-                onClick={() => { setViewingArchived(!viewingArchived); setSelectedExamId(''); }}
-                sx={{ textTransform: 'uppercase', fontWeight: 500, fontSize: '0.72rem', letterSpacing: '0.04em', borderColor: '#cbd5e1', color: '#777', borderRadius: 2, py: 1, '&:hover': { bgcolor: '#f1f5f9', borderColor: '#94a3b8' } }}
-              >
-                {viewingArchived ? 'View Active Exams' : 'View Archived Exams'}
-              </Button>
-            </Box>
-          )}
-        </Box>
+        {/* ════ EXAM SIDEBAR ════ */}
+        <ExamSidebar
+          open={sidebarOpen}
+          onToggle={() => setSidebarOpen(!sidebarOpen)}
+          exams={exams}
+          selectedExamId={selectedExamId}
+          onSelectExam={setSelectedExamId}
+          viewingArchived={viewingArchived}
+          onToggleArchived={() => {
+            setViewingArchived(!viewingArchived);
+            setSelectedExamId('');
+          }}
+        />
 
         {/* ════ RIGHT PANEL ════ */}
         <Box sx={{ flex: 1, p: 3.5, overflowY: 'auto', minWidth: 0 }}>

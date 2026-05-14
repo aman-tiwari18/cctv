@@ -585,7 +585,7 @@ const Exams = () => {
                           borderRadius: '12px',
                           fontWeight: 600,
                           fontSize: '0.68rem',
-                          border: '1px solid #e2e8f0',
+                          // border: '1px solid #e2e8f0',
                           height: 30,
                           px: 0.5,
                           '& .MuiChip-icon': { color: '#2563eb' },
@@ -608,16 +608,7 @@ const Exams = () => {
                         {String(exam.camera_count || 0).padStart(2, '0')}
                       </Typography>
                     </Box>
-                    <Box
-                      onClick={() => navigate(`/shifts?exam=${exam.id}`)}
-                      sx={{ display: 'flex', alignItems: 'center', gap: 0.8, cursor: 'pointer', '&:hover': { opacity: 0.75, color: '#3c81f6' } }}
-                    >
-                      <ShiftSvgIcon sx={{ fontSize: 20, color: '#8b929cff' }} />
 
-                      <Typography sx={{ fontSize: '0.8rem', fontWeight: 600, color: '#333', '&:hover': { color: '#3c81f6' } }}>
-                        {String(exam.examShifts?.length || 0).padStart(2, '0')}
-                      </Typography>
-                    </Box>
                     <Box
                       onClick={() => navigate(`/analytics?exam=${exam.id}`)}
                       sx={{ display: 'flex', alignItems: 'center', gap: 0.8, cursor: 'pointer', '&:hover': { opacity: 0.75, color: '#3c81f6' } }}

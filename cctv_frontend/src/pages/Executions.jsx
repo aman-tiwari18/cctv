@@ -8,12 +8,12 @@ import {
   Select, MenuItem, TextField, InputAdornment, TableSortLabel,
 } from '@mui/material';
 import {
-  Visibility, Refresh, Stop, FiberManualRecord, ChevronRight,
+  Visibility, Refresh, Stop, FiberManualRecord,
   PlayCircle as PlayCircleIcon, Slideshow, Search
 } from '@mui/icons-material';
 import { format } from 'date-fns';
 import { executionsAPI, examsAPI } from '../services/api';
-import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
+import ExamSidebar from '../components/ExamSidebar';
 import axios from 'axios';
 
 /* ── Status chip colour map ────────────────────────────────── */
@@ -64,6 +64,7 @@ const Executions = () => {
   const urlExamId = searchParams.get('exam');
 
   /* ── Sidebar state ── */
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [exams, setExams] = useState([]);
   const [selectedExamId, setSelectedExamId] = useState(urlExamId || '');
   const [viewingArchived, setViewingArchived] = useState(false);
@@ -300,60 +301,19 @@ const Executions = () => {
   return (
     <Box sx={{ display: 'flex', minHeight: 'calc(100vh - 120px)', bgcolor: '#f8fafc' }}>
 
-      {/* ════ LEFT SIDEBAR ════ */}
-      <Box sx={{
-        width: 280, flexShrink: 0, borderRight: '1px solid #e8ecf1',
-        bgcolor: '#fff', display: 'flex', flexDirection: 'column', overflow: 'hidden',
-      }}>
-        {/* Section header */}
-        <Box sx={{ px: 2.5, pt: 2.5, pb: 1.5 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <ExamsSvgIcon sx={{ fontSize: 18, color: '#64748b' }} />
-            <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#334155' }}>
-              {viewingArchived ? 'Archived Exams' : 'Available Exams'}
-            </Typography>
-          </Box>
-        </Box>
-
-        {/* Exam list */}
-        <Box sx={{ flex: 1, overflowY: 'auto', scrollbarWidth: 'none', '&::-webkit-scrollbar': { display: 'none' } }}>
-          {exams.map((exam) => {
-            const active = String(exam.id) === String(selectedExamId);
-            return (
-              <Box
-                key={exam.id}
-                onClick={() => setSelectedExamId(exam.id)}
-                sx={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  px: 2.5, py: 1.8, cursor: 'pointer',
-                  borderLeft: active ? '3px solid #3b82f6' : '3px solid transparent',
-                  bgcolor: active ? '#f0f6ff' : 'transparent',
-                  transition: 'all 0.15s ease',
-                  '&:hover': { bgcolor: active ? '#f0f6ff' : '#f8fafc' },
-                }}
-              >
-                <Typography sx={{ fontSize: '0.88rem', fontWeight: active ? 600 : 400, color: active ? '#3b82f6' : '#334155', lineHeight: 1.4, pr: 1 }}>
-                  {exam.exam_name} ({exam.exam_body})
-                </Typography>
-                <ChevronRight sx={{ fontSize: 20, color: active ? '#3b82f6' : '#94a3b8', flexShrink: 0 }} />
-              </Box>
-            );
-          })}
-          {exams.length === 0 && (
-            <Typography sx={{ px: 2.5, py: 2, fontSize: '0.82rem', color: '#94a3b8' }}>No exams found.</Typography>
-          )}
-        </Box>
-
-        {/* Toggle archived */}
-        <Box sx={{ px: 2.5, py: 2 }}>
-          <Button variant="outlined" fullWidth
-            onClick={() => { setViewingArchived(!viewingArchived); setSelectedExamId(''); }}
-            sx={{ textTransform: 'uppercase', fontWeight: 500, fontSize: '0.72rem', letterSpacing: '0.04em', borderColor: '#cbd5e1', color: '#777', borderRadius: 2, py: 1, '&:hover': { bgcolor: '#f1f5f9', borderColor: '#94a3b8' } }}
-          >
-            {viewingArchived ? 'View Active Exams' : 'View Archived Exams'}
-          </Button>
-        </Box>
-      </Box>
+      {/* ════ EXAM SIDEBAR ════ */}
+      <ExamSidebar
+        open={sidebarOpen}
+        onToggle={() => setSidebarOpen(!sidebarOpen)}
+        exams={exams}
+        selectedExamId={selectedExamId}
+        onSelectExam={setSelectedExamId}
+        viewingArchived={viewingArchived}
+        onToggleArchived={() => {
+          setViewingArchived(!viewingArchived);
+          setSelectedExamId('');
+        }}
+      />
 
       {/* ════ RIGHT PANEL ════ */}
       <Box sx={{ flex: 1, p: 3.5, overflowY: 'auto' }}>

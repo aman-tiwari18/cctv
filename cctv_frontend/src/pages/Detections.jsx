@@ -315,6 +315,7 @@ function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onS
               fullWidth
               disableElevation
               onClick={(e) => { e.stopPropagation(); if (onSkip) onSkip(item); }}
+              startIcon={<img src="/arrow-left.png" alt="left" style={{ width: 16, height: 16 }} />}
               sx={{
                 borderColor: '#c3c5d8', color: '#475569', fontWeight: 900,
                 width: "80px",
@@ -329,7 +330,7 @@ function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onS
 
           <Button
             variant="contained"
-            endIcon={!isPushed && <KeyboardArrowRightIcon />}
+            endIcon={!isPushed && <img src="/arrow-right.png" alt="right" style={{ width: 16, height: 16 }} />}
             disableElevation
             onClick={(e) => {
               e.stopPropagation();
@@ -704,6 +705,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
                         fullWidth
                         disableElevation
                         onClick={handleSkip}
+                        startIcon={<img src="/arrow-left.png" alt="left" style={{ width: 18, height: 18 }} />}
                         sx={{
                           borderColor: '#c3c5d8', color: '#475569', fontWeight: 900,
                           width: "100px",
@@ -717,7 +719,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
                     )}
                     <Button
                       variant="contained"
-                      endIcon={!isPushed && <KeyboardArrowRightIcon />}
+                      endIcon={!isPushed && <img src="/arrow-right.png" alt="right" style={{ width: 18, height: 18 }} />}
                       disableElevation
                       onClick={handlePush}
                       disabled={copyingToClient || isPushed}
@@ -755,7 +757,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
 
 export default function Detections() {
   const { user } = useAuth();
-  const { setAllCounts, setUnfilteredCounts, typeFilter, setTypeFilter, setExportToExcel, setDownloadConsolidatedReport } = useDetectionCounts();
+  const { setAllCounts, setUnfilteredCounts, typeFilter, setTypeFilter, setExportToExcel, setDownloadConsolidatedReport, setReportValidationError } = useDetectionCounts();
   const [searchParams] = useSearchParams();
 
   const [data, setData] = useState([]);
@@ -1229,13 +1231,15 @@ export default function Detections() {
 
   const handleDownloadReport = useCallback(async () => {
     if (!examFilter) {
-      alert("Please select an Exam from the top filter to generate the report.");
+      setReportValidationError('Please select an Exam from the top filter to generate the report.');
       return;
     }
     if (!dateFilter) {
-      alert("Please select a Date from the top filter to generate the report.");
+      setReportValidationError('Please select a Date from the top filter to generate the report.');
       return;
     }
+
+    setReportValidationError('');
 
     try {
       const params = {};
@@ -1256,9 +1260,15 @@ export default function Detections() {
       document.body.appendChild(link);
       link.click();
       link.parentNode.removeChild(link);
+      
+      setClientSnackbar({
+        open: true,
+        message: 'Report downloaded successfully!',
+        severity: 'success'
+      });
     } catch (error) {
       console.error('Download report failed:', error);
-      alert('Failed to download report.');
+      setReportValidationError('Failed to download report. Please try again.');
     }
   }, [typeFilter, dateFilter, search, examFilter, appliedStartTime, appliedEndTime]);
 

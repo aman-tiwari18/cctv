@@ -12,6 +12,8 @@ const DetectionCountsContext = createContext({
   setExportToExcel: () => { },
   downloadConsolidatedReport: () => { },
   setDownloadConsolidatedReport: () => { },
+  reportValidationError: '',
+  setReportValidationError: () => { },
 });
 
 export const DetectionCountsProvider = ({ children }) => {
@@ -20,6 +22,7 @@ export const DetectionCountsProvider = ({ children }) => {
   const [typeFilter, setTypeFilter] = useState([]);
   const [exportToExcel, setExportToExcel] = useState(() => () => { });
   const [downloadConsolidatedReport, setDownloadConsolidatedReport] = useState(() => () => { });
+  const [reportValidationError, setReportValidationError] = useState('');
 
   // Calculate total live count from unfilteredCounts
   const totalLiveCount = useMemo(() => {
@@ -39,6 +42,8 @@ export const DetectionCountsProvider = ({ children }) => {
     setExportToExcel,
     downloadConsolidatedReport,
     setDownloadConsolidatedReport,
+    reportValidationError,
+    setReportValidationError,
   }), [
     allCounts,
     unfilteredCounts,
@@ -46,6 +51,7 @@ export const DetectionCountsProvider = ({ children }) => {
     typeFilter,
     exportToExcel,
     downloadConsolidatedReport,
+    reportValidationError,
   ]);
 
   return (

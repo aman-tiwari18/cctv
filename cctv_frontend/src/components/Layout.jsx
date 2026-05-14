@@ -19,6 +19,8 @@ import {
   Collapse,
   Chip,
   Button,
+  Snackbar,
+  Alert,
 } from '@mui/material';
 import {
   Menu as MenuIcon,
@@ -96,7 +98,6 @@ const menuItems = [
   { text: 'Dashboard', icon: <Dashboard />, path: '/' },
   { text: 'Exams', icon: <ExamsSvgIcon />, path: '/exams' },
   { text: 'Cameras', icon: <CameraAltIcon />, path: '/cameras' },
-  { text: 'Shifts', icon: <ShiftSvgIcon />, path: '/shifts' },
   { text: 'Schedule Analysis', icon: <Analytics />, path: '/analytics' },
   { text: 'Executions', icon: <Slideshow />, path: '/executions' },
   { text: 'Detections', icon: <CustomSvgIcon />, path: '/detections', hasSubItems: true },
@@ -369,10 +370,11 @@ function LayoutInner() {
   const location = useLocation();
   const { user, logout } = useAuth();
 
-  const { unfilteredCounts, exportToExcel, downloadConsolidatedReport } = useDetectionCounts();
+  const { unfilteredCounts, exportToExcel, downloadConsolidatedReport, reportValidationError, setReportValidationError } = useDetectionCounts();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState(null);
   const [liveExamsCount, setLiveExamsCount] = useState(0);
+  const [reportSnackbar, setReportSnackbar] = useState({ open: false, message: '', severity: 'warning' });
 
   // Calculate total detections with useMemo for better reactivity
   const totalDetections = React.useMemo(() => {
@@ -428,6 +430,19 @@ function LayoutInner() {
       }
     }
   }, [location.pathname, user]);
+
+  // Watch for validation errors from Detections page
+  useEffect(() => {
+    if (reportValidationError) {
+      setReportSnackbar({
+        open: true,
+        message: reportValidationError,
+        severity: 'warning'
+      });
+      // Clear the error from context after showing it
+      setReportValidationError('');
+    }
+  }, [reportValidationError, setReportValidationError]);
 
   const handleNavigate = (path) => {
     navigate(path);
@@ -500,7 +515,12 @@ function LayoutInner() {
                 variant="contained"
                 startIcon={<Download sx={{ fontSize: 16 }} />}
                 disableElevation
-                onClick={downloadConsolidatedReport}
+                onClick={() => {
+                  setReportSnackbar({ open: false, message: '', severity: 'warning' });
+                  if (downloadConsolidatedReport) {
+                    downloadConsolidatedReport();
+                  }
+                }}
                 sx={{
                   height: 34,
                   borderRadius: '8px',
@@ -649,6 +669,27 @@ function LayoutInner() {
       >
         <Outlet />
       </Box>
+
+      {/* Report Validation Snackbar - positioned below the button */}
+      <Snackbar
+        open={reportSnackbar.open}
+        autoHideDuration={3000}
+        onClose={() => setReportSnackbar({ ...reportSnackbar, open: false })}
+        anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+        sx={{
+          top: `${APPBAR_HEIGHT + 5}px !important`, // Position below the app bar + button
+          right: '24px !important',
+        }}
+      >
+        <Alert
+          onClose={() => setReportSnackbar({ ...reportSnackbar, open: false })}
+          severity={reportSnackbar.severity}
+          variant="filled"
+          sx={{ width: '100%' }}
+        >
+          {reportSnackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }
