@@ -326,7 +326,7 @@
   get:
     tags: [Auth]
     summary: List all users (admin only)
-    description: Filters: `verified`, `role`, `search` (matches `full_name` or `email`).
+    description: 'Filters: `verified`, `role`, `search` (matches `full_name` or `email`).'
     parameters:
       - name: verified
         in: query
