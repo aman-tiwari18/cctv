@@ -27,7 +27,7 @@ SCRIPT_CLASSIFICATION_MAP = {
     # 2. Improper furniture (not implemented yet, but would use Inside Lab)
     
     # 3. Crowd Detection - More than 10 people at entry gate
-    "crowd":           ["entry", "entry/exit", "outside/biometric area", "outside (crowd at entry/ exit gate)"],
+    "crowd":           ["entry", "entry/exit", "outside/biometric area", "outside"],
     "crowd_biometric": ["entry", "entry/exit", "outside/biometric area", "outside (crowd at entry/ exit gate)"],
     
     # 4. Invigilator Not Moving in exam room or not moving in all lanes
@@ -37,13 +37,13 @@ SCRIPT_CLASSIFICATION_MAP = {
     "proximity":       ["inside lab", "computer lab"],
     
     # 6. Server Room Threshold - More than or equal to the limit
-    "server":          ["server room", "inside lab / server room", "inside server room"],
+    "server":          ["server room", "inside lab / server room", "inside lab"],
     
     # 7. Mobile Phone Detection
-    "phone":           ["inside lab", "computer lab", "inside server room"],
+    "phone":           ["inside lab", "computer lab", "server room"],
     
     # 8. Movement at entry/exit during examination
-    "entry_exit":      ["entry", "entry/exit", "outside (crowd at entry/ exit gate)"],
+    "entry_exit":      ["entry", "entry/exit", "outside"],
     
     # 9. Camera feed is inverted
     "inversion":       ["all"],

@@ -76,15 +76,22 @@ def detect_persons_in_frame(frame, device_id="unknown", camera_no="unknown", scr
         cv2.putText(frame, f"Person {conf:.2f}", (x1, y1 - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
-    cv2.putText(frame, f"Persons: {person_count}", (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-    cv2.putText(frame, f"{device_id} - {camera_no}", (10, 60),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    server_detected = person_count >= MIN_PERSONS
+
+    # Status overlay
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (10, 10), (460, 100), (0, 0, 0), -1)
+    cv2.addWeighted(frame, 0.7, overlay, 0.3, 0, frame)
+    status_color = (0, 0, 255) if server_detected else (0, 255, 0)
+    status_text = f"INTRUDER DETECTED! ({person_count})" if server_detected else "All Clear"
+    cv2.putText(frame, status_text, (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
+    cv2.putText(frame, f"Persons: {person_count}", (20, 62),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+    cv2.putText(frame, f"{device_id} - Cam {camera_no}", (20, 87),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
 
     key = f"{device_id}_{camera_no}"
     now = time.time()
-    
-    server_detected = person_count >= MIN_PERSONS
 
     with _state_lock:
         time_elapsed = now - last_save_times.get(key, 0)
@@ -127,10 +134,18 @@ def detect_persons_batch(items):
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
         ch_no = item.get('ch_no', item.get('camera_id', 'unknown'))
-        cv2.putText(frame, f"Persons: {person_count}", (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        cv2.putText(frame, f"CH: {ch_no}", (10, 60),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+        # Status overlay
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (10, 10), (460, 100), (0, 0, 0), -1)
+        cv2.addWeighted(frame, 0.7, overlay, 0.3, 0, frame)
+        status_color = (0, 0, 255) if server_detected else (0, 255, 0)
+        status_text = f"INTRUDER DETECTED! ({person_count})" if server_detected else "All Clear"
+        cv2.putText(frame, status_text, (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
+        cv2.putText(frame, f"Persons: {person_count}", (20, 62),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+        cv2.putText(frame, f"CH: {ch_no}", (20, 87),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
 
         outputs.append((frame, server_detected, person_count))
 

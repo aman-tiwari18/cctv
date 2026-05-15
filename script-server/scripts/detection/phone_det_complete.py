@@ -131,18 +131,27 @@ def detect_phone_in_frame(frame, device_id="unknown", camera_no="unknown", scrip
     phone_count = len(phone_boxes)
     phone_detected = phone_count > 0
 
-    # Draw detections
     for box in phone_boxes:
         x1, y1, x2, y2 = map(int, box.xyxy[0])
+        conf = float(box.conf[0])
         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+        cv2.putText(frame, f"Phone {conf:.2f}", (x1, max(y1 - 8, 10)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
 
-    scene_labels = classify_scene(frame)
-    cv2.putText(frame, f"Scene: {', '.join(scene_labels[:2])}", (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-    cv2.putText(frame, f"Phones: {phone_count}", (10, 60),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-    cv2.putText(frame, f"{device_id} - {camera_no}", (10, 90),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    # Only run expensive CPU scene classification when a phone is actually detected
+    scene_labels = classify_scene(frame) if phone_detected else ["--"]
+
+    # Status overlay
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (10, 10), (480, 110), (0, 0, 0), -1)
+    cv2.addWeighted(frame, 0.7, overlay, 0.3, 0, frame)
+    status_color = (0, 0, 255) if phone_detected else (0, 255, 0)
+    status_text = f"PHONE DETECTED! ({phone_count})" if phone_detected else "All Clear"
+    cv2.putText(frame, status_text, (20, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
+    cv2.putText(frame, f"Scene: {', '.join(scene_labels[:2])}", (20, 65),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
+    cv2.putText(frame, f"{device_id} - Cam {camera_no}", (20, 90),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
 
     key = f"{device_id}_{camera_no}"
     now = time.time()
@@ -180,16 +189,26 @@ def detect_phone_batch(items):
 
         for box in phone_boxes:
             x1, y1, x2, y2 = map(int, box.xyxy[0])
+            conf = float(box.conf[0])
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+            cv2.putText(frame, f"Phone {conf:.2f}", (x1, max(y1 - 8, 10)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
 
-        scene_labels = classify_scene(frame)
+        # Only run expensive CPU scene classification when a phone is actually detected
+        scene_labels = classify_scene(frame) if phone_detected else ["--"]
         ch_no = item.get('ch_no', item.get('camera_id', 'unknown'))
-        cv2.putText(frame, f"Scene: {', '.join(scene_labels[:2])}", (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        cv2.putText(frame, f"Phones: {phone_count}", (10, 60),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        cv2.putText(frame, f"CH: {ch_no}", (10, 90),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+        # Status overlay
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (10, 10), (480, 110), (0, 0, 0), -1)
+        cv2.addWeighted(frame, 0.7, overlay, 0.3, 0, frame)
+        status_color = (0, 0, 255) if phone_detected else (0, 255, 0)
+        status_text = f"PHONE DETECTED! ({phone_count})" if phone_detected else "All Clear"
+        cv2.putText(frame, status_text, (20, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
+        cv2.putText(frame, f"Scene: {', '.join(scene_labels[:2])}", (20, 65),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
+        cv2.putText(frame, f"CH: {ch_no}", (20, 90),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
 
         outputs.append((frame, phone_detected, phone_count))
 

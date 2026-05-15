@@ -92,6 +92,7 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=900):
             {
                 'frame':     item['frame'],
                 'ch_no':     item['ch_no'],
+                'device_id': item.get('device_id') or item.get('camera_id'),  # must match key in detect_invigilator_batch
                 'camera_id': item.get('device_id') or item.get('camera_id'),
                 'state':     item.get('state', {}),
             }
