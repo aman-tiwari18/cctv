@@ -113,7 +113,7 @@ def detect_persons_batch(items):
     Returns: List[(annotated_frame, server_detected, person_count)]
     """
     model = get_yolo_model()
-    frames = [item['frame'] for item in items]
+    frames = [item['frame'].copy() for item in items]
     results = model(frames, conf=CONF_THRESHOLD, verbose=False)
 
     outputs = []

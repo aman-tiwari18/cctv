@@ -262,6 +262,9 @@ def _hls_camera_thread(cfg, stop_event):
         if frame_count % HLS_SAMPLE_EVERY != 0:
             continue
 
+        if frame is None or frame.size == 0:
+            continue
+
         try:
             _gpu_queue.put_nowait({
                 "frame":       frame.copy(),

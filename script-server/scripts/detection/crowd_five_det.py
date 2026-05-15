@@ -75,14 +75,22 @@ def detect_crowd_five_in_frame(frame, device_id="unknown", camera_no="unknown", 
         cv2.putText(frame, f"P {conf:.2f}", (x1, max(y1 - 8, 10)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
 
-    violation_detected = person_count < MAX_PERSONS
+    # Zero persons = likely camera/lighting issue, skip to avoid false positives
+    violation_detected = 0 < person_count < MAX_PERSONS
 
     # Status overlay
     overlay = frame.copy()
     cv2.rectangle(overlay, (10, 10), (420, 100), (0, 0, 0), -1)
     cv2.addWeighted(frame, 0.7, overlay, 0.3, 0, frame)
-    status_color = (0, 0, 255) if violation_detected else (0, 255, 0)
-    status_text = "LOW PERSON COUNT!" if violation_detected else "All Clear"
+    if person_count == 0:
+        status_color = (0, 165, 255)  # orange — camera/detection issue
+        status_text = "NO PERSON DETECTED"
+    elif violation_detected:
+        status_color = (0, 0, 255)
+        status_text = "LOW PERSON COUNT!"
+    else:
+        status_color = (0, 255, 0)
+        status_text = "All Clear"
     cv2.putText(frame, status_text, (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
     cv2.putText(frame, f"Persons Detected: {person_count} / Min: {MAX_PERSONS}", (20, 60),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
@@ -118,7 +126,7 @@ def detect_crowd_five_in_frame(frame, device_id="unknown", camera_no="unknown", 
 def detect_crowd_five_batch(items):
     """Run true batch inference."""
     model = get_yolo_model()
-    frames = [item['frame'] for item in items]
+    frames = [item['frame'].copy() for item in items]
     results = model(frames, conf=CONF_THRESHOLD, verbose=False)
 
     outputs = []
@@ -132,7 +140,8 @@ def detect_crowd_five_batch(items):
                     person_boxes.append(box)
 
         person_count = len(person_boxes)
-        violation_detected = person_count < MAX_PERSONS
+        # Zero persons = likely camera/lighting issue, skip to avoid false positives
+        violation_detected = 0 < person_count < MAX_PERSONS
 
         for box in person_boxes:
             x1, y1, x2, y2 = map(int, box.xyxy[0])
@@ -147,8 +156,15 @@ def detect_crowd_five_batch(items):
         overlay = frame.copy()
         cv2.rectangle(overlay, (10, 10), (420, 100), (0, 0, 0), -1)
         cv2.addWeighted(frame, 0.7, overlay, 0.3, 0, frame)
-        status_color = (0, 0, 255) if violation_detected else (0, 255, 0)
-        status_text = "LOW PERSON COUNT!" if violation_detected else "All Clear"
+        if person_count == 0:
+            status_color = (0, 165, 255)  # orange — camera/detection issue
+            status_text = "NO PERSON DETECTED"
+        elif violation_detected:
+            status_color = (0, 0, 255)
+            status_text = "LOW PERSON COUNT!"
+        else:
+            status_color = (0, 255, 0)
+            status_text = "All Clear"
         cv2.putText(frame, status_text, (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
         cv2.putText(frame, f"Persons Detected: {person_count} / Min: {MAX_PERSONS}", (20, 60),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
