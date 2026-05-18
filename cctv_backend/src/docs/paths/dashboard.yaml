@@ -1,11 +1,16 @@
 /api/dashboard/admin-stats:
   get:
     tags: [Dashboard]
-    summary: Admin dashboard statistics
+    summary: Admin dashboard statistics (legacy)
     description: |
       Returns aggregate counts (exams, shifts, cameras, detections, executions)
       for the admin dashboard. Supports optional `timeRange` query (e.g. `24h`,
       `7d`, `30d`).
+
+      **Legacy endpoint.** New "CCTV Control Center" dashboard uses
+      `/api/dashboard/overview` and `/api/dashboard/live-exams` instead.
+    security:
+      - bearerAuth: []
     parameters:
       - name: timeRange
         in: query
@@ -46,3 +51,217 @@
         $ref: '#/components/responses/Unauthorized'
       '500':
         $ref: '#/components/responses/ServerError'
+
+/api/dashboard/overview:
+  get:
+    tags: [Dashboard]
+    summary: New dashboard — Performance Overview cards + Detection Distribution
+    description: |
+      Feeds the 4 Performance Overview cards (Total Exams, Cameras, Script
+      Breakdown, Total Detections) and the Detection Distribution chart on the
+      new "CCTV Control Center" dashboard.
+
+      **Date semantics:**
+      - `date` (optional) defaults to **today in local server time (IST)**.
+      - Cameras card is scoped to exams that are live on `date`
+        (`is_active=1 AND date BETWEEN start_date AND end_date`).
+      - Scripts card filters `shift_script_assignments.assignment_date = date`.
+      - Detections card + distribution filter `created_at` to `[date, date+1)`.
+
+      **Invariants:**
+      - `cameras.acc + cameras.non_acc === cameras.total`
+      - `detections.today === detections.pushed_to_client + detections.false_detection`
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: date
+        in: query
+        required: false
+        description: Calendar date in `YYYY-MM-DD` (local IST). Defaults to today.
+        schema:
+          type: string
+          format: date
+          example: '2026-05-15'
+    responses:
+      '200':
+        description: Aggregated overview for the selected date.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                data:
+                  type: object
+                  properties:
+                    date: { type: string, format: date, example: '2026-05-15' }
+                    total_exams:
+                      type: object
+                      properties:
+                        active:  { type: integer, example: 1 }
+                        ongoing: { type: integer, example: 1 }
+                        total:   { type: integer, example: 1 }
+                    cameras:
+                      type: object
+                      properties:
+                        total:              { type: integer, example: 810 }
+                        acc:                { type: integer, example: 200 }
+                        non_acc:            { type: integer, example: 610 }
+                        failed_to_classify: { type: integer, example: 0 }
+                    scripts:
+                      type: object
+                      properties:
+                        planned_today: { type: integer, example: 32 }
+                        run:           { type: integer, example: 18 }
+                        pend:          { type: integer, example: 10 }
+                        done:          { type: integer, example: 4 }
+                    detections:
+                      type: object
+                      properties:
+                        today:            { type: integer, example: 43 }
+                        pushed_to_client: { type: integer, example: 25 }
+                        false_detection:  { type: integer, example: 18 }
+                    detection_distribution:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          type:          { type: string, example: entry_exit_detection }
+                          count:         { type: integer, example: 1116 }
+                          pushed_count:  { type: integer, example: 800 }
+                          removed_count: { type: integer, example: 100 }
+                          accuracy:      { type: string,  example: '71.68', description: '`pushed_count / count * 100`, fixed to 2 decimals.' }
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '500':
+        $ref: '#/components/responses/ServerError'
+
+/api/dashboard/live-exams:
+  get:
+    tags: [Dashboard]
+    summary: New dashboard — Live Exam Table (paginated)
+    description: |
+      Returns one row per `(live exam, currently-running shift)` pair, paginated.
+
+      **"Live" definition (always "right now"; no `date` param):**
+      - `exam.is_active = 1` AND `exam_shift.is_active = 1`
+      - today (local IST) BETWEEN `exam.start_date` AND `exam.end_date`
+      - current local time falls inside the shift's `start_time..end_time`
+        window (with overnight `end_time < start_time` handling).
+
+      **Per-row counts:**
+      - `cameras` — total cameras for that exam (HLS scoped to shift; RTSP per exam).
+        HLS rows with `shift_id IS NULL` apply to all shifts.
+      - `running` — cameras with `LOWER(status)='accessible'` only.
+      - `offline = cameras − running`.
+      - `detections` — `COUNT(*)` of today's detections for `(exam_id, shift_id)`.
+
+      **Invariants:**
+      - `running + offline === cameras` per row.
+      - `total_pages === Math.ceil(total / limit)`.
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: page
+        in: query
+        required: false
+        description: 1-indexed page number.
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      - name: limit
+        in: query
+        required: false
+        description: Rows per page (max 100).
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 10
+      - name: exam_id
+        in: query
+        required: false
+        description: Optional filter to a single exam.
+        schema:
+          type: integer
+          minimum: 1
+    responses:
+      '200':
+        description: Paginated live (exam, shift) rows.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                data:
+                  type: object
+                  properties:
+                    page:        { type: integer, example: 1 }
+                    limit:       { type: integer, example: 10 }
+                    total:       { type: integer, example: 1, description: Total matching rows (across all pages). }
+                    total_pages: { type: integer, example: 1 }
+                    rows:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          exam_id:    { type: integer, example: 22 }
+                          shift_id:   { type: integer, example: 103 }
+                          exam_name:  { type: string,  example: 'Sample Exam' }
+                          shift_name: { type: string,  example: 'Shift 1' }
+                          link_type:  { type: string,  enum: [HLS, RTSP], example: RTSP }
+                          cameras:    { type: integer, example: 810 }
+                          running:    { type: integer, example: 200 }
+                          offline:    { type: integer, example: 610 }
+                          detections: { type: integer, example: 42 }
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '500':
+        $ref: '#/components/responses/ServerError'
+
+/api/dashboard/system-status:
+  get:
+    tags: [Dashboard]
+    summary: Public health probe for the top-bar "System Status" indicator
+    description: |
+      Pings the database with a 1.5s timeout. Always returns HTTP 200 (even
+      when degraded) — the frontend consumes the `data.status` string.
+
+      **Public:** no auth required. Mirrors the lightweight
+      `GET /cctv_analytics/health` endpoint but adds a DB connectivity check.
+    responses:
+      '200':
+        description: System status snapshot.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                data:
+                  type: object
+                  properties:
+                    status:
+                      type: string
+                      enum: [online, degraded]
+                      example: online
+                      description: '`degraded` when any check is offline; `online` when all checks pass.'
+                    checks:
+                      type: object
+                      properties:
+                        api:
+                          type: object
+                          properties:
+                            status: { type: string, enum: [online], example: online }
+                        database:
+                          type: object
+                          properties:
+                            status:     { type: string, enum: [online, offline], example: online }
+                            latency_ms: { type: integer, example: 4 }
+                            error:      { type: string, nullable: true, description: Present only when status is offline. }
+                    timestamp:
+                      type: string
+                      format: date-time
+                      example: '2026-05-15T14:32:11.000Z'
