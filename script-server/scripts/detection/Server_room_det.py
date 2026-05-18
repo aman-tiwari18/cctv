@@ -23,8 +23,10 @@ SAVE_FOLDER = os.path.join(PROJECT_ROOT, "results/tcs_detections/server_room_det
 # - Server Room / Strong Room
 
 COOLDOWN_TIME = 60        # Seconds between saves per camera (1 minute - reduced for faster alerts)
-MIN_PERSONS = 1           # Threshold for violation (any person in server room)
 CONF_THRESHOLD = 0.50     # Confidence for person detection (increased for accuracy)
+
+# Per-TC-code thresholds loaded from server_room_constants.py
+from server_room_constants import TC_CODE_THRESHOLDS, get_min_persons, DEFAULT_MIN_PERSONS as MIN_PERSONS
 
 os.makedirs(SAVE_FOLDER, exist_ok=True)
 
@@ -124,7 +126,9 @@ def detect_persons_batch(items):
             if int(box.cls[0]) == 0 and float(box.conf[0]) >= CONF_THRESHOLD
         ]
         person_count = len(person_boxes)
-        server_detected = person_count >= MIN_PERSONS
+        tc_code = item.get('tc_code', '')
+        min_persons = get_min_persons(tc_code)
+        server_detected = person_count >= min_persons
 
         for box in person_boxes:
             x1, y1, x2, y2 = map(int, box.xyxy[0])
@@ -140,7 +144,7 @@ def detect_persons_batch(items):
         cv2.rectangle(overlay, (10, 10), (460, 100), (0, 0, 0), -1)
         cv2.addWeighted(frame, 0.7, overlay, 0.3, 0, frame)
         status_color = (0, 0, 255) if server_detected else (0, 255, 0)
-        status_text = f"INTRUDER DETECTED! ({person_count})" if server_detected else "All Clear"
+        status_text = f"INTRUDER DETECTED! ({person_count}/{min_persons})" if server_detected else "All Clear"
         cv2.putText(frame, status_text, (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
         cv2.putText(frame, f"Persons: {person_count}", (20, 62),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
