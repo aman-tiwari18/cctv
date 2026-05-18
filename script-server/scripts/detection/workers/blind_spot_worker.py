@@ -138,10 +138,14 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=180):
                 del annotated
                 if 'frame' in item: del item['frame']
 
+            del batch
+
         except Exception as e:
-            logger.error(f"[BlindSpot] Batch error: {e}")
+            logger.error(f"[BlindSpot] Batch inference error: {e}")
             for item in batch:
-                if 'frame' in item: del item['frame']
+                item.pop('frame', None)
+            del batch
+            continue
 
     logger.info("🔴 [BlindSpot] GPU worker stopped")
 
@@ -186,7 +190,8 @@ def blind_spot_worker(frame_queue):
                 }, timeout=0.1)
             except queue.Full:
                 pass
-            del frame
+            finally:
+                del frame
     finally:
         stop_event.set()
         gpu_t.join(timeout=5)

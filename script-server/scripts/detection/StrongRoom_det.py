@@ -91,7 +91,7 @@ def detect_strongroom_in_frame(frame, device_id="unknown", camera_no="unknown", 
 def detect_strongroom_batch(items):
     """Run true batch inference."""
     model = get_yolo_model()
-    frames = [item['frame'] for item in items]
+    frames = [item['frame'].copy() for item in items]
     results = model(frames, conf=CONF_THRESHOLD, verbose=False)
 
     outputs = []

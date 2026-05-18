@@ -217,7 +217,8 @@ def crowd_det_biometric_worker(frame_queue):
                 }, timeout=0.1)
             except queue.Full:
                 pass
-            del frame
+            finally:
+                del frame
     finally:
         stop_event.set()
         gpu_t.join(timeout=5)
