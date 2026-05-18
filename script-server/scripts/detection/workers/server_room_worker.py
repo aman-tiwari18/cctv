@@ -28,6 +28,9 @@ if DETECTION_ROOT not in sys.path:
 # Import core detection module
 import Server_room_det as server_core
 
+# Import shared threshold constants
+from server_room_constants import TC_CODE_THRESHOLDS, get_min_persons, DEFAULT_MIN_PERSONS
+
 # ================= GRACEFUL STOP FLAG =================
 _STOP_EVENT = threading.Event()
 
@@ -102,6 +105,7 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=60):
                 'frame':     item['frame'],
                 'ch_no':     item['ch_no'],
                 'camera_id': item.get('device_id') or item.get('camera_id'),
+                'tc_code':   item.get('tc_code', ''),
                 'state':     item.get('state', {}),
             }
             for item in batch
@@ -225,6 +229,7 @@ def server_room_worker(frame_queue):
             if frame is None:
                 continue
 
+            tc_code = str(packet.get("tc_code", "")) if isinstance(packet, dict) else ""
             try:
                 _gpu_queue.put({
                     "frame":        frame.copy(),
@@ -232,6 +237,7 @@ def server_room_worker(frame_queue):
                     "camera_no":    camera_no,
                     "ch_no":        camera_no,
                     "exam_id":      exam_id,
+                    "tc_code":      tc_code,
                     "script_name":  "server",
                     "source_type":  "RTSP",
                     "state":        {},
@@ -256,6 +262,7 @@ def _hls_camera_thread(cfg, stop_event):
     script_name = cfg.get('script_code', 'server')
     ch_no       = cfg.get('ch_no') or cfg.get('camera_no') or camera_id
     exam_id     = cfg.get('exam_id', '0')
+    tc_code     = str(cfg.get('tc_code') or cfg.get('TC_CODE') or '')
     initial_url = cfg.get('cctv_url') or cfg.get('stream_url') or cfg.get('url', '')
 
     hls = extract_hls_streaming_url(initial_url)
@@ -295,6 +302,7 @@ def _hls_camera_thread(cfg, stop_event):
                 "camera_id":   camera_id,
                 "ch_no":       ch_no,
                 "exam_id":     exam_id,
+                "tc_code":     tc_code,
                 "script_name": script_name,
                 "source_type": "HLS",
             })

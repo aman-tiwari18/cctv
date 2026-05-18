@@ -7,6 +7,77 @@
 
 const { query } = require('../config/database');
 
+// ============================================================================
+// Helpers used by the new client dashboard endpoints (overview, live-exams).
+// Date logic mirrors DashboardController.js so "today" is consistent across
+// admin and client endpoints. Kept local to this file to avoid cross-controller
+// coupling — same pattern as the existing controllers in this codebase.
+// ============================================================================
+
+/**
+ * Local-IST date string "YYYY-MM-DD" from a Date (defaults to now).
+ * Avoids toISOString()'s UTC offset which shifts the date for IST early hours.
+ */
+const getLocalDateStr = (d = new Date()) => [
+    d.getFullYear(),
+    String(d.getMonth() + 1).padStart(2, '0'),
+    String(d.getDate()).padStart(2, '0'),
+].join('-');
+
+/**
+ * Local "HH:MM:SS" from a Date (defaults to now).
+ */
+const getLocalTimeStr = (d = new Date()) => d.toTimeString().substring(0, 8);
+
+/**
+ * Given "YYYY-MM-DD", return { start: "YYYY-MM-DD 00:00:00", end: "YYYY-MM-(DD+1) 00:00:00" }
+ * for use with `created_at >= ? AND created_at < ?` ranges.
+ */
+const getDateRangeBounds = (dateStr) => {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const start = new Date(y, m - 1, d, 0, 0, 0, 0);
+    const end = new Date(y, m - 1, d + 1, 0, 0, 0, 0);
+    const fmt = (dt) => `${getLocalDateStr(dt)} ${getLocalTimeStr(dt)}`;
+    return { start: fmt(start), end: fmt(end) };
+};
+
+/**
+ * Validate a YYYY-MM-DD string; return null if invalid.
+ */
+const validateDateParam = (raw) => {
+    if (!raw || typeof raw !== 'string') return null;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+    const [y, m, d] = raw.split('-').map(Number);
+    const dt = new Date(y, m - 1, d);
+    if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) return null;
+    return raw;
+};
+
+/**
+ * Build the company filter clause + params, mirroring the existing pattern used
+ * in getClientDashboardStats / getCameraAccessibility / etc.
+ *
+ * - ADMIN or missing company_name: no filter (sees all). NULL/empty company_name
+ *   case mirrors existing behavior — flagged for separate hardening.
+ * - 'EY' company: special-cased to see SSC + TCS exam bodies.
+ * - Other companies: exact match on exam_body.
+ *
+ * @param {string} userRole
+ * @param {string} userCompanyName
+ * @param {string} examColumnAlias  Optional SQL column reference, e.g. "e.exam_body" when joining.
+ *                                  Defaults to "exam_body" for unqualified queries.
+ * @returns {{ clause: string, params: any[] }}
+ */
+const buildCompanyFilter = (userRole, userCompanyName, examColumnAlias = 'exam_body') => {
+    if (userRole === 'ADMIN' || !userCompanyName) {
+        return { clause: '', params: [] };
+    }
+    if (userCompanyName === 'EY') {
+        return { clause: ` AND ${examColumnAlias} IN ('SSC','TCS')`, params: [] };
+    }
+    return { clause: ` AND ${examColumnAlias} = ?`, params: [userCompanyName] };
+};
+
 /**
  * GET /api/client-dashboard/stats
  * Returns detection statistics for dashboard
@@ -772,6 +843,409 @@ exports.getExamBodyDetails = async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Failed to fetch exam body details'
+        });
+    }
+};
+
+
+/**
+ * GET /api/client-dashboard/overview?date=YYYY-MM-DD
+ * Client (company-scoped) version of /api/dashboard/overview.
+ * Returns the 4 Performance Overview cards + Detection Distribution chart,
+ * filtered to the requesting user's company (ADMIN sees everything).
+ * Response shape is identical to the admin endpoint so the same frontend can swap URLs.
+ */
+exports.getOverview = async (req, res) => {
+    try {
+        const userCompanyName = req.user?.company_name;
+        const userRole = req.user?.role;
+        const date = validateDateParam(req.query.date) || getLocalDateStr();
+        const { start: dateStart, end: dateEnd } = getDateRangeBounds(date);
+
+        const companyFilter = buildCompanyFilter(userRole, userCompanyName);
+
+        // Q1: Exams summary scoped to the company filter
+        const examsSummaryP = query(
+            `SELECT COUNT(*) AS total,
+                    SUM(CASE WHEN is_active = 1
+                              AND start_date IS NOT NULL AND end_date IS NOT NULL
+                              AND ? BETWEEN start_date AND end_date
+                         THEN 1 ELSE 0 END) AS ongoing
+             FROM exams
+             WHERE 1 = 1${companyFilter.clause}`,
+            [date, ...companyFilter.params]
+        );
+
+        // Q2: Active-on-date exam IDs (subset of company's exams that are live on the date)
+        const activeExamsP = query(
+            `SELECT id FROM exams
+             WHERE is_active = 1
+               AND start_date IS NOT NULL AND end_date IS NOT NULL
+               AND ? BETWEEN start_date AND end_date${companyFilter.clause}`,
+            [date, ...companyFilter.params]
+        );
+
+        const [examsSummary, activeExams] = await Promise.all([examsSummaryP, activeExamsP]);
+        const activeExamIds = activeExams.map((e) => e.id);
+
+        let camerasAgg = { total: 0, acc: 0, failed_to_classify: 0 };
+        let detectionsAgg = { pushed: 0, removed: 0 };
+        let distribution = [];
+        let scriptsAgg = { planned_today: 0, run_count: 0, pend_count: 0, done_count: 0 };
+
+        if (activeExamIds.length > 0) {
+            // Q3 + Q4: Cameras HLS + RTSP
+            const hlsCamsP = query(
+                `SELECT COUNT(*) AS total,
+                        SUM(CASE WHEN LOWER(status) = 'accessible' THEN 1 ELSE 0 END) AS acc,
+                        SUM(CASE WHEN classification IS NULL OR classification = '' THEN 1 ELSE 0 END) AS failed_to_classify
+                 FROM camera_links_hls
+                 WHERE exam_id IN (?) AND is_active = 1`,
+                [activeExamIds]
+            );
+            const rtspCamsP = query(
+                `SELECT COUNT(*) AS total,
+                        SUM(CASE WHEN LOWER(status) = 'accessible' THEN 1 ELSE 0 END) AS acc,
+                        SUM(CASE WHEN classification IS NULL OR classification = '' THEN 1 ELSE 0 END) AS failed_to_classify
+                 FROM camera_links_rtsp
+                 WHERE exam_id IN (?) AND is_active = 1`,
+                [activeExamIds]
+            );
+
+            // Q5: Scripts — must JOIN through exam_shifts because shift_script_assignments
+            // has no exam_id column. This is the one structural difference from the admin endpoint.
+            const scriptsP = query(
+                `SELECT COUNT(*) AS planned_today,
+                        SUM(CASE WHEN ssa.status = 'RUNNING'   THEN 1 ELSE 0 END) AS run_count,
+                        SUM(CASE WHEN ssa.status = 'PENDING'   THEN 1 ELSE 0 END) AS pend_count,
+                        SUM(CASE WHEN ssa.status = 'COMPLETED' THEN 1 ELSE 0 END) AS done_count
+                 FROM shift_script_assignments ssa
+                 JOIN exam_shifts es ON es.id = ssa.shift_id
+                 WHERE ssa.assignment_date = ? AND ssa.is_active = TRUE
+                   AND es.exam_id IN (?)`,
+                [date, activeExamIds]
+            );
+
+            // Q6 + Q7: Detections HLS + RTSP for date range.
+            // CLIENT VISIBILITY RULE: only rows with pushed_to_client = 1 are visible to a client.
+            // Within that set:
+            //   - "pushed" (still showing to client) = remove_from_client = 0
+            //   - "removed" (retracted after push)   = remove_from_client = 1
+            // Total visible today = pushed + removed = strict partition, no double-count.
+            const hlsDetP = query(
+                `SELECT SUM(CASE WHEN remove_from_client = 0 THEN 1 ELSE 0 END) AS pushed,
+                        SUM(CASE WHEN remove_from_client = 1 THEN 1 ELSE 0 END) AS removed
+                 FROM camera_report_hls
+                 WHERE exam_id IN (?) AND pushed_to_client = 1
+                   AND created_at >= ? AND created_at < ?`,
+                [activeExamIds, dateStart, dateEnd]
+            );
+            const rtspDetP = query(
+                `SELECT SUM(CASE WHEN remove_from_client = 0 THEN 1 ELSE 0 END) AS pushed,
+                        SUM(CASE WHEN remove_from_client = 1 THEN 1 ELSE 0 END) AS removed
+                 FROM camera_report_rtsp
+                 WHERE exam_id IN (?) AND pushed_to_client = 1
+                   AND created_at >= ? AND created_at < ?`,
+                [activeExamIds, dateStart, dateEnd]
+            );
+
+            // Q8: Distribution HLS + RTSP grouped by detection_type — same client visibility rule.
+            // total_count = entire pushed-to-client set for that type (= pushed + removed)
+            // pushed_count = subset still showing (NOT retracted)
+            // removed_count = subset retracted
+            const hlsDistP = query(
+                `SELECT detection_type,
+                        COUNT(*) AS total_count,
+                        SUM(CASE WHEN remove_from_client = 0 THEN 1 ELSE 0 END) AS pushed_count,
+                        SUM(CASE WHEN remove_from_client = 1 THEN 1 ELSE 0 END) AS removed_count
+                 FROM camera_report_hls
+                 WHERE exam_id IN (?) AND pushed_to_client = 1
+                   AND created_at >= ? AND created_at < ?
+                 GROUP BY detection_type`,
+                [activeExamIds, dateStart, dateEnd]
+            );
+            const rtspDistP = query(
+                `SELECT detection_type,
+                        COUNT(*) AS total_count,
+                        SUM(CASE WHEN remove_from_client = 0 THEN 1 ELSE 0 END) AS pushed_count,
+                        SUM(CASE WHEN remove_from_client = 1 THEN 1 ELSE 0 END) AS removed_count
+                 FROM camera_report_rtsp
+                 WHERE exam_id IN (?) AND pushed_to_client = 1
+                   AND created_at >= ? AND created_at < ?
+                 GROUP BY detection_type`,
+                [activeExamIds, dateStart, dateEnd]
+            );
+
+            const [hlsCams, rtspCams, scripts, hlsDet, rtspDet, hlsDist, rtspDist] = await Promise.all([
+                hlsCamsP, rtspCamsP, scriptsP, hlsDetP, rtspDetP, hlsDistP, rtspDistP,
+            ]);
+
+            const sumCam = (a, b) => ({
+                total: Number(a?.total || 0) + Number(b?.total || 0),
+                acc: Number(a?.acc || 0) + Number(b?.acc || 0),
+                failed_to_classify: Number(a?.failed_to_classify || 0) + Number(b?.failed_to_classify || 0),
+            });
+            camerasAgg = sumCam(hlsCams[0], rtspCams[0]);
+
+            scriptsAgg = {
+                planned_today: Number(scripts[0]?.planned_today || 0),
+                run_count: Number(scripts[0]?.run_count || 0),
+                pend_count: Number(scripts[0]?.pend_count || 0),
+                done_count: Number(scripts[0]?.done_count || 0),
+            };
+
+            detectionsAgg = {
+                pushed: Number(hlsDet[0]?.pushed || 0) + Number(rtspDet[0]?.pushed || 0),
+                removed: Number(hlsDet[0]?.removed || 0) + Number(rtspDet[0]?.removed || 0),
+            };
+
+            const distMap = new Map();
+            const accumulate = (rows) => {
+                rows.forEach((r) => {
+                    const type = r.detection_type || 'unknown';
+                    const cur = distMap.get(type) || { type, count: 0, pushed_count: 0, removed_count: 0 };
+                    cur.count += Number(r.total_count || 0);
+                    cur.pushed_count += Number(r.pushed_count || 0);
+                    cur.removed_count += Number(r.removed_count || 0);
+                    distMap.set(type, cur);
+                });
+            };
+            accumulate(hlsDist);
+            accumulate(rtspDist);
+            distribution = Array.from(distMap.values()).map((d) => ({
+                ...d,
+                accuracy: d.count > 0 ? ((d.pushed_count / d.count) * 100).toFixed(2) : '0.00',
+            }));
+        }
+
+        const ongoing = Number(examsSummary[0]?.ongoing || 0);
+        const total = Number(examsSummary[0]?.total || 0);
+
+        res.json({
+            success: true,
+            data: {
+                date,
+                total_exams: {
+                    active: ongoing,
+                    ongoing,
+                    total,
+                },
+                cameras: {
+                    total: camerasAgg.total,
+                    acc: camerasAgg.acc,
+                    non_acc: camerasAgg.total - camerasAgg.acc,
+                    failed_to_classify: camerasAgg.failed_to_classify,
+                },
+                scripts: {
+                    planned_today: scriptsAgg.planned_today,
+                    run: scriptsAgg.run_count,
+                    pend: scriptsAgg.pend_count,
+                    done: scriptsAgg.done_count,
+                },
+                detections: {
+                    today: detectionsAgg.pushed + detectionsAgg.removed,
+                    pushed_to_client: detectionsAgg.pushed,
+                    false_detection: detectionsAgg.removed,
+                },
+                detection_distribution: distribution,
+            },
+        });
+
+    } catch (error) {
+        console.error('[ClientDashboardController.getOverview] Error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch client dashboard overview',
+            error: error.message,
+        });
+    }
+};
+
+
+/**
+ * GET /api/client-dashboard/live-exams?page=1&limit=10&exam_id=<optional>
+ * Client (company-scoped) version of /api/dashboard/live-exams.
+ * Returns one row per (live exam belonging to the company, currently-running shift).
+ */
+exports.getLiveExams = async (req, res) => {
+    try {
+        const userCompanyName = req.user?.company_name;
+        const userRole = req.user?.role;
+
+        const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+        const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 10));
+        const offset = (page - 1) * limit;
+        const examIdFilter = req.query.exam_id ? parseInt(req.query.exam_id, 10) : null;
+
+        const todayDate = getLocalDateStr();
+        const nowTime = getLocalTimeStr();
+        const { start: todayStart, end: tomorrowStart } = getDateRangeBounds(todayDate);
+
+        // Company filter applied to the exams alias `e` in the row driver
+        const companyFilter = buildCompanyFilter(userRole, userCompanyName, 'e.exam_body');
+
+        const liveWhere = `
+            WHERE e.is_active = 1 AND es.is_active = 1
+              AND e.start_date IS NOT NULL AND e.end_date IS NOT NULL
+              AND ? BETWEEN e.start_date AND e.end_date
+              AND (
+                    (es.end_time >= es.start_time AND ? BETWEEN es.start_time AND es.end_time)
+                 OR (es.end_time <  es.start_time AND (? >= es.start_time OR ? <= es.end_time))
+              )
+              ${companyFilter.clause}
+              ${examIdFilter ? 'AND e.id = ?' : ''}
+        `;
+
+        const baseParams = [todayDate, nowTime, nowTime, nowTime, ...companyFilter.params];
+        if (examIdFilter) baseParams.push(examIdFilter);
+
+        const countP = query(
+            `SELECT COUNT(*) AS total
+             FROM exam_shifts es
+             JOIN exams e ON e.id = es.exam_id
+             ${liveWhere}`,
+            baseParams
+        );
+
+        const rowsP = query(
+            `SELECT e.id            AS exam_id,
+                    e.exam_name,
+                    e.link_type,
+                    es.id           AS shift_id,
+                    es.shift_name,
+                    es.start_time,
+                    es.end_time
+             FROM exam_shifts es
+             JOIN exams e ON e.id = es.exam_id
+             ${liveWhere}
+             ORDER BY e.id, es.start_time
+             LIMIT ? OFFSET ?`,
+            [...baseParams, limit, offset]
+        );
+
+        const [countResult, pageRows] = await Promise.all([countP, rowsP]);
+        const total = Number(countResult[0]?.total || 0);
+        const totalPages = limit > 0 ? Math.ceil(total / limit) : 0;
+
+        if (pageRows.length === 0) {
+            return res.json({
+                success: true,
+                data: { page, limit, total, total_pages: totalPages, rows: [] },
+            });
+        }
+
+        const examIds = [...new Set(pageRows.map((r) => r.exam_id))];
+
+        // Camera aggregates: HLS keyed by (exam_id, shift_id), shift-NULL bucketed as -1
+        const hlsCamsP = query(
+            `SELECT exam_id,
+                    COALESCE(shift_id, -1) AS shift_id,
+                    COUNT(*) AS cameras,
+                    SUM(CASE WHEN LOWER(status) = 'accessible' THEN 1 ELSE 0 END) AS running
+             FROM camera_links_hls
+             WHERE exam_id IN (?) AND is_active = 1
+             GROUP BY exam_id, COALESCE(shift_id, -1)`,
+            [examIds]
+        );
+        const rtspCamsP = query(
+            `SELECT exam_id,
+                    COUNT(*) AS cameras,
+                    SUM(CASE WHEN LOWER(status) = 'accessible' THEN 1 ELSE 0 END) AS running
+             FROM camera_links_rtsp
+             WHERE exam_id IN (?) AND is_active = 1
+             GROUP BY exam_id`,
+            [examIds]
+        );
+
+        // Detections per (exam, shift) — CLIENT visibility rule: only pushed_to_client = 1.
+        // The "Detections" column on the Live Exam Table shows how many detection events
+        // the client received for this shift today (= still-pushed + retracted = entire pushed set).
+        const hlsDetP = query(
+            `SELECT exam_id, shift_id, COUNT(*) AS detections
+             FROM camera_report_hls
+             WHERE exam_id IN (?) AND pushed_to_client = 1
+               AND created_at >= ? AND created_at < ?
+             GROUP BY exam_id, shift_id`,
+            [examIds, todayStart, tomorrowStart]
+        );
+        const rtspDetP = query(
+            `SELECT exam_id, shift_id, COUNT(*) AS detections
+             FROM camera_report_rtsp
+             WHERE exam_id IN (?) AND pushed_to_client = 1
+               AND created_at >= ? AND created_at < ?
+             GROUP BY exam_id, shift_id`,
+            [examIds, todayStart, tomorrowStart]
+        );
+
+        const [hlsCams, rtspCams, hlsDet, rtspDet] = await Promise.all([
+            hlsCamsP, rtspCamsP, hlsDetP, rtspDetP,
+        ]);
+
+        const hlsCamMap = new Map();
+        hlsCams.forEach((r) => {
+            hlsCamMap.set(`${r.exam_id}::${r.shift_id}`, {
+                cameras: Number(r.cameras || 0),
+                running: Number(r.running || 0),
+            });
+        });
+        const rtspCamMap = new Map();
+        rtspCams.forEach((r) => {
+            rtspCamMap.set(r.exam_id, {
+                cameras: Number(r.cameras || 0),
+                running: Number(r.running || 0),
+            });
+        });
+        const hlsDetMap = new Map();
+        hlsDet.forEach((r) => {
+            hlsDetMap.set(`${r.exam_id}::${r.shift_id}`, Number(r.detections || 0));
+        });
+        const rtspDetMap = new Map();
+        rtspDet.forEach((r) => {
+            rtspDetMap.set(`${r.exam_id}::${r.shift_id}`, Number(r.detections || 0));
+        });
+
+        const rows = pageRows.map((r) => {
+            let cameras = 0;
+            let running = 0;
+            let detections = 0;
+
+            if (String(r.link_type || '').toUpperCase() === 'HLS') {
+                const shiftSpecific = hlsCamMap.get(`${r.exam_id}::${r.shift_id}`) || { cameras: 0, running: 0 };
+                const allShifts = hlsCamMap.get(`${r.exam_id}::-1`) || { cameras: 0, running: 0 };
+                cameras = shiftSpecific.cameras + allShifts.cameras;
+                running = shiftSpecific.running + allShifts.running;
+                detections = hlsDetMap.get(`${r.exam_id}::${r.shift_id}`) || 0;
+            } else {
+                const c = rtspCamMap.get(r.exam_id) || { cameras: 0, running: 0 };
+                cameras = c.cameras;
+                running = c.running;
+                detections = rtspDetMap.get(`${r.exam_id}::${r.shift_id}`) || 0;
+            }
+
+            return {
+                exam_id: r.exam_id,
+                shift_id: r.shift_id,
+                exam_name: r.exam_name,
+                shift_name: r.shift_name,
+                link_type: r.link_type,
+                cameras,
+                running,
+                offline: cameras - running,
+                detections,
+            };
+        });
+
+        res.json({
+            success: true,
+            data: { page, limit, total, total_pages: totalPages, rows },
+        });
+
+    } catch (error) {
+        console.error('[ClientDashboardController.getLiveExams] Error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch client live exams',
+            error: error.message,
         });
     }
 };

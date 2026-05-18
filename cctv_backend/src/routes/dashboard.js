@@ -3,7 +3,12 @@ const router = express.Router();
 const DashboardController = require('../controllers/DashboardController');
 const { authenticate } = require('../middleware/auth');
 
-// Admin dashboard stats
+// Admin dashboard stats (existing — unchanged)
 router.get('/admin-stats', authenticate, DashboardController.getAdminDashboardStats);
+
+// New dashboard endpoints (CCTV Control Center redesign)
+router.get('/overview',       authenticate, DashboardController.getOverview);
+router.get('/live-exams',     authenticate, DashboardController.getLiveExams);
+router.get('/system-status',                DashboardController.getSystemStatus); // public, mirrors /cctv_analytics/health
 
 module.exports = router;
