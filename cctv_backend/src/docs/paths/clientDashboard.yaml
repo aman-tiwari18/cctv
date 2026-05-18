@@ -93,3 +93,192 @@
         $ref: '#/components/responses/NotFound'
       '500':
         $ref: '#/components/responses/ServerError'
+
+/api/client-dashboard/overview:
+  get:
+    tags: [Client Dashboard]
+    summary: New client dashboard — Performance Overview cards + Detection Distribution (company-scoped)
+    description: |
+      Client (company-scoped) version of `GET /api/dashboard/overview`. Returns the
+      same response shape, but data is filtered to the requesting user's company.
+
+      **Company-scoping behavior:**
+      - **ADMIN** — sees all exams (no filter).
+      - **VIEWER with `company_name = 'EY'`** — sees exams where `exam_body IN ('SSC', 'TCS')`.
+      - **VIEWER with any other `company_name`** — sees exams where `exam_body = company_name`
+        (e.g. a TCS viewer sees only TCS exams).
+
+      **Same date semantics as the admin endpoint:**
+      - `date` defaults to today in local server time (IST).
+      - Cameras card scoped to exams that are live on `date` (`is_active=1 AND date BETWEEN start_date AND end_date`).
+      - Scripts card filters `shift_script_assignments.assignment_date = date` AND joins
+        through `exam_shifts` to apply the company filter.
+      - Detections card + distribution filter `created_at` to `[date, date+1)`.
+
+      **Client visibility rule (DIFFERS from admin endpoint):**
+      Clients can only see detections that were pushed to them (`pushed_to_client = 1`).
+      Untriaged or never-pushed detections are invisible. Within the pushed set:
+      - `detections.pushed_to_client` = pushed AND still showing (`remove_from_client = 0`)
+      - `detections.false_detection`  = pushed but later retracted (`remove_from_client = 1`)
+      - `detections.today`            = pushed_to_client + false_detection (entire pushed set)
+      Same shape applies to `detection_distribution[*]`: `pushed_count` = still showing,
+      `removed_count` = retracted, `count` = both combined.
+
+      **Invariants (must hold):**
+      - `cameras.acc + cameras.non_acc === cameras.total`
+      - `detections.today === detections.pushed_to_client + detections.false_detection`
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: date
+        in: query
+        required: false
+        description: Calendar date in `YYYY-MM-DD` (local IST). Defaults to today.
+        schema:
+          type: string
+          format: date
+          example: '2026-05-18'
+    responses:
+      '200':
+        description: Aggregated overview for the selected date, scoped to the user's company.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                data:
+                  type: object
+                  properties:
+                    date: { type: string, format: date, example: '2026-05-18' }
+                    total_exams:
+                      type: object
+                      properties:
+                        active:  { type: integer, example: 1 }
+                        ongoing: { type: integer, example: 1 }
+                        total:   { type: integer, example: 1 }
+                    cameras:
+                      type: object
+                      properties:
+                        total:              { type: integer, example: 810 }
+                        acc:                { type: integer, example: 200 }
+                        non_acc:            { type: integer, example: 610 }
+                        failed_to_classify: { type: integer, example: 0 }
+                    scripts:
+                      type: object
+                      properties:
+                        planned_today: { type: integer, example: 2 }
+                        run:           { type: integer, example: 2 }
+                        pend:          { type: integer, example: 0 }
+                        done:          { type: integer, example: 0 }
+                    detections:
+                      type: object
+                      properties:
+                        today:            { type: integer, example: 0 }
+                        pushed_to_client: { type: integer, example: 0 }
+                        false_detection:  { type: integer, example: 0 }
+                    detection_distribution:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          type:          { type: string, example: server_room_detection }
+                          count:         { type: integer, example: 2 }
+                          pushed_count:  { type: integer, example: 0 }
+                          removed_count: { type: integer, example: 0 }
+                          accuracy:      { type: string,  example: '0.00', description: '`pushed_count / count * 100`, fixed to 2 decimals.' }
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '500':
+        $ref: '#/components/responses/ServerError'
+
+/api/client-dashboard/live-exams:
+  get:
+    tags: [Client Dashboard]
+    summary: New client dashboard — Live Exam Table (paginated, company-scoped)
+    description: |
+      Client (company-scoped) version of `GET /api/dashboard/live-exams`. Returns one
+      row per `(live exam belonging to the user's company, currently-running shift)` pair.
+
+      **"Live" definition (same as admin endpoint, always "right now"):**
+      - `exam.is_active = 1` AND `exam_shift.is_active = 1`
+      - today (local IST) BETWEEN `exam.start_date` AND `exam.end_date`
+      - current local time falls inside the shift's `start_time..end_time`
+        (with overnight `end_time < start_time` handling).
+      - **PLUS company filter on `exams.exam_body`** (see `/overview` description).
+
+      **Per-row counts (identical shape to admin, but `detections` is client-visible only):**
+      - `cameras` — total cameras for that exam (HLS scoped to shift; RTSP per exam).
+        HLS rows with `shift_id IS NULL` apply to all shifts.
+      - `running` — cameras with `LOWER(status)='accessible'` only.
+      - `offline = cameras − running`.
+      - `detections` — `COUNT(*)` of today's detections for `(exam_id, shift_id)`
+        **filtered to `pushed_to_client = 1`** (the client only sees pushed detections).
+
+      **Invariants:**
+      - `running + offline === cameras` per row.
+      - `total_pages === Math.ceil(total / limit)`.
+
+      If a client passes `?exam_id=` of an exam not in their company, the response
+      is `total: 0, rows: []` — the company filter naturally rejects it.
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: page
+        in: query
+        required: false
+        description: 1-indexed page number.
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      - name: limit
+        in: query
+        required: false
+        description: Rows per page (max 100).
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 10
+      - name: exam_id
+        in: query
+        required: false
+        description: Optional filter to a single exam (must be in user's company, otherwise zero rows).
+        schema:
+          type: integer
+          minimum: 1
+    responses:
+      '200':
+        description: Paginated live (exam, shift) rows, scoped to the user's company.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                success: { type: boolean, example: true }
+                data:
+                  type: object
+                  properties:
+                    page:        { type: integer, example: 1 }
+                    limit:       { type: integer, example: 10 }
+                    total:       { type: integer, example: 1 }
+                    total_pages: { type: integer, example: 1 }
+                    rows:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          exam_id:    { type: integer, example: 22 }
+                          shift_id:   { type: integer, example: 103 }
+                          exam_name:  { type: string,  example: 'Sample Exam' }
+                          shift_name: { type: string,  example: 'Shift 1' }
+                          link_type:  { type: string,  enum: [HLS, RTSP], example: RTSP }
+                          cameras:    { type: integer, example: 810 }
+                          running:    { type: integer, example: 200 }
+                          offline:    { type: integer, example: 610 }
+                          detections: { type: integer, example: 42 }
+      '401':
+        $ref: '#/components/responses/Unauthorized'
+      '500':
+        $ref: '#/components/responses/ServerError'

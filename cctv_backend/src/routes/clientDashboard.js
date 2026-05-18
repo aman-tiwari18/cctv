@@ -15,4 +15,8 @@ router.get('/camera-accessibility/download', authenticate, ClientDashboardContro
 // Get detailed statistics for a specific exam_body
 router.get('/exam-body/:examBody/details', authenticate, ClientDashboardController.getExamBodyDetails);
 
+// New CCTV Control Center client dashboard endpoints (mirror admin /dashboard/* but company-scoped)
+router.get('/overview',   authenticate, ClientDashboardController.getOverview);
+router.get('/live-exams', authenticate, ClientDashboardController.getLiveExams);
+
 module.exports = router;
