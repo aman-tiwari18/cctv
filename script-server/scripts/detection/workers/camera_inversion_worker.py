@@ -140,6 +140,11 @@ def _detect_orientation_batch(frames):
         scene_scores, _ = probs.topk(1)
         scene_scores = scene_scores.squeeze(1).tolist()
 
+    # Free CUDA-resident intermediates before continuing
+    del batch_tensor, out, probs, tensors, results, all_rotations
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
     index_map = {}
     for (idx, name, img), (obj_count, obj_conf), scene_conf in zip(meta, yolo_outs, scene_scores):
         score = obj_count * obj_conf + scene_conf
@@ -232,10 +237,14 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=240):
                 del corrected
                 if 'frame' in item: del item['frame']
 
+            del batch
+
         except Exception as e:
-            logger.error(f"[Inversion] Batch error: {e}")
+            logger.error(f"[Inversion] Batch inference error: {e}")
             for item in batch:
-                if 'frame' in item: del item['frame']
+                item.pop('frame', None)
+            del batch
+            continue
 
     logger.info("🔴 [Inversion] GPU worker stopped")
 
@@ -280,7 +289,8 @@ def camera_inversion_worker(frame_queue):
                 }, timeout=0.1)
             except queue.Full:
                 pass
-            del frame
+            finally:
+                del frame
     finally:
         stop_event.set()
         gpu_t.join(timeout=5)
