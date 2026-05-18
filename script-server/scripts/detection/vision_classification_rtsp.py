@@ -121,6 +121,12 @@ import socket as _socket
 
 _CAMVIEW_AUTH_USER  = os.getenv("CAMVIEW_AUTH_USER",  "system")
 _CAMVIEW_AUTH_PASS  = os.getenv("CAMVIEW_AUTH_PASS",  "Coreiseven@@")
+# Per-server password overrides: CAMVIEW_AUTH_PASS_d15=<password> etc.
+_CAMVIEW_PER_SERVER_PASS: dict = {
+    k.replace("CAMVIEW_AUTH_PASS_", "").lower() + ".camview.io": v
+    for k, v in os.environ.items()
+    if k.startswith("CAMVIEW_AUTH_PASS_")
+}
 _CAMVIEW_TOKEN_TTL  = int(os.getenv("CAMVIEW_TOKEN_TTL", "3600"))
 _CAMVIEW_SKIP_PRIV  = os.getenv("CAMVIEW_SKIP_PRIVATE_IPS", "1") == "1"
 
@@ -135,7 +141,7 @@ _camview_server_locks_meta  = threading.Lock() # guards the locks-dict itself
 import fcntl as _fcntl
 _TOKEN_CACHE_FILE   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "server_tokens.json")
 _TOKEN_LOCK_FILE    = _TOKEN_CACHE_FILE + ".lock"
-_CAMVIEW_AUTH_BACKOFF    = 5    # seconds before retrying a failed auth
+_CAMVIEW_AUTH_BACKOFF    = 120  # seconds before retrying a failed auth (prevents DVR account lockouts)
 _CAMVIEW_KEEPALIVE_SECS  = 22   # send keepalive every 22s (session timeout is ~30s)
 _camview_keepalive_threads: dict = {}  # server → (Thread, Event)
 _local_cache_lock   = threading.Lock()
@@ -199,11 +205,18 @@ def _probe_tcp_port(host: str, port: int, timeout: float = 2.0) -> bool:
 
 
 def _sync_camview_authenticate(server: str) -> Optional[str]:
-    """Blocking — 2-step Camview challenge/response auth. Returns token or None."""
+    """Blocking — 2-step Camview challenge/response auth. Returns token or None.
+
+    Some DVR firmware versions (e.g. d15) reject encryptType=MD5 with code 1101
+    ('nonce is illegal') but accept the same MD5-chain signature with encryptType=RSA.
+    On 1101 the function gets a fresh challenge and retries with encryptType=RSA.
+    """
     import requests as _req
     auth_url = f"https://{server}/admin/API/accounts/authorize"
     headers  = {"Content-Type": "application/json"}
     payload  = {"userName": _CAMVIEW_AUTH_USER, "ipAddress": "", "clientType": "WINPC_V1"}
+    # Use per-server password if configured, else global default
+    password = _CAMVIEW_PER_SERVER_PASS.get(server.lower(), _CAMVIEW_AUTH_PASS)
 
     for attempt in range(1, 3):
         try:
@@ -219,17 +232,38 @@ def _sync_camview_authenticate(server: str) -> Optional[str]:
             if not all([realm, random_key, public_key]):
                 continue
 
-            sig = _camview_signature(_CAMVIEW_AUTH_USER, _CAMVIEW_AUTH_PASS, realm, random_key)
-            p2 = {"mac": "", "signature": sig, "userName": _CAMVIEW_AUTH_USER,
-                  "randomKey": random_key, "publicKey": public_key,
-                  "encryptType": "MD5", "ipAddress": "", "clientType": "WINPC_V1", "userType": "0"}
-            r2 = _req.post(auth_url, headers={"Content-Type": "application/json", "Cookie": cookie},
-                           data=json.dumps(p2), timeout=TIMEOUT_API, verify=False)
-            j2 = r2.json()
-            token = j2.get("token")
-            if token:
-                logger.info(f"[Camview] Authenticated: {server}")
-                return token
+            sig = _camview_signature(_CAMVIEW_AUTH_USER, password, realm, random_key)
+            for enc_type in ("MD5", "RSA"):
+                p2 = {"mac": "", "signature": sig, "userName": _CAMVIEW_AUTH_USER,
+                      "randomKey": random_key, "publicKey": public_key,
+                      "encryptType": enc_type, "ipAddress": "", "clientType": "WINPC_V1",
+                      "userType": "0"}
+                r2 = _req.post(auth_url, headers={"Content-Type": "application/json", "Cookie": cookie},
+                               data=json.dumps(p2), timeout=TIMEOUT_API, verify=False)
+                j2 = r2.json()
+                token = j2.get("token")
+                if token:
+                    logger.info(f"[Camview] Authenticated: {server}")
+                    return token
+                # code 1101 = DVR rejects this encryptType — try the other one with a fresh challenge
+                if j2.get("code") == 1101 and enc_type == "MD5":
+                    logger.debug(f"[Camview] {server} rejected encryptType=MD5 (code 1101), retrying with RSA")
+                    # Get a fresh challenge for the RSA retry (session is consumed)
+                    try:
+                        r1b = _req.post(auth_url, headers=headers, data=json.dumps(payload),
+                                        timeout=TIMEOUT_API, verify=False)
+                        j1b = r1b.json()
+                        if j1b.get("randomKey") and j1b.get("realm"):
+                            realm      = j1b["realm"]
+                            random_key = j1b["randomKey"]
+                            public_key = j1b.get("publickey") or j1b.get("publicKey") or public_key
+                            cookie     = r1b.headers.get("Set-Cookie", cookie)
+                            sig        = _camview_signature(_CAMVIEW_AUTH_USER, password, realm, random_key)
+                    except Exception:
+                        pass
+                    continue
+                break  # non-1101 failure — no point trying RSA
+
         except Exception as e:
             logger.debug(f"[Camview] Auth attempt {attempt} failed for {server}: {e}")
         time.sleep(attempt)
@@ -1849,8 +1883,10 @@ def _ensure_vllm_running():
         pass
 
     logger.info("Starting temporary vLLM server process. Please wait (~20 seconds)...")
+    _vllm_script = os.getenv("VLLM_START_SCRIPT", os.path.join(PROJECT_ROOT, "start_vllm.sh"))
+    logger.info(f"Using vLLM start script: {_vllm_script}")
     proc = subprocess.Popen(
-        ["/bin/bash", "/data/cctv_dev/cctv/script-server/start_vllm.sh"],
+        ["/bin/bash", _vllm_script],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         preexec_fn=os.setsid
