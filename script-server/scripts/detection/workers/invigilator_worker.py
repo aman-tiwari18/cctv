@@ -92,6 +92,7 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=900):
             {
                 'frame':     item['frame'],
                 'ch_no':     item['ch_no'],
+                'device_id': item.get('device_id') or item.get('camera_id'),  # must match key in detect_invigilator_batch
                 'camera_id': item.get('device_id') or item.get('camera_id'),
                 'state':     item.get('state', {}),
             }
@@ -254,6 +255,9 @@ def _hls_camera_thread(cfg, stop_event):
 
         frame_count += 1
         if frame_count % HLS_SAMPLE_EVERY != 0:
+            continue
+
+        if frame is None or frame.size == 0:
             continue
 
         try:

@@ -23,10 +23,12 @@ SAVE_FOLDER = os.path.join(BASE_DIR, "results/invigilator_detection")
 # - Computer Lab / Inside Lab / Exam Lab / Inside Classroom
 
 COOLDOWN_TIME = 180       # Seconds between saves
-CONF_THRESHOLD = 0.45     # Confidence for person detection
+CONF_THRESHOLD = 0.50     # Raised: standing persons are high-confidence detections
 STATIC_THRESH = 35        # Pixels movement threshold
-STATIC_TIME_THRESH = 600  # Seconds to be considered static
+STATIC_TIME_THRESH = 600  # Seconds to be considered static (10 min)
 NO_TARGET_TIME_THRESH = 20 # Seconds to be considered absent
+MIN_HEIGHT = 200         # Minimum bounding box height (px) — filters out seated candidates (~150–180px),
+                          # only standing persons (invigilator) reach this height in typical lab cameras
 
 os.makedirs(SAVE_FOLDER, exist_ok=True)
 
@@ -101,25 +103,51 @@ def detect_invigilator_in_frame(frame, device_id="unknown", camera_no="unknown",
     model = get_yolo_model()
     results = model(frame, conf=CONF_THRESHOLD, verbose=False)[0]
 
-    person_boxes = [box.xyxy[0].cpu().numpy() for box in results.boxes 
-                    if int(box.cls[0]) == 0 and box.conf[0] >= CONF_THRESHOLD]
+    # Only track standing persons (height >= MIN_HEIGHT) — filters out seated candidates
+    person_boxes = []
+    person_confs = []
+    for box in results.boxes:
+        if int(box.cls[0]) == 0 and box.conf[0] >= CONF_THRESHOLD:
+            coords = box.xyxy[0].cpu().numpy()
+            if (coords[3] - coords[1]) >= MIN_HEIGHT:
+                person_boxes.append(coords)
+                person_confs.append(float(box.conf[0]))
 
     key = f"{device_id}_{camera_no}"
     with _state_lock:
         if key not in trackers:
             trackers[key] = SimplifiedTracker()
         tracker = trackers[key]
-        
+
     absent, static_violation = tracker.update(person_boxes)
     violation_detected = absent or static_violation
+    status = "ABSENT" if absent else ("STATIC" if static_violation else "Active")
 
-    # Draw
-    for box in person_boxes:
-        cv2.rectangle(frame, (int(box[0]), int(box[1])), (int(box[2]), int(box[3])), (0, 255, 0), 2)
+    # Color: red=violation, orange=static, green=active
+    if absent:
+        box_color = (0, 0, 255)
+    elif static_violation:
+        box_color = (0, 165, 255)
+    else:
+        box_color = (0, 255, 0)
 
-    status = "Absent" if absent else ("Static" if static_violation else "Active")
-    cv2.putText(frame, f"Invigilator: {status}", (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255) if violation_detected else (0, 255, 0), 2)
+    for box, conf in zip(person_boxes, person_confs):
+        x1, y1, x2, y2 = int(box[0]), int(box[1]), int(box[2]), int(box[3])
+        cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
+        cv2.putText(frame, f"Invig {conf:.2f}", (x1, max(y1 - 8, 10)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, box_color, 1)
+
+    # Status overlay
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (10, 10), (450, 110), (0, 0, 0), -1)
+    cv2.addWeighted(frame, 0.7, overlay, 0.3, 0, frame)
+    status_color = (0, 0, 255) if violation_detected else (0, 255, 0)
+    cv2.putText(frame, f"Invigilator: {status}", (20, 38),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.9, status_color, 2)
+    cv2.putText(frame, f"Standing persons: {len(person_boxes)}", (20, 65),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+    cv2.putText(frame, f"{device_id} - Cam {camera_no}", (20, 90),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
 
     now = time.time()
     with _state_lock:
@@ -138,33 +166,59 @@ def detect_invigilator_in_frame(frame, device_id="unknown", camera_no="unknown",
 def detect_invigilator_batch(items):
     """Run true batch inference."""
     model = get_yolo_model()
-    frames = [item['frame'] for item in items]
+    frames = [item['frame'].copy() for item in items]
     results = model(frames, conf=CONF_THRESHOLD, verbose=False)
 
     outputs = []
     for item, result in zip(items, results):
         frame = item['frame'].copy()
-        person_boxes = [box.xyxy[0].cpu().numpy() for box in result.boxes 
-                        if int(box.cls[0]) == 0 and float(box.conf[0]) >= CONF_THRESHOLD]
+        # Only track standing persons (height >= MIN_HEIGHT) — filters out seated candidates
+        person_boxes = []
+        person_confs = []
+        for box in result.boxes:
+            if int(box.cls[0]) == 0 and float(box.conf[0]) >= CONF_THRESHOLD:
+                coords = box.xyxy[0].cpu().numpy()
+                if (coords[3] - coords[1]) >= MIN_HEIGHT:
+                    person_boxes.append(coords)
+                    person_confs.append(float(box.conf[0]))
 
         device_id = item.get('device_id', 'unknown')
         camera_no = item.get('ch_no', 'unknown')
         key = f"{device_id}_{camera_no}"
-        
+
         with _state_lock:
             if key not in trackers:
                 trackers[key] = SimplifiedTracker()
             tracker = trackers[key]
-            
+
         absent, static_violation = tracker.update(person_boxes)
         violation_detected = absent or static_violation
+        status = "ABSENT" if absent else ("STATIC" if static_violation else "Active")
 
-        for box in person_boxes:
-            cv2.rectangle(frame, (int(box[0]), int(box[1])), (int(box[2]), int(box[3])), (0, 255, 0), 2)
+        if absent:
+            box_color = (0, 0, 255)
+        elif static_violation:
+            box_color = (0, 165, 255)
+        else:
+            box_color = (0, 255, 0)
 
-        status = "Absent" if absent else ("Static" if static_violation else "Active")
-        cv2.putText(frame, f"Invigilator: {status}", (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255) if violation_detected else (0, 255, 0), 2)
+        for box, conf in zip(person_boxes, person_confs):
+            x1, y1, x2, y2 = int(box[0]), int(box[1]), int(box[2]), int(box[3])
+            cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
+            cv2.putText(frame, f"Invig {conf:.2f}", (x1, max(y1 - 8, 10)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, box_color, 1)
+
+        # Status overlay
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (10, 10), (450, 110), (0, 0, 0), -1)
+        cv2.addWeighted(frame, 0.7, overlay, 0.3, 0, frame)
+        status_color = (0, 0, 255) if violation_detected else (0, 255, 0)
+        cv2.putText(frame, f"Invigilator: {status}", (20, 38),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.9, status_color, 2)
+        cv2.putText(frame, f"Standing persons: {len(person_boxes)}", (20, 65),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+        cv2.putText(frame, f"CH: {camera_no}", (20, 90),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
 
         outputs.append((frame, violation_detected, 1 if violation_detected else 0))
 

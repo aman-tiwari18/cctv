@@ -54,6 +54,29 @@ def calculate_bottom_distance(box1, box2):
     x2, y2 = get_box_bottom_center(box2)
     return math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
 
+def _annotate_violations(frame, person_boxes, violations):
+    """Draw bounding boxes around violating persons, lines between them, and distance labels."""
+    violating_indices = {idx for i, j, _ in violations for idx in (i, j)}
+
+    for idx in violating_indices:
+        box = person_boxes[idx]
+        x1, y1, x2, y2 = int(box[0]), int(box[1]), int(box[2]), int(box[3])
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+        cv2.putText(frame, f"P{idx + 1}", (x1, max(y1 - 8, 10)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+
+    for i, j, d in violations:
+        c1 = get_box_bottom_center(person_boxes[i])
+        c2 = get_box_bottom_center(person_boxes[j])
+        cv2.line(frame,
+                 (int(c1[0]), int(c1[1])),
+                 (int(c2[0]), int(c2[1])),
+                 (0, 0, 255), 2)
+        mid_x = int((c1[0] + c2[0]) / 2)
+        mid_y = int((c1[1] + c2[1]) / 2)
+        cv2.putText(frame, f"{d:.1f}px", (mid_x, mid_y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+
 # ================= STATE ===================
 last_save_times = {}
 _state_lock = threading.Lock()
@@ -77,17 +100,21 @@ def detect_proximity_in_frame(frame, device_id="unknown", camera_no="unknown", s
             d = calculate_bottom_distance(person_boxes[i], person_boxes[j])
             if d < PROXIMITY_THRESHOLD:
                 violations.append((i, j, d))
-                # Draw violation line
-                c1 = get_box_bottom_center(person_boxes[i])
-                c2 = get_box_bottom_center(person_boxes[j])
-                cv2.line(frame, (int(c1[0]), int(c1[1])), (int(c2[0]), int(c2[1])), (0, 0, 255), 2)
 
     violation_detected = len(violations) > 0
+    _annotate_violations(frame, person_boxes, violations)
 
-    cv2.putText(frame, f"Proximity Violations: {len(violations)}", (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-    cv2.putText(frame, f"{device_id} - {camera_no}", (10, 60),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    # Status overlay
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (10, 10), (420, 100), (0, 0, 0), -1)
+    cv2.addWeighted(frame, 0.7, overlay, 0.3, 0, frame)
+    status_color = (0, 0, 255) if violation_detected else (0, 255, 0)
+    status_text = "PROXIMITY VIOLATION!" if violation_detected else "All Clear"
+    cv2.putText(frame, status_text, (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
+    cv2.putText(frame, f"Persons: {len(person_boxes)}  Violations: {len(violations)}", (20, 60),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+    cv2.putText(frame, f"{device_id} - Cam {camera_no}", (20, 85),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
 
     key = f"{device_id}_{camera_no}"
     now = time.time()
@@ -119,7 +146,7 @@ def detect_proximity_in_frame(frame, device_id="unknown", camera_no="unknown", s
 def detect_proximity_batch(items):
     """Run true batch inference."""
     model = get_yolo_model()
-    frames = [item['frame'] for item in items]
+    frames = [item['frame'].copy() for item in items]
     results = model(frames, conf=CONF_THRESHOLD, verbose=False)
 
     outputs = []
@@ -136,16 +163,23 @@ def detect_proximity_batch(items):
                 d = calculate_bottom_distance(person_boxes[i], person_boxes[j])
                 if d < PROXIMITY_THRESHOLD:
                     violations.append((i, j, d))
-                    c1 = get_box_bottom_center(person_boxes[i])
-                    c2 = get_box_bottom_center(person_boxes[j])
-                    cv2.line(frame, (int(c1[0]), int(c1[1])), (int(c2[0]), int(c2[1])), (0, 0, 255), 2)
 
         violation_detected = len(violations) > 0
+        _annotate_violations(frame, person_boxes, violations)
+
         ch_no = item.get('ch_no', item.get('camera_id', 'unknown'))
-        cv2.putText(frame, f"Proximity Violations: {len(violations)}", (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        cv2.putText(frame, f"CH: {ch_no}", (10, 60),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+        # Status overlay
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (10, 10), (420, 100), (0, 0, 0), -1)
+        cv2.addWeighted(frame, 0.7, overlay, 0.3, 0, frame)
+        status_color = (0, 0, 255) if violation_detected else (0, 255, 0)
+        status_text = "PROXIMITY VIOLATION!" if violation_detected else "All Clear"
+        cv2.putText(frame, status_text, (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
+        cv2.putText(frame, f"Persons: {len(person_boxes)}  Violations: {len(violations)}", (20, 60),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+        cv2.putText(frame, f"CH: {ch_no}", (20, 85),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
 
         outputs.append((frame, violation_detected, len(violations)))
 

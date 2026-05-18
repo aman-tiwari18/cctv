@@ -879,25 +879,26 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, removingId, re
       </Box>
       
       {/* Tip Banner */}
-      <Box sx={{ 
-        bgcolor: '#e3f2fd', 
-        borderRadius: 2, 
-        p: 1.5, 
-        display: 'flex', 
-        alignItems: 'center', 
+      <Box sx={{
+        bgcolor: '#e3f2fd',
+        borderRadius: 2,
+        p: 1,
+        display: 'flex',
+        alignItems: 'center',
         gap: 1,
-        border: '1px solid #90caf9'
+        border: '1px solid #90caf9',
+        width: 'fit-content',
       }}>
         <Box sx={{ 
           color: '#1976d2', 
-          fontSize: 20, 
+          fontSize: 14, 
           display: 'flex', 
           alignItems: 'center' 
         }}>
           💡
         </Box>
         <Typography sx={{ 
-          fontSize: 14, 
+          fontSize: 12, 
           color: '#1565c0', 
           fontWeight: 500 
         }}>

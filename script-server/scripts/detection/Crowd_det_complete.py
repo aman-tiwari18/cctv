@@ -67,20 +67,30 @@ def detect_crowd_in_frame(frame, device_id="unknown", camera_no="unknown", scrip
 
     person_count = len(person_detections)
 
+    crowd_detected = person_count >= MIN_PERSONS
+
     # Draw detections
     for box in person_detections:
         x1, y1, x2, y2 = map(int, box.xyxy[0])
+        conf = float(box.conf[0])
         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+        cv2.putText(frame, f"P {conf:.2f}", (x1, max(y1 - 8, 10)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
 
-    cv2.putText(frame, f"Persons: {person_count}", (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-    cv2.putText(frame, f"{device_id} - {camera_no}", (10, 60),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    # Status overlay
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (10, 10), (420, 100), (0, 0, 0), -1)
+    cv2.addWeighted(frame, 0.7, overlay, 0.3, 0, frame)
+    status_color = (0, 0, 255) if crowd_detected else (0, 255, 0)
+    status_text = f"CROWD DETECTED! ({person_count})" if crowd_detected else "All Clear"
+    cv2.putText(frame, status_text, (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
+    cv2.putText(frame, f"Persons: {person_count} / Threshold: {MIN_PERSONS}", (20, 62),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+    cv2.putText(frame, f"{device_id} - Cam {camera_no}", (20, 87),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
 
     key = f"{device_id}_{camera_no}"
     now = time.time()
-    
-    crowd_detected = person_count >= MIN_PERSONS
 
     with _state_lock:
         time_elapsed = now - last_save_times.get(key, 0)
@@ -108,7 +118,7 @@ def detect_crowd_in_frame(frame, device_id="unknown", camera_no="unknown", scrip
 def detect_crowd_batch(items):
     """Run true batch inference."""
     model = get_yolo_model()
-    frames = [item['frame'] for item in items]
+    frames = [item['frame'].copy() for item in items]
     results = model(frames, conf=CONF_THRESHOLD, verbose=False)
 
     outputs = []
@@ -123,13 +133,24 @@ def detect_crowd_batch(items):
 
         for box in person_boxes:
             x1, y1, x2, y2 = map(int, box.xyxy[0])
+            conf = float(box.conf[0])
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+            cv2.putText(frame, f"P {conf:.2f}", (x1, max(y1 - 8, 10)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
 
         ch_no = item.get('ch_no', item.get('camera_id', 'unknown'))
-        cv2.putText(frame, f"Persons: {person_count}", (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        cv2.putText(frame, f"CH: {ch_no}", (10, 60),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+        # Status overlay
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (10, 10), (420, 100), (0, 0, 0), -1)
+        cv2.addWeighted(frame, 0.7, overlay, 0.3, 0, frame)
+        status_color = (0, 0, 255) if crowd_detected else (0, 255, 0)
+        status_text = f"CROWD DETECTED! ({person_count})" if crowd_detected else "All Clear"
+        cv2.putText(frame, status_text, (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
+        cv2.putText(frame, f"Persons: {person_count} / Threshold: {MIN_PERSONS}", (20, 62),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+        cv2.putText(frame, f"CH: {ch_no}", (20, 87),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
 
         outputs.append((frame, crowd_detected, person_count))
 

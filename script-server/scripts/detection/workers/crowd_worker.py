@@ -56,6 +56,7 @@ GPU_QUEUE_SIZE      = 128
 BATCH_WAIT_TIMEOUT  = 0.2
 THREAD_DELAY        = 0.1
 HLS_SAMPLE_EVERY    = 5
+CONSEC_THRESHOLD    = 2   # CONF=0.45 — require 2 consecutive frames to avoid single-frame false positives
 
 _gpu_queue = queue.Queue(maxsize=GPU_QUEUE_SIZE)
 
@@ -109,15 +110,22 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=180):
 
         # Process results
         for item, (annotated_frame, detected, person_count) in zip(batch, batch_results):
+            state = item.get('state', {})
+
             if not detected:
+                state["consec_violations"] = 0
                 continue
 
-            state = item.get('state', {})
+            state["consec_violations"] = state.get("consec_violations", 0) + 1
+            if state["consec_violations"] < CONSEC_THRESHOLD:
+                continue
+
             now = time.time()
             if now - state.get("last_save", 0) < cooldown_time:
                 continue
 
             state["last_save"] = now
+            state["consec_violations"] = 0
             ts = time.strftime("%Y%m%d_%H%M%S")
             uid = str(uuid.uuid4())
             
@@ -253,6 +261,9 @@ def _hls_camera_thread(cfg, stop_event):
 
         frame_count += 1
         if frame_count % HLS_SAMPLE_EVERY != 0:
+            continue
+
+        if frame is None or frame.size == 0:
             continue
 
         try:

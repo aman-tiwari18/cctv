@@ -56,6 +56,7 @@ GPU_QUEUE_SIZE      = 128
 BATCH_WAIT_TIMEOUT  = 0.2
 THREAD_DELAY        = 0.1
 HLS_SAMPLE_EVERY    = 5
+CONSEC_THRESHOLD    = 5   # Higher than crowd_five (3) — zero-person triggers on ANY missed detection; 5 frames ensures genuine empty room
 
 _gpu_queue = queue.Queue(maxsize=GPU_QUEUE_SIZE)
 
@@ -109,15 +110,23 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=360):
 
         # Process results
         for item, (annotated_frame, detected, person_count) in zip(batch, batch_results):
+            state = item.get('state', {})
+
             if not detected:
+                state["consec_violations"] = 0
                 continue
 
-            state = item.get('state', {})
+            # Zero-person fires on any single missed detection — require 5 consecutive frames
+            state["consec_violations"] = state.get("consec_violations", 0) + 1
+            if state["consec_violations"] < CONSEC_THRESHOLD:
+                continue
+
             now = time.time()
             if now - state.get("last_save", 0) < cooldown_time:
                 continue
 
             state["last_save"] = now
+            state["consec_violations"] = 0
             ts = time.strftime("%Y%m%d_%H%M%S")
             uid = str(uuid.uuid4())
             
