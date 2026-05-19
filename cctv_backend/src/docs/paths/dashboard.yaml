@@ -141,13 +141,15 @@
     tags: [Dashboard]
     summary: New dashboard — Live Exam Table (paginated)
     description: |
-      Returns one row per `(live exam, currently-running shift)` pair, paginated.
+      Returns one row per `(exam, shift)` pair where the exam is live by date today, paginated.
 
-      **"Live" definition (always "right now"; no `date` param):**
+      **"Live" definition (per mentor — DATE RANGE ONLY, no time-of-day filter):**
       - `exam.is_active = 1` AND `exam_shift.is_active = 1`
       - today (local IST) BETWEEN `exam.start_date` AND `exam.end_date`
-      - current local time falls inside the shift's `start_time..end_time`
-        window (with overnight `end_time < start_time` handling).
+
+      All shifts of a live-by-date exam appear in the result, regardless of whether
+      the shift's `start_time..end_time` window is currently active. The frontend
+      can apply its own time-window highlighting if needed.
 
       **Per-row counts:**
       - `cameras` — total cameras for that exam (HLS scoped to shift; RTSP per exam).

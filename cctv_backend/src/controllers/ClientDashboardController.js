@@ -1078,25 +1078,25 @@ exports.getLiveExams = async (req, res) => {
         const examIdFilter = req.query.exam_id ? parseInt(req.query.exam_id, 10) : null;
 
         const todayDate = getLocalDateStr();
-        const nowTime = getLocalTimeStr();
         const { start: todayStart, end: tomorrowStart } = getDateRangeBounds(todayDate);
 
         // Company filter applied to the exams alias `e` in the row driver
         const companyFilter = buildCompanyFilter(userRole, userCompanyName, 'e.exam_body');
 
+        // "Live exam" = exam whose date range includes today (per mentor):
+        //   exam.is_active = 1 AND today BETWEEN start_date AND end_date
+        // No time-of-day filter — all shifts of a live-by-date exam appear, regardless
+        // of whether the shift's start/end window is currently active. Frontend can
+        // do its own time-window visualization if needed.
         const liveWhere = `
             WHERE e.is_active = 1 AND es.is_active = 1
               AND e.start_date IS NOT NULL AND e.end_date IS NOT NULL
               AND ? BETWEEN e.start_date AND e.end_date
-              AND (
-                    (es.end_time >= es.start_time AND ? BETWEEN es.start_time AND es.end_time)
-                 OR (es.end_time <  es.start_time AND (? >= es.start_time OR ? <= es.end_time))
-              )
               ${companyFilter.clause}
               ${examIdFilter ? 'AND e.id = ?' : ''}
         `;
 
-        const baseParams = [todayDate, nowTime, nowTime, nowTime, ...companyFilter.params];
+        const baseParams = [todayDate, ...companyFilter.params];
         if (examIdFilter) baseParams.push(examIdFilter);
 
         const countP = query(

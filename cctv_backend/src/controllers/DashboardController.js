@@ -451,23 +451,22 @@ exports.getLiveExams = async (req, res) => {
         const examIdFilter = req.query.exam_id ? parseInt(req.query.exam_id, 10) : null;
 
         const todayDate = getLocalDateStr();
-        const nowTime = getLocalTimeStr();
         const { start: todayStart, end: tomorrowStart } = getDateRangeBounds(todayDate);
 
-        // Shared WHERE for row driver and count
-        // Overnight shift handled with end_time < start_time branch
+        // Shared WHERE for row driver and count.
+        // "Live exam" = exam whose date range includes today (per mentor):
+        //   exam.is_active = 1 AND today BETWEEN start_date AND end_date
+        // No time-of-day filter — all shifts of a live-by-date exam appear, regardless
+        // of whether the shift's start/end window is currently active. Frontend can
+        // do its own time-window visualization if needed.
         const liveWhere = `
             WHERE e.is_active = 1 AND es.is_active = 1
               AND e.start_date IS NOT NULL AND e.end_date IS NOT NULL
               AND ? BETWEEN e.start_date AND e.end_date
-              AND (
-                    (es.end_time >= es.start_time AND ? BETWEEN es.start_time AND es.end_time)
-                 OR (es.end_time <  es.start_time AND (? >= es.start_time OR ? <= es.end_time))
-              )
               ${examIdFilter ? 'AND e.id = ?' : ''}
         `;
 
-        const baseParams = [todayDate, nowTime, nowTime, nowTime];
+        const baseParams = [todayDate];
         if (examIdFilter) baseParams.push(examIdFilter);
 
         // Count query (parallel with row driver)

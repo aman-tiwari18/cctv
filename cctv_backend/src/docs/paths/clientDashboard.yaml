@@ -198,14 +198,16 @@
     summary: New client dashboard — Live Exam Table (paginated, company-scoped)
     description: |
       Client (company-scoped) version of `GET /api/dashboard/live-exams`. Returns one
-      row per `(live exam belonging to the user's company, currently-running shift)` pair.
+      row per `(exam, shift)` pair where the exam is live by date today AND belongs
+      to the user's company.
 
-      **"Live" definition (same as admin endpoint, always "right now"):**
+      **"Live" definition (per mentor — DATE RANGE ONLY, no time-of-day filter):**
       - `exam.is_active = 1` AND `exam_shift.is_active = 1`
       - today (local IST) BETWEEN `exam.start_date` AND `exam.end_date`
-      - current local time falls inside the shift's `start_time..end_time`
-        (with overnight `end_time < start_time` handling).
       - **PLUS company filter on `exams.exam_body`** (see `/overview` description).
+
+      All shifts of a live-by-date exam appear in the result, regardless of whether
+      the shift's `start_time..end_time` window is currently active.
 
       **Per-row counts (identical shape to admin, but `detections` is client-visible only):**
       - `cameras` — total cameras for that exam (HLS scoped to shift; RTSP per exam).
