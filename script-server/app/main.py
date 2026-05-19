@@ -1433,9 +1433,9 @@ async def copy_client_detections(payload: ClientDetectionCopyRequest):
 
 @app.get("/client-detections")
 def list_client_detections(
-    page: int = 1, 
-    limit: int = 100, 
-    source: Optional[str] = None, 
+    page: int = 1,
+    limit: int = 100,
+    source: Optional[str] = None,
     type: Optional[str] = None,
     date: Optional[str] = None,
     start_time: Optional[str] = None,
@@ -1445,38 +1445,26 @@ def list_client_detections(
     user_role: Optional[str] = None,
     user_company: Optional[str] = None,
 ):
-    rows = []
     all_counts = {k: 0 for k in DETECTION_FOLDERS}
 
     conn = _get_connection()
     try:
         with conn.cursor() as cur:
-            db_rows = []
-            
-            # Get user's exam IDs based on role and company
+            # Resolve user exam IDs for non-admin role filtering.
             user_exam_ids = []
             if user_role and user_role != 'ADMIN':
                 if user_company:
-                    # Fetch exams for this company
                     if user_company == 'EY':
                         cur.execute("SELECT id FROM exams WHERE exam_body IN ('SSC', 'TCS') AND is_active = 1")
                     else:
                         cur.execute("SELECT id FROM exams WHERE exam_body = %s AND is_active = 1", (user_company,))
-                    
                     user_exam_ids = [row['id'] for row in cur.fetchall()]
-                    
-                    # If no exams found for user, return empty
                     if not user_exam_ids:
                         return {
-                            "success": True,
-                            "total": 0,
-                            "page": page,
-                            "limit": limit,
-                            "counts": {k: 0 for k in DETECTION_FOLDERS},
-                            "data": [],
+                            "success": True, "total": 0, "page": page, "limit": limit,
+                            "counts": {k: 0 for k in DETECTION_FOLDERS}, "data": [],
                         }
-            
-            # Resolve detection_type folder names for SQL filtering.
+
             sql_folder_names: List[str] = []
             if type:
                 sql_folder_names = [
@@ -1484,139 +1472,144 @@ def list_client_detections(
                     if k.strip() in DETECTION_FOLDERS
                 ]
 
-            def _build_client_query(base_query: str, base_params: list, include_type: bool = True) -> tuple:
-                """Append shared WHERE clauses (exam, optionally type) to a query.
+            def _build_where() -> tuple:
+                """Build WHERE clause shared by both tables. Type filter is omitted
+                here so we can count all types for the sidebar in one pass.
 
                 NOTE: date is intentionally NOT pushed into SQL because exam_date
-                is NULL on many legacy rows. Date filtering is handled in Python
-                using the date extracted from the filename, which is always correct.
+                is unreliable (NULL on many rows, or set to the exam schedule date
+                rather than the detection date). Date filtering uses _basic_detection_meta
+                on the filename, which is always correct.
                 """
-                q, p = base_query, list(base_params)
+                conds = ["pushed_to_client = 1", "remove_from_client = 0"]
+                params: list = []
                 if exam_id:
-                    q += " AND exam_id = %s"
-                    p.append(exam_id)
+                    conds.append("exam_id = %s")
+                    params.append(exam_id)
                 elif user_exam_ids:
-                    placeholders = ','.join(['%s'] * len(user_exam_ids))
-                    q += f" AND exam_id IN ({placeholders})"
-                    p.extend(user_exam_ids)
-                if include_type and sql_folder_names:
-                    placeholders = ','.join(['%s'] * len(sql_folder_names))
-                    q += f" AND detection_type IN ({placeholders})"
-                    p.extend(sql_folder_names)
-                return q, p
+                    ph = ','.join(['%s'] * len(user_exam_ids))
+                    conds.append(f"exam_id IN ({ph})")
+                    params.extend(user_exam_ids)
+                return " AND ".join(conds), params
 
-            # HLS — skip entirely when caller only wants RTSP results.
-            if source != "rtsp":
-                hls_base = (
-                    "SELECT * FROM camera_report_hls USE INDEX (idx_exam_shift_push)"
-                    " WHERE pushed_to_client = 1 AND remove_from_client = 0"
-                )
-                hls_query, hls_params = _build_client_query(hls_base, [], include_type=False)
+            where_clause, where_params = _build_where()
+
+            # Per-table hard cap: ORDER BY created_at DESC LIMIT N ensures we always
+            # fetch the most recent rows and never pull unbounded history into Python.
+            _FETCH_CAP = 5000
+
+            db_rows: List[dict] = []
+            for table, idx in [
+                ("camera_report_hls",  "idx_exam_shift_push"),
+                ("camera_report_rtsp", "idx_push_status_rtsp"),
+            ]:
+                if source == "rtsp" and table == "camera_report_hls":
+                    continue
+                if source == "hls" and table == "camera_report_rtsp":
+                    continue
                 try:
-                    cur.execute(hls_query, tuple(hls_params) if hls_params else None)
+                    cur.execute(
+                        f"SELECT * FROM {table} USE INDEX ({idx})"
+                        f" WHERE {where_clause}"
+                        f" ORDER BY created_at DESC LIMIT {_FETCH_CAP}",
+                        tuple(where_params) if where_params else None,
+                    )
                     db_rows.extend(cur.fetchall())
                 except Exception as e:
-                    logger.error(f"HLS Client Detections fetch failed: {e}")
-
-            # RTSP — skip entirely when caller only wants HLS results.
-            if source != "hls":
-                rtsp_base = (
-                    "SELECT * FROM camera_report_rtsp USE INDEX (idx_push_status_rtsp)"
-                    " WHERE pushed_to_client = 1 AND remove_from_client = 0"
-                )
-                rtsp_query, rtsp_params = _build_client_query(rtsp_base, [], include_type=False)
-                try:
-                    cur.execute(rtsp_query, tuple(rtsp_params) if rtsp_params else None)
-                    db_rows.extend(cur.fetchall())
-                except Exception as e:
-                    logger.error(f"RTSP Client Detections fetch failed: {e}")
+                    logger.error(f"Client detections fetch failed ({table}): {e}")
 
             db_rows.sort(key=lambda x: str(x.get("created_at", "")), reverse=True)
 
+            # ── Light pass: cheap filtering without calling parse_detection_filename ──
+            # Date/time filtering uses the LRU-cached _basic_detection_meta (regex only,
+            # no DB). Search uses DB columns already in the row. parse_detection_filename
+            # (regex + camera DB lookups) is deferred to the paginated slice only.
+            filtered: List[tuple] = []  # (row, filename, type_key, source_part)
             for row in db_rows:
                 imageurl_full = str(row.get("imageurl", ""))
                 filename = imageurl_full.split("/")[-1] if "/" in imageurl_full else imageurl_full
                 folder_name = row.get("detection_type", "")
-
                 type_key = next((k for k, v in DETECTION_FOLDERS.items() if v == folder_name), folder_name)
                 source_part = "rtsp" if "rtsp" in imageurl_full else "hls"
 
-                item = parse_detection_filename(
-                    filename,
-                    type_key,
-                    file_path=None,
-                    is_new_image=False,
-                    source=source_part,
-                )
-                
-                item.update({
-                    "source": source_part,
-                    "type": type_key,
-                    "filename": filename,
-                    "relativePath": f"{filename}",
-                    "cameraName": row.get("camera_name"),
-                    "centerName": row.get("center_name", "") or row.get("centre_name", ""),
-                    "city": row.get("city"),
-                    "state": row.get("state"),
-                    "tcCode": row.get("tc_code"),
-                    "category": row.get("camera_category", ""),
-                    "exam_id": row.get("exam_id"),
-                    "uid": row.get("unique_id"),
-                    "_mtime": _epoch_ms(row.get("created_at")) or 0,
-                    "updatedAt": _epoch_ms(row.get("updated_at")),
-                    "updated_at": _epoch_ms(row.get("updated_at")),
-                })
+                # Cheap date + time check from filename (single cached call)
+                if date or start_time or end_time:
+                    basic = _basic_detection_meta(filename)
+                    if date and not basic["date"].startswith(date):
+                        continue
+                    if start_time or end_time:
+                        t = basic.get("time", "")
+                        if len(t) >= 4:
+                            h_m = f"{t[:2]}:{t[2:4]}"
+                            if start_time and h_m < start_time:
+                                continue
+                            if end_time and h_m > end_time:
+                                continue
 
-                if date and not item["date"].startswith(date):
-                    continue
-                
-                if start_time or end_time:
-                    time_str = item.get("time")
-                    if time_str and len(time_str) >= 4:
-                        h_m = f"{time_str[:2]}:{time_str[2:4]}"
-                        if start_time and h_m < start_time:
-                            continue
-                        if end_time and h_m > end_time:
-                            continue
-                            
+                # Search against DB columns — no filename parse required.
                 if search:
                     q = search.lower()
                     haystack = " ".join([
-                        str(item.get("filename") or ""),
-                        str(item.get("cameraName") or ""),
-                        str(item.get("centerName") or ""),
-                        str(item.get("city") or ""),
-                        str(item.get("state") or ""),
-                        str(item.get("tcCode") or ""),
+                        str(row.get("camera_name") or ""),
+                        str(row.get("center_name") or ""),
+                        str(row.get("centre_name") or ""),
+                        str(row.get("city") or ""),
+                        str(row.get("state") or ""),
+                        str(row.get("tc_code") or ""),
+                        filename,
                     ]).lower()
                     if q not in haystack:
                         continue
 
-                # Accumulate sidebar counts for ALL types that pass date/time/search
-                # filters — this must happen before the type-filter check below so the
-                # sidebar shows the distribution across all types, not just the selected one.
+                # Count all types for the sidebar (before the type filter below).
                 if type_key in all_counts:
                     all_counts[type_key] += 1
 
-                # Python-side type filter (SQL omits it so we can count all types above)
+                # Python-side type filter (omitted from SQL so counts stay accurate).
                 if sql_folder_names and folder_name not in sql_folder_names:
                     continue
 
+                filtered.append((row, filename, type_key, source_part))
+
+            total = len(filtered)
+            start_idx = (page - 1) * limit
+            page_slice = filtered[start_idx: start_idx + limit]
+
+            # ── Full parse only for the current page (at most `limit` rows) ──
+            rows = []
+            for row, filename, type_key, source_part in page_slice:
+                item = parse_detection_filename(
+                    filename, type_key, file_path=None, is_new_image=False, source=source_part,
+                )
+                item.update({
+                    "source":      source_part,
+                    "type":        type_key,
+                    "filename":    filename,
+                    "relativePath": filename,
+                    "cameraName":  row.get("camera_name"),
+                    "centerName":  row.get("center_name", "") or row.get("centre_name", ""),
+                    "city":        row.get("city"),
+                    "state":       row.get("state"),
+                    "tcCode":      row.get("tc_code"),
+                    "category":    row.get("camera_category", ""),
+                    "exam_id":     row.get("exam_id"),
+                    "uid":         row.get("unique_id"),
+                    "_mtime":      _epoch_ms(row.get("created_at")) or 0,
+                    "updatedAt":   _epoch_ms(row.get("updated_at")),
+                    "updated_at":  _epoch_ms(row.get("updated_at")),
+                })
                 rows.append(item)
+
     finally:
         conn.close()
 
-    total = len(rows)
-    start = (page - 1) * limit
-    paginated = rows[start: start + limit]
-
     return {
         "success": True,
-        "total": total,
-        "page": page,
-        "limit": limit,
-        "counts": all_counts,
-        "data": paginated,
+        "total":   total,
+        "page":    page,
+        "limit":   limit,
+        "counts":  all_counts,
+        "data":    rows,
     }
 
 class ClientDetectionRemoveRequest(BaseModel):
