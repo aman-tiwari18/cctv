@@ -4,8 +4,10 @@ import os
 import logging
 import threading
 import torch
+import numpy as np
 from datetime import datetime
 from ultralytics import YOLO
+from collections import deque
 
 # ================= LOGGING =================
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -20,11 +22,19 @@ SAVE_FOLDER = os.path.join(BASE_DIR, "results/invigilator_detection")
 # This detection runs on cameras classified as:
 # - Computer Lab / Inside Lab / Exam Lab / Inside Classroom
 
-COOLDOWN_TIME = 180            # Seconds between saves
+COOLDOWN_TIME = 180            # Seconds between saves (worker-level cooldown is 900s, separate)
+
+# --- Standing-person classification (used by both ABSENT and STATIC) ---
 CONF_THRESHOLD = 0.30          # Catches partial / side-on / distant standing invigilators
-NO_TARGET_TIME_THRESH = 45     # Seconds of zero-standing-person before ABSENT fires
-MIN_HEIGHT = 100               # Minimum bbox height (px) to be considered a standing candidate (loosened from 130 to catch farther invigilators)
+MIN_HEIGHT = 100               # Minimum bbox height (px) to be considered standing
 STANDING_ASPECT_RATIO = 1.5    # h/w >= 1.5 → "standing" pose. Below this → sitting / wide-box / not invigilator.
+
+# --- ABSENT violation (no invigilator in the room) ---
+NO_TARGET_TIME_THRESH = 45     # Seconds of zero-standing-person before ABSENT fires
+
+# --- STATIC violation (invigilator stuck in one place, not actively monitoring) ---
+STATIC_THRESH = 35             # Pixels — movement below this is "still"
+STATIC_TIME_THRESH = 600       # Seconds — 10 min of stillness before STATIC fires
 
 os.makedirs(SAVE_FOLDER, exist_ok=True)
 
@@ -48,33 +58,69 @@ def get_yolo_model():
 # ================= TRACKING =================
 class SimplifiedTracker:
     """
-    Per-camera absence tracker.
+    Per-camera tracker for BOTH violation types:
 
-    Rule (mentor-approved, for now):
-      - Standing person detected in this frame → invigilator is PRESENT (no violation).
-      - No standing person detected for NO_TARGET_TIME_THRESH continuous seconds → ABSENT.
-      - No 'static for too long' rule. Per-frame standing / not-standing is the only signal.
+      ABSENT  → fires when zero standing persons are detected for NO_TARGET_TIME_THRESH
+                continuous seconds.
+      STATIC  → fires when the tallest detected standing person stays within a
+                STATIC_THRESH-pixel circle for STATIC_TIME_THRESH continuous seconds.
+
+    The two are independent — a single frame's outcome can yield one, the other,
+    both, or neither. They are returned as a tuple (absent, static_violation)
+    so the caller (and downstream dashboard) can label them distinctly.
+
+    Static-tracking uses ONLY the tallest standing person per frame, so the
+    10-slot position-history deque is not contaminated by multiple persons in
+    busy frames (this was a pre-session bug; preserved fix).
     """
     def __init__(self):
-        self.no_target_start = None
+        self.no_target_start = None              # ABSENT timer start
+        self.position_history = {}               # deque of tallest-standing centroids
+        self.static_start = {}                   # STATIC timer start
         self.last_save = 0
 
     def update(self, person_boxes):
         """
-        person_boxes : list of [x1,y1,x2,y2] for boxes classified as STANDING
-        Returns True if ABSENT should fire, False otherwise.
+        person_boxes : list of [x1,y1,x2,y2] for boxes classified as STANDING.
+        Returns (absent_violation: bool, static_violation: bool).
         """
         now = time.time()
 
+        # --- ABSENT branch -------------------------------------------------
         if not person_boxes:
-            # No standing person — start / continue the absence clock
             if self.no_target_start is None:
                 self.no_target_start = now
-            return now - self.no_target_start > NO_TARGET_TIME_THRESH
+            absent = now - self.no_target_start > NO_TARGET_TIME_THRESH
+            # No standing person → static check is moot; clear its state
+            self.static_start.pop("invigilator", None)
+            self.position_history.pop("invigilator", None)
+            return absent, False
 
-        # At least one standing person — invigilator is present, disarm the clock
+        # At least one standing person → disarm absence clock
         self.no_target_start = None
-        return False
+
+        # --- STATIC branch -------------------------------------------------
+        # Track only the TALLEST standing person — avoids deque contamination
+        # in multi-person frames (which made the old static check unreliable).
+        tallest = max(person_boxes, key=lambda b: b[3] - b[1])
+        center = ((tallest[0] + tallest[2]) / 2.0, (tallest[1] + tallest[3]) / 2.0)
+        hist = self.position_history.setdefault("invigilator", deque(maxlen=10))
+        hist.append(center)
+
+        static_violation = False
+        if len(hist) == 10:
+            moves = [np.linalg.norm(np.subtract(a, b))
+                     for a, b in zip(list(hist), list(hist)[1:])]
+            is_still = max(moves) < STATIC_THRESH
+            if is_still:
+                if "invigilator" not in self.static_start:
+                    self.static_start["invigilator"] = now
+                static_violation = (now - self.static_start["invigilator"]) > STATIC_TIME_THRESH
+            else:
+                # Moved enough — reset the stillness timer
+                self.static_start.pop("invigilator", None)
+
+        return False, static_violation
 
 # ================= STATE ===================
 trackers = {}
@@ -109,12 +155,18 @@ def detect_invigilator_in_frame(frame, device_id="unknown", camera_no="unknown",
             trackers[key] = SimplifiedTracker()
         tracker = trackers[key]
 
-    absent = tracker.update(person_boxes)
-    violation_detected = absent
-    status = "ABSENT" if absent else "Active"
+    absent, static_violation = tracker.update(person_boxes)
+    violation_detected = absent or static_violation
+    status = "ABSENT" if absent else ("STATIC" if static_violation else "Active")
 
-    # Box colour: red if absent (no standing detected), green if active (standing present)
-    box_color = (0, 0, 255) if absent else (0, 255, 0)
+    # Box colour: red = ABSENT, orange = STATIC, green = Active.
+    # When ABSENT fires there are no person_boxes (loop iterates zero times — no box drawn).
+    if absent:
+        box_color = (0, 0, 255)         # red
+    elif static_violation:
+        box_color = (0, 165, 255)       # orange
+    else:
+        box_color = (0, 255, 0)         # green
 
     for box, conf in zip(person_boxes, person_confs):
         x1, y1, x2, y2 = int(box[0]), int(box[1]), int(box[2]), int(box[3])
@@ -180,12 +232,17 @@ def detect_invigilator_batch(items):
                 trackers[key] = SimplifiedTracker()
             tracker = trackers[key]
 
-        absent = tracker.update(person_boxes)
-        violation_detected = absent
-        status = "ABSENT" if absent else "Active"
+        absent, static_violation = tracker.update(person_boxes)
+        violation_detected = absent or static_violation
+        status = "ABSENT" if absent else ("STATIC" if static_violation else "Active")
 
-        # Box colour: red if absent (no standing detected), green if active (standing present)
-        box_color = (0, 0, 255) if absent else (0, 255, 0)
+        # Box colour: red = ABSENT, orange = STATIC, green = Active.
+        if absent:
+            box_color = (0, 0, 255)         # red
+        elif static_violation:
+            box_color = (0, 165, 255)       # orange
+        else:
+            box_color = (0, 255, 0)         # green
 
         for box, conf in zip(person_boxes, person_confs):
             x1, y1, x2, y2 = int(box[0]), int(box[1]), int(box[2]), int(box[3])
