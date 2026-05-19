@@ -56,7 +56,7 @@ GPU_QUEUE_SIZE      = 128
 BATCH_WAIT_TIMEOUT  = 0.2
 THREAD_DELAY        = 0.1
 HLS_SAMPLE_EVERY    = 5
-CONSEC_THRESHOLD    = 3   # Consecutive violation frames required before saving (avoids single-frame false positives)
+CONSEC_THRESHOLD    = 2   # Lowered: 3 was eating brief 1-2 frame low-crowd events; 2 still avoids single-frame noise
 
 _gpu_queue = queue.Queue(maxsize=GPU_QUEUE_SIZE)
 
