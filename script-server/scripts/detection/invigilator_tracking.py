@@ -23,10 +23,12 @@ SAVE_FOLDER = os.path.join(BASE_DIR, "results/invigilator_detection")
 # - Computer Lab / Inside Lab / Exam Lab / Inside Classroom
 
 COOLDOWN_TIME = 180            # Seconds between saves
-CONF_THRESHOLD = 0.30          # Lowered: catches faint / partial / side-on detections that previously slipped through
+CONF_THRESHOLD = 0.20          # Aggressively low: catches faint / partial / side-on / distant detections.
+                               # The size-classifier downstream still gates standing/sitting separately.
 STATIC_THRESH = 35             # Pixels movement threshold
 STATIC_TIME_THRESH = 600       # Seconds to be considered static (10 min)
-NO_TARGET_TIME_THRESH = 45     # Seconds with NO YOLO detection at all → ABSENT (longer = fewer false ABSENT)
+NO_TARGET_TIME_THRESH = 120    # Seconds of CONTINUOUS zero detection before ABSENT fires.
+                               # 120s is conservative — real invigilator absence is much longer than transient YOLO misses.
 MIN_HEIGHT = 150               # Minimum bbox height (px) for a person to be classified "standing"
 SITTING_MIN_HEIGHT = 40        # Minimum bbox height to be classified as a seated person
 STANDING_ASPECT_RATIO = 1.8    # height/width >= 1.8 AND height >= MIN_HEIGHT → "standing"
@@ -59,21 +61,28 @@ class SimplifiedTracker:
         self.static_start = {}
         self.no_target_start = None
         self.last_save = 0
+        self.has_ever_seen_person = False   # Warmup guard: never fire ABSENT until a person has been confirmed at least once
 
     def update(self, standing_boxes, any_person):
         """
         standing_boxes : list of [x1,y1,x2,y2] for boxes classified as standing
-        any_person     : True if ANY person (standing OR sitting) was detected this frame
+        any_person     : True if ANY person (standing OR sitting OR tiny detection) was seen this frame
         Returns (absent_violation, static_violation).
         """
         now = time.time()
 
-        # ABSENCE: only when no person at all (standing or sitting)
+        # ABSENCE LOGIC
         if not any_person:
+            # Don't even start the timer until we've confirmed the camera CAN see a person.
+            # This prevents misaligned / just-started cameras from firing ABSENT immediately.
+            if not self.has_ever_seen_person:
+                return False, False
             if self.no_target_start is None:
                 self.no_target_start = now
             return now - self.no_target_start > NO_TARGET_TIME_THRESH, False
 
+        # Any person seen — disarm the absence timer and mark this camera as "warmed up".
+        self.has_ever_seen_person = True
         self.no_target_start = None
 
         # STATIC: track only the tallest standing person — avoids deque contamination
