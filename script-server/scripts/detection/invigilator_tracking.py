@@ -4,10 +4,8 @@ import os
 import logging
 import threading
 import torch
-import numpy as np
 from datetime import datetime
 from ultralytics import YOLO
-from collections import deque
 
 # ================= LOGGING =================
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -23,12 +21,10 @@ SAVE_FOLDER = os.path.join(BASE_DIR, "results/invigilator_detection")
 # - Computer Lab / Inside Lab / Exam Lab / Inside Classroom
 
 COOLDOWN_TIME = 180            # Seconds between saves
-CONF_THRESHOLD = 0.30          # Catches partial / side-on / distant standing invigilators (was 0.50 in original — too strict, missed real detections)
-STATIC_THRESH = 35             # Pixels movement threshold
-STATIC_TIME_THRESH = 600       # Seconds to be considered static (10 min)
+CONF_THRESHOLD = 0.30          # Catches partial / side-on / distant standing invigilators
 NO_TARGET_TIME_THRESH = 45     # Seconds of zero-standing-person before ABSENT fires
-MIN_HEIGHT = 130               # Minimum bbox height (px) to be considered standing (was 200 — too strict, missed distant / shorter invigilators)
-STANDING_ASPECT_RATIO = 1.5    # h/w >= 1.5 — additional check to keep upright-seated persons from being mis-classified as standing
+MIN_HEIGHT = 100               # Minimum bbox height (px) to be considered a standing candidate (loosened from 130 to catch farther invigilators)
+STANDING_ASPECT_RATIO = 1.5    # h/w >= 1.5 → "standing" pose. Below this → sitting / wide-box / not invigilator.
 
 os.makedirs(SAVE_FOLDER, exist_ok=True)
 
@@ -51,49 +47,34 @@ def get_yolo_model():
 
 # ================= TRACKING =================
 class SimplifiedTracker:
+    """
+    Per-camera absence tracker.
+
+    Rule (mentor-approved, for now):
+      - Standing person detected in this frame → invigilator is PRESENT (no violation).
+      - No standing person detected for NO_TARGET_TIME_THRESH continuous seconds → ABSENT.
+      - No 'static for too long' rule. Per-frame standing / not-standing is the only signal.
+    """
     def __init__(self):
-        self.tracks = {}
-        self.track_id_count = 0
-        self.position_history = {}
-        self.static_start = {}
         self.no_target_start = None
         self.last_save = 0
 
     def update(self, person_boxes):
         """
-        person_boxes : list of [x1,y1,x2,y2] for boxes classified as STANDING (invigilator candidates)
-        Per mentor rule: only standing persons count as invigilator. Sitting persons → absence-eligible.
-        Returns (absent_violation, static_violation).
+        person_boxes : list of [x1,y1,x2,y2] for boxes classified as STANDING
+        Returns True if ABSENT should fire, False otherwise.
         """
         now = time.time()
 
-        # ABSENCE — no standing person detected
         if not person_boxes:
+            # No standing person — start / continue the absence clock
             if self.no_target_start is None:
                 self.no_target_start = now
-            return now - self.no_target_start > NO_TARGET_TIME_THRESH, False
+            return now - self.no_target_start > NO_TARGET_TIME_THRESH
 
-        # Standing person seen — disarm absence timer
+        # At least one standing person — invigilator is present, disarm the clock
         self.no_target_start = None
-
-        # STATIC: track only the tallest standing person — avoids deque contamination from multi-person frames
-        tallest = max(person_boxes, key=lambda b: b[3] - b[1])
-        center = ((tallest[0] + tallest[2]) / 2, (tallest[1] + tallest[3]) / 2)
-        hist = self.position_history.setdefault("invigilator", deque(maxlen=10))
-        hist.append(center)
-
-        if len(hist) == 10:
-            moves = [np.linalg.norm(np.subtract(a, b))
-                     for a, b in zip(list(hist), list(hist)[1:])]
-            static = max(moves) < STATIC_THRESH
-            if static:
-                if "invigilator" not in self.static_start:
-                    self.static_start["invigilator"] = now
-                return False, now - self.static_start["invigilator"] > STATIC_TIME_THRESH
-            else:
-                self.static_start.pop("invigilator", None)
-
-        return False, False
+        return False
 
 # ================= STATE ===================
 trackers = {}
@@ -128,17 +109,12 @@ def detect_invigilator_in_frame(frame, device_id="unknown", camera_no="unknown",
             trackers[key] = SimplifiedTracker()
         tracker = trackers[key]
 
-    absent, static_violation = tracker.update(person_boxes)
-    violation_detected = absent or static_violation
-    status = "ABSENT" if absent else ("STATIC" if static_violation else "Active")
+    absent = tracker.update(person_boxes)
+    violation_detected = absent
+    status = "ABSENT" if absent else "Active"
 
-    # Box colour follows status (red=absent, orange=static, green=active)
-    if absent:
-        box_color = (0, 0, 255)
-    elif static_violation:
-        box_color = (0, 165, 255)
-    else:
-        box_color = (0, 255, 0)
+    # Box colour: red if absent (no standing detected), green if active (standing present)
+    box_color = (0, 0, 255) if absent else (0, 255, 0)
 
     for box, conf in zip(person_boxes, person_confs):
         x1, y1, x2, y2 = int(box[0]), int(box[1]), int(box[2]), int(box[3])
@@ -204,16 +180,12 @@ def detect_invigilator_batch(items):
                 trackers[key] = SimplifiedTracker()
             tracker = trackers[key]
 
-        absent, static_violation = tracker.update(person_boxes)
-        violation_detected = absent or static_violation
-        status = "ABSENT" if absent else ("STATIC" if static_violation else "Active")
+        absent = tracker.update(person_boxes)
+        violation_detected = absent
+        status = "ABSENT" if absent else "Active"
 
-        if absent:
-            box_color = (0, 0, 255)
-        elif static_violation:
-            box_color = (0, 165, 255)
-        else:
-            box_color = (0, 255, 0)
+        # Box colour: red if absent (no standing detected), green if active (standing present)
+        box_color = (0, 0, 255) if absent else (0, 255, 0)
 
         for box, conf in zip(person_boxes, person_confs):
             x1, y1, x2, y2 = int(box[0]), int(box[1]), int(box[2]), int(box[3])
