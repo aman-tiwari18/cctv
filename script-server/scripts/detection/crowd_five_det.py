@@ -25,8 +25,8 @@ SAVE_FOLDER = os.path.join(BASE_DIR, "results/crowd_detection_threshold")
 
 COOLDOWN_TIME = 120       # Seconds between saves (changed from 240 to match worker)
 MAX_PERSONS = 5           # Threshold for violation (less than 5 persons)
-CONF_THRESHOLD = 0.45     # Confidence for person detection
-MIN_BOX_AREA = 1500       # Ignore tiny detections (far-away or partial persons, ~40x38px)
+CONF_THRESHOLD = 0.35     # Lowered to catch partial / back-row persons
+MIN_BOX_AREA = 900        # ~30x30px — catches back-of-room candidates that were previously skipped
 
 os.makedirs(SAVE_FOLDER, exist_ok=True)
 
