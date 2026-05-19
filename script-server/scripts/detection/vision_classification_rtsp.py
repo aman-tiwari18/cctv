@@ -141,7 +141,7 @@ _camview_server_locks_meta  = threading.Lock() # guards the locks-dict itself
 import fcntl as _fcntl
 _TOKEN_CACHE_FILE   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "server_tokens.json")
 _TOKEN_LOCK_FILE    = _TOKEN_CACHE_FILE + ".lock"
-_CAMVIEW_AUTH_BACKOFF    = 120  # seconds before retrying a failed auth (prevents DVR account lockouts)
+_CAMVIEW_AUTH_BACKOFF    = int(os.getenv("CAMVIEW_AUTH_BACKOFF", "65"))  # seconds before retrying failed auth (>= DVR lockout window ~47s)
 _CAMVIEW_KEEPALIVE_SECS  = 22   # send keepalive every 22s (session timeout is ~30s)
 _camview_keepalive_threads: dict = {}  # server → (Thread, Event)
 _local_cache_lock   = threading.Lock()
@@ -305,7 +305,15 @@ def _sync_camview_get_token(server: str) -> Optional[str]:
             _token_cache_load()
             tok = _camview_tokens.get(server)
             ts  = _camview_timestamps.get(server, 0)
-            if tok and tok != "FAILED" and time.time() - ts < _CAMVIEW_TOKEN_TTL:
+            # If no keepalive thread is running for this server the DVR session
+            # has likely expired (session timeout ~30s after last keepalive).
+            # Use a short TTL so we don't hand out a stale token that will 401.
+            effective_ttl = (
+                _CAMVIEW_TOKEN_TTL
+                if server in _camview_keepalive_threads
+                else _CAMVIEW_KEEPALIVE_SECS * 2
+            )
+            if tok and tok != "FAILED" and time.time() - ts < effective_ttl:
                 return tok
             # Authenticate — we hold both the per-server lock and the file lock
             token = _sync_camview_authenticate(server)
@@ -358,11 +366,15 @@ def _start_camview_keepalive(server: str) -> None:
         logger.info(f"[Camview] Keepalive thread started: {server}")
 
 
-def _preauth_camview_servers(cameras: list) -> None:
-    """Pre-authenticate every unique Camview server before Pass-1 begins.
+def _preauth_camview_servers(cameras: list, force: bool = False) -> None:
+    """Pre-authenticate every unique Camview server before Pass-1/Pass-2 begins.
     This warms up all token caches so the 64 concurrent Pass-1 workers get
     cache hits instead of triggering a thundering-herd of simultaneous auths.
     Runs authentications in parallel (one thread per unique server).
+
+    force=True (Pass-2): clears FAILED markers so servers that failed during
+    Pass-1 get a fresh auth attempt (lockout window is ~65s, Pass-1 takes
+    several minutes, so the lockout should have cleared by Pass-2 time).
     """
     servers = sorted({
         re.sub(r'^https?://', '', str(c.get('cctv_url') or '')).rstrip('/').lower()
@@ -372,7 +384,17 @@ def _preauth_camview_servers(cameras: list) -> None:
     })
     if not servers:
         return
-    logger.info(f"[Camview] Pre-authenticating {len(servers)} server(s): {servers}")
+    logger.info(f"[Camview] Pre-authenticating {len(servers)} server(s) (force={force}): {servers}")
+
+    if force:
+        # Clear FAILED markers so the negative-cache backoff doesn't block Pass-2.
+        # By the time Pass-2 runs, the DVR lockout window (≤65s) has elapsed.
+        with _local_cache_lock:
+            for srv in servers:
+                if _camview_tokens.get(srv) == "FAILED":
+                    _camview_tokens.pop(srv, None)
+                    _camview_timestamps.pop(srv, None)
+                    logger.info(f"[Camview] Cleared FAILED cache for {srv} ahead of Pass-2")
 
     def _auth_one(srv):
         token = _sync_camview_get_token(srv)
@@ -1501,8 +1523,8 @@ async def run_assignment_mode() -> dict:
         # Re-warm auth tokens before VLM workers start — Pass-1 may have taken
         # several minutes and stream tokens can expire in that window.
         if is_rtsp:
-            logger.info("[Camview] Pre-auth refresh before Pass-2...")
-            await loop.run_in_executor(_THREAD_POOL, _preauth_camview_servers, cameras)
+            logger.info("[Camview] Pre-auth refresh before Pass-2 (force=True)...")
+            await loop.run_in_executor(_THREAD_POOL, _preauth_camview_servers, cameras, True)
 
         logger.info(
             f"Pass-2 | {len(accessible)} cameras | "
@@ -1618,6 +1640,10 @@ async def _default_pipeline(cameras: List[dict], runtime: dict) -> None:
             return
 
         # Pass-2
+        if is_rtsp:
+            logger.info("[Camview] Pre-auth refresh before Pass-2 (force=True)...")
+            await loop.run_in_executor(_THREAD_POOL, _preauth_camview_servers, cameras, True)
+
         logger.info(
             f"Pass-2 | {len(accessible)} cameras | "
             f"{MAX_WORKERS_VLM} vLLM workers"
