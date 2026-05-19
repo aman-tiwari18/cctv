@@ -5,7 +5,7 @@
 
 'use strict';
 
-const { query, sequelize } = require('../config/database');
+const { query } = require('../config/database');
 
 /**
  * Local-IST date string "YYYY-MM-DD" from a Date (defaults to now).
@@ -619,37 +619,4 @@ exports.getLiveExams = async (req, res) => {
             error: error.message,
         });
     }
-};
-
-
-/**
- * GET /api/dashboard/system-status
- * Public health probe for the top-bar "System Status" indicator.
- * Pings the DB with a 1.5s timeout. Returns HTTP 200 with status:"online"|"degraded".
- */
-exports.getSystemStatus = async (req, res) => {
-    const checks = { api: { status: 'online' } };
-
-    try {
-        const dbStart = Date.now();
-        await Promise.race([
-            sequelize.authenticate(),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('db_timeout')), 1500)),
-        ]);
-        checks.database = { status: 'online', latency_ms: Date.now() - dbStart };
-    } catch (err) {
-        checks.database = { status: 'offline', error: err.message };
-    }
-
-    const anyOffline = Object.values(checks).some((c) => c.status === 'offline');
-    const overall = anyOffline ? 'degraded' : 'online';
-
-    res.json({
-        success: true,
-        data: {
-            status: overall,
-            checks,
-            timestamp: new Date().toISOString(),
-        },
-    });
 };
