@@ -66,8 +66,9 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=180):
     """
     logger.info("🚀 [BlindSpot] GPU worker started (true batch mode)")
     blind_spot_core.get_yolo_model()
-    
+
     last_save_time = {}
+    batch_count = 0
 
     while not stop_event.is_set():
         batch = []
@@ -146,6 +147,10 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=180):
                 item.pop('frame', None)
             del batch
             continue
+
+        batch_count += 1
+        if batch_count % 30 == 0 and torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     logger.info("🔴 [BlindSpot] GPU worker stopped")
 

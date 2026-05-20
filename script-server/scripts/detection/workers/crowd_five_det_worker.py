@@ -76,6 +76,7 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=120):
         stop_event.set()
         return
     log_counter = 0
+    batch_count = 0
 
     while not stop_event.is_set():
         batch = []
@@ -175,6 +176,9 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=120):
             if 'frame' in item: del item['frame']
 
         del batch
+        batch_count += 1
+        if batch_count % 30 == 0 and torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     logger.info("🔴 [CrowdFive] GPU worker stopped")
 

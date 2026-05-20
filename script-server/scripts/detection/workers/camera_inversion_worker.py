@@ -119,7 +119,10 @@ def _detect_orientation_batch(frames):
             meta.append((idx, name, img))
 
     # YOLO BATCH
-    results = _yolo_model(all_rotations, conf=0.35, verbose=False)
+    with torch.inference_mode():
+        results = _yolo_model(all_rotations, conf=0.35, verbose=False, half=True)
+        if _yolo_model.predictor is not None:
+            _yolo_model.predictor.results = None
     yolo_outs = []
     for r in results:
         boxes = r.boxes
@@ -164,8 +167,9 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=240):
     """
     logger.info("🚀 [Inversion] GPU worker started (true batch mode)")
     _load_models()
-    
+
     last_save_time = {}
+    batch_count = 0
 
     while not stop_event.is_set():
         batch = []
@@ -245,6 +249,10 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=240):
                 item.pop('frame', None)
             del batch
             continue
+
+        batch_count += 1
+        if batch_count % 30 == 0 and torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     logger.info("🔴 [Inversion] GPU worker stopped")
 

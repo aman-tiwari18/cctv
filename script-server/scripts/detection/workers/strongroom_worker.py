@@ -71,6 +71,7 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=180):
     # Warm up model
     strongroom_core.get_yolo_model()
     log_counter = 0
+    batch_count = 0
 
     while not stop_event.is_set():
         batch = []
@@ -162,6 +163,9 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=180):
             if 'frame' in item: del item['frame']
 
         del batch
+        batch_count += 1
+        if batch_count % 30 == 0 and torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     logger.info("🔴 [Strongroom] GPU worker stopped")
 

@@ -120,7 +120,10 @@ _state_lock = threading.Lock()
 def detect_phone_in_frame(frame, device_id="unknown", camera_no="unknown", script_name="phone"):
     """Standalone detection for a single frame."""
     model = get_yolo_model()
-    results = model(frame, conf=CONF_THRESHOLD, verbose=False)[0]
+    with torch.inference_mode():
+        results = model(frame, conf=CONF_THRESHOLD, verbose=False, half=True)[0]
+        if model.predictor is not None:
+            model.predictor.results = None
 
     names = results.names
     phone_boxes = [
@@ -174,7 +177,10 @@ def detect_phone_batch(items):
     """Run true batch inference."""
     model = get_yolo_model()
     frames = [item['frame'].copy() for item in items]
-    results = model(frames, conf=CONF_THRESHOLD, verbose=False)
+    with torch.inference_mode():
+        results = model(frames, conf=CONF_THRESHOLD, verbose=False, half=True)
+        if model.predictor is not None:
+            model.predictor.results = None
 
     outputs = []
     for item, result in zip(items, results):
