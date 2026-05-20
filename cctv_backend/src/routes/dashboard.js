@@ -7,8 +7,7 @@ const { authenticate } = require('../middleware/auth');
 router.get('/admin-stats', authenticate, DashboardController.getAdminDashboardStats);
 
 // New dashboard endpoints (CCTV Control Center redesign)
-router.get('/overview',       authenticate, DashboardController.getOverview);
-router.get('/live-exams',     authenticate, DashboardController.getLiveExams);
-router.get('/system-status',                DashboardController.getSystemStatus); // public, mirrors /cctv_analytics/health
+router.get('/overview',   authenticate, DashboardController.getOverview);
+router.get('/live-exams', authenticate, DashboardController.getLiveExams);
 
 module.exports = router;

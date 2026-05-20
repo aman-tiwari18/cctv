@@ -141,13 +141,15 @@
     tags: [Dashboard]
     summary: New dashboard — Live Exam Table (paginated)
     description: |
-      Returns one row per `(live exam, currently-running shift)` pair, paginated.
+      Returns one row per `(exam, shift)` pair where the exam is live by date today, paginated.
 
-      **"Live" definition (always "right now"; no `date` param):**
+      **"Live" definition (per mentor — DATE RANGE ONLY, no time-of-day filter):**
       - `exam.is_active = 1` AND `exam_shift.is_active = 1`
       - today (local IST) BETWEEN `exam.start_date` AND `exam.end_date`
-      - current local time falls inside the shift's `start_time..end_time`
-        window (with overnight `end_time < start_time` handling).
+
+      All shifts of a live-by-date exam appear in the result, regardless of whether
+      the shift's `start_time..end_time` window is currently active. The frontend
+      can apply its own time-window highlighting if needed.
 
       **Per-row counts:**
       - `cameras` — total cameras for that exam (HLS scoped to shift; RTSP per exam).
@@ -220,48 +222,3 @@
         $ref: '#/components/responses/Unauthorized'
       '500':
         $ref: '#/components/responses/ServerError'
-
-/api/dashboard/system-status:
-  get:
-    tags: [Dashboard]
-    summary: Public health probe for the top-bar "System Status" indicator
-    description: |
-      Pings the database with a 1.5s timeout. Always returns HTTP 200 (even
-      when degraded) — the frontend consumes the `data.status` string.
-
-      **Public:** no auth required. Mirrors the lightweight
-      `GET /cctv_analytics/health` endpoint but adds a DB connectivity check.
-    responses:
-      '200':
-        description: System status snapshot.
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                success: { type: boolean, example: true }
-                data:
-                  type: object
-                  properties:
-                    status:
-                      type: string
-                      enum: [online, degraded]
-                      example: online
-                      description: '`degraded` when any check is offline; `online` when all checks pass.'
-                    checks:
-                      type: object
-                      properties:
-                        api:
-                          type: object
-                          properties:
-                            status: { type: string, enum: [online], example: online }
-                        database:
-                          type: object
-                          properties:
-                            status:     { type: string, enum: [online, offline], example: online }
-                            latency_ms: { type: integer, example: 4 }
-                            error:      { type: string, nullable: true, description: Present only when status is offline. }
-                    timestamp:
-                      type: string
-                      format: date-time
-                      example: '2026-05-15T14:32:11.000Z'
