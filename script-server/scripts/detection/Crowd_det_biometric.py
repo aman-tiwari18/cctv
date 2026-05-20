@@ -108,7 +108,8 @@ def detect_crowd_biometric_batch(items):
     """Run true batch inference for biometric area crowd detection."""
     model = get_yolo_model()
     frames = [item['frame'].copy() for item in items]
-    results = model(frames, conf=CONF_THRESHOLD, verbose=False)
+    with torch.inference_mode():
+        results = model(frames, conf=CONF_THRESHOLD, verbose=False)
 
     outputs = []
     for item, result in zip(items, results):
@@ -132,4 +133,5 @@ def detect_crowd_biometric_batch(items):
 
         outputs.append((frame, crowd_detected, person_count))
 
+    del results, frames
     return outputs

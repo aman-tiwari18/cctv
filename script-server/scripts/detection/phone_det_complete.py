@@ -174,7 +174,8 @@ def detect_phone_batch(items):
     """Run true batch inference."""
     model = get_yolo_model()
     frames = [item['frame'].copy() for item in items]
-    results = model(frames, conf=CONF_THRESHOLD, verbose=False)
+    with torch.inference_mode():
+        results = model(frames, conf=CONF_THRESHOLD, verbose=False)
 
     outputs = []
     for item, result in zip(items, results):
@@ -202,6 +203,7 @@ def detect_phone_batch(items):
         overlay = frame.copy()
         cv2.rectangle(overlay, (10, 10), (480, 110), (0, 0, 0), -1)
         cv2.addWeighted(frame, 0.7, overlay, 0.3, 0, frame)
+        del overlay
         status_color = (0, 0, 255) if phone_detected else (0, 255, 0)
         status_text = f"PHONE DETECTED! ({phone_count})" if phone_detected else "All Clear"
         cv2.putText(frame, status_text, (20, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
@@ -212,4 +214,5 @@ def detect_phone_batch(items):
 
         outputs.append((frame, phone_detected, phone_count))
 
+    del results, frames
     return outputs

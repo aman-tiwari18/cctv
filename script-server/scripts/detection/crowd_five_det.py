@@ -127,7 +127,8 @@ def detect_crowd_five_batch(items):
     """Run true batch inference."""
     model = get_yolo_model()
     frames = [item['frame'].copy() for item in items]
-    results = model(frames, conf=CONF_THRESHOLD, verbose=False)
+    with torch.inference_mode():
+        results = model(frames, conf=CONF_THRESHOLD, verbose=False)
 
     outputs = []
     for item, result in zip(items, results):
@@ -156,6 +157,7 @@ def detect_crowd_five_batch(items):
         overlay = frame.copy()
         cv2.rectangle(overlay, (10, 10), (420, 100), (0, 0, 0), -1)
         cv2.addWeighted(frame, 0.7, overlay, 0.3, 0, frame)
+        del overlay
         if person_count == 0:
             status_color = (0, 165, 255)  # orange — camera/detection issue
             status_text = "NO PERSON DETECTED"
@@ -173,4 +175,5 @@ def detect_crowd_five_batch(items):
 
         outputs.append((frame, violation_detected, person_count))
 
+    del results, frames
     return outputs

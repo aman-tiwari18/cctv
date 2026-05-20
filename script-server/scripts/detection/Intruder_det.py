@@ -105,7 +105,8 @@ def detect_intruder_batch(items):
     """Run true batch inference."""
     model = get_yolo_model()
     frames = [item['frame'].copy() for item in items]
-    results = model(frames, conf=CONF_THRESHOLD, verbose=False)
+    with torch.inference_mode():
+        results = model(frames, conf=CONF_THRESHOLD, verbose=False)
 
     outputs = []
     for item, result in zip(items, results):
@@ -130,6 +131,7 @@ def detect_intruder_batch(items):
         overlay = frame.copy()
         cv2.rectangle(overlay, (10, 10), (460, 100), (0, 0, 0), -1)
         cv2.addWeighted(frame, 0.7, overlay, 0.3, 0, frame)
+        del overlay
         status_color = (0, 0, 255) if intruder_detected else (0, 255, 0)
         status_text = f"INTRUDER DETECTED! ({person_count})" if intruder_detected else "All Clear"
         cv2.putText(frame, status_text, (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
@@ -140,4 +142,5 @@ def detect_intruder_batch(items):
 
         outputs.append((frame, intruder_detected, person_count))
 
+    del results, frames
     return outputs

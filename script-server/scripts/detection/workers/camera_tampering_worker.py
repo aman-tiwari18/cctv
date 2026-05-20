@@ -204,6 +204,7 @@ def _hls_camera_thread(cfg, stop_event, q):
 
         frame_count += 1
         if frame_count % HLS_SAMPLE_EVERY != 0:
+            del frame
             continue
 
         try:

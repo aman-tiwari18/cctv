@@ -116,7 +116,8 @@ def detect_qp_box_batch(items):
     """Run true batch inference."""
     model = get_yolo_model()
     frames = [item['frame'].copy() for item in items]
-    results = model(frames, conf=CONF_THRESHOLD, verbose=False)
+    with torch.inference_mode():
+        results = model(frames, conf=CONF_THRESHOLD, verbose=False)
 
     outputs = []
     for item, result in zip(items, results):
@@ -147,4 +148,5 @@ def detect_qp_box_batch(items):
 
         outputs.append((frame, violation_detected, box_count))
 
+    del results, frames
     return outputs

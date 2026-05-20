@@ -105,7 +105,8 @@ _state_lock = threading.Lock()
 def detect_blind_spot_batch(items):
     model = get_yolo_model()
     frames = [item['frame'].copy() for item in items]
-    results = model(frames, conf=CONF_THRESHOLD, verbose=False)
+    with torch.inference_mode():
+        results = model(frames, conf=CONF_THRESHOLD, verbose=False)
 
     outputs = []
     for item, result in zip(items, results):
@@ -121,5 +122,6 @@ def detect_blind_spot_batch(items):
             
         annotated, violation = detector.analyze_frame(frame, person_boxes)
         outputs.append((annotated, violation, len(person_boxes)))
-        
+
+    del results, frames
     return outputs

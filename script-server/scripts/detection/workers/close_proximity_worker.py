@@ -71,6 +71,7 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=60):
     # Warm up model
     proximity_core.get_yolo_model()
     log_counter = 0
+    _batch_count = 0
 
     while not stop_event.is_set():
         batch = []
@@ -104,7 +105,7 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=60):
             logger.error(f"[Proximity] Batch inference error: {e}")
             for item in batch:
                 item.pop('frame',None)
-            del batch
+            del batch, inference_items
             continue
 
         # Process results
@@ -161,7 +162,14 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=60):
             del annotated_frame
             if 'frame' in item: del item['frame']
 
-        del batch
+        del batch, batch_results, inference_items
+
+        _batch_count += 1
+        if _batch_count % 50 == 0:
+            import gc
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
     logger.info("🔴 [Proximity] GPU worker stopped")
 
@@ -261,9 +269,11 @@ def _hls_camera_thread(cfg, stop_event):
 
         frame_count += 1
         if frame_count % HLS_SAMPLE_EVERY != 0:
+            del frame
             continue
 
         if frame is None or frame.size == 0:
+            del frame
             continue
 
         try:
