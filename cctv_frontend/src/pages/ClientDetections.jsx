@@ -1033,7 +1033,8 @@ const ClientDetections = () => {
     if (dateFilter) {
       const itemDate = item.date || (item.detected_at ? item.detected_at.split(',')[0] : '');
       const filterDateFormatted = formatDateDDMMYYYY(parseDDMMYYYYToDate(dateFilter));
-      if (itemDate !== filterDateFormatted && itemDate !== dateFilter) {
+      const filterDateISO = parseDateForQuery(dateFilter); // "YYYY-MM-DD" — matches item.date from socket payloads
+      if (itemDate !== filterDateFormatted && itemDate !== dateFilter && itemDate !== filterDateISO) {
         return false;
       }
     }
