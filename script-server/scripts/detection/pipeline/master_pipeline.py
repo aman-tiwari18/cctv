@@ -522,8 +522,16 @@ def start_keepalive(server_address):
 
 
 def stop_all_keepalives():
-    for server, (t, stop) in keepalive_threads.items():
+    # Snapshot before mutating
+    entries = list(keepalive_threads.items())
+    for server, (t, stop) in entries:
         stop.set()
+    for server, (t, stop) in entries:
+        try:
+            t.join(timeout=2)
+        except Exception:
+            pass
+    keepalive_threads.clear()
 
 
 def is_private_ip_url(url):

@@ -235,7 +235,7 @@ def phone_worker(frame_queue):
             except queue.Full:
                 pass
             finally:
-                del frame
+                del frame, packet
     finally:
         stop_event.set()
         gpu_t.join(timeout=5)
