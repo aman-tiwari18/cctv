@@ -1104,7 +1104,24 @@ def run_rtsp_pipeline(camera_group, max_concurrent=MAX_CONCURRENT):
                 logger.warning(f"Force terminating worker {p.name}")
                 p.terminate()
                 p.join(timeout=2)
+            if p.is_alive():
+                logger.error(f"Killing stuck worker {p.name} (likely in CUDA call)")
+                p.kill()
+                p.join(timeout=2)
         _unregister_child_process(p)
+
+    # Drain and close queues so pickled frame bytes don't linger in pipe buffers
+    for script, q in script_queues.items():
+        try:
+            while True:
+                q.get_nowait()
+        except Exception:
+            pass
+        try:
+            q.close()
+            q.join_thread()
+        except Exception:
+            pass
 
 
 # ============================================================

@@ -114,14 +114,14 @@ def _epoch_ms(value) -> Optional[int]:
             return None
 
 
-@lru_cache(maxsize=4096)
+@lru_cache(maxsize=1024)
 def _camera_meta_for_ch(ch_no: str, exam_date_iso: str) -> dict:
     if not ch_no:
         return {}
     return get_hls_camera_by_ch_code(ch_no, exam_date_iso) or {}
 
 
-@lru_cache(maxsize=4096)
+@lru_cache(maxsize=1024)
 def _camera_meta_for_rtsp_pk(camera_id_pk: int) -> dict:
     """Fetch RTSP camera metadata by primary key."""
     if not camera_id_pk:
@@ -129,7 +129,7 @@ def _camera_meta_for_rtsp_pk(camera_id_pk: int) -> dict:
     return get_rtsp_camera_by_id(camera_id_pk) or {}
 
 
-@lru_cache(maxsize=8192)
+@lru_cache(maxsize=2048)
 def _camera_meta_for_rtsp_device_ch(device_id: str, camera_no: str) -> dict:
     """Fetch RTSP camera metadata by device_id and camera_no.
     
@@ -224,9 +224,13 @@ def _extract_ch_no(camera_id: str) -> str:
     return m.group(1) if m else ""
 
 
-@lru_cache(maxsize=65536)
 def _basic_detection_meta(filename: str) -> dict:
-    """Extract cheap filter fields from filename without DB metadata lookups."""
+    """Extract cheap filter fields from filename without DB metadata lookups.
+
+    Note: NOT lru_cached. Filenames embed timestamps + UUIDs so cache hit rate
+    is ~0%; the cache used to fill 65k slots with never-hit entries (~20 MB waste).
+    Re-running the regex parse is microseconds.
+    """
     stem = Path(filename).stem
     dt_match = re.search(r'(\d{8})_(\d{6})', stem)
     date_iso = ""
@@ -375,6 +379,8 @@ async def detection_watch_loop():
                     d = _basic_detection_meta(relative_path).get("date")
                     if d and d in date_map:
                         date_map[d].discard(tagged_path)
+                        if not date_map[d]:
+                            del date_map[d]
 
                 if new_files:
                     def _new_file_mtime(tagged_path: str) -> float:

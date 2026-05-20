@@ -1,6 +1,7 @@
 import asyncio
 import os
 import httpx
+from collections import OrderedDict
 from datetime import datetime, timezone, timedelta
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -23,7 +24,8 @@ class Poller:
         
         self.running_scripts = set()
         self.scheduled_scripts = {}  # id -> Task
-        self.completed_scripts = set()
+        self.completed_scripts: "OrderedDict[str, None]" = OrderedDict()
+        self._completed_scripts_cap = 10000
         self._poll_task = None
 
     async def start(self):
@@ -195,7 +197,9 @@ class Poller:
             meta = assignment.get("execution_metadata", {})
             raw_code = str(meta.get("script_code") or assignment.get("script_code") or "").strip().lower()
             if raw_code in ("vision", "scene_classification"):
-                self.completed_scripts.add(assignment_id)
+                self.completed_scripts[assignment_id] = None
+                if len(self.completed_scripts) > self._completed_scripts_cap:
+                    self.completed_scripts.popitem(last=False)  # FIFO eviction
             
         except Exception as e:
             if "__TIMEOUT_COMPLETED__" in str(e):
