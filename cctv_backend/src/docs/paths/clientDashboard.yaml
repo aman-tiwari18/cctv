@@ -201,20 +201,18 @@
     tags: [Client Dashboard]
     summary: New client dashboard — Live Exam Table (paginated, company-scoped)
     description: |
-      Client (company-scoped) version of `GET /api/dashboard/live-exams`. Returns one
-      row per `(exam, shift)` pair where exam is live by date today AND belongs to the
-      user's company:
+      Client (company-scoped) version of `GET /api/dashboard/live-exams`. Returns
+      one row per `(exam, shift)` pair where:
       - `exam.is_active = 1`
       - today (local IST) BETWEEN `exam.start_date` AND `exam.end_date`
       - `exam_shift.is_active = 1`
+      - current local time BETWEEN `exam_shift.start_time` AND `exam_shift.end_time`
       - PLUS company filter on `exams.exam_body` (see below)
 
-      **V2.1 (2026-05-21):** NO time-of-day filter. All shifts of a live-by-date exam
-      appear regardless of current clock time.
-
-      **`shift_bracket` field (display label):** computed per-row from `start_time`:
-      `'Morning'` for `[09:00, 12:00)`, `'Afternoon'` for `[12:00, 15:00)`,
-      `'Evening'` for `[15:00, 18:00)`, `null` otherwise. Display label only.
+      **V2.2 (2026-05-21):** the shift's actual time window is the filter, while the
+      `shift_bracket` LABEL is derived from the CURRENT time (Morning 09-12 /
+      Afternoon 12-15 / Evening 15-18 / null otherwise). A single long shift moves
+      through brackets as the day progresses.
 
       **Company filter:**
       - **ADMIN** — sees all live (exam, shift) rows.
@@ -287,7 +285,7 @@
                           exam_name:     { type: string,  example: 'test' }
                           shift_name:    { type: string,  example: 'Shift 1' }
                           link_type:     { type: string,  enum: [HLS, RTSP], example: RTSP }
-                          shift_bracket: { type: string,  enum: [Morning, Afternoon, Evening], nullable: true, example: Morning, description: 'Display label only. null if start_time is outside 09:00-18:00.' }
+                          shift_bracket: { type: string,  enum: [Morning, Afternoon, Evening], nullable: true, example: Afternoon, description: 'Display label derived from the CURRENT local time. null if outside 09:00-18:00.' }
                           shift_start:   { type: string,  example: '09:00:00' }
                           shift_end:     { type: string,  example: '12:00:00' }
                           cameras:       { type: integer, example: 810 }

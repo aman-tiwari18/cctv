@@ -381,7 +381,7 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                         variant="caption"
                                         sx={{ color: '#64748b', letterSpacing: '0.06em', fontWeight: 600 }}
                                     >
-                                        TOTAL DETECTION
+                                        TOTAL DETECTIONS
                                     </Typography>
                                 </Box>
                             </Box>

@@ -47,19 +47,21 @@ const validateDateParam = (raw) => {
 };
 
 /**
- * Return the shift-bracket label for a given shift start_time.
- * V2.1: bracket is a per-row display label, not a filter. Returns null if
- * the start_time falls outside the 09:00:00-18:00:00 envelope.
+ * Return the shift-bracket label for a given time.
+ * V2.2: applied to the current local time — rows in /live-exams are labeled
+ * with the bracket NOW falls into (not the shift's start_time), so a single
+ * long shift moves through "Morning" → "Afternoon" → "Evening" as the day
+ * progresses. Returns null if outside 09:00:00-18:00:00.
  *
  * String comparison on zero-padded "HH:MM:SS" is lexically equivalent to
  * time order, so no Date parsing is needed.
  *
- * @param {string} startTime  "HH:MM:SS"
+ * @param {string} time  "HH:MM:SS"
  * @returns {'Morning' | 'Afternoon' | 'Evening' | null}
  */
-const bracketForStartTime = (startTime) => {
-    if (!startTime) return null;
-    const t = String(startTime).slice(0, 8);
+const bracketForTime = (time) => {
+    if (!time) return null;
+    const t = String(time).slice(0, 8);
     if (t >= '09:00:00' && t < '12:00:00') return 'Morning';
     if (t >= '12:00:00' && t < '15:00:00') return 'Afternoon';
     if (t >= '15:00:00' && t < '18:00:00') return 'Evening';
@@ -466,11 +468,11 @@ exports.getOverview = async (req, res) => {
 
 /**
  * GET /api/dashboard/live-exams?page=1&limit=10&exam_id=<optional>
- * Feeds the Live Exam Table. V2.1 (2026-05-21): returns ALL (exam, shift) pairs
- * where exam is live by date today (exam.is_active=1 AND today in date range,
- * exam_shift.is_active=1). NO time-of-day filter — matches the Layout
- * "Live Exams" badge's definition exactly. `shift_bracket` is a per-row
- * display label computed from start_time (Morning/Afternoon/Evening or null).
+ * Feeds the Live Exam Table. V2.2 (2026-05-21): returns (exam, shift) rows
+ * where the exam is live by date today AND the current local time falls
+ * inside the shift's [start_time, end_time] window. Per-row `shift_bracket`
+ * label is computed from the CURRENT TIME (Morning/Afternoon/Evening), so the
+ * same shift gets relabeled as the day progresses through the brackets.
  */
 exports.getLiveExams = async (req, res) => {
     try {
@@ -480,17 +482,22 @@ exports.getLiveExams = async (req, res) => {
         const examIdFilter = req.query.exam_id ? parseInt(req.query.exam_id, 10) : null;
 
         const todayDate = getLocalDateStr();
+        const nowTime = getLocalTimeStr();
         const { start: todayStart, end: tomorrowStart } = getDateRangeBounds(todayDate);
 
-        // V2.1: live-by-date only. Bracket is per-row label, not a filter.
+        // V2.2: filter to shifts currently in their time window AND
+        // label by the bracket the CURRENT time falls in (not the shift's start_time).
+        const currentBracket = bracketForTime(nowTime);
+
         const liveWhere = `
             WHERE e.is_active = 1 AND es.is_active = 1
               AND e.start_date IS NOT NULL AND e.end_date IS NOT NULL
               AND ? BETWEEN e.start_date AND e.end_date
+              AND ? BETWEEN es.start_time AND es.end_time
               ${examIdFilter ? 'AND e.id = ?' : ''}
         `;
 
-        const baseParams = [todayDate];
+        const baseParams = [todayDate, nowTime];
         if (examIdFilter) baseParams.push(examIdFilter);
 
         // Count query (parallel with row driver)
@@ -636,7 +643,7 @@ exports.getLiveExams = async (req, res) => {
                 exam_name: r.exam_name,
                 shift_name: r.shift_name,
                 link_type: r.link_type,
-                shift_bracket: bracketForStartTime(r.start_time),
+                shift_bracket: currentBracket,
                 shift_start: r.start_time,
                 shift_end: r.end_time,
                 cameras,

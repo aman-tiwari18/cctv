@@ -144,23 +144,24 @@
     tags: [Dashboard]
     summary: New dashboard — Live Exam Table (paginated)
     description: |
-      Returns one row per `(exam, shift)` pair where the exam is live by date today:
+      Returns one row per `(exam, shift)` pair where the exam is live by date today
+      AND the shift is currently running (current local time inside its
+      `[start_time, end_time]` window):
       - `exam.is_active = 1`
       - today (local IST) BETWEEN `exam.start_date` AND `exam.end_date`
       - `exam_shift.is_active = 1`
+      - current local time BETWEEN `exam_shift.start_time` AND `exam_shift.end_time`
 
-      **V2.1 (2026-05-21):** NO time-of-day filter. All shifts of a live-by-date exam
-      appear regardless of current clock time. Matches the Layout "Live Exams" badge
-      definition exactly so badge count == response `data.total`.
+      **V2.2 (2026-05-21):** the shift's actual time window is the filter, while
+      the bracket LABEL (`shift_bracket`) is derived from the CURRENT TIME. So a
+      single long shift like 09:00–18:59 is labeled "Morning" at 10:00, "Afternoon"
+      at 14:00, "Evening" at 16:00.
 
-      **`shift_bracket` field (display label):** computed per-row from `start_time`:
-      - `'Morning'`   if `start_time` in `[09:00:00, 12:00:00)`
+      **`shift_bracket` field (display label, derived from current local time):**
+      - `'Morning'`   if current time in `[09:00:00, 12:00:00)`
       - `'Afternoon'` if `[12:00:00, 15:00:00)`
       - `'Evening'`   if `[15:00:00, 18:00:00)`
-      - `null` if `start_time` is outside `[09:00, 18:00)` (or NULL)
-
-      It is a display label only — the frontend uses it to render "Morning 09:00-12:00",
-      etc. It is NOT used for filtering.
+      - `null` if outside `[09:00, 18:00)`
 
       **Per-row counts:**
       - `cameras` — total cameras for that exam (HLS scoped to shift; RTSP per exam).
@@ -170,7 +171,7 @@
 
       **Invariants:**
       - `total_pages === Math.ceil(total / limit)` when limit > 0, else 0.
-      - `data.total` equals the count of `(exam, shift)` rows where the WHERE matches.
+      - Every returned row has `shift_start <= nowTime <= shift_end` per the SQL filter.
     security:
       - bearerAuth: []
     parameters:
@@ -225,7 +226,7 @@
                           exam_name:     { type: string,  example: 'test' }
                           shift_name:    { type: string,  example: 'Shift 1' }
                           link_type:     { type: string,  enum: [HLS, RTSP], example: RTSP }
-                          shift_bracket: { type: string,  enum: [Morning, Afternoon, Evening], nullable: true, example: Morning, description: 'Display label only (computed from start_time). null if start_time is outside 09:00-18:00.' }
+                          shift_bracket: { type: string,  enum: [Morning, Afternoon, Evening], nullable: true, example: Afternoon, description: 'Display label derived from the CURRENT local time (not the shifts start_time). null if current time is outside 09:00-18:00.' }
                           shift_start:   { type: string,  example: '09:00:00', description: 'TIME from exam_shifts.start_time' }
                           shift_end:     { type: string,  example: '12:00:00', description: 'TIME from exam_shifts.end_time' }
                           cameras:       { type: integer, example: 810 }
