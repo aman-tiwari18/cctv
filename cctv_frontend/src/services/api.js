@@ -148,7 +148,16 @@ export const clientDashboardAPI = {
 };
 
 export const dashboardAPI = {
-    getAdminStats: (timeRange = '24h') => api.get('/dashboard/admin-stats', { params: { timeRange } })
+    getAdminStats: (timeRange = '24h') => api.get('/dashboard/admin-stats', { params: { timeRange } }),
+
+    // V2 — CCTV Control Center dashboard
+    getOverview: (date) =>
+        api.get('/dashboard/overview', { params: date ? { date } : {} }),
+
+    getLiveExams: ({ page = 1, limit = 10, exam_id } = {}) =>
+        api.get('/dashboard/live-exams', {
+            params: { page, limit, ...(exam_id ? { exam_id } : {}) },
+        }),
 };
 
 export default api;

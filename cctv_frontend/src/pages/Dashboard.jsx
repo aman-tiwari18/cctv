@@ -1,675 +1,831 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Grid,
-  Card,
-  CardContent,
-  Typography,
-  Box,
-  CircularProgress,
-  Paper,
-  FormControl,
-  Select,
-  MenuItem,
-  LinearProgress,
+    Box,
+    Card,
+    CardContent,
+    Chip,
+    CircularProgress,
+    FormControl,
+    Grid,
+    MenuItem,
+    Paper,
+    Select,
+    Stack,
+    Table,
+    TableBody,
+    TableCell,
+    TableContainer,
+    TableHead,
+    TablePagination,
+    TableRow,
+    Typography,
 } from '@mui/material';
-import {
-  CheckCircle,
-  Cancel,
-  Autorenew,
-  MoreHoriz,
-  InfoOutlined,
-} from '@mui/icons-material';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts';
-import { examsAPI, executionsAPI, dashboardAPI } from '../services/api';
+import { LocalizationProvider, DatePicker } from '@mui/x-date-pickers';
+import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
+import { format, parseISO } from 'date-fns';
+import StarRoundedIcon from '@mui/icons-material/StarRounded';
+import { dashboardAPI } from '../services/api';
 import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
-import { CustomSvgIcon } from '../components/DetectionSvgIcon';
 import { ShiftSvgIcon } from '../components/ShiftSvgIcon';
+import { CustomSvgIcon } from '../components/DetectionSvgIcon';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
-import { useAuth } from '../contexts/AuthContext';
-import { useDetectionCounts } from '../contexts/DetectionCountsContext';
-import { useSocket } from '../contexts/SocketContext';
-import { useNavigate } from 'react-router-dom';
+
+// ---------------------------------------------------------------------------
+// Constants — kept identical to V1 so other pages that reuse the same mapping
+// stay consistent. Backend returns raw detection_type strings; frontend categorises.
+// ---------------------------------------------------------------------------
 
 const CATEGORY_COLORS = {
-  people: '#3b82f6',
-  movement: '#ef4444',
-  camera: '#f59e0b',
+    people: '#3b82f6',
+    movement: '#ef4444',
+    camera: '#f59e0b',
 };
 
 const SCRIPT_CATEGORY_MAP = {
-  // Script IDs (from scripts table)
-  proximity: 'people',
-  crowd: 'people',
-  crowd_biometric: 'people',
-  crowd_five: 'people',
-  crowd_zero: 'people',
-  invigilator: 'people',
-  phone: 'people',
-  server: 'people',
-  intruder: 'people',
-  strongroom: 'movement',
-  qp_box: 'movement',
-  entry_exit: 'movement',
-  inversion: 'camera',
-  tamper: 'camera',
-  tampering: 'camera',
-  blind_spot: 'camera',
-  vision: 'camera',
-  
-  // Folder names (detection_type in database) - ACTUAL VALUES FROM WORKERS
-  proximity_detection: 'people',
-  crowd_detection: 'people',
-  crowd_detection_biometric: 'people',
-  crowd_detection_threshold: 'people',
-  zero_person_detection: 'people',
-  invigilator_detection: 'people',
-  phone_detection: 'people',
-  server_room_detection: 'people',
-  intruder_detection: 'people',
-  strongroom_detection: 'movement',
-  qp_box_missing: 'movement',
-  entry_exit_detection: 'movement',
-  camera_inversion_detection: 'camera',
-  camera_tampering_detection: 'camera',
-  blind_spot_detection: 'camera',
-  vision_detection: 'camera',
+    // Script IDs (from scripts table)
+    proximity: 'people',
+    crowd: 'people',
+    crowd_biometric: 'people',
+    crowd_five: 'people',
+    crowd_zero: 'people',
+    invigilator: 'people',
+    phone: 'people',
+    server: 'people',
+    intruder: 'people',
+    strongroom: 'movement',
+    qp_box: 'movement',
+    entry_exit: 'movement',
+    inversion: 'camera',
+    tamper: 'camera',
+    tampering: 'camera',
+    blind_spot: 'camera',
+    vision: 'camera',
+
+    // Folder names (detection_type in database) — actual values from workers
+    proximity_detection: 'people',
+    crowd_detection: 'people',
+    crowd_detection_biometric: 'people',
+    crowd_detection_threshold: 'people',
+    zero_person_detection: 'people',
+    invigilator_detection: 'people',
+    phone_detection: 'people',
+    server_room_detection: 'people',
+    intruder_detection: 'people',
+    strongroom_detection: 'movement',
+    qp_box_missing: 'movement',
+    entry_exit_detection: 'movement',
+    camera_inversion_detection: 'camera',
+    camera_tampering_detection: 'camera',
+    blind_spot_detection: 'camera',
+    vision_detection: 'camera',
 };
 
 const DETECTION_TYPE_LABELS = {
-  // Script IDs
-  proximity: 'Close Proximity',
-  crowd: 'Crowd Detection (Entry/Exit)',
-  crowd_biometric: 'Crowd Detection (Biometric)',
-  crowd_five: 'Crowd < 5',
-  crowd_zero: 'Zero Person',
-  server: 'Server Room',
-  intruder: 'Intruder',
-  strongroom: 'Strong Room Movement',
-  qp_box: 'QP Box Detection',
-  entry_exit: 'Entry/Exit',
-  phone: 'Phone',
-  blind_spot: 'Blind Spot',
-  invigilator: 'Invigilator',
-  inversion: 'Camera Inversion',
-  tamper: 'Camera Tampering',
-  tampering: 'Camera Tampering',
-  vision: 'Vision Detection',
-  
-  // Folder names (detection_type in database) - ACTUAL VALUES FROM WORKERS
-  proximity_detection: 'Close Proximity',
-  crowd_detection: 'Crowd Detection (Entry/Exit)',
-  crowd_detection_biometric: 'Crowd Detection (Biometric)',
-  crowd_detection_threshold: 'Crowd < 5',
-  zero_person_detection: 'Zero Person',
-  server_room_detection: 'Server Room',
-  intruder_detection: 'Intruder',
-  strongroom_detection: 'Strong Room Movement',
-  qp_box_missing: 'QP Box Detection',
-  entry_exit_detection: 'Entry/Exit',
-  phone_detection: 'Phone',
-  blind_spot_detection: 'Blind Spot',
-  invigilator_detection: 'Invigilator',
-  camera_inversion_detection: 'Camera Inversion',
-  camera_tampering_detection: 'Camera Tampering',
-  vision_detection: 'Vision Detection',
+    proximity: 'Close Proximity',
+    crowd: 'Crowd Detection (Entry/Exit)',
+    crowd_biometric: 'Crowd Detection (Biometric)',
+    crowd_five: 'Crowd < 5',
+    crowd_zero: 'Zero Person',
+    server: 'Server Room',
+    intruder: 'Intruder',
+    strongroom: 'Strong Room Movement',
+    qp_box: 'QP Box Detection',
+    entry_exit: 'Entry/Exit',
+    phone: 'Phone',
+    blind_spot: 'Blind Spot',
+    invigilator: 'Invigilator',
+    inversion: 'Camera Inversion',
+    tamper: 'Camera Tampering',
+    tampering: 'Camera Tampering',
+    vision: 'Vision Detection',
+
+    // Folder names (detection_type in database) — actual values from workers
+    proximity_detection: 'Close Proximity',
+    crowd_detection: 'Crowd Detection (Entry/Exit)',
+    crowd_detection_biometric: 'Crowd Detection (Biometric)',
+    crowd_detection_threshold: 'Crowd < 5',
+    zero_person_detection: 'Zero Person',
+    server_room_detection: 'Server Room',
+    intruder_detection: 'Intruder',
+    strongroom_detection: 'Strong Room Movement',
+    qp_box_missing: 'QP Box Detection',
+    entry_exit_detection: 'Entry/Exit',
+    phone_detection: 'Phone',
+    blind_spot_detection: 'Blind Spot',
+    invigilator_detection: 'Invigilator',
+    camera_inversion_detection: 'Camera Inversion',
+    camera_tampering_detection: 'Camera Tampering',
+    vision_detection: 'Vision Detection',
 };
 
-const StatCard = ({ title, value, icon, color, loading, onClick }) => (
-  <Card
-    elevation={0}
-    onClick={onClick}
-    sx={{
-      height: '100%', borderRadius: 3, border: '1px solid #e2e8f0', boxShadow: 'none',
-      cursor: onClick ? 'pointer' : 'default',
-      transition: 'all 0.18s ease',
-      '&:hover': onClick ? { boxShadow: '0 4px 20px rgba(59,130,246,0.12)', borderColor: '#3b82f6' } : {},
-    }}
-  >
-    <CardContent sx={{ p: 0, height: '100%', '&:last-child': { pb: 0 } }}>
-      <Box display="flex" justifyContent="space-between" alignItems="stretch" height="100%">
-        <Box flex={1} display="flex" flexDirection="column" justifyContent="center" sx={{ p: 2 }}>
-          <Typography
-            variant="caption"
-            sx={{
-              color: '#64748b',
-              fontWeight: 600,
-              letterSpacing: '0.05em',
-              textTransform: 'uppercase',
-              fontSize: '0.7rem',
-            }}
-          >
-            {title}
-          </Typography>
-          <Typography variant="h5" fontWeight={700} sx={{ mt: 0.5, color: '#0f172a' }}>
-            {loading ? <CircularProgress size={24} /> : value}
-          </Typography>
-        </Box>
-        <Box
-          sx={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            pr: 2,
-            py: 2,
-          }}
-        >
-          <Box
-            sx={{
-              backgroundColor: `${color}18`,
-              borderRadius: 2,
-              width: 70,
-              height: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            {React.cloneElement(icon, { sx: { fontSize: 40, color } })}
-          </Box>
-        </Box>
-      </Box>
-    </CardContent>
-  </Card>
+const CATEGORY_LABELS = {
+    people: 'People',
+    movement: 'Movement',
+    camera: 'Camera',
+};
+
+const CHIP_TONES = {
+    amber:  { bg: '#fef3c7', text: '#92400e' },
+    violet: { bg: '#ede9fe', text: '#5b21b6' },
+    green:  { bg: '#d1fae5', text: '#065f46' },
+};
+
+const KPI_ICON_BG = 'rgba(60, 129, 246, 0.12)';
+const KPI_ICON_COLOR = '#3c81f6';
+
+// ---------------------------------------------------------------------------
+// KpiCard — the 4 top cards
+// ---------------------------------------------------------------------------
+
+const KpiCard = ({ title, value, icon, chips = [], loading }) => (
+    <Card sx={{ height: '100%' }}>
+        <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
+            <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+                <Typography
+                    variant="overline"
+                    sx={{
+                        color: '#64748b',
+                        fontWeight: 700,
+                        letterSpacing: '0.08em',
+                        fontSize: '0.72rem',
+                    }}
+                >
+                    {title}
+                </Typography>
+                <Box
+                    sx={{
+                        bgcolor: KPI_ICON_BG,
+                        borderRadius: 1.5,
+                        width: 40,
+                        height: 40,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                    }}
+                >
+                    {React.cloneElement(icon, { sx: { fontSize: 22, color: KPI_ICON_COLOR } })}
+                </Box>
+            </Stack>
+
+            <Box sx={{ mt: 1.5, mb: 2, minHeight: 48 }}>
+                {loading ? (
+                    <CircularProgress size={22} />
+                ) : (
+                    <Typography
+                        sx={{
+                            fontSize: '2.5rem',
+                            fontWeight: 700,
+                            color: '#1e3a8a',
+                            lineHeight: 1.1,
+                        }}
+                    >
+                        {Number(value || 0).toLocaleString()}
+                    </Typography>
+                )}
+            </Box>
+
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap rowGap={1}>
+                {chips.map((chip) => {
+                    const tone = CHIP_TONES[chip.tone] || CHIP_TONES.amber;
+                    return (
+                        <Chip
+                            key={chip.label}
+                            label={
+                                <Box component="span">
+                                    <Box component="span" sx={{ fontWeight: 600, mr: 0.5 }}>
+                                        {chip.label}
+                                    </Box>
+                                    <Box component="span" sx={{ fontWeight: 700 }}>
+                                        {Number(chip.value || 0).toLocaleString()}
+                                    </Box>
+                                </Box>
+                            }
+                            sx={{
+                                bgcolor: tone.bg,
+                                color: tone.text,
+                                borderRadius: 1.5,
+                                height: 'auto',
+                                py: 0.6,
+                                px: 0.4,
+                                '& .MuiChip-label': { px: 1.2, fontSize: '0.78rem' },
+                            }}
+                        />
+                    );
+                })}
+            </Stack>
+        </CardContent>
+    </Card>
 );
 
-const EXECUTION_DETAIL_ITEMS = [
-  {
-    key: 'completed',
-    label: 'COMPLETED',
-    icon: <CheckCircle sx={{ fontSize: 20, color: '#fff' }} />,
-    bgColor: '#4caf50',
-  },
-  {
-    key: 'failed',
-    label: 'FAILED',
-    icon: <Cancel sx={{ fontSize: 20, color: '#fff' }} />,
-    bgColor: '#e1464c',
-  },
-  {
-    key: 'running',
-    label: 'RUNNING',
-    icon: <Autorenew sx={{ fontSize: 20, color: '#fff' }} />,
-    bgColor: '#2196f3',
-  },
-  {
-    key: 'pending',
-    label: 'PENDING',
-    icon: <MoreHoriz sx={{ fontSize: 20, color: '#fff' }} />,
-    bgColor: '#90a4ae',
-  },
-];
+// ---------------------------------------------------------------------------
+// DetectionDistributionCard — donut + category list
+// ---------------------------------------------------------------------------
+
+const DetectionDistributionCard = ({ distribution = [], loading }) => {
+    const [category, setCategory] = useState('all');
+
+    // Build chart segments based on category filter
+    const segments = useMemo(() => {
+        if (!Array.isArray(distribution) || distribution.length === 0) return [];
+
+        if (category === 'all') {
+            // Aggregate per category
+            const agg = { people: 0, movement: 0, camera: 0 };
+            distribution.forEach((d) => {
+                const cat = SCRIPT_CATEGORY_MAP[d.type] || 'camera';
+                agg[cat] = (agg[cat] || 0) + Number(d.count || 0);
+            });
+            return ['people', 'movement', 'camera']
+                .map((cat) => ({
+                    key: cat,
+                    label: CATEGORY_LABELS[cat],
+                    count: agg[cat] || 0,
+                    color: CATEGORY_COLORS[cat],
+                }))
+                .filter((s) => s.count > 0);
+        }
+
+        // Filter to a single category; one segment per detection_type
+        return distribution
+            .filter((d) => (SCRIPT_CATEGORY_MAP[d.type] || 'camera') === category)
+            .map((d) => ({
+                key: d.type,
+                label: DETECTION_TYPE_LABELS[d.type] || d.type,
+                count: Number(d.count || 0),
+                color: CATEGORY_COLORS[category],
+            }))
+            .filter((s) => s.count > 0);
+    }, [distribution, category]);
+
+    const total = segments.reduce((acc, s) => acc + s.count, 0);
+
+    const segmentsWithPercent = segments.map((s) => ({
+        ...s,
+        percent: total > 0 ? (s.count / total) * 100 : 0,
+    }));
+
+    return (
+        <Card sx={{ height: '100%' }}>
+            <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
+                <Stack
+                    direction="row"
+                    justifyContent="space-between"
+                    alignItems="center"
+                    sx={{ mb: 2 }}
+                >
+                    <Typography variant="h6" sx={{ fontWeight: 700, color: '#0f172a' }}>
+                        Detection Distribution
+                    </Typography>
+                    <FormControl size="small" sx={{ minWidth: 140 }}>
+                        <Select
+                            value={category}
+                            onChange={(e) => setCategory(e.target.value)}
+                            sx={{ fontSize: '0.85rem', borderRadius: 2 }}
+                        >
+                            <MenuItem value="all">All Categories</MenuItem>
+                            <MenuItem value="people">People</MenuItem>
+                            <MenuItem value="movement">Movement</MenuItem>
+                            <MenuItem value="camera">Camera</MenuItem>
+                        </Select>
+                    </FormControl>
+                </Stack>
+
+                {loading ? (
+                    <Box display="flex" justifyContent="center" alignItems="center" minHeight={220}>
+                        <CircularProgress />
+                    </Box>
+                ) : segmentsWithPercent.length === 0 ? (
+                    <Box display="flex" justifyContent="center" alignItems="center" minHeight={220}>
+                        <Typography color="text.secondary">No detections in this view.</Typography>
+                    </Box>
+                ) : (
+                    <Grid container spacing={2} alignItems="center">
+                        <Grid item xs={12} sm={6}>
+                            <Stack spacing={1.2}>
+                                {segmentsWithPercent.map((s) => (
+                                    <Stack
+                                        key={s.key}
+                                        direction="row"
+                                        alignItems="center"
+                                        spacing={1.2}
+                                    >
+                                        <Box
+                                            sx={{
+                                                width: 10,
+                                                height: 10,
+                                                borderRadius: '50%',
+                                                bgcolor: s.color,
+                                                flexShrink: 0,
+                                            }}
+                                        />
+                                        <Typography sx={{ flex: 1, fontSize: '0.9rem', color: '#334155' }}>
+                                            {s.label}
+                                        </Typography>
+                                        <Typography sx={{ fontWeight: 600, color: '#0f172a', fontSize: '0.9rem' }}>
+                                            {s.count.toLocaleString()}
+                                        </Typography>
+                                        <Typography sx={{ color: '#94a3b8', fontSize: '0.82rem', minWidth: 56, textAlign: 'right' }}>
+                                            ({s.percent.toFixed(2)}%)
+                                        </Typography>
+                                    </Stack>
+                                ))}
+                            </Stack>
+                        </Grid>
+
+                        <Grid item xs={12} sm={6}>
+                            <Box sx={{ position: 'relative', height: 220 }}>
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <PieChart>
+                                        <Pie
+                                            data={segmentsWithPercent}
+                                            cx="50%"
+                                            cy="50%"
+                                            innerRadius={62}
+                                            outerRadius={92}
+                                            paddingAngle={2}
+                                            dataKey="count"
+                                            nameKey="label"
+                                            stroke="none"
+                                        >
+                                            {segmentsWithPercent.map((s) => (
+                                                <Cell key={s.key} fill={s.color} />
+                                            ))}
+                                        </Pie>
+                                        <Tooltip
+                                            formatter={(value, name) => [
+                                                `${Number(value).toLocaleString()}`,
+                                                name,
+                                            ]}
+                                        />
+                                    </PieChart>
+                                </ResponsiveContainer>
+                                <Box
+                                    sx={{
+                                        position: 'absolute',
+                                        inset: 0,
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        pointerEvents: 'none',
+                                    }}
+                                >
+                                    <Typography sx={{ fontSize: '1.75rem', fontWeight: 700, color: '#1e3a8a' }}>
+                                        {total.toLocaleString()}
+                                    </Typography>
+                                    <Typography
+                                        variant="caption"
+                                        sx={{ color: '#64748b', letterSpacing: '0.06em', fontWeight: 600 }}
+                                    >
+                                        TOTAL DETECTION
+                                    </Typography>
+                                </Box>
+                            </Box>
+                        </Grid>
+                    </Grid>
+                )}
+            </CardContent>
+        </Card>
+    );
+};
+
+// ---------------------------------------------------------------------------
+// GpuPerformanceCard — static / dummy data; no API
+// ---------------------------------------------------------------------------
+
+const GpuPerformanceCard = () => {
+    const utilization = 88.2;
+    const gaugeData = [
+        { name: 'used', value: utilization, color: '#3c81f6' },
+        { name: 'free', value: 100 - utilization, color: '#e2e8f0' },
+    ];
+
+    return (
+        <Card sx={{ height: '100%' }}>
+            <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="flex-start" sx={{ mb: 1.5 }}>
+                    <Box>
+                        <Typography variant="h6" sx={{ fontWeight: 700, color: '#0f172a' }}>
+                            Overall GPU Performance
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: '#64748b' }}>
+                            Real-Time GPU Allocation Efficiency Across Active Nodes
+                        </Typography>
+                    </Box>
+                </Stack>
+
+                <Grid container spacing={2} alignItems="center">
+                    <Grid item xs={12} sm={7}>
+                        <Box sx={{ position: 'relative', height: 200 }}>
+                            <ResponsiveContainer width="100%" height="100%">
+                                <PieChart>
+                                    <Pie
+                                        data={gaugeData}
+                                        cx="50%"
+                                        cy="80%"
+                                        innerRadius={70}
+                                        outerRadius={95}
+                                        startAngle={180}
+                                        endAngle={0}
+                                        dataKey="value"
+                                        stroke="none"
+                                    >
+                                        {gaugeData.map((d) => (
+                                            <Cell key={d.name} fill={d.color} />
+                                        ))}
+                                    </Pie>
+                                </PieChart>
+                            </ResponsiveContainer>
+                            <Box
+                                sx={{
+                                    position: 'absolute',
+                                    inset: 0,
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    alignItems: 'center',
+                                    justifyContent: 'flex-end',
+                                    pb: 1,
+                                    pointerEvents: 'none',
+                                }}
+                            >
+                                <Typography sx={{ fontSize: '1.9rem', fontWeight: 700, color: '#3c81f6' }}>
+                                    {utilization}%
+                                </Typography>
+                                <Typography
+                                    variant="caption"
+                                    sx={{ color: '#64748b', letterSpacing: '0.06em', fontWeight: 600 }}
+                                >
+                                    UTILIZATION
+                                </Typography>
+                            </Box>
+                        </Box>
+                        <Box
+                            sx={{
+                                mt: 1,
+                                bgcolor: '#f8fafc',
+                                border: '1px solid #e2e8f0',
+                                borderRadius: 2,
+                                px: 2,
+                                py: 1,
+                                textAlign: 'center',
+                            }}
+                        >
+                            <Typography sx={{ fontSize: '0.85rem', color: '#475569' }}>
+                                Camera Capacity{' '}
+                                <Box component="span" sx={{ fontWeight: 700, color: '#0f172a' }}>
+                                    MIN 4 • MAX 3688
+                                </Box>
+                            </Typography>
+                        </Box>
+                    </Grid>
+
+                    <Grid item xs={12} sm={5}>
+                        <Stack spacing={1.2}>
+                            <Paper
+                                elevation={0}
+                                sx={{
+                                    bgcolor: '#eff6ff',
+                                    border: '1px solid #dbeafe',
+                                    borderRadius: 2,
+                                    p: 1.2,
+                                    textAlign: 'center',
+                                }}
+                            >
+                                <StarRoundedIcon sx={{ color: '#3c81f6', fontSize: 22 }} />
+                                <Typography sx={{ fontWeight: 700, fontSize: '0.85rem', color: '#1e3a8a' }}>
+                                    Optimal
+                                </Typography>
+                                <Typography variant="caption" sx={{ color: '#64748b' }}>
+                                    EFFICIENCY
+                                </Typography>
+                            </Paper>
+                            <Paper
+                                elevation={0}
+                                sx={{ border: '1px solid #e2e8f0', borderRadius: 2, p: 1.2 }}
+                            >
+                                <Typography variant="caption" sx={{ color: '#64748b', letterSpacing: '0.05em', fontWeight: 600 }}>
+                                    ACCESSIBLE CAMERAS
+                                </Typography>
+                                <Typography sx={{ fontWeight: 700, fontSize: '1.1rem', color: '#0f172a' }}>
+                                    1,234
+                                </Typography>
+                            </Paper>
+                            <Paper
+                                elevation={0}
+                                sx={{ border: '1px solid #e2e8f0', borderRadius: 2, p: 1.2 }}
+                            >
+                                <Typography variant="caption" sx={{ color: '#64748b', letterSpacing: '0.05em', fontWeight: 600 }}>
+                                    MEMORY LOAD
+                                </Typography>
+                                <Typography sx={{ fontWeight: 700, fontSize: '1.1rem', color: '#0f172a' }}>
+                                    14.2 GB / 24 GB
+                                </Typography>
+                            </Paper>
+                        </Stack>
+                    </Grid>
+                </Grid>
+
+                <Typography
+                    variant="caption"
+                    sx={{ display: 'block', mt: 1.5, textAlign: 'center', color: '#94a3b8' }}
+                >
+                    Mock data — wiring to real GPU telemetry comes in a later iteration.
+                </Typography>
+            </CardContent>
+        </Card>
+    );
+};
+
+// ---------------------------------------------------------------------------
+// LiveExamsCard — paginated table from /api/dashboard/live-exams
+// ---------------------------------------------------------------------------
+
+const formatShortDate = (raw) => {
+    if (!raw) return '';
+    try {
+        return format(parseISO(raw), 'd MMM');
+    } catch {
+        return raw;
+    }
+};
+
+const formatHMM = (raw) => (typeof raw === 'string' ? raw.slice(0, 5) : '');
+
+const LiveExamsCard = () => {
+    const [rows, setRows] = useState([]);
+    const [total, setTotal] = useState(0);
+    const [loading, setLoading] = useState(true);
+    const [page, setPage] = useState(0);          // 0-indexed for MUI TablePagination
+    const [rowsPerPage, setRowsPerPage] = useState(10);
+
+    useEffect(() => {
+        let cancelled = false;
+        setLoading(true);
+        dashboardAPI
+            .getLiveExams({ page: page + 1, limit: rowsPerPage })
+            .then((res) => {
+                if (cancelled) return;
+                const data = res?.data?.data || {};
+                setRows(Array.isArray(data.rows) ? data.rows : []);
+                setTotal(Number(data.total || 0));
+            })
+            .catch((err) => {
+                if (cancelled) return;
+                console.error('[Dashboard.getLiveExams]', err);
+                setRows([]);
+                setTotal(0);
+            })
+            .finally(() => {
+                if (!cancelled) setLoading(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [page, rowsPerPage]);
+
+    return (
+        <Card>
+            <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
+                <Typography variant="h6" sx={{ fontWeight: 700, color: '#0f172a', mb: 2 }}>
+                    Live Exams
+                </Typography>
+
+                <TableContainer
+                    component={Paper}
+                    elevation={0}
+                    sx={{ borderRadius: 2.5, border: '1px solid #e8ecf1', boxShadow: 'none' }}
+                >
+                    <Table>
+                        <TableHead sx={{ bgcolor: '#f8fafc' }}>
+                            <TableRow>
+                                {['Exam', 'Date', 'Shift & Time', 'Cameras', 'Scripts', 'Detections'].map((h) => (
+                                    <TableCell
+                                        key={h}
+                                        sx={{
+                                            fontWeight: 700,
+                                            fontSize: '0.78rem',
+                                            color: '#64748b',
+                                            letterSpacing: '0.04em',
+                                        }}
+                                    >
+                                        {h}
+                                    </TableCell>
+                                ))}
+                            </TableRow>
+                        </TableHead>
+                        <TableBody>
+                            {loading ? (
+                                <TableRow>
+                                    <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
+                                        <CircularProgress size={28} />
+                                    </TableCell>
+                                </TableRow>
+                            ) : rows.length === 0 ? (
+                                <TableRow>
+                                    <TableCell colSpan={6} align="center" sx={{ py: 4, color: '#94a3b8' }}>
+                                        No live exams in the current shift bracket.
+                                    </TableCell>
+                                </TableRow>
+                            ) : (
+                                rows.map((row) => (
+                                    <TableRow key={`${row.exam_id}::${row.shift_id}`} hover>
+                                        <TableCell sx={{ fontWeight: 700, color: '#0f172a' }}>
+                                            {row.exam_name}
+                                        </TableCell>
+                                        <TableCell sx={{ color: '#475569' }}>
+                                            {formatShortDate(row.date)}
+                                        </TableCell>
+                                        <TableCell>
+                                            <Typography sx={{ fontWeight: 600, color: '#0f172a', fontSize: '0.9rem' }}>
+                                                {row.shift_bracket}
+                                            </Typography>
+                                            <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+                                                {formatHMM(row.shift_start)} - {formatHMM(row.shift_end)}
+                                            </Typography>
+                                        </TableCell>
+                                        <TableCell sx={{ color: '#3c81f6', fontWeight: 600 }}>
+                                            {Number(row.cameras || 0).toLocaleString()}
+                                        </TableCell>
+                                        <TableCell sx={{ color: '#3c81f6', fontWeight: 600 }}>
+                                            {Number(row.scripts || 0).toLocaleString()}
+                                        </TableCell>
+                                        <TableCell sx={{ color: '#475569', fontWeight: 600 }}>
+                                            {Number(row.detections || 0).toLocaleString()}
+                                        </TableCell>
+                                    </TableRow>
+                                ))
+                            )}
+                        </TableBody>
+                    </Table>
+                </TableContainer>
+
+                <TablePagination
+                    component="div"
+                    count={total}
+                    page={page}
+                    onPageChange={(_, newPage) => setPage(newPage)}
+                    rowsPerPage={rowsPerPage}
+                    onRowsPerPageChange={(e) => {
+                        setRowsPerPage(parseInt(e.target.value, 10) || 10);
+                        setPage(0);
+                    }}
+                    rowsPerPageOptions={[5, 10, 25, 50]}
+                    labelRowsPerPage="Rows per page:"
+                    sx={{
+                        '.MuiTablePagination-toolbar': { minHeight: '44px !important', px: 1 },
+                        '.MuiTablePagination-selectLabel, .MuiTablePagination-select, .MuiTablePagination-displayedRows': {
+                            m: 0,
+                            fontSize: 13,
+                            color: '#334155',
+                        },
+                    }}
+                />
+            </CardContent>
+        </Card>
+    );
+};
+
+// ---------------------------------------------------------------------------
+// Dashboard (default export)
+// ---------------------------------------------------------------------------
 
 const Dashboard = () => {
-  const navigate = useNavigate();
-  const { unfilteredCounts } = useDetectionCounts();
-  const { connected } = useSocket();
-  const [stats, setStats] = useState({
-    exams: 0,
-    upcomingShifts: 0,
-    totalCameras: 0,
-    executions: null,
-    detectionDistribution: [],
-    examStatus: { completed: 0, in_progress: 0, pending: 0 },
-  });
-  const [loading, setLoading] = useState(true);
-  const [timeRange, setTimeRange] = useState('24h');
-  const [selectedCategory, setSelectedCategory] = useState('all');
+    const [date, setDate] = useState(new Date());
+    const [overview, setOverview] = useState(null);
+    const [overviewLoading, setOverviewLoading] = useState(true);
 
-  // Calculate total detections from context
-  const totalDetections = useMemo(() => {
-    const total = Object.values(unfilteredCounts).reduce((a, b) => a + b, 0);
-    console.log('[Dashboard] Total detections updated:', total, unfilteredCounts);
-    return total;
-  }, [unfilteredCounts]);
+    useEffect(() => {
+        let cancelled = false;
+        setOverviewLoading(true);
+        const dateStr = format(date, 'yyyy-MM-dd');
+        dashboardAPI
+            .getOverview(dateStr)
+            .then((res) => {
+                if (!cancelled) setOverview(res?.data?.data || null);
+            })
+            .catch((err) => {
+                if (cancelled) return;
+                console.error('[Dashboard.getOverview]', err);
+                setOverview(null);
+            })
+            .finally(() => {
+                if (!cancelled) setOverviewLoading(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [date]);
 
-  useEffect(() => {
-    loadDashboardData();
-  }, [timeRange]);
+    const totalExams   = overview?.total_exams   || { total: 0, ongoing: 0 };
+    const cameras      = overview?.cameras       || { total: 0, accessible: 0, unclassified: 0 };
+    const scripts      = overview?.scripts       || { planned_today: 0, running: 0, scheduled: 0, completed: 0 };
+    const detections   = overview?.detections    || { today: 0, pushed_to_client: 0, false_detection: 0 };
+    const distribution = overview?.detection_distribution || [];
 
-  const loadDashboardData = async () => {
-    try {
-      const [adminStatsRes, executionsRes] = await Promise.all([
-        dashboardAPI.getAdminStats(timeRange),
-        executionsAPI.getStatistics(),
-      ]);
-
-      const adminData = adminStatsRes.data.data;
-
-      setStats({
-        exams: adminData.active_exams || 0,
-        upcomingShifts: adminData.total_shifts || 0,
-        totalCameras: adminData.total_cameras || 0,
-        executions: executionsRes.data.data,
-        detectionDistribution: adminData.detection_distribution || [],
-        examStatus: adminData.exam_status || { completed: 0, in_progress: 0, pending: 0 },
-      });
-    } catch (error) {
-      console.error('Error loading dashboard data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Filter detection data by category
-  const filteredDetectionData = selectedCategory === 'all' 
-    ? stats.detectionDistribution 
-    : stats.detectionDistribution.filter(item => SCRIPT_CATEGORY_MAP[item.type] === selectedCategory);
-  
-  // Prepare pie chart data
-  const pieData = filteredDetectionData.map(item => ({
-    name: DETECTION_TYPE_LABELS[item.type] || item.type,
-    value: parseFloat(item.accuracy) || 0,
-    count: item.count,
-    type: item.type,
-    category: SCRIPT_CATEGORY_MAP[item.type] || 'camera',
-    color: CATEGORY_COLORS[SCRIPT_CATEGORY_MAP[item.type]] || '#94a3b8',
-  }));
-
-  // Calculate average accuracy
-  const avgAccuracy = pieData.length > 0 
-    ? (pieData.reduce((sum, item) => sum + item.value, 0) / pieData.length).toFixed(1)
-    : 0;
-
-  const totalExamTasks = stats.examStatus.completed + stats.examStatus.in_progress + stats.examStatus.pending;
-
-  const executionData = stats.executions
-    ? [
-      { name: 'COMPLETED', value: stats.executions.completed, color: '#4caf50' },
-      { name: 'FAILED', value: stats.executions.failed, color: '#e1464c' },
-      { name: 'RUNNING', value: stats.executions.running, color: '#2196f3' },
-      { name: 'PENDING', value: stats.executions.pending, color: '#e1e9f3' },
-    ]
-    : [];
-
-  return (
-    <Box>
-      {/* Header with Time Range Selector */}
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.9rem' }}>
-          Real-time surveillance execution metrics
-        </Typography>
-        {/* <FormControl size="small" sx={{ minWidth: 150 }}>
-          <Select
-            value={timeRange}
-            onChange={(e) => setTimeRange(e.target.value)}
-            startAdornment={<Schedule sx={{ fontSize: 16, mr: 0.5, color: '#64748b' }} />}
-            sx={{
-              bgcolor: '#f8fafc',
-              border: '1px solid #e2e8f0',
-              fontWeight: 600,
-              fontSize: '0.85rem',
-              '& .MuiOutlinedInput-notchedOutline': { border: 'none' },
-            }}
-          >
-            <MenuItem value="24h">Last 24 Hours</MenuItem>
-            <MenuItem value="7d">Last 7 Days</MenuItem>
-            <MenuItem value="30d">Last 30 Days</MenuItem>
-            <MenuItem value="90d">Last 3 Months</MenuItem>
-            <MenuItem value="all">All Time</MenuItem>
-          </Select>
-        </FormControl> */}
-      </Box>
-
-      <Grid container spacing={2} mb={3}>
-        {/* Stats Cards */}
-        <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            title="All Exams"
-            value={stats.exams}
-            icon={<ExamsSvgIcon />}
-            color="#3b82f6"
-            loading={loading}
-            onClick={() => navigate('/exams')}
-          />
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            title="Total Shifts"
-            value={stats.upcomingShifts}
-            icon={<ShiftSvgIcon />}
-            color="#3b82f6"
-            loading={loading}
-            onClick={() => navigate('/shifts')}
-          />
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            title="Total Cameras"
-            value={stats.totalCameras}
-            icon={<CameraAltIcon />}
-            color="#3b82f6"
-            loading={loading}
-            onClick={() => navigate('/cameras')}
-          />
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <StatCard
-            title="Total Detections"
-            value={totalDetections.toLocaleString()}
-            icon={<CustomSvgIcon />}
-            color="#3b82f6"
-            loading={loading}
-            onClick={() => navigate('/detections')}
-          />
-        </Grid>
-
-        {/* Detection Distribution & Exam Status */}
-        <Grid item xs={12} md={7}>
-          <Paper elevation={0} sx={{ p: 3, borderRadius: 3, border: '1px solid #e2e8f0', height: '100%', boxShadow: 'none' }}>
-            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-              <Typography variant="h6" fontWeight={700} sx={{ color: '#0f172a' }}>
-                Detection Distribution
-              </Typography>
-              <FormControl size="small" sx={{ minWidth: 150 }}>
-                <Select
-                  value={selectedCategory}
-                  onChange={(e) => setSelectedCategory(e.target.value)}
-                  sx={{ fontSize: '0.85rem' }}
+    return (
+        <LocalizationProvider dateAdapter={AdapterDateFns}>
+            <Box>
+                {/* Overview header */}
+                <Stack
+                    direction={{ xs: 'column', sm: 'row' }}
+                    justifyContent="space-between"
+                    alignItems={{ xs: 'flex-start', sm: 'flex-end' }}
+                    spacing={2}
+                    sx={{ mb: 2.5 }}
                 >
-                  <MenuItem value="all">All Categories</MenuItem>
-                  <MenuItem value="people">People</MenuItem>
-                  <MenuItem value="movement">Movement</MenuItem>
-                  <MenuItem value="camera">Camera</MenuItem>
-                </Select>
-              </FormControl>
-            </Box>
-
-            {loading ? (
-              <Box display="flex" justifyContent="center" alignItems="center" height={240}>
-                <CircularProgress />
-              </Box>
-            ) : (
-              <>
-                <Box display="flex" alignItems="center" justifyContent="center" position="relative" height={240}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={pieData}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={65}
-                        outerRadius={100}
-                        paddingAngle={2}
-                        dataKey="value"
-                      >
-                        {pieData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <Tooltip />
-                    </PieChart>
-                  </ResponsiveContainer>
-                  
-                  <Box
-                    position="absolute"
-                    top="50%"
-                    left="50%"
-                    sx={{ transform: 'translate(-50%, -50%)' }}
-                    textAlign="center"
-                  >
-                    <Typography variant="h4" fontWeight={800} sx={{ color: '#0f172a', fontSize: '1.75rem' }}>
-                      {avgAccuracy}%
-                    </Typography>
-                    <Typography variant="caption" sx={{ color: '#64748b', textTransform: 'uppercase', fontSize: '0.65rem', fontWeight: 600, letterSpacing: '0.05em' }}>
-                      Avg Accuracy
-                    </Typography>
-                  </Box>
-                </Box>
-
-                <Box display="flex" flexDirection="column" gap={1.5} mt={2} maxHeight={140} sx={{ overflowY: 'auto' }}>
-                  {pieData.map((item, index) => (
-                    <Box key={index} display="flex" alignItems="center" justifyContent="space-between" gap={2}>
-                      <Box display="flex" alignItems="center" gap={1}>
-                        <Box
-                          sx={{
-                            width: 12,
-                            height: 12,
-                            borderRadius: '50%',
-                            bgcolor: item.color,
-                            flexShrink: 0,
-                          }}
-                        />
-                        <Typography variant="body2" sx={{ fontSize: '0.85rem', color: '#64748b' }}>
-                          {item.name}
+                    <Box>
+                        <Typography variant="h5" sx={{ fontWeight: 700, color: '#0f172a' }}>
+                            Overview
                         </Typography>
-                      </Box>
-                      <Typography variant="body2" sx={{ fontSize: '0.85rem', fontWeight: 700, color: '#0f172a' }}>
-                        {item.value}%
-                      </Typography>
+                        <Typography variant="body2" sx={{ color: '#64748b' }}>
+                            Monitor Live Exams, Camera Activity, Detections
+                        </Typography>
                     </Box>
-                  ))}
-                </Box>
-              </>
-            )}
-          </Paper>
-        </Grid>
+                    <DatePicker
+                        value={date}
+                        onChange={(d) => d && setDate(d)}
+                        format="dd MMM yyyy"
+                        slotProps={{
+                            textField: {
+                                size: 'small',
+                                sx: { minWidth: 180, bgcolor: '#fff', borderRadius: 2 },
+                            },
+                        }}
+                    />
+                </Stack>
 
-        <Grid item xs={12} md={5}>
-          <Paper elevation={0} sx={{ p: 3, borderRadius: 3, border: '1px solid #e2e8f0', height: '100%', boxShadow: 'none' }}>
-            <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-              <Typography variant="h6" fontWeight={700} sx={{ color: '#0f172a' }}>
-                All Exam Status
-              </Typography>
-              <Typography variant="caption" sx={{ color: '#64748b', fontSize: '0.75rem' }}>
-                TOTAL: {totalExamTasks}
-              </Typography>
+                {/* Row 1 — 4 KPI cards */}
+                <Grid container spacing={2.5} sx={{ mb: 2.5 }}>
+                    <Grid item xs={12} sm={6} lg={3}>
+                        <KpiCard
+                            title="TOTAL EXAMS"
+                            value={totalExams.total}
+                            icon={<ExamsSvgIcon />}
+                            chips={[
+                                { label: 'Ongoing', value: totalExams.ongoing, tone: 'amber' },
+                                { label: 'Total',   value: totalExams.total,   tone: 'violet' },
+                            ]}
+                            loading={overviewLoading}
+                        />
+                    </Grid>
+                    <Grid item xs={12} sm={6} lg={3}>
+                        <KpiCard
+                            title="TOTAL CAMERAS"
+                            value={cameras.total}
+                            icon={<CameraAltIcon />}
+                            chips={[
+                                { label: 'Accessible',   value: cameras.accessible,   tone: 'amber' },
+                                { label: 'Unclassified', value: cameras.unclassified, tone: 'violet' },
+                            ]}
+                            loading={overviewLoading}
+                        />
+                    </Grid>
+                    <Grid item xs={12} sm={6} lg={3}>
+                        <KpiCard
+                            title="SCRIPT BREAKDOWN"
+                            value={scripts.planned_today}
+                            icon={<ShiftSvgIcon />}
+                            chips={[
+                                { label: 'Running',   value: scripts.running,   tone: 'amber' },
+                                { label: 'Scheduled', value: scripts.scheduled, tone: 'violet' },
+                                { label: 'Completed', value: scripts.completed, tone: 'green' },
+                            ]}
+                            loading={overviewLoading}
+                        />
+                    </Grid>
+                    <Grid item xs={12} sm={6} lg={3}>
+                        <KpiCard
+                            title="TOTAL DETECTIONS"
+                            value={detections.today}
+                            icon={<CustomSvgIcon />}
+                            chips={[
+                                { label: 'Pushed',          value: detections.pushed_to_client, tone: 'amber' },
+                                { label: 'False Detection', value: detections.false_detection,  tone: 'violet' },
+                            ]}
+                            loading={overviewLoading}
+                        />
+                    </Grid>
+                </Grid>
+
+                {/* Row 2 — Distribution + GPU */}
+                <Grid container spacing={2.5} sx={{ mb: 2.5 }}>
+                    <Grid item xs={12} md={6}>
+                        <DetectionDistributionCard
+                            distribution={distribution}
+                            loading={overviewLoading}
+                        />
+                    </Grid>
+                    <Grid item xs={12} md={6}>
+                        <GpuPerformanceCard />
+                    </Grid>
+                </Grid>
+
+                {/* Row 3 — Live Exams table */}
+                <LiveExamsCard />
             </Box>
-
-            {loading ? (
-              <Box display="flex" justifyContent="center" alignItems="center" height={200}>
-                <CircularProgress />
-              </Box>
-            ) : (
-              <Box display="flex" flexDirection="column" gap={4}>
-                <Box>
-                  <Box display="flex" justifyContent="space-between" mb={1}>
-                    <Typography variant="body2" fontWeight={600} sx={{ fontSize: '0.85rem' }}>
-                      Completed
-                    </Typography>
-                    <Typography variant="body2" fontWeight={600} sx={{ fontSize: '0.85rem', color: '#3b82f6' }}>
-                      {stats.examStatus.completed}/{totalExamTasks}
-                    </Typography>
-                  </Box>
-                  <LinearProgress
-                    variant="determinate"
-                    value={totalExamTasks > 0 ? (stats.examStatus.completed / totalExamTasks) * 100 : 0}
-                    sx={{
-                      height: 24,
-                      borderRadius: 8,
-                      bgcolor: '#e2e8f0',
-                      '& .MuiLinearProgress-bar': {
-                        bgcolor: '#3b82f6',
-                        borderRadius: 8,
-                      },
-                    }}
-                  />
-                </Box>
-
-                <Box>
-                  <Box display="flex" justifyContent="space-between" mb={1}>
-                    <Typography variant="body2" fontWeight={600} sx={{ fontSize: '0.85rem' }}>
-                      In Progress
-                    </Typography>
-                    <Typography variant="body2" fontWeight={600} sx={{ fontSize: '0.85rem', color: '#f59e0b' }}>
-                      {stats.examStatus.in_progress}/{totalExamTasks}
-                    </Typography>
-                  </Box>
-                  <LinearProgress
-                    variant="determinate"
-                    value={totalExamTasks > 0 ? (stats.examStatus.in_progress / totalExamTasks) * 100 : 0}
-                    sx={{
-                      height: 24,
-                      borderRadius: 8,
-                      bgcolor: '#e2e8f0',
-                      '& .MuiLinearProgress-bar': {
-                        bgcolor: '#f59e0b',
-                        borderRadius: 8,
-                      },
-                    }}
-                  />
-                </Box>
-
-                <Box>
-                  <Box display="flex" justifyContent="space-between" mb={1}>
-                    <Typography variant="body2" fontWeight={600} sx={{ fontSize: '0.85rem' }}>
-                      Pending
-                    </Typography>
-                    <Typography variant="body2" fontWeight={600} sx={{ fontSize: '0.85rem', color: '#64748b' }}>
-                      {stats.examStatus.pending}/{totalExamTasks}
-                    </Typography>
-                  </Box>
-                  <LinearProgress
-                    variant="determinate"
-                    value={totalExamTasks > 0 ? (stats.examStatus.pending / totalExamTasks) * 100 : 0}
-                    sx={{
-                      height: 24,
-                      borderRadius: 8,
-                      bgcolor: '#e2e8f0',
-                      '& .MuiLinearProgress-bar': {
-                        bgcolor: '#94a3b8',
-                        borderRadius: 8,
-                      },
-                    }}
-                  />
-                </Box>
-              </Box>
-            )}
-          </Paper>
-        </Grid>
-
-        {/* Execution Status Chart */}
-        <Grid item xs={12} md={8}>
-          <Paper
-            elevation={0}
-            sx={{
-              p: 3,
-              height: '620px',
-              borderRadius: 3,
-              boxShadow: 'none',
-            }}
-          >
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <Typography variant="h6" fontWeight={700} sx={{ color: '#0f172a' }}>
-                  Execution Status Overview
-                </Typography>
-                <InfoOutlined sx={{ fontSize: 18, color: '#94a3b8', cursor: 'pointer' }} />
-              </Box>
-              <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                {executionData.map((item) => (
-                  <Box key={item.name} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: item.color }} />
-                    <Typography variant="caption" sx={{ fontSize: '0.7rem', fontWeight: 600, color: '#64748b' }}>
-                      {item.name}
-                    </Typography>
-                  </Box>
-                ))}
-              </Box>
-            </Box>
-
-            {loading ? (
-              <Box display="flex" justifyContent="center" alignItems="center" height="300px">
-                <CircularProgress />
-              </Box>
-            ) : (
-              <ResponsiveContainer width="100%" height="85%">
-                <BarChart data={executionData} barCategoryGap="20%">
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                  <XAxis
-                    dataKey="name"
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fontSize: 11, fontWeight: 600, fill: '#94a3b8' }}
-                  />
-                  <YAxis
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fontSize: 11, fill: '#94a3b8' }}
-                  />
-                  <Tooltip
-                    cursor={{ fill: 'rgba(0,0,0,0.02)' }}
-                    contentStyle={{
-                      borderRadius: 8,
-                      border: '1px solid #e2e8f0',
-                      boxShadow: 'none',
-                    }}
-                  />
-                  <Bar dataKey="value" radius={[6, 6, 0, 0]} maxBarSize={160}>
-                    {executionData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </Paper>
-        </Grid>
-
-        {/* Execution Details — Sidebar Card */}
-        <Grid item xs={12} md={4}>
-          <Paper
-            elevation={0}
-            sx={{
-              p: 3,
-              height: '620px',
-              borderRadius: 3,
-              boxShadow: 'none',
-              display: 'flex',
-              flexDirection: 'column',
-            }}
-          >
-            <Typography
-              variant="h6"
-              sx={{
-                fontWeight: 700,
-                color: '#0f172a',
-              }}
-            >
-              Execution Details
-            </Typography>
-            <Typography sx={{ color: '#64748b', mb: 3, fontSize: '0.85rem' }}>
-              Live cycle monitoring
-            </Typography>
-
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 4, mt: 1 }}>
-              {EXECUTION_DETAIL_ITEMS.map((item) => (
-                <Box key={item.key} sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                  <Box
-                    sx={{
-                      width: 40,
-                      height: 40,
-                      borderRadius: '50%',
-                      bgcolor: item.bgColor,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      flexShrink: 0,
-                    }}
-                  >
-                    {item.icon}
-                  </Box>
-                  <Box>
-                    <Typography sx={{ color: '#0f172a', lineHeight: 1.2, fontWeight: 700, fontSize: '1.5rem' }}>
-                      {loading ? <CircularProgress size={20} /> : (stats.executions?.[item.key] || 0)}
-                    </Typography>
-                    <Typography
-                      sx={{
-                        fontWeight: 600,
-                        color: '#64748b',
-                        fontSize: '0.85rem',
-                      }}
-                    >
-                      {item.label}
-                    </Typography>
-                  </Box>
-                </Box>
-              ))}
-            </Box>
-          </Paper>
-        </Grid>
-      </Grid>
-    </Box>
-  );
+        </LocalizationProvider>
+    );
 };
 
 export default Dashboard;
