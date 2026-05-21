@@ -1,28 +1,30 @@
-import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { lazy, Suspense } from 'react';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
+import LinearProgress from '@mui/material/LinearProgress';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { DetectionCountsProvider } from './contexts/DetectionCountsContext';
 import { SocketProvider } from './contexts/SocketContext';
 import ProtectedRoute from './components/ProtectedRoute';
-import Layout from './components/Layout';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import ForgotPassword from './pages/ForgotPassword';
-import Dashboard from './pages/Dashboard';
-import Exams from './pages/Exams';
-import Cameras from './pages/Cameras';
-import Shifts from './pages/Shifts';
-import Analytics from './pages/Analytics';
-import Executions from './pages/Executions';
-import Detections from './pages/Detections';
-import ClientDetections from './pages/ClientDetections';
-import ClientDetectionDashboard from './pages/ClientDetectionDashboard';
-import ClientExams from './pages/ClientExams';
-import ClientCameras from './pages/ClientCameras';
-import UserVerification from './pages/UserVerification';
-import GPUMonitor from './pages/GPUMonitor';
+
+const Layout = lazy(() => import('./components/Layout'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Exams = lazy(() => import('./pages/Exams'));
+const Cameras = lazy(() => import('./pages/Cameras'));
+const Shifts = lazy(() => import('./pages/Shifts'));
+const Analytics = lazy(() => import('./pages/Analytics'));
+const Executions = lazy(() => import('./pages/Executions'));
+const Detections = lazy(() => import('./pages/Detections'));
+const ClientDetections = lazy(() => import('./pages/ClientDetections'));
+const ClientDetectionDashboard = lazy(() => import('./pages/ClientDetectionDashboard'));
+const ClientExams = lazy(() => import('./pages/ClientExams'));
+const ClientCameras = lazy(() => import('./pages/ClientCameras'));
+const UserVerification = lazy(() => import('./pages/UserVerification'));
+const GPUMonitor = lazy(() => import('./pages/GPUMonitor'));
 
 // Role-based route wrapper
 const RoleBasedRoute = ({ AdminComp, ViewerComp, OperatorComp }) => {
@@ -147,41 +149,45 @@ const theme = createTheme({
   },
 });
 
+const pageLoader = (
+  <LinearProgress sx={{ position: 'fixed', top: 0, left: 0, width: '100%', zIndex: 9999 }} />
+);
+
 function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <AuthProvider>
-        <DetectionCountsProvider>
-          <SocketProvider>
-            {/* <BrowserRouter> */}
-            <Routes>
-              <Route path="/login" element={<Login />} />
-              <Route path="/register" element={<Register />} />
-              <Route path="/forgot-password" element={<ForgotPassword />} />
-              <Route
-                path="/"
-                element={
-                  <ProtectedRoute>
-                    <Layout />
-                  </ProtectedRoute>
-                }
-              >
-                <Route index element={<RoleBasedRoute AdminComp={Dashboard} ViewerComp={ClientDetectionDashboard} />} />
-                <Route path="exams" element={<RoleBasedRoute AdminComp={Exams} ViewerComp={ClientExams} />} />
-                <Route path="cameras" element={<RoleBasedRoute AdminComp={Cameras} ViewerComp={ClientCameras} />} />
-                <Route path="shifts" element={<RoleBasedRoute AdminComp={Shifts} />} />
-                <Route path="analytics" element={<RoleBasedRoute AdminComp={Analytics} />} />
-                <Route path="executions" element={<RoleBasedRoute AdminComp={Executions} />} />
-                <Route path="gpu-monitor" element={<RoleBasedRoute AdminComp={GPUMonitor} />} />
-                <Route path="detections" element={<RoleBasedRoute AdminComp={Detections} ViewerComp={ClientDetections} OperatorComp={Detections} />} />
-                <Route path="user-verification" element={<UserVerification />} />
-              </Route>
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-            {/* </BrowserRouter> */}
-          </SocketProvider>
-        </DetectionCountsProvider>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route
+            path="/"
+            element={
+              <ProtectedRoute>
+                <DetectionCountsProvider>
+                  <SocketProvider>
+                    <Suspense fallback={pageLoader}>
+                      <Layout />
+                    </Suspense>
+                  </SocketProvider>
+                </DetectionCountsProvider>
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<Suspense fallback={null}><RoleBasedRoute AdminComp={Dashboard} ViewerComp={ClientDetectionDashboard} /></Suspense>} />
+            <Route path="exams" element={<Suspense fallback={null}><RoleBasedRoute AdminComp={Exams} ViewerComp={ClientExams} /></Suspense>} />
+            <Route path="cameras" element={<Suspense fallback={null}><RoleBasedRoute AdminComp={Cameras} ViewerComp={ClientCameras} /></Suspense>} />
+            <Route path="shifts" element={<Suspense fallback={null}><RoleBasedRoute AdminComp={Shifts} /></Suspense>} />
+            <Route path="analytics" element={<Suspense fallback={null}><RoleBasedRoute AdminComp={Analytics} /></Suspense>} />
+            <Route path="executions" element={<Suspense fallback={null}><RoleBasedRoute AdminComp={Executions} /></Suspense>} />
+            <Route path="gpu-monitor" element={<Suspense fallback={null}><RoleBasedRoute AdminComp={GPUMonitor} /></Suspense>} />
+            <Route path="detections" element={<Suspense fallback={null}><RoleBasedRoute AdminComp={Detections} ViewerComp={ClientDetections} OperatorComp={Detections} /></Suspense>} />
+            <Route path="user-verification" element={<Suspense fallback={null}><UserVerification /></Suspense>} />
+          </Route>
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
       </AuthProvider>
     </ThemeProvider>
   );
