@@ -37,9 +37,9 @@ import CameraAltIcon from '@mui/icons-material/CameraAlt';
 // ---------------------------------------------------------------------------
 
 const CATEGORY_COLORS = {
-    people: '#3b82f6',
-    movement: '#ef4444',
-    camera: '#f59e0b',
+    people: '#6366f1',
+    movement: '#a5b4fc',
+    camera: '#475569',
 };
 
 const SCRIPT_CATEGORY_MAP = {
@@ -126,13 +126,12 @@ const CATEGORY_LABELS = {
 };
 
 const CHIP_TONES = {
-    amber:  { bg: '#fef3c7', text: '#92400e' },
+    amber:  { bg: '#fde6c8', text: '#92400e' },
     violet: { bg: '#ede9fe', text: '#5b21b6' },
-    green:  { bg: '#d1fae5', text: '#065f46' },
 };
 
-const KPI_ICON_BG = 'rgba(60, 129, 246, 0.12)';
-const KPI_ICON_COLOR = '#3c81f6';
+const KPI_ICON_BG = '#3b82f6';
+const KPI_ICON_COLOR = '#ffffff';
 
 // ---------------------------------------------------------------------------
 // KpiCard — the 4 top cards
@@ -600,7 +599,7 @@ const LiveExamsCard = () => {
                     sx={{ borderRadius: 2.5, border: '1px solid #e8ecf1', boxShadow: 'none' }}
                 >
                     <Table>
-                        <TableHead sx={{ bgcolor: '#f8fafc' }}>
+                        <TableHead sx={{ bgcolor: '#f5f3ff' }}>
                             <TableRow>
                                 {['Exam', 'Date', 'Shift & Time', 'Cameras', 'Scripts', 'Detections'].map((h) => (
                                     <TableCell
@@ -794,7 +793,7 @@ const Dashboard = () => {
                             chips={[
                                 { label: 'Running',   value: scripts.running,   tone: 'amber' },
                                 { label: 'Scheduled', value: scripts.scheduled, tone: 'violet' },
-                                { label: 'Completed', value: scripts.completed, tone: 'green' },
+                                { label: 'Completed', value: scripts.completed, tone: 'violet' },
                             ]}
                             loading={overviewLoading}
                         />
