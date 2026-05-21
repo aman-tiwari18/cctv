@@ -47,20 +47,22 @@ const validateDateParam = (raw) => {
 };
 
 /**
- * Determine which fixed shift bracket the given local time falls into.
- * Brackets are half-open: [start, end). Returns null if nowTime is outside
- * the 09:00:00-18:00:00 envelope.
+ * Return the shift-bracket label for a given shift start_time.
+ * V2.1: bracket is a per-row display label, not a filter. Returns null if
+ * the start_time falls outside the 09:00:00-18:00:00 envelope.
  *
  * String comparison on zero-padded "HH:MM:SS" is lexically equivalent to
  * time order, so no Date parsing is needed.
  *
- * @param {string} nowTime  "HH:MM:SS"
- * @returns {{name: string, start: string, end: string} | null}
+ * @param {string} startTime  "HH:MM:SS"
+ * @returns {'Morning' | 'Afternoon' | 'Evening' | null}
  */
-const computeActiveBracket = (nowTime) => {
-    if (nowTime >= '09:00:00' && nowTime < '12:00:00') return { name: 'Morning',   start: '09:00:00', end: '12:00:00' };
-    if (nowTime >= '12:00:00' && nowTime < '15:00:00') return { name: 'Afternoon', start: '12:00:00', end: '15:00:00' };
-    if (nowTime >= '15:00:00' && nowTime < '18:00:00') return { name: 'Evening',   start: '15:00:00', end: '18:00:00' };
+const bracketForStartTime = (startTime) => {
+    if (!startTime) return null;
+    const t = String(startTime).slice(0, 8);
+    if (t >= '09:00:00' && t < '12:00:00') return 'Morning';
+    if (t >= '12:00:00' && t < '15:00:00') return 'Afternoon';
+    if (t >= '15:00:00' && t < '18:00:00') return 'Evening';
     return null;
 };
 
@@ -464,10 +466,11 @@ exports.getOverview = async (req, res) => {
 
 /**
  * GET /api/dashboard/live-exams?page=1&limit=10&exam_id=<optional>
- * Feeds the Live Exam Table. V2 (2026-05-21): returns only (exam, shift) rows
- * whose shift.start_time falls in the currently-active shift bracket
- * (Morning 09:00-12:00, Afternoon 12:00-15:00, Evening 15:00-18:00).
- * Outside 09:00-18:00, returns empty payload immediately (no SQL).
+ * Feeds the Live Exam Table. V2.1 (2026-05-21): returns ALL (exam, shift) pairs
+ * where exam is live by date today (exam.is_active=1 AND today in date range,
+ * exam_shift.is_active=1). NO time-of-day filter — matches the Layout
+ * "Live Exams" badge's definition exactly. `shift_bracket` is a per-row
+ * display label computed from start_time (Morning/Afternoon/Evening or null).
  */
 exports.getLiveExams = async (req, res) => {
     try {
@@ -477,28 +480,17 @@ exports.getLiveExams = async (req, res) => {
         const examIdFilter = req.query.exam_id ? parseInt(req.query.exam_id, 10) : null;
 
         const todayDate = getLocalDateStr();
-        const nowTime = getLocalTimeStr();
         const { start: todayStart, end: tomorrowStart } = getDateRangeBounds(todayDate);
 
-        // V2: Short-circuit when no shift bracket is currently active.
-        const bracket = computeActiveBracket(nowTime);
-        if (!bracket) {
-            return res.json({
-                success: true,
-                data: { page, limit, total: 0, total_pages: 0, rows: [] },
-            });
-        }
-
-        // V2 shared WHERE: exam live-by-date AND shift.start_time inside active bracket.
+        // V2.1: live-by-date only. Bracket is per-row label, not a filter.
         const liveWhere = `
             WHERE e.is_active = 1 AND es.is_active = 1
               AND e.start_date IS NOT NULL AND e.end_date IS NOT NULL
               AND ? BETWEEN e.start_date AND e.end_date
-              AND es.start_time >= ? AND es.start_time < ?
               ${examIdFilter ? 'AND e.id = ?' : ''}
         `;
 
-        const baseParams = [todayDate, bracket.start, bracket.end];
+        const baseParams = [todayDate];
         if (examIdFilter) baseParams.push(examIdFilter);
 
         // Count query (parallel with row driver)
@@ -644,7 +636,7 @@ exports.getLiveExams = async (req, res) => {
                 exam_name: r.exam_name,
                 shift_name: r.shift_name,
                 link_type: r.link_type,
-                shift_bracket: bracket.name,
+                shift_bracket: bracketForStartTime(r.start_time),
                 shift_start: r.start_time,
                 shift_end: r.end_time,
                 cameras,

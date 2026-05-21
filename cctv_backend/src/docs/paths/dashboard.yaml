@@ -144,21 +144,23 @@
     tags: [Dashboard]
     summary: New dashboard — Live Exam Table (paginated)
     description: |
-      Returns one row per `(exam, shift)` pair where:
-      - exam is live by date today (today between start_date and end_date, is_active=1), AND
-      - shift's `start_time` falls in the **currently-active shift bracket**.
+      Returns one row per `(exam, shift)` pair where the exam is live by date today:
+      - `exam.is_active = 1`
+      - today (local IST) BETWEEN `exam.start_date` AND `exam.end_date`
+      - `exam_shift.is_active = 1`
 
-      **Shift brackets (V2, 2026-05-21):**
-      - Morning   `[09:00:00, 12:00:00)`
-      - Afternoon `[12:00:00, 15:00:00)`
-      - Evening   `[15:00:00, 18:00:00)`
+      **V2.1 (2026-05-21):** NO time-of-day filter. All shifts of a live-by-date exam
+      appear regardless of current clock time. Matches the Layout "Live Exams" badge
+      definition exactly so badge count == response `data.total`.
 
-      The active bracket is determined by the current local server time (IST). If the
-      current time is outside `[09:00, 18:00)`, the endpoint short-circuits and returns
-      `total: 0, rows: []` immediately (no SQL).
+      **`shift_bracket` field (display label):** computed per-row from `start_time`:
+      - `'Morning'`   if `start_time` in `[09:00:00, 12:00:00)`
+      - `'Afternoon'` if `[12:00:00, 15:00:00)`
+      - `'Evening'`   if `[15:00:00, 18:00:00)`
+      - `null` if `start_time` is outside `[09:00, 18:00)` (or NULL)
 
-      Each row's `shift_bracket` field always equals the name of the currently-active bracket.
-      Shifts whose `start_time` falls outside any bracket never appear.
+      It is a display label only — the frontend uses it to render "Morning 09:00-12:00",
+      etc. It is NOT used for filtering.
 
       **Per-row counts:**
       - `cameras` — total cameras for that exam (HLS scoped to shift; RTSP per exam).
@@ -167,9 +169,8 @@
       - `detections` — `COUNT(*)` of today's detections for `(exam_id, shift_id)`.
 
       **Invariants:**
-      - Every row's `shift_start >= bracket.start AND < bracket.end`.
-      - Every row's `shift_bracket` equals the name of the currently-active bracket.
       - `total_pages === Math.ceil(total / limit)` when limit > 0, else 0.
+      - `data.total` equals the count of `(exam, shift)` rows where the WHERE matches.
     security:
       - bearerAuth: []
     parameters:
@@ -224,7 +225,7 @@
                           exam_name:     { type: string,  example: 'test' }
                           shift_name:    { type: string,  example: 'Shift 1' }
                           link_type:     { type: string,  enum: [HLS, RTSP], example: RTSP }
-                          shift_bracket: { type: string,  enum: [Morning, Afternoon, Evening], example: Morning }
+                          shift_bracket: { type: string,  enum: [Morning, Afternoon, Evening], nullable: true, example: Morning, description: 'Display label only (computed from start_time). null if start_time is outside 09:00-18:00.' }
                           shift_start:   { type: string,  example: '09:00:00', description: 'TIME from exam_shifts.start_time' }
                           shift_end:     { type: string,  example: '12:00:00', description: 'TIME from exam_shifts.end_time' }
                           cameras:       { type: integer, example: 810 }

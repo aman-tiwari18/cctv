@@ -301,14 +301,14 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                     </Box>
                 ) : (
                     <Grid container spacing={2} alignItems="center">
-                        <Grid item xs={12} sm={6}>
-                            <Stack spacing={1.2}>
+                        <Grid item xs={12} sm={5}>
+                            <Stack spacing={1.4}>
                                 {segmentsWithPercent.map((s) => (
                                     <Stack
                                         key={s.key}
                                         direction="row"
                                         alignItems="center"
-                                        spacing={1.2}
+                                        spacing={1.25}
                                     >
                                         <Box
                                             sx={{
@@ -319,13 +319,13 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                                 flexShrink: 0,
                                             }}
                                         />
-                                        <Typography sx={{ flex: 1, fontSize: '0.9rem', color: '#334155' }}>
+                                        <Typography sx={{ minWidth: 88, fontSize: '0.9rem', color: '#334155' }}>
                                             {s.label}
                                         </Typography>
-                                        <Typography sx={{ fontWeight: 600, color: '#0f172a', fontSize: '0.9rem' }}>
+                                        <Typography sx={{ fontWeight: 700, color: '#0f172a', fontSize: '0.95rem', ml: 'auto' }}>
                                             {s.count.toLocaleString()}
                                         </Typography>
-                                        <Typography sx={{ color: '#94a3b8', fontSize: '0.82rem', minWidth: 56, textAlign: 'right' }}>
+                                        <Typography sx={{ color: '#94a3b8', fontSize: '0.82rem', minWidth: 62, textAlign: 'right' }}>
                                             ({s.percent.toFixed(2)}%)
                                         </Typography>
                                     </Stack>
@@ -333,16 +333,18 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                             </Stack>
                         </Grid>
 
-                        <Grid item xs={12} sm={6}>
-                            <Box sx={{ position: 'relative', height: 220 }}>
+                        <Grid item xs={12} sm={7}>
+                            <Box sx={{ position: 'relative', height: 240 }}>
                                 <ResponsiveContainer width="100%" height="100%">
                                     <PieChart>
                                         <Pie
                                             data={segmentsWithPercent}
                                             cx="50%"
-                                            cy="50%"
-                                            innerRadius={62}
-                                            outerRadius={92}
+                                            cy="85%"
+                                            startAngle={180}
+                                            endAngle={0}
+                                            innerRadius={78}
+                                            outerRadius={112}
                                             paddingAngle={2}
                                             dataKey="count"
                                             nameKey="label"
@@ -363,15 +365,16 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                 <Box
                                     sx={{
                                         position: 'absolute',
-                                        inset: 0,
+                                        bottom: 6,
+                                        left: 0,
+                                        right: 0,
                                         display: 'flex',
                                         flexDirection: 'column',
                                         alignItems: 'center',
-                                        justifyContent: 'center',
                                         pointerEvents: 'none',
                                     }}
                                 >
-                                    <Typography sx={{ fontSize: '1.75rem', fontWeight: 700, color: '#1e3a8a' }}>
+                                    <Typography sx={{ fontSize: '1.9rem', fontWeight: 700, color: '#1e3a8a', lineHeight: 1.1 }}>
                                         {total.toLocaleString()}
                                     </Typography>
                                     <Typography
@@ -624,7 +627,7 @@ const LiveExamsCard = () => {
                             ) : rows.length === 0 ? (
                                 <TableRow>
                                     <TableCell colSpan={6} align="center" sx={{ py: 4, color: '#94a3b8' }}>
-                                        No live exams in the current shift bracket.
+                                        No live exams today.
                                     </TableCell>
                                 </TableRow>
                             ) : (
@@ -637,9 +640,11 @@ const LiveExamsCard = () => {
                                             {formatShortDate(row.date)}
                                         </TableCell>
                                         <TableCell>
-                                            <Typography sx={{ fontWeight: 600, color: '#0f172a', fontSize: '0.9rem' }}>
-                                                {row.shift_bracket}
-                                            </Typography>
+                                            {row.shift_bracket && (
+                                                <Typography sx={{ fontWeight: 600, color: '#0f172a', fontSize: '0.9rem' }}>
+                                                    {row.shift_bracket}
+                                                </Typography>
+                                            )}
                                             <Typography variant="caption" sx={{ color: '#94a3b8' }}>
                                                 {formatHMM(row.shift_start)} - {formatHMM(row.shift_end)}
                                             </Typography>
