@@ -47,6 +47,24 @@ const validateDateParam = (raw) => {
 };
 
 /**
+ * Determine which fixed shift bracket the given local time falls into.
+ * Brackets are half-open: [start, end). Returns null if nowTime is outside
+ * the 09:00:00-18:00:00 envelope.
+ *
+ * String comparison on zero-padded "HH:MM:SS" is lexically equivalent to
+ * time order, so no Date parsing is needed.
+ *
+ * @param {string} nowTime  "HH:MM:SS"
+ * @returns {{name: string, start: string, end: string} | null}
+ */
+const computeActiveBracket = (nowTime) => {
+    if (nowTime >= '09:00:00' && nowTime < '12:00:00') return { name: 'Morning',   start: '09:00:00', end: '12:00:00' };
+    if (nowTime >= '12:00:00' && nowTime < '15:00:00') return { name: 'Afternoon', start: '12:00:00', end: '15:00:00' };
+    if (nowTime >= '15:00:00' && nowTime < '18:00:00') return { name: 'Evening',   start: '15:00:00', end: '18:00:00' };
+    return null;
+};
+
+/**
  * GET /api/dashboard/admin-stats
  * Returns detection statistics for admin dashboard (all exams)
  */
@@ -257,20 +275,11 @@ exports.getAdminDashboardStats = async (req, res) => {
 exports.getOverview = async (req, res) => {
     try {
         const date = validateDateParam(req.query.date) || getLocalDateStr();
+        const nowTime = getLocalTimeStr();
         const { start: dateStart, end: dateEnd } = getDateRangeBounds(date);
 
-        // Q1: Exams summary (total + ongoing for selected date)
-        const examsSummaryP = query(
-            `SELECT COUNT(*) AS total,
-                    SUM(CASE WHEN is_active = 1
-                              AND start_date IS NOT NULL AND end_date IS NOT NULL
-                              AND ? BETWEEN start_date AND end_date
-                         THEN 1 ELSE 0 END) AS ongoing
-             FROM exams`,
-            [date]
-        );
-
-        // Q2: Active exam IDs (for camera + detection scoping)
+        // Q1: On-today exam IDs (source of `total` AND scope for cameras/detections).
+        // total_exams.total = activeExams.length per V2 spec (on-today count, not all-time).
         const activeExamsP = query(
             `SELECT id FROM exams
              WHERE is_active = 1
@@ -279,19 +288,35 @@ exports.getOverview = async (req, res) => {
             [date]
         );
 
-        // Q5: Scripts breakdown (assignment_date = selected date)
+        // Q1b: Ongoing count — exams with at least one shift currently in time window.
+        // BETWEEN start_time AND end_time is inclusive; assumes same-day shifts
+        // (no overnight wraparound, per current production shift policy).
+        const ongoingP = query(
+            `SELECT COUNT(DISTINCT es.exam_id) AS ongoing
+             FROM exam_shifts es
+             JOIN exams e ON e.id = es.exam_id
+             WHERE e.is_active = 1
+               AND e.start_date IS NOT NULL AND e.end_date IS NOT NULL
+               AND ? BETWEEN e.start_date AND e.end_date
+               AND es.is_active = 1
+               AND ? BETWEEN es.start_time AND es.end_time`,
+            [date, nowTime]
+        );
+
+        // Q5: Scripts breakdown (assignment_date = selected date).
+        // V2 response renames: run→running, pend→scheduled, done→completed.
         const scriptsP = query(
             `SELECT COUNT(*) AS planned_today,
-                    SUM(CASE WHEN status = 'RUNNING'   THEN 1 ELSE 0 END) AS run_count,
-                    SUM(CASE WHEN status = 'PENDING'   THEN 1 ELSE 0 END) AS pend_count,
-                    SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END) AS done_count
+                    SUM(CASE WHEN status = 'RUNNING'   THEN 1 ELSE 0 END) AS running,
+                    SUM(CASE WHEN status = 'PENDING'   THEN 1 ELSE 0 END) AS scheduled,
+                    SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END) AS completed
              FROM shift_script_assignments
              WHERE assignment_date = ? AND is_active = TRUE`,
             [date]
         );
 
-        const [examsSummary, activeExams, scripts] = await Promise.all([
-            examsSummaryP, activeExamsP, scriptsP,
+        const [activeExams, ongoingResult, scripts] = await Promise.all([
+            activeExamsP, ongoingP, scriptsP,
         ]);
 
         const activeExamIds = activeExams.map((e) => e.id);
@@ -394,29 +419,28 @@ exports.getOverview = async (req, res) => {
             }));
         }
 
-        const ongoing = Number(examsSummary[0]?.ongoing || 0);
-        const total = Number(examsSummary[0]?.total || 0);
+        // V2: total = on-today count (= activeExams.length). ongoing = currently live by time.
+        const total = activeExams.length;
+        const ongoing = Number(ongoingResult[0]?.ongoing || 0);
 
         res.json({
             success: true,
             data: {
                 date,
                 total_exams: {
-                    active: ongoing,
-                    ongoing,
                     total,
+                    ongoing,
                 },
                 cameras: {
                     total: camerasAgg.total,
-                    acc: camerasAgg.acc,
-                    non_acc: camerasAgg.total - camerasAgg.acc,
-                    failed_to_classify: camerasAgg.failed_to_classify,
+                    accessible: camerasAgg.acc,
+                    unclassified: camerasAgg.failed_to_classify,
                 },
                 scripts: {
                     planned_today: Number(scripts[0]?.planned_today || 0),
-                    run: Number(scripts[0]?.run_count || 0),
-                    pend: Number(scripts[0]?.pend_count || 0),
-                    done: Number(scripts[0]?.done_count || 0),
+                    running:       Number(scripts[0]?.running       || 0),
+                    scheduled:     Number(scripts[0]?.scheduled     || 0),
+                    completed:     Number(scripts[0]?.completed     || 0),
                 },
                 detections: {
                     today: detectionsAgg.pushed + detectionsAgg.removed,
@@ -440,8 +464,10 @@ exports.getOverview = async (req, res) => {
 
 /**
  * GET /api/dashboard/live-exams?page=1&limit=10&exam_id=<optional>
- * Feeds the Live Exam Table. Returns one row per (live exam, currently-running shift).
- * "Live" = exam.is_active AND today inside [start_date, end_date] AND now inside shift time window.
+ * Feeds the Live Exam Table. V2 (2026-05-21): returns only (exam, shift) rows
+ * whose shift.start_time falls in the currently-active shift bracket
+ * (Morning 09:00-12:00, Afternoon 12:00-15:00, Evening 15:00-18:00).
+ * Outside 09:00-18:00, returns empty payload immediately (no SQL).
  */
 exports.getLiveExams = async (req, res) => {
     try {
@@ -451,22 +477,28 @@ exports.getLiveExams = async (req, res) => {
         const examIdFilter = req.query.exam_id ? parseInt(req.query.exam_id, 10) : null;
 
         const todayDate = getLocalDateStr();
+        const nowTime = getLocalTimeStr();
         const { start: todayStart, end: tomorrowStart } = getDateRangeBounds(todayDate);
 
-        // Shared WHERE for row driver and count.
-        // "Live exam" = exam whose date range includes today (per mentor):
-        //   exam.is_active = 1 AND today BETWEEN start_date AND end_date
-        // No time-of-day filter — all shifts of a live-by-date exam appear, regardless
-        // of whether the shift's start/end window is currently active. Frontend can
-        // do its own time-window visualization if needed.
+        // V2: Short-circuit when no shift bracket is currently active.
+        const bracket = computeActiveBracket(nowTime);
+        if (!bracket) {
+            return res.json({
+                success: true,
+                data: { page, limit, total: 0, total_pages: 0, rows: [] },
+            });
+        }
+
+        // V2 shared WHERE: exam live-by-date AND shift.start_time inside active bracket.
         const liveWhere = `
             WHERE e.is_active = 1 AND es.is_active = 1
               AND e.start_date IS NOT NULL AND e.end_date IS NOT NULL
               AND ? BETWEEN e.start_date AND e.end_date
+              AND es.start_time >= ? AND es.start_time < ?
               ${examIdFilter ? 'AND e.id = ?' : ''}
         `;
 
-        const baseParams = [todayDate];
+        const baseParams = [todayDate, bracket.start, bracket.end];
         if (examIdFilter) baseParams.push(examIdFilter);
 
         // Count query (parallel with row driver)
@@ -507,6 +539,7 @@ exports.getLiveExams = async (req, res) => {
         }
 
         const examIds = [...new Set(pageRows.map((r) => r.exam_id))];
+        const shiftIds = [...new Set(pageRows.map((r) => r.shift_id))];
 
         // Camera aggregates: HLS keyed by (exam_id, shift_id), with NULL shift_id mapped to -1 for "all shifts"
         const hlsCamsP = query(
@@ -546,8 +579,17 @@ exports.getLiveExams = async (req, res) => {
             [examIds, todayStart, tomorrowStart]
         );
 
-        const [hlsCams, rtspCams, hlsDet, rtspDet] = await Promise.all([
-            hlsCamsP, rtspCamsP, hlsDetP, rtspDetP,
+        // V2: Scripts count per shift today
+        const scriptsP = query(
+            `SELECT shift_id, COUNT(*) AS scripts
+             FROM shift_script_assignments
+             WHERE shift_id IN (?) AND assignment_date = ? AND is_active = TRUE
+             GROUP BY shift_id`,
+            [shiftIds, todayDate]
+        );
+
+        const [hlsCams, rtspCams, hlsDet, rtspDet, scriptsAgg] = await Promise.all([
+            hlsCamsP, rtspCamsP, hlsDetP, rtspDetP, scriptsP,
         ]);
 
         // Build lookup maps
@@ -573,35 +615,40 @@ exports.getLiveExams = async (req, res) => {
         rtspDet.forEach((r) => {
             rtspDetMap.set(`${r.exam_id}::${r.shift_id}`, Number(r.detections || 0));
         });
+        // V2: scripts count per shift_id (Number-keyed to avoid string/number coercion bugs)
+        const scriptsMap = new Map();
+        scriptsAgg.forEach((r) => {
+            scriptsMap.set(Number(r.shift_id), Number(r.scripts || 0));
+        });
 
         // Stitch per page row
         const rows = pageRows.map((r) => {
             let cameras = 0;
-            let running = 0;
             let detections = 0;
 
             if (String(r.link_type || '').toUpperCase() === 'HLS') {
                 const shiftSpecific = hlsCamMap.get(`${r.exam_id}::${r.shift_id}`) || { cameras: 0, running: 0 };
                 const allShifts = hlsCamMap.get(`${r.exam_id}::-1`) || { cameras: 0, running: 0 };
                 cameras = shiftSpecific.cameras + allShifts.cameras;
-                running = shiftSpecific.running + allShifts.running;
                 detections = hlsDetMap.get(`${r.exam_id}::${r.shift_id}`) || 0;
             } else {
                 const c = rtspCamMap.get(r.exam_id) || { cameras: 0, running: 0 };
                 cameras = c.cameras;
-                running = c.running;
                 detections = rtspDetMap.get(`${r.exam_id}::${r.shift_id}`) || 0;
             }
 
             return {
                 exam_id: r.exam_id,
                 shift_id: r.shift_id,
+                date: todayDate,
                 exam_name: r.exam_name,
                 shift_name: r.shift_name,
                 link_type: r.link_type,
+                shift_bracket: bracket.name,
+                shift_start: r.start_time,
+                shift_end: r.end_time,
                 cameras,
-                running,
-                offline: cameras - running,
+                scripts: scriptsMap.get(Number(r.shift_id)) || 0,
                 detections,
             };
         });

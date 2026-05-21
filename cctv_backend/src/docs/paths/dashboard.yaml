@@ -61,16 +61,21 @@
       Breakdown, Total Detections) and the Detection Distribution chart on the
       new "CCTV Control Center" dashboard.
 
-      **Date semantics:**
+      **V2 semantics (2026-05-21):**
       - `date` (optional) defaults to **today in local server time (IST)**.
-      - Cameras card is scoped to exams that are live on `date`
-        (`is_active=1 AND date BETWEEN start_date AND end_date`).
-      - Scripts card filters `shift_script_assignments.assignment_date = date`.
+      - `total_exams.total` = count of exams where today is in [start_date, end_date] AND is_active=1.
+        Big number on UI equals this sub-field — NO all-time total anymore.
+      - `total_exams.ongoing` = subset of those exams whose at least one active shift has
+        current local time inside `[start_time, end_time]`.
+      - Cameras card scoped to exams live on `date`.
+      - Scripts card filters `shift_script_assignments.assignment_date = date` (all statuses counted in `planned_today`).
       - Detections card + distribution filter `created_at` to `[date, date+1)`.
 
       **Invariants:**
-      - `cameras.acc + cameras.non_acc === cameras.total`
-      - `detections.today === detections.pushed_to_client + detections.false_detection`
+      - `cameras.accessible <= cameras.total` and `cameras.unclassified <= cameras.total`
+        (independent slices — sum may exceed total).
+      - `scripts.running + scheduled + completed <= scripts.planned_today` (FAILED/CANCELLED also exist).
+      - `detections.today === detections.pushed_to_client + detections.false_detection`.
     security:
       - bearerAuth: []
     parameters:
@@ -98,23 +103,21 @@
                     total_exams:
                       type: object
                       properties:
-                        active:  { type: integer, example: 1 }
-                        ongoing: { type: integer, example: 1 }
-                        total:   { type: integer, example: 1 }
+                        total:   { type: integer, example: 1, description: 'On-today count (same value as big number on UI).' }
+                        ongoing: { type: integer, example: 1, description: 'Currently live by time (current time in any shift window).' }
                     cameras:
                       type: object
                       properties:
-                        total:              { type: integer, example: 810 }
-                        acc:                { type: integer, example: 200 }
-                        non_acc:            { type: integer, example: 610 }
-                        failed_to_classify: { type: integer, example: 0 }
+                        total:        { type: integer, example: 810 }
+                        accessible:   { type: integer, example: 200, description: "LOWER(status) = 'accessible'" }
+                        unclassified: { type: integer, example: 0,   description: "classification IS NULL OR classification = ''" }
                     scripts:
                       type: object
                       properties:
                         planned_today: { type: integer, example: 32 }
-                        run:           { type: integer, example: 18 }
-                        pend:          { type: integer, example: 10 }
-                        done:          { type: integer, example: 4 }
+                        running:       { type: integer, example: 18, description: "status = 'RUNNING'" }
+                        scheduled:     { type: integer, example: 10, description: "status = 'PENDING' (UI label 'Scheduled')" }
+                        completed:     { type: integer, example: 4,  description: "status = 'COMPLETED'" }
                     detections:
                       type: object
                       properties:
@@ -141,26 +144,32 @@
     tags: [Dashboard]
     summary: New dashboard — Live Exam Table (paginated)
     description: |
-      Returns one row per `(exam, shift)` pair where the exam is live by date today, paginated.
+      Returns one row per `(exam, shift)` pair where:
+      - exam is live by date today (today between start_date and end_date, is_active=1), AND
+      - shift's `start_time` falls in the **currently-active shift bracket**.
 
-      **"Live" definition (per mentor — DATE RANGE ONLY, no time-of-day filter):**
-      - `exam.is_active = 1` AND `exam_shift.is_active = 1`
-      - today (local IST) BETWEEN `exam.start_date` AND `exam.end_date`
+      **Shift brackets (V2, 2026-05-21):**
+      - Morning   `[09:00:00, 12:00:00)`
+      - Afternoon `[12:00:00, 15:00:00)`
+      - Evening   `[15:00:00, 18:00:00)`
 
-      All shifts of a live-by-date exam appear in the result, regardless of whether
-      the shift's `start_time..end_time` window is currently active. The frontend
-      can apply its own time-window highlighting if needed.
+      The active bracket is determined by the current local server time (IST). If the
+      current time is outside `[09:00, 18:00)`, the endpoint short-circuits and returns
+      `total: 0, rows: []` immediately (no SQL).
+
+      Each row's `shift_bracket` field always equals the name of the currently-active bracket.
+      Shifts whose `start_time` falls outside any bracket never appear.
 
       **Per-row counts:**
       - `cameras` — total cameras for that exam (HLS scoped to shift; RTSP per exam).
         HLS rows with `shift_id IS NULL` apply to all shifts.
-      - `running` — cameras with `LOWER(status)='accessible'` only.
-      - `offline = cameras − running`.
+      - `scripts` — `COUNT(*)` of `shift_script_assignments` for this `shift_id` today (is_active=TRUE).
       - `detections` — `COUNT(*)` of today's detections for `(exam_id, shift_id)`.
 
       **Invariants:**
-      - `running + offline === cameras` per row.
-      - `total_pages === Math.ceil(total / limit)`.
+      - Every row's `shift_start >= bracket.start AND < bracket.end`.
+      - Every row's `shift_bracket` equals the name of the currently-active bracket.
+      - `total_pages === Math.ceil(total / limit)` when limit > 0, else 0.
     security:
       - bearerAuth: []
     parameters:
@@ -209,15 +218,18 @@
                       items:
                         type: object
                         properties:
-                          exam_id:    { type: integer, example: 22 }
-                          shift_id:   { type: integer, example: 103 }
-                          exam_name:  { type: string,  example: 'Sample Exam' }
-                          shift_name: { type: string,  example: 'Shift 1' }
-                          link_type:  { type: string,  enum: [HLS, RTSP], example: RTSP }
-                          cameras:    { type: integer, example: 810 }
-                          running:    { type: integer, example: 200 }
-                          offline:    { type: integer, example: 610 }
-                          detections: { type: integer, example: 42 }
+                          exam_id:       { type: integer, example: 22 }
+                          shift_id:      { type: integer, example: 105 }
+                          date:          { type: string,  format: date, example: '2026-05-21' }
+                          exam_name:     { type: string,  example: 'test' }
+                          shift_name:    { type: string,  example: 'Shift 1' }
+                          link_type:     { type: string,  enum: [HLS, RTSP], example: RTSP }
+                          shift_bracket: { type: string,  enum: [Morning, Afternoon, Evening], example: Morning }
+                          shift_start:   { type: string,  example: '09:00:00', description: 'TIME from exam_shifts.start_time' }
+                          shift_end:     { type: string,  example: '12:00:00', description: 'TIME from exam_shifts.end_time' }
+                          cameras:       { type: integer, example: 810 }
+                          scripts:       { type: integer, example: 26, description: 'Count of script assignments for this shift today.' }
+                          detections:    { type: integer, example: 5391, description: 'COUNT of today detections for (exam, shift). Admin: all detections. Client: pushed_to_client=1 only.' }
       '401':
         $ref: '#/components/responses/Unauthorized'
       '500':

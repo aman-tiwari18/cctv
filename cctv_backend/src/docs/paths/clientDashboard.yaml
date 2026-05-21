@@ -108,9 +108,13 @@
       - **VIEWER with any other `company_name`** — sees exams where `exam_body = company_name`
         (e.g. a TCS viewer sees only TCS exams).
 
-      **Same date semantics as the admin endpoint:**
+      **V2 semantics (2026-05-21):**
       - `date` defaults to today in local server time (IST).
-      - Cameras card scoped to exams that are live on `date` (`is_active=1 AND date BETWEEN start_date AND end_date`).
+      - `total_exams.total` = count of company exams where today is in [start_date, end_date].
+        Big number on UI equals this sub-field — NO all-time total.
+      - `total_exams.ongoing` = subset whose at least one active shift has current local time
+        inside `[start_time, end_time]`.
+      - Cameras card scoped to company exams live on `date`.
       - Scripts card filters `shift_script_assignments.assignment_date = date` AND joins
         through `exam_shifts` to apply the company filter.
       - Detections card + distribution filter `created_at` to `[date, date+1)`.
@@ -125,8 +129,10 @@
       `removed_count` = retracted, `count` = both combined.
 
       **Invariants (must hold):**
-      - `cameras.acc + cameras.non_acc === cameras.total`
-      - `detections.today === detections.pushed_to_client + detections.false_detection`
+      - `cameras.accessible <= cameras.total` and `cameras.unclassified <= cameras.total`
+        (independent slices — sum may exceed total).
+      - `scripts.running + scheduled + completed <= scripts.planned_today`.
+      - `detections.today === detections.pushed_to_client + detections.false_detection`.
     security:
       - bearerAuth: []
     parameters:
@@ -154,23 +160,21 @@
                     total_exams:
                       type: object
                       properties:
-                        active:  { type: integer, example: 1 }
-                        ongoing: { type: integer, example: 1 }
-                        total:   { type: integer, example: 1 }
+                        total:   { type: integer, example: 1, description: 'On-today count, company-scoped (same as big number on UI).' }
+                        ongoing: { type: integer, example: 1, description: 'Currently live by time within the company.' }
                     cameras:
                       type: object
                       properties:
-                        total:              { type: integer, example: 810 }
-                        acc:                { type: integer, example: 200 }
-                        non_acc:            { type: integer, example: 610 }
-                        failed_to_classify: { type: integer, example: 0 }
+                        total:        { type: integer, example: 810 }
+                        accessible:   { type: integer, example: 200, description: "LOWER(status) = 'accessible'" }
+                        unclassified: { type: integer, example: 0,   description: "classification IS NULL OR classification = ''" }
                     scripts:
                       type: object
                       properties:
                         planned_today: { type: integer, example: 2 }
-                        run:           { type: integer, example: 2 }
-                        pend:          { type: integer, example: 0 }
-                        done:          { type: integer, example: 0 }
+                        running:       { type: integer, example: 2, description: "status = 'RUNNING'" }
+                        scheduled:     { type: integer, example: 0, description: "status = 'PENDING' (UI label 'Scheduled')" }
+                        completed:     { type: integer, example: 0, description: "status = 'COMPLETED'" }
                     detections:
                       type: object
                       properties:
@@ -198,31 +202,38 @@
     summary: New client dashboard — Live Exam Table (paginated, company-scoped)
     description: |
       Client (company-scoped) version of `GET /api/dashboard/live-exams`. Returns one
-      row per `(exam, shift)` pair where the exam is live by date today AND belongs
-      to the user's company.
+      row per `(exam, shift)` pair where:
+      - exam is live by date today AND belongs to the user's company, AND
+      - shift's `start_time` falls in the **currently-active shift bracket**.
 
-      **"Live" definition (per mentor — DATE RANGE ONLY, no time-of-day filter):**
-      - `exam.is_active = 1` AND `exam_shift.is_active = 1`
-      - today (local IST) BETWEEN `exam.start_date` AND `exam.end_date`
-      - **PLUS company filter on `exams.exam_body`** (see `/overview` description).
+      **Shift brackets (V2, 2026-05-21):**
+      - Morning   `[09:00:00, 12:00:00)`
+      - Afternoon `[12:00:00, 15:00:00)`
+      - Evening   `[15:00:00, 18:00:00)`
 
-      All shifts of a live-by-date exam appear in the result, regardless of whether
-      the shift's `start_time..end_time` window is currently active.
+      The active bracket is determined by the current local server time (IST). If outside
+      `[09:00, 18:00)`, the endpoint short-circuits and returns `total: 0, rows: []`
+      immediately (no SQL). Shifts whose `start_time` falls outside any bracket never appear.
+
+      **Company filter:**
+      - **ADMIN** — sees all live (exam, shift) rows.
+      - **VIEWER with `company_name = 'EY'`** — sees only `exam_body IN ('SSC', 'TCS')`.
+      - **VIEWER with other `company_name`** — sees only `exam_body = <their company>`.
+
+      If a client passes `?exam_id=` of an exam not in their company, the response
+      is `total: 0, rows: []` — the company filter naturally rejects it.
 
       **Per-row counts (identical shape to admin, but `detections` is client-visible only):**
       - `cameras` — total cameras for that exam (HLS scoped to shift; RTSP per exam).
         HLS rows with `shift_id IS NULL` apply to all shifts.
-      - `running` — cameras with `LOWER(status)='accessible'` only.
-      - `offline = cameras − running`.
-      - `detections` — `COUNT(*)` of today's detections for `(exam_id, shift_id)`
-        **filtered to `pushed_to_client = 1`** (the client only sees pushed detections).
+      - `scripts` — `COUNT(*)` of `shift_script_assignments` for this `shift_id` today.
+      - `detections` — today's detections for `(exam_id, shift_id)` **filtered to
+        `pushed_to_client = 1`** (the client only sees pushed detections).
 
       **Invariants:**
-      - `running + offline === cameras` per row.
-      - `total_pages === Math.ceil(total / limit)`.
-
-      If a client passes `?exam_id=` of an exam not in their company, the response
-      is `total: 0, rows: []` — the company filter naturally rejects it.
+      - Every row's `shift_start >= bracket.start AND < bracket.end`.
+      - Every row's `shift_bracket` equals the name of the currently-active bracket.
+      - `total_pages === Math.ceil(total / limit)` when limit > 0, else 0.
     security:
       - bearerAuth: []
     parameters:
@@ -271,15 +282,18 @@
                       items:
                         type: object
                         properties:
-                          exam_id:    { type: integer, example: 22 }
-                          shift_id:   { type: integer, example: 103 }
-                          exam_name:  { type: string,  example: 'Sample Exam' }
-                          shift_name: { type: string,  example: 'Shift 1' }
-                          link_type:  { type: string,  enum: [HLS, RTSP], example: RTSP }
-                          cameras:    { type: integer, example: 810 }
-                          running:    { type: integer, example: 200 }
-                          offline:    { type: integer, example: 610 }
-                          detections: { type: integer, example: 42 }
+                          exam_id:       { type: integer, example: 22 }
+                          shift_id:      { type: integer, example: 105 }
+                          date:          { type: string,  format: date, example: '2026-05-21' }
+                          exam_name:     { type: string,  example: 'test' }
+                          shift_name:    { type: string,  example: 'Shift 1' }
+                          link_type:     { type: string,  enum: [HLS, RTSP], example: RTSP }
+                          shift_bracket: { type: string,  enum: [Morning, Afternoon, Evening], example: Morning }
+                          shift_start:   { type: string,  example: '09:00:00' }
+                          shift_end:     { type: string,  example: '12:00:00' }
+                          cameras:       { type: integer, example: 810 }
+                          scripts:       { type: integer, example: 26 }
+                          detections:    { type: integer, example: 200, description: 'Client-visible only (pushed_to_client=1).' }
       '401':
         $ref: '#/components/responses/Unauthorized'
       '500':
