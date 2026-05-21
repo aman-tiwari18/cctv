@@ -37,9 +37,9 @@ import CameraAltIcon from '@mui/icons-material/CameraAlt';
 // ---------------------------------------------------------------------------
 
 const CATEGORY_COLORS = {
-    people: '#6366f1',
-    movement: '#a5b4fc',
-    camera: '#475569',
+    people: '#6775b7',
+    movement: '#94b6ef',
+    camera: '#21252c',
 };
 
 const SCRIPT_CATEGORY_MAP = {
@@ -126,11 +126,11 @@ const CATEGORY_LABELS = {
 };
 
 const CHIP_TONES = {
-    amber:  { bg: '#fde6c8', text: '#92400e' },
-    violet: { bg: '#ede9fe', text: '#5b21b6' },
+    amber:  { bg: '#f7b784', text: '#92400e' },
+    violet: { bg: '#efeffb', text: '#5b21b6' },
 };
 
-const KPI_ICON_BG = '#3b82f6';
+const KPI_ICON_BG = '#3368c1';
 const KPI_ICON_COLOR = '#ffffff';
 
 // ---------------------------------------------------------------------------
@@ -175,7 +175,7 @@ const KpiCard = ({ title, value, icon, chips = [], loading }) => (
                         sx={{
                             fontSize: '2.5rem',
                             fontWeight: 700,
-                            color: '#1e3a8a',
+                            color: '#1b479a',
                             lineHeight: 1.1,
                         }}
                     >
@@ -373,7 +373,7 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                         pointerEvents: 'none',
                                     }}
                                 >
-                                    <Typography sx={{ fontSize: '1.9rem', fontWeight: 700, color: '#1e3a8a', lineHeight: 1.1 }}>
+                                    <Typography sx={{ fontSize: '1.9rem', fontWeight: 700, color: '#1b479a', lineHeight: 1.1 }}>
                                         {total.toLocaleString()}
                                     </Typography>
                                     <Typography
@@ -399,7 +399,7 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
 const GpuPerformanceCard = () => {
     const utilization = 88.2;
     const gaugeData = [
-        { name: 'used', value: utilization, color: '#3c81f6' },
+        { name: 'used', value: utilization, color: '#3368c1' },
         { name: 'free', value: 100 - utilization, color: '#e2e8f0' },
     ];
 
@@ -451,7 +451,7 @@ const GpuPerformanceCard = () => {
                                     pointerEvents: 'none',
                                 }}
                             >
-                                <Typography sx={{ fontSize: '1.9rem', fontWeight: 700, color: '#3c81f6' }}>
+                                <Typography sx={{ fontSize: '1.9rem', fontWeight: 700, color: '#3368c1' }}>
                                     {utilization}%
                                 </Typography>
                                 <Typography
@@ -494,8 +494,8 @@ const GpuPerformanceCard = () => {
                                     textAlign: 'center',
                                 }}
                             >
-                                <StarRoundedIcon sx={{ color: '#3c81f6', fontSize: 22 }} />
-                                <Typography sx={{ fontWeight: 700, fontSize: '0.85rem', color: '#1e3a8a' }}>
+                                <StarRoundedIcon sx={{ color: '#3368c1', fontSize: 22 }} />
+                                <Typography sx={{ fontWeight: 700, fontSize: '0.85rem', color: '#1b479a' }}>
                                     Optimal
                                 </Typography>
                                 <Typography variant="caption" sx={{ color: '#64748b' }}>
@@ -599,7 +599,7 @@ const LiveExamsCard = () => {
                     sx={{ borderRadius: 2.5, border: '1px solid #e8ecf1', boxShadow: 'none' }}
                 >
                     <Table>
-                        <TableHead sx={{ bgcolor: '#f5f3ff' }}>
+                        <TableHead sx={{ bgcolor: '#efeffb' }}>
                             <TableRow>
                                 {['Exam', 'Date', 'Shift & Time', 'Cameras', 'Scripts', 'Detections'].map((h) => (
                                     <TableCell
@@ -648,10 +648,10 @@ const LiveExamsCard = () => {
                                                 {formatHMM(row.shift_start)} - {formatHMM(row.shift_end)}
                                             </Typography>
                                         </TableCell>
-                                        <TableCell sx={{ color: '#3c81f6', fontWeight: 600 }}>
+                                        <TableCell sx={{ color: '#3368c1', fontWeight: 600 }}>
                                             {Number(row.cameras || 0).toLocaleString()}
                                         </TableCell>
-                                        <TableCell sx={{ color: '#3c81f6', fontWeight: 600 }}>
+                                        <TableCell sx={{ color: '#3368c1', fontWeight: 600 }}>
                                             {Number(row.scripts || 0).toLocaleString()}
                                         </TableCell>
                                         <TableCell sx={{ color: '#475569', fontWeight: 600 }}>
