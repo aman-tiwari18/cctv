@@ -126,11 +126,11 @@ const CATEGORY_LABELS = {
 };
 
 const CHIP_TONES = {
-    amber:  { bg: '#f7b784', text: '#92400e' },
-    violet: { bg: '#efeffb', text: '#5b21b6' },
+    amber:  { bg: '#fdede0', text: '#92400e' },
+    violet: { bg: '#ecedfe', text: '#5b21b6' },
 };
 
-const KPI_ICON_BG = '#3368c1';
+const KPI_ICON_BG = '#0249c6';
 const KPI_ICON_COLOR = '#ffffff';
 
 // ---------------------------------------------------------------------------
@@ -144,7 +144,7 @@ const KpiCard = ({ title, value, icon, chips = [], loading }) => (
                 <Typography
                     variant="overline"
                     sx={{
-                        color: '#64748b',
+                        color: '#7d7b84',
                         fontWeight: 700,
                         letterSpacing: '0.08em',
                         fontSize: '0.72rem',
@@ -175,7 +175,7 @@ const KpiCard = ({ title, value, icon, chips = [], loading }) => (
                         sx={{
                             fontSize: '2.5rem',
                             fontWeight: 700,
-                            color: '#1b479a',
+                            color: '#0e4ab2',
                             lineHeight: 1.1,
                         }}
                     >
