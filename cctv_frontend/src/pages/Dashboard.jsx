@@ -360,8 +360,9 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
     const chartBoxRef = useRef(null);
 
     // Donut radius scales to fit the available width, capped so it never grows huge.
-    // Ring thickness stays fixed at 30px so the donut always looks consistent.
-    const outerR = Math.max(110, Math.min(180, Math.floor(chartWidth / 2) - 20));
+    // 24px per side clears the +12 hover expansion plus ~6px drop-shadow blur.
+    // Floor at 100 keeps "TOTAL DETECTIONS" inside the inner circle on narrow Mac viewports.
+    const outerR = Math.max(100, Math.min(180, Math.floor(chartWidth / 2) - 24));
     const innerR = outerR - 30;
 
     useEffect(() => {
