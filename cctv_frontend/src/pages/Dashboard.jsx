@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
     Box,
     Card,
@@ -324,6 +324,26 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
     const [category, setCategory] = useState('all');
     const [activeKey, setActiveKey] = useState(null);
     const [mousePos, setMousePos] = useState(null);
+    const [chartWidth, setChartWidth] = useState(400);
+    const chartBoxRef = useRef(null);
+
+    // Donut radius scales with container width but ring thickness stays fixed at 30px
+    const CHART_HEIGHT = 300;
+    const CHART_CY_FRACTION = 0.9;
+    const RING_THICKNESS = 30;
+    const heightCap = CHART_HEIGHT * CHART_CY_FRACTION - 10;
+    const outerR = Math.max(80, Math.min(heightCap, Math.floor(chartWidth / 2) - 10));
+    const innerR = Math.max(20, outerR - RING_THICKNESS);
+
+    useEffect(() => {
+        const el = chartBoxRef.current;
+        if (!el || typeof ResizeObserver === 'undefined') return;
+        const ro = new ResizeObserver((entries) => {
+            if (entries[0]) setChartWidth(entries[0].contentRect.width);
+        });
+        ro.observe(el);
+        return () => ro.disconnect();
+    }, []);
 
     // Build tree: 3 parent categories, each with its sub-detections
     const tree = useMemo(() => {
@@ -485,7 +505,8 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
 
                         <Grid item xs={12} sm={7}>
                             <Box
-                                sx={{ position: 'relative', height: 300 }}
+                                ref={chartBoxRef}
+                                sx={{ position: 'relative', height: CHART_HEIGHT }}
                                 onMouseMove={(e) => {
                                     const rect = e.currentTarget.getBoundingClientRect();
                                     setMousePos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
@@ -500,8 +521,8 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                             cy="90%"
                                             startAngle={180}
                                             endAngle={0}
-                                            innerRadius={130}
-                                            outerRadius={160}
+                                            innerRadius={innerR}
+                                            outerRadius={outerR}
                                             paddingAngle={1}
                                             dataKey="count"
                                             nameKey="label"
