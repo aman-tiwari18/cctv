@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
     Box,
     Card,
@@ -290,40 +290,89 @@ const renderActiveShape = (props) => {
     );
 };
 
-const DetectionDonutTooltip = ({ label, percent }) => (
-    <Box sx={{ position: 'relative', pb: '10px', pointerEvents: 'none' }}>
-        <Box sx={{
-            bgcolor: '#FFF',
-            border: '1px solid #CED2E0',
-            borderRadius: '8px',
-            padding: '4px 10px',
-            display: 'inline-flex',
-            alignItems: 'center',
-            fontFamily: 'Inter, sans-serif',
-            fontSize: '14px',
-            fontWeight: 700,
-            color: '#191B23',
-            boxShadow: '0 2px 6px 0 rgba(0,0,0,0.08)',
-            whiteSpace: 'nowrap',
-        }}>
-            {label}: {percent}%
+// Tooltip drawn as ONE continuous SVG path (rounded rect + downward triangle merged),
+// so the stroke wraps the whole shape — no visible seam between the box and the arrow.
+const DetectionDonutTooltip = ({ label, percent }) => {
+    const text = `${label}: ${percent}%`;
+    const fontSize = 13;
+    const charW = 7.2; // approx for Inter 700 13px
+    const padH = 12;
+    const padV = 6;
+    const radius = 8;
+    const triBaseW = 12;
+    const triH = 7;
+    const W = Math.max(80, text.length * charW + 2 * padH);
+    const H = fontSize + 2 * padV + 4; // include some leading
+    const cx = W / 2;
+
+    const d = [
+        `M ${radius} 0`,
+        `L ${W - radius} 0`,
+        `A ${radius} ${radius} 0 0 1 ${W} ${radius}`,
+        `L ${W} ${H - radius}`,
+        `A ${radius} ${radius} 0 0 1 ${W - radius} ${H}`,
+        `L ${cx + triBaseW / 2} ${H}`,
+        `L ${cx} ${H + triH}`,
+        `L ${cx - triBaseW / 2} ${H}`,
+        `L ${radius} ${H}`,
+        `A ${radius} ${radius} 0 0 1 0 ${H - radius}`,
+        `L 0 ${radius}`,
+        `A ${radius} ${radius} 0 0 1 ${radius} 0`,
+        'Z',
+    ].join(' ');
+
+    return (
+        <Box component="svg"
+            width={W + 2}
+            height={H + triH + 2}
+            viewBox={`-1 -1 ${W + 2} ${H + triH + 2}`}
+            style={{
+                display: 'block',
+                overflow: 'visible',
+                filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.08))',
+                pointerEvents: 'none',
+            }}
+        >
+            <path d={d} fill="#FFF" stroke="#CED2E0" strokeWidth="1" strokeLinejoin="round" />
+            <text
+                x={W / 2}
+                y={H / 2}
+                textAnchor="middle"
+                dominantBaseline="central"
+                style={{
+                    fontFamily: 'Inter, sans-serif',
+                    fontSize: `${fontSize}px`,
+                    fontWeight: 700,
+                    fill: '#191B23',
+                }}
+            >
+                {text}
+            </text>
         </Box>
-        {/* Down-pointing triangle, drawn as an SVG so we can stroke only the two legs */}
-        <Box component="svg" width={14} height={9} viewBox="0 0 14 9" sx={{
-            position: 'absolute',
-            bottom: '1px',
-            left: '50%',
-            transform: 'translateX(-50%)',
-        }}>
-            <path d="M 0 0 L 7 8 L 14 0" fill="#FFF" stroke="#CED2E0" strokeWidth="1" />
-        </Box>
-    </Box>
-);
+    );
+};
 
 const DetectionDistributionCard = ({ distribution = [], loading }) => {
     const [category, setCategory] = useState('all');
     const [activeKey, setActiveKey] = useState(null);
     const [mousePos, setMousePos] = useState(null);
+    const [chartWidth, setChartWidth] = useState(400);
+    const chartBoxRef = useRef(null);
+
+    // Donut radius scales to fit the available width, capped so it never grows huge.
+    // Ring thickness stays fixed at 30px so the donut always looks consistent.
+    const outerR = Math.max(110, Math.min(180, Math.floor(chartWidth / 2) - 20));
+    const innerR = outerR - 30;
+
+    useEffect(() => {
+        const el = chartBoxRef.current;
+        if (!el || typeof ResizeObserver === 'undefined') return;
+        const ro = new ResizeObserver(([entry]) => {
+            if (entry) setChartWidth(entry.contentRect.width);
+        });
+        ro.observe(el);
+        return () => ro.disconnect();
+    }, []);
 
     // Build tree: 3 parent categories, each with its sub-detections
     const tree = useMemo(() => {
@@ -485,6 +534,7 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
 
                         <Grid item xs={12} sm={7}>
                             <Box
+                                ref={chartBoxRef}
                                 sx={{ position: 'relative', height: 320 }}
                                 onMouseMove={(e) => {
                                     const rect = e.currentTarget.getBoundingClientRect();
@@ -500,8 +550,8 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                             cy="90%"
                                             startAngle={180}
                                             endAngle={0}
-                                            innerRadius={150}
-                                            outerRadius={180}
+                                            innerRadius={innerR}
+                                            outerRadius={outerR}
                                             paddingAngle={1}
                                             dataKey="count"
                                             nameKey="label"
