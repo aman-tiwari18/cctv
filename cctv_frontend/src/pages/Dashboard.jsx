@@ -360,10 +360,10 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
     const chartBoxRef = useRef(null);
 
     // Donut radius scales to fit the available width, capped so it never grows huge.
-    // 24px per side clears the +12 hover expansion plus ~6px drop-shadow blur.
+    // 14px per side clears the +12 hover expansion plus ~2px drop-shadow blur margin.
     // Floor at 100 keeps "TOTAL DETECTIONS" inside the inner circle on narrow Mac viewports.
-    const outerR = Math.max(80, Math.min(180, Math.floor(chartWidth / 2) - 24));
-    const innerR = outerR - 30;
+    const outerR = Math.max(100, Math.min(200, Math.floor(chartWidth / 2) - 14));
+    const innerR = outerR - 32;
 
     useEffect(() => {
         const el = chartBoxRef.current;
@@ -536,7 +536,7 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                         <Grid item xs={12} sm={7}>
                             <Box
                                 ref={chartBoxRef}
-                                sx={{ position: 'relative', height: 320 }}
+                                sx={{ position: 'relative', height: 360 }}
                                 onMouseMove={(e) => {
                                     const rect = e.currentTarget.getBoundingClientRect();
                                     setMousePos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
@@ -548,7 +548,7 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                         <Pie
                                             data={donutData}
                                             cx="50%"
-                                            cy="82%"
+                                            cy="78%"
                                             startAngle={180}
                                             endAngle={0}
                                             innerRadius={innerR}
@@ -590,7 +590,7 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                 <Box
                                     sx={{
                                         position: 'absolute',
-                                        bottom: 60,
+                                        bottom: 82,
                                         left: 0,
                                         right: 0,
                                         display: 'flex',
