@@ -22,7 +22,7 @@ import {
 } from '@mui/material';
 import { LocalizationProvider, DatePicker } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
+import { Cell, Pie, PieChart, ResponsiveContainer, Sector, Tooltip } from 'recharts';
 import { format, parseISO } from 'date-fns';
 import StarRoundedIcon from '@mui/icons-material/StarRounded';
 import KeyboardArrowDownRoundedIcon from '@mui/icons-material/KeyboardArrowDownRounded';
@@ -272,8 +272,52 @@ const KpiCard = ({ title, value, icon, chips = [], loading }) => (
 // DetectionDistributionCard — donut + category list
 // ---------------------------------------------------------------------------
 
+// Hovered segment renders as a slightly larger sector with an orange glow
+const renderActiveShape = (props) => {
+    const { cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill } = props;
+    return (
+        <g style={{ filter: 'drop-shadow(0 0 5px #FB923C)' }}>
+            <Sector
+                cx={cx}
+                cy={cy}
+                innerRadius={innerRadius}
+                outerRadius={outerRadius + 12}
+                startAngle={startAngle}
+                endAngle={endAngle}
+                fill={fill}
+            />
+        </g>
+    );
+};
+
+const DetectionDonutTooltip = ({ active, payload }) => {
+    if (!active || !payload || !payload.length) return null;
+    const item = payload[0];
+    const label = item?.payload?.label || item?.name || '';
+    const percent = ((item?.percent || 0) * 100).toFixed(0);
+    return (
+        <Box sx={{
+            bgcolor: '#FFF',
+            border: '1px solid #CED2E0',
+            borderRadius: '8px',
+            padding: '4px 10px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            fontFamily: 'Inter, sans-serif',
+            fontSize: '14px',
+            fontWeight: 700,
+            color: '#191B23',
+            boxShadow: '0 2px 6px 0 rgba(0,0,0,0.08)',
+            whiteSpace: 'nowrap',
+        }}>
+            {label}: {percent}%
+        </Box>
+    );
+};
+
 const DetectionDistributionCard = ({ distribution = [], loading }) => {
     const [category, setCategory] = useState('all');
+    const [activeKey, setActiveKey] = useState(null);
 
     // Build tree: 3 parent categories, each with its sub-detections
     const tree = useMemo(() => {
@@ -323,6 +367,8 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
     const parentPercent = (p) => (tree.grandTotal > 0 ? (p.count / tree.grandTotal) * 100 : 0);
     const subPercent = (parent, sub) => (parent.count > 0 ? (sub.count / parent.count) * 100 : 0);
 
+    const activeIdx = donutData.findIndex((d) => d.key === activeKey);
+
     return (
         <Card sx={{ height: '100%', bgcolor: '#fff', borderRadius: '8px', boxShadow: '0 2px 4px 0 rgba(0,0,0,0.05)' }}>
             <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
@@ -334,7 +380,22 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                         <Select
                             value={category}
                             onChange={(e) => setCategory(e.target.value)}
-                            sx={{ fontSize: '0.85rem', borderRadius: 2 }}
+                            sx={{
+                                fontSize: '13px',
+                                borderRadius: '8px',
+                                '& .MuiSelect-select': { fontSize: '13px', py: 0.75 },
+                            }}
+                            MenuProps={{
+                                PaperProps: {
+                                    sx: {
+                                        '& .MuiMenuItem-root': {
+                                            fontSize: '13px',
+                                            minHeight: 32,
+                                            py: 0.75,
+                                        },
+                                    },
+                                },
+                            }}
                         >
                             <MenuItem value="all">All Categories</MenuItem>
                             <MenuItem value="people">People &amp; Activity</MenuItem>
@@ -359,6 +420,7 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                 <Stack spacing={1.2}>
                                     {tree.parents.map((p) => {
                                         const expanded = category === p.key;
+                                        const parentActive = activeKey === p.key;
                                         return (
                                             <Box key={p.key}>
                                                 <Stack
@@ -374,30 +436,33 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                                             : <KeyboardArrowRightRoundedIcon sx={{ fontSize: 16 }} />}
                                                     </Box>
                                                     <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: p.color, flexShrink: 0 }} />
-                                                    <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 500 }}>
+                                                    <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: parentActive ? 700 : 500 }}>
                                                         {p.label}
                                                     </Typography>
                                                     <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 700, ml: 0.5 }}>
                                                         {p.count.toLocaleString()}
                                                     </Typography>
-                                                    <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '12px', ml: 'auto', opacity: 0.7 }}>
+                                                    <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: parentActive ? 700 : 400, ml: 'auto', opacity: parentActive ? 1 : 0.7 }}>
                                                         ({parentPercent(p).toFixed(2)}%)
                                                     </Typography>
                                                 </Stack>
 
                                                 {expanded && p.subs.length > 0 && (
                                                     <Stack spacing={0.2} sx={{ mt: 0.6, pl: 4, pb: 0.8, borderBottom: '1px solid #eef0f3' }}>
-                                                        {p.subs.map((s) => (
-                                                            <Stack key={s.key} direction="row" alignItems="center" spacing={1}>
-                                                                <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: s.color, flexShrink: 0 }} />
-                                                                <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 400, lineHeight: '20px' }}>
-                                                                    {s.label}
-                                                                </Typography>
-                                                                <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 700, lineHeight: '20px', ml: 'auto' }}>
-                                                                    {subPercent(p, s).toFixed(0)}%
-                                                                </Typography>
-                                                            </Stack>
-                                                        ))}
+                                                        {p.subs.map((s) => {
+                                                            const subActive = activeKey === s.key;
+                                                            return (
+                                                                <Stack key={s.key} direction="row" alignItems="center" spacing={1}>
+                                                                    <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: s.color, flexShrink: 0 }} />
+                                                                    <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: subActive ? 700 : 400, lineHeight: '20px' }}>
+                                                                        {s.label}
+                                                                    </Typography>
+                                                                    <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 700, lineHeight: '20px', ml: 'auto' }}>
+                                                                        {subPercent(p, s).toFixed(0)}%
+                                                                    </Typography>
+                                                                </Stack>
+                                                            );
+                                                        })}
                                                     </Stack>
                                                 )}
                                             </Box>
@@ -408,38 +473,37 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                         </Grid>
 
                         <Grid item xs={12} sm={7}>
-                            <Box sx={{ position: 'relative', height: 240 }}>
+                            <Box sx={{ position: 'relative', height: 300 }}>
                                 <ResponsiveContainer width="100%" height="100%">
                                     <PieChart>
                                         <Pie
                                             data={donutData}
                                             cx="50%"
-                                            cy="85%"
+                                            cy="88%"
                                             startAngle={180}
                                             endAngle={0}
-                                            innerRadius={82}
-                                            outerRadius={112}
+                                            innerRadius={100}
+                                            outerRadius={130}
                                             paddingAngle={1}
                                             dataKey="count"
                                             nameKey="label"
                                             stroke="none"
+                                            activeIndex={activeIdx >= 0 ? activeIdx : -1}
+                                            activeShape={renderActiveShape}
+                                            onMouseEnter={(_, idx) => setActiveKey(donutData[idx]?.key || null)}
+                                            onMouseLeave={() => setActiveKey(null)}
                                         >
                                             {donutData.map((s) => (
                                                 <Cell key={s.key} fill={s.color} />
                                             ))}
                                         </Pie>
-                                        <Tooltip
-                                            formatter={(value, name) => [
-                                                `${Number(value).toLocaleString()}`,
-                                                name,
-                                            ]}
-                                        />
+                                        <Tooltip content={<DetectionDonutTooltip />} />
                                     </PieChart>
                                 </ResponsiveContainer>
                                 <Box
                                     sx={{
                                         position: 'absolute',
-                                        bottom: 6,
+                                        bottom: 50,
                                         left: 0,
                                         right: 0,
                                         display: 'flex',
