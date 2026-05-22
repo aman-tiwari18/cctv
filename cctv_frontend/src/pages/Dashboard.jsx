@@ -331,8 +331,9 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
     const CHART_HEIGHT = 300;
     const CHART_CY_FRACTION = 0.9;
     const RING_THICKNESS = 30;
-    const heightCap = CHART_HEIGHT * CHART_CY_FRACTION - 10;
-    const outerR = Math.max(80, Math.min(heightCap, Math.floor(chartWidth / 2) - 10));
+    // Horizontal padding (30px each side) leaves room for the hover-glow shadow + active sector expand
+    const heightCap = CHART_HEIGHT * CHART_CY_FRACTION - 20;
+    const outerR = Math.max(80, Math.min(heightCap, Math.floor(chartWidth / 2) - 30));
     const innerR = Math.max(20, outerR - RING_THICKNESS);
 
     useEffect(() => {
