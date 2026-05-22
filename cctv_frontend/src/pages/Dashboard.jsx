@@ -126,28 +126,30 @@ const CATEGORY_LABELS = {
 };
 
 const CHIP_TONES = {
-    amber:  { bg: '#fef4ea', text: '#4d4d55' },
-    violet: { bg: '#ecedfe', text: '#4d4d55' },
+    amber:  { bg: '#FFEEE0', text: '#5C5F61' },
+    violet: { bg: '#E5E5FF', text: '#5C5F61' },
 };
 
-const KPI_ICON_BG = '#0249c6';
-const KPI_ICON_COLOR = '#ffffff';
+const KPI_ICON_BG = 'rgba(0, 74, 198, 0.10)';
+const KPI_ICON_COLOR = '#004AC6';
 
 // ---------------------------------------------------------------------------
 // KpiCard — the 4 top cards
 // ---------------------------------------------------------------------------
 
 const KpiCard = ({ title, value, icon, chips = [], loading }) => (
-    <Card sx={{ height: '100%', bgcolor: '#f6f4fb' }}>
+    <Card sx={{ height: '100%', bgcolor: '#fff', borderRadius: 1, border: '1px solid #eef0f3' }}>
         <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
             <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
                 <Typography
                     variant="overline"
                     sx={{
-                        color: '#7d7b84',
+                        color: '#5C5F61',
                         fontWeight: 700,
-                        letterSpacing: '0.08em',
-                        fontSize: '0.72rem',
+                        fontSize: '15px',
+                        lineHeight: '16px',
+                        letterSpacing: '0.6px',
+                        textTransform: 'uppercase',
                     }}
                 >
                     {title}
@@ -155,7 +157,7 @@ const KpiCard = ({ title, value, icon, chips = [], loading }) => (
                 <Box
                     sx={{
                         bgcolor: KPI_ICON_BG,
-                        borderRadius: 1.5,
+                        borderRadius: 1,
                         width: 40,
                         height: 40,
                         display: 'flex',
@@ -163,7 +165,7 @@ const KpiCard = ({ title, value, icon, chips = [], loading }) => (
                         justifyContent: 'center',
                     }}
                 >
-                    {React.cloneElement(icon, { sx: { fontSize: 22, color: KPI_ICON_COLOR } })}
+                    {React.cloneElement(icon, { sx: { fontSize: 18, color: KPI_ICON_COLOR } })}
                 </Box>
             </Stack>
 
@@ -173,10 +175,10 @@ const KpiCard = ({ title, value, icon, chips = [], loading }) => (
                 ) : (
                     <Typography
                         sx={{
-                            fontSize: '2.5rem',
+                            fontSize: '36px',
                             fontWeight: 700,
-                            color: '#0e4ab2',
-                            lineHeight: 1.1,
+                            color: '#2E68C9',
+                            lineHeight: '42px',
                         }}
                     >
                         {Number(value || 0).toLocaleString()}
@@ -191,8 +193,8 @@ const KpiCard = ({ title, value, icon, chips = [], loading }) => (
                         <Chip
                             key={chip.label}
                             label={
-                                <Box component="span">
-                                    <Box component="span" sx={{ fontWeight: 600, mr: 0.5 }}>
+                                <Box sx={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', lineHeight: 1.2 }}>
+                                    <Box component="span" sx={{ fontWeight: 600 }}>
                                         {chip.label}
                                     </Box>
                                     <Box component="span" sx={{ fontWeight: 700 }}>
@@ -203,11 +205,20 @@ const KpiCard = ({ title, value, icon, chips = [], loading }) => (
                             sx={{
                                 bgcolor: tone.bg,
                                 color: tone.text,
-                                borderRadius: 1.5,
-                                height: 'auto',
-                                py: 0.6,
+                                borderRadius: 1,
+                                height: 51,
+                                py: 0,
                                 px: 0.4,
-                                '& .MuiChip-label': { px: 1.2, fontSize: '0.78rem' },
+                                boxShadow: '0 1px 2px 0 rgba(0,0,0,0.05)',
+                                fontFamily: 'Manrope, Inter, sans-serif',
+                                '& .MuiChip-label': {
+                                    px: 1.2,
+                                    fontSize: '12px',
+                                    fontWeight: 600,
+                                    lineHeight: '17px',
+                                    letterSpacing: '1px',
+                                    textTransform: 'capitalize',
+                                },
                             }}
                         />
                     );
