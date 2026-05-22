@@ -359,11 +359,17 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
     const [chartWidth, setChartWidth] = useState(400);
     const chartBoxRef = useRef(null);
 
-    // Donut radius scales to fit the available width, capped so it never grows huge.
-    // 14px per side clears the +12 hover expansion plus ~2px drop-shadow blur margin.
-    // Floor at 100 keeps "TOTAL DETECTIONS" inside the inner circle on narrow Mac viewports.
-    const outerR = Math.max(100, Math.min(200, Math.floor(chartWidth / 2) - 14));
+    // Donut radius scales to fully use the available width (the chart column is
+    // typically much wider than the ring needs). 16px per side clears the +12
+    // hover expansion plus drop-shadow blur margin. Floor at 100 keeps
+    // "TOTAL DETECTIONS" inside the inner circle on narrow Mac viewports.
+    const outerR = Math.max(100, Math.min(280, Math.floor(chartWidth / 2) - 16));
     const innerR = outerR - 32;
+    // Box height + cy scale with the radius so the half-circle always has the
+    // same visual padding around it (35px above the arc, 85px below the chord
+    // for the "599 / TOTAL DETECTIONS" overlay + breathing room).
+    const arcCy = outerR + 35;
+    const boxHeight = arcCy + 85;
 
     useEffect(() => {
         const el = chartBoxRef.current;
@@ -536,7 +542,7 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                         <Grid item xs={12} sm={7}>
                             <Box
                                 ref={chartBoxRef}
-                                sx={{ position: 'relative', height: 360 }}
+                                sx={{ position: 'relative', height: boxHeight }}
                                 onMouseMove={(e) => {
                                     const rect = e.currentTarget.getBoundingClientRect();
                                     setMousePos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
@@ -548,7 +554,7 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                         <Pie
                                             data={donutData}
                                             cx="50%"
-                                            cy="78%"
+                                            cy={arcCy}
                                             startAngle={180}
                                             endAngle={0}
                                             innerRadius={innerR}
@@ -590,7 +596,7 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                 <Box
                                     sx={{
                                         position: 'absolute',
-                                        bottom: 82,
+                                        bottom: 88,
                                         left: 0,
                                         right: 0,
                                         display: 'flex',
