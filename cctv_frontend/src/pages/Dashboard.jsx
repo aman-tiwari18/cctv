@@ -362,7 +362,7 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
     // Donut radius scales to fit the available width, capped so it never grows huge.
     // 24px per side clears the +12 hover expansion plus ~6px drop-shadow blur.
     // Floor at 100 keeps "TOTAL DETECTIONS" inside the inner circle on narrow Mac viewports.
-    const outerR = Math.max(100, Math.min(180, Math.floor(chartWidth / 2) - 24));
+    const outerR = Math.max(80, Math.min(180, Math.floor(chartWidth / 2) - 24));
     const innerR = outerR - 30;
 
     useEffect(() => {
@@ -548,7 +548,7 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                         <Pie
                                             data={donutData}
                                             cx="50%"
-                                            cy="90%"
+                                            cy="82%"
                                             startAngle={180}
                                             endAngle={0}
                                             innerRadius={innerR}
@@ -590,7 +590,7 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                 <Box
                                     sx={{
                                         position: 'absolute',
-                                        bottom: 35,
+                                        bottom: 60,
                                         left: 0,
                                         right: 0,
                                         display: 'flex',
