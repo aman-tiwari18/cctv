@@ -26,10 +26,10 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import { format, parseISO } from 'date-fns';
 import StarRoundedIcon from '@mui/icons-material/StarRounded';
 import { dashboardAPI } from '../services/api';
-import BarChartRoundedIcon from '@mui/icons-material/BarChartRounded';
-import VideocamRoundedIcon from '@mui/icons-material/VideocamRounded';
-import AccessTimeRoundedIcon from '@mui/icons-material/AccessTimeRounded';
-import EqualizerRoundedIcon from '@mui/icons-material/EqualizerRounded';
+import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
+import { ShiftSvgIcon } from '../components/ShiftSvgIcon';
+import { CustomSvgIcon } from '../components/DetectionSvgIcon';
+import CameraAltIcon from '@mui/icons-material/CameraAlt';
 
 // ---------------------------------------------------------------------------
 // Constants — kept identical to V1 so other pages that reuse the same mapping
@@ -765,7 +765,7 @@ const Dashboard = () => {
                         <KpiCard
                             title="TOTAL EXAMS"
                             value={totalExams.total}
-                            icon={<BarChartRoundedIcon />}
+                            icon={<ExamsSvgIcon />}
                             chips={[
                                 { label: 'Ongoing', value: totalExams.ongoing, tone: 'amber' },
                                 { label: 'Total',   value: totalExams.total,   tone: 'violet' },
@@ -777,7 +777,7 @@ const Dashboard = () => {
                         <KpiCard
                             title="TOTAL CAMERAS"
                             value={cameras.total}
-                            icon={<VideocamRoundedIcon />}
+                            icon={<CameraAltIcon />}
                             chips={[
                                 { label: 'Accessible',   value: cameras.accessible,   tone: 'amber' },
                                 { label: 'Unclassified', value: cameras.unclassified, tone: 'violet' },
@@ -789,7 +789,7 @@ const Dashboard = () => {
                         <KpiCard
                             title="SCRIPT BREAKDOWN"
                             value={scripts.planned_today}
-                            icon={<AccessTimeRoundedIcon />}
+                            icon={<ShiftSvgIcon />}
                             chips={[
                                 { label: 'Running',   value: scripts.running,   tone: 'amber' },
                                 { label: 'Scheduled', value: scripts.scheduled, tone: 'violet' },
@@ -802,7 +802,7 @@ const Dashboard = () => {
                         <KpiCard
                             title="TOTAL DETECTIONS"
                             value={detections.today}
-                            icon={<EqualizerRoundedIcon />}
+                            icon={<CustomSvgIcon />}
                             chips={[
                                 { label: 'Pushed',          value: detections.pushed_to_client, tone: 'amber' },
                                 { label: 'False Detection', value: detections.false_detection,  tone: 'violet' },
