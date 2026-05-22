@@ -25,6 +25,8 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import { format, parseISO } from 'date-fns';
 import StarRoundedIcon from '@mui/icons-material/StarRounded';
+import KeyboardArrowDownRoundedIcon from '@mui/icons-material/KeyboardArrowDownRounded';
+import KeyboardArrowRightRoundedIcon from '@mui/icons-material/KeyboardArrowRightRounded';
 import { dashboardAPI } from '../services/api';
 import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
 import { ShiftSvgIcon } from '../components/ShiftSvgIcon';
@@ -37,9 +39,47 @@ import CameraAltIcon from '@mui/icons-material/CameraAlt';
 // ---------------------------------------------------------------------------
 
 const CATEGORY_COLORS = {
-    people: '#6775b7',
-    movement: '#94b6ef',
-    camera: '#21252c',
+    people: '#A9C9FF',
+    movement: '#FAB781',
+    camera: '#7676BE',
+};
+
+// Per-detection-type bullet colors — mirrors ShiftScriptManager.jsx SCRIPT_META.iconColor
+// so the dot a user sees here matches the glyph they see on the Schedule Analysis / Add Script screens.
+const SUBCATEGORY_COLORS = {
+    proximity: '#5cb88a',
+    crowd: '#e24d7b',
+    crowd_biometric: '#9333ea',
+    crowd_five: '#e06050',
+    crowd_zero: '#6b5b95',
+    invigilator: '#00bfcf',
+    phone: '#465a38',
+    server: '#a0623d',
+    intruder: '#d94466',
+    qp_box: '#dc2626',
+    entry_exit: '#1d7a7d',
+    strongroom: '#b91c1c',
+    inversion: '#7a86b4',
+    tamper: '#00c8d4',
+    tampering: '#00c8d4',
+    blind_spot: '#b0a850',
+    vision: '#3b82f6',
+    proximity_detection: '#5cb88a',
+    crowd_detection: '#e24d7b',
+    crowd_detection_biometric: '#9333ea',
+    crowd_detection_threshold: '#e06050',
+    zero_person_detection: '#6b5b95',
+    invigilator_detection: '#00bfcf',
+    phone_detection: '#465a38',
+    server_room_detection: '#a0623d',
+    intruder_detection: '#d94466',
+    qp_box_missing: '#dc2626',
+    entry_exit_detection: '#1d7a7d',
+    strongroom_detection: '#b91c1c',
+    camera_inversion_detection: '#7a86b4',
+    camera_tampering_detection: '#00c8d4',
+    blind_spot_detection: '#b0a850',
+    vision_detection: '#3b82f6',
 };
 
 const SCRIPT_CATEGORY_MAP = {
@@ -120,9 +160,9 @@ const DETECTION_TYPE_LABELS = {
 };
 
 const CATEGORY_LABELS = {
-    people: 'People',
-    movement: 'Movement',
-    camera: 'Camera',
+    people: 'People & Activity',
+    movement: 'Movement & Alert',
+    camera: 'Camera & System',
 };
 
 const CHIP_TONES = {
@@ -138,7 +178,7 @@ const KPI_ICON_COLOR = '#004AC6';
 // ---------------------------------------------------------------------------
 
 const KpiCard = ({ title, value, icon, chips = [], loading }) => (
-    <Card sx={{ height: '100%', bgcolor: '#fff', borderRadius: 1, border: '1px solid #eef0f3' }}>
+    <Card sx={{ height: '100%', bgcolor: '#fff', borderRadius: '8px', border: '1px solid #eef0f3' }}>
         <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
             <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
                 <Typography
@@ -157,7 +197,7 @@ const KpiCard = ({ title, value, icon, chips = [], loading }) => (
                 <Box
                     sx={{
                         bgcolor: KPI_ICON_BG,
-                        borderRadius: 1,
+                        borderRadius: '8px',
                         width: 40,
                         height: 40,
                         display: 'flex',
@@ -205,7 +245,7 @@ const KpiCard = ({ title, value, icon, chips = [], loading }) => (
                             sx={{
                                 bgcolor: tone.bg,
                                 color: tone.text,
-                                borderRadius: 1,
+                                borderRadius: '8px',
                                 height: 51,
                                 py: 0,
                                 px: 0.4,
@@ -235,56 +275,59 @@ const KpiCard = ({ title, value, icon, chips = [], loading }) => (
 const DetectionDistributionCard = ({ distribution = [], loading }) => {
     const [category, setCategory] = useState('all');
 
-    // Build chart segments based on category filter
-    const segments = useMemo(() => {
-        if (!Array.isArray(distribution) || distribution.length === 0) return [];
-
-        if (category === 'all') {
-            // Aggregate per category
-            const agg = { people: 0, movement: 0, camera: 0 };
-            distribution.forEach((d) => {
-                const cat = SCRIPT_CATEGORY_MAP[d.type] || 'camera';
-                agg[cat] = (agg[cat] || 0) + Number(d.count || 0);
-            });
-            return ['people', 'movement', 'camera']
-                .map((cat) => ({
-                    key: cat,
-                    label: CATEGORY_LABELS[cat],
-                    count: agg[cat] || 0,
-                    color: CATEGORY_COLORS[cat],
+    // Build tree: 3 parent categories, each with its sub-detections
+    const tree = useMemo(() => {
+        const list = Array.isArray(distribution) ? distribution : [];
+        const parents = ['people', 'movement', 'camera'].map((cat) => {
+            const subs = list
+                .filter((d) => (SCRIPT_CATEGORY_MAP[d.type] || 'camera') === cat)
+                .map((d) => ({
+                    key: d.type,
+                    label: DETECTION_TYPE_LABELS[d.type] || d.type,
+                    count: Number(d.count || 0),
+                    color: SUBCATEGORY_COLORS[d.type] || CATEGORY_COLORS[cat],
                 }))
                 .filter((s) => s.count > 0);
+
+            const count = subs.reduce((a, s) => a + s.count, 0);
+            return {
+                key: cat,
+                label: CATEGORY_LABELS[cat],
+                count,
+                color: CATEGORY_COLORS[cat],
+                subs,
+            };
+        });
+        const grandTotal = parents.reduce((a, p) => a + p.count, 0);
+        return { parents, grandTotal };
+    }, [distribution]);
+
+    // Donut data + center label depend on selected category
+    const { donutData, centerValue, centerLabel } = useMemo(() => {
+        if (category === 'all') {
+            const data = tree.parents
+                .filter((p) => p.count > 0)
+                .map((p) => ({ key: p.key, label: p.label, count: p.count, color: p.color }));
+            return { donutData: data, centerValue: tree.grandTotal, centerLabel: 'TOTAL DETECTIONS' };
         }
+        const parent = tree.parents.find((p) => p.key === category);
+        return {
+            donutData: (parent?.subs || []).map((s) => ({
+                key: s.key, label: s.label, count: s.count, color: s.color,
+            })),
+            centerValue: parent?.count || 0,
+            centerLabel: (parent?.label || '').toUpperCase(),
+        };
+    }, [tree, category]);
 
-        // Filter to a single category; one segment per detection_type
-        return distribution
-            .filter((d) => (SCRIPT_CATEGORY_MAP[d.type] || 'camera') === category)
-            .map((d) => ({
-                key: d.type,
-                label: DETECTION_TYPE_LABELS[d.type] || d.type,
-                count: Number(d.count || 0),
-                color: CATEGORY_COLORS[category],
-            }))
-            .filter((s) => s.count > 0);
-    }, [distribution, category]);
-
-    const total = segments.reduce((acc, s) => acc + s.count, 0);
-
-    const segmentsWithPercent = segments.map((s) => ({
-        ...s,
-        percent: total > 0 ? (s.count / total) * 100 : 0,
-    }));
+    const parentPercent = (p) => (tree.grandTotal > 0 ? (p.count / tree.grandTotal) * 100 : 0);
+    const subPercent = (parent, sub) => (parent.count > 0 ? (sub.count / parent.count) * 100 : 0);
 
     return (
-        <Card sx={{ height: '100%' }}>
+        <Card sx={{ height: '100%', bgcolor: '#fff', borderRadius: '8px', boxShadow: '0 2px 4px 0 rgba(0,0,0,0.05)' }}>
             <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
-                <Stack
-                    direction="row"
-                    justifyContent="space-between"
-                    alignItems="center"
-                    sx={{ mb: 2 }}
-                >
-                    <Typography variant="h6" sx={{ fontWeight: 700, color: '#0f172a' }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                    <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '20px', fontWeight: 700, lineHeight: '24px' }}>
                         Detection Distribution
                     </Typography>
                     <FormControl size="small" sx={{ minWidth: 140 }}>
@@ -294,9 +337,9 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                             sx={{ fontSize: '0.85rem', borderRadius: 2 }}
                         >
                             <MenuItem value="all">All Categories</MenuItem>
-                            <MenuItem value="people">People</MenuItem>
-                            <MenuItem value="movement">Movement</MenuItem>
-                            <MenuItem value="camera">Camera</MenuItem>
+                            <MenuItem value="people">People &amp; Activity</MenuItem>
+                            <MenuItem value="movement">Movement &amp; Alert</MenuItem>
+                            <MenuItem value="camera">Camera &amp; System</MenuItem>
                         </Select>
                     </FormControl>
                 </Stack>
@@ -305,42 +348,63 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                     <Box display="flex" justifyContent="center" alignItems="center" minHeight={220}>
                         <CircularProgress />
                     </Box>
-                ) : segmentsWithPercent.length === 0 ? (
+                ) : tree.grandTotal === 0 ? (
                     <Box display="flex" justifyContent="center" alignItems="center" minHeight={220}>
                         <Typography color="text.secondary">No detections in this view.</Typography>
                     </Box>
                 ) : (
                     <Grid container spacing={2} alignItems="center">
                         <Grid item xs={12} sm={5}>
-                            <Stack spacing={1.4}>
-                                {segmentsWithPercent.map((s) => (
-                                    <Stack
-                                        key={s.key}
-                                        direction="row"
-                                        alignItems="center"
-                                        spacing={1.25}
-                                    >
-                                        <Box
-                                            sx={{
-                                                width: 10,
-                                                height: 10,
-                                                borderRadius: '50%',
-                                                bgcolor: s.color,
-                                                flexShrink: 0,
-                                            }}
-                                        />
-                                        <Typography sx={{ minWidth: 88, fontSize: '0.9rem', color: '#334155' }}>
-                                            {s.label}
-                                        </Typography>
-                                        <Typography sx={{ fontWeight: 700, color: '#0f172a', fontSize: '0.95rem', ml: 'auto' }}>
-                                            {s.count.toLocaleString()}
-                                        </Typography>
-                                        <Typography sx={{ color: '#94a3b8', fontSize: '0.82rem', minWidth: 62, textAlign: 'right' }}>
-                                            ({s.percent.toFixed(2)}%)
-                                        </Typography>
-                                    </Stack>
-                                ))}
-                            </Stack>
+                            <Box sx={{ maxHeight: 240, overflowY: 'auto', pr: 0.5 }}>
+                                <Stack spacing={1.2}>
+                                    {tree.parents.map((p) => {
+                                        const expanded = category === p.key;
+                                        return (
+                                            <Box key={p.key}>
+                                                <Stack
+                                                    direction="row"
+                                                    alignItems="center"
+                                                    spacing={0.75}
+                                                    onClick={() => setCategory(expanded ? 'all' : p.key)}
+                                                    sx={{ cursor: 'pointer', userSelect: 'none' }}
+                                                >
+                                                    <Box sx={{ color: '#434655', display: 'inline-flex', alignItems: 'center' }}>
+                                                        {expanded
+                                                            ? <KeyboardArrowDownRoundedIcon sx={{ fontSize: 16 }} />
+                                                            : <KeyboardArrowRightRoundedIcon sx={{ fontSize: 16 }} />}
+                                                    </Box>
+                                                    <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: p.color, flexShrink: 0 }} />
+                                                    <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 500 }}>
+                                                        {p.label}
+                                                    </Typography>
+                                                    <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 700, ml: 0.5 }}>
+                                                        {p.count.toLocaleString()}
+                                                    </Typography>
+                                                    <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '12px', ml: 'auto', opacity: 0.7 }}>
+                                                        ({parentPercent(p).toFixed(2)}%)
+                                                    </Typography>
+                                                </Stack>
+
+                                                {expanded && p.subs.length > 0 && (
+                                                    <Stack spacing={0.2} sx={{ mt: 0.6, pl: 4, pb: 0.8, borderBottom: '1px solid #eef0f3' }}>
+                                                        {p.subs.map((s) => (
+                                                            <Stack key={s.key} direction="row" alignItems="center" spacing={1}>
+                                                                <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: s.color, flexShrink: 0 }} />
+                                                                <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 400, lineHeight: '20px' }}>
+                                                                    {s.label}
+                                                                </Typography>
+                                                                <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 700, lineHeight: '20px', ml: 'auto' }}>
+                                                                    {subPercent(p, s).toFixed(0)}%
+                                                                </Typography>
+                                                            </Stack>
+                                                        ))}
+                                                    </Stack>
+                                                )}
+                                            </Box>
+                                        );
+                                    })}
+                                </Stack>
+                            </Box>
                         </Grid>
 
                         <Grid item xs={12} sm={7}>
@@ -348,19 +412,19 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                 <ResponsiveContainer width="100%" height="100%">
                                     <PieChart>
                                         <Pie
-                                            data={segmentsWithPercent}
+                                            data={donutData}
                                             cx="50%"
                                             cy="85%"
                                             startAngle={180}
                                             endAngle={0}
-                                            innerRadius={78}
+                                            innerRadius={82}
                                             outerRadius={112}
-                                            paddingAngle={2}
+                                            paddingAngle={1}
                                             dataKey="count"
                                             nameKey="label"
                                             stroke="none"
                                         >
-                                            {segmentsWithPercent.map((s) => (
+                                            {donutData.map((s) => (
                                                 <Cell key={s.key} fill={s.color} />
                                             ))}
                                         </Pie>
@@ -384,14 +448,13 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                         pointerEvents: 'none',
                                     }}
                                 >
-                                    <Typography sx={{ fontSize: '1.9rem', fontWeight: 700, color: '#1b479a', lineHeight: 1.1 }}>
-                                        {total.toLocaleString()}
+                                    <Typography sx={{ fontFamily: 'Inter, sans-serif', fontSize: '48px', fontWeight: 700, color: '#2E68C9', lineHeight: '60px' }}>
+                                        {centerValue.toLocaleString()}
                                     </Typography>
                                     <Typography
-                                        variant="caption"
-                                        sx={{ color: '#64748b', letterSpacing: '0.06em', fontWeight: 600 }}
+                                        sx={{ color: '#2E68C9', fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 600, lineHeight: '16px', letterSpacing: '0.6px', textTransform: 'uppercase' }}
                                     >
-                                        TOTAL DETECTIONS
+                                        {centerLabel}
                                     </Typography>
                                 </Box>
                             </Box>
