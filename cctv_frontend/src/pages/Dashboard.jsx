@@ -421,8 +421,8 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                     </Box>
                 ) : (
                     <Grid container spacing={2} alignItems="center">
-                        <Grid item xs={12} sm={4}>
-                            <Box sx={{ maxHeight: 320, overflowY: 'auto', pr: 0.5 }}>
+                        <Grid item xs={12} sm={5}>
+                            <Box sx={{ maxHeight: 280, overflowY: 'auto', pr: 0.5 }}>
                                 <Stack spacing={1.2}>
                                     {tree.parents.map((p) => {
                                         const expanded = category === p.key;
@@ -443,8 +443,8 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                                             : <KeyboardArrowRightRoundedIcon sx={{ fontSize: 16 }} />}
                                                         <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: p.color }} />
                                                     </Stack>
-                                                    {/* label, can wrap */}
-                                                    <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: parentActive ? 700 : 500, lineHeight: '20px', flexGrow: 1, minWidth: 0 }}>
+                                                    {/* label, wraps at natural word boundaries */}
+                                                    <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: parentActive ? 700 : 500, lineHeight: '20px', flexGrow: 1, flexShrink: 1 }}>
                                                         {p.label}
                                                     </Typography>
                                                     {/* count + percent, also locked to first text line */}
@@ -483,9 +483,9 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                             </Box>
                         </Grid>
 
-                        <Grid item xs={12} sm={8}>
+                        <Grid item xs={12} sm={7}>
                             <Box
-                                sx={{ position: 'relative', height: 360 }}
+                                sx={{ position: 'relative', height: 300 }}
                                 onMouseMove={(e) => {
                                     const rect = e.currentTarget.getBoundingClientRect();
                                     setMousePos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
@@ -497,11 +497,11 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                         <Pie
                                             data={donutData}
                                             cx="50%"
-                                            cy="92%"
+                                            cy="90%"
                                             startAngle={180}
                                             endAngle={0}
-                                            innerRadius="60%"
-                                            outerRadius="92%"
+                                            innerRadius={130}
+                                            outerRadius={160}
                                             paddingAngle={1}
                                             dataKey="count"
                                             nameKey="label"
@@ -539,7 +539,7 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                 <Box
                                     sx={{
                                         position: 'absolute',
-                                        bottom: 30,
+                                        bottom: 35,
                                         left: 0,
                                         right: 0,
                                         display: 'flex',
