@@ -290,45 +290,40 @@ const renderActiveShape = (props) => {
     );
 };
 
-const DetectionDonutTooltip = ({ active, payload }) => {
-    if (!active || !payload || !payload.length) return null;
-    const item = payload[0];
-    const label = item?.payload?.label || item?.name || '';
-    const percent = ((item?.percent || 0) * 100).toFixed(0);
-    return (
-        <Box sx={{ position: 'relative', pb: '10px', pointerEvents: 'none' }}>
-            <Box sx={{
-                bgcolor: '#FFF',
-                border: '1px solid #CED2E0',
-                borderRadius: '8px',
-                padding: '4px 10px',
-                display: 'inline-flex',
-                alignItems: 'center',
-                fontFamily: 'Inter, sans-serif',
-                fontSize: '14px',
-                fontWeight: 700,
-                color: '#191B23',
-                boxShadow: '0 2px 6px 0 rgba(0,0,0,0.08)',
-                whiteSpace: 'nowrap',
-            }}>
-                {label}: {percent}%
-            </Box>
-            {/* Down-pointing triangle, drawn as an SVG so we can stroke only the two legs */}
-            <Box component="svg" width={14} height={9} viewBox="0 0 14 9" sx={{
-                position: 'absolute',
-                bottom: '1px',
-                left: '50%',
-                transform: 'translateX(-50%)',
-            }}>
-                <path d="M 0 0 L 7 8 L 14 0" fill="#FFF" stroke="#CED2E0" strokeWidth="1" />
-            </Box>
+const DetectionDonutTooltip = ({ label, percent }) => (
+    <Box sx={{ position: 'relative', pb: '10px', pointerEvents: 'none' }}>
+        <Box sx={{
+            bgcolor: '#FFF',
+            border: '1px solid #CED2E0',
+            borderRadius: '8px',
+            padding: '4px 10px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            fontFamily: 'Inter, sans-serif',
+            fontSize: '14px',
+            fontWeight: 700,
+            color: '#191B23',
+            boxShadow: '0 2px 6px 0 rgba(0,0,0,0.08)',
+            whiteSpace: 'nowrap',
+        }}>
+            {label}: {percent}%
         </Box>
-    );
-};
+        {/* Down-pointing triangle, drawn as an SVG so we can stroke only the two legs */}
+        <Box component="svg" width={14} height={9} viewBox="0 0 14 9" sx={{
+            position: 'absolute',
+            bottom: '1px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+        }}>
+            <path d="M 0 0 L 7 8 L 14 0" fill="#FFF" stroke="#CED2E0" strokeWidth="1" />
+        </Box>
+    </Box>
+);
 
 const DetectionDistributionCard = ({ distribution = [], loading }) => {
     const [category, setCategory] = useState('all');
     const [activeKey, setActiveKey] = useState(null);
+    const [mousePos, setMousePos] = useState(null);
 
     // Build tree: 3 parent categories, each with its sub-detections
     const tree = useMemo(() => {
@@ -426,8 +421,8 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                     </Box>
                 ) : (
                     <Grid container spacing={2} alignItems="center">
-                        <Grid item xs={12} sm={5}>
-                            <Box sx={{ maxHeight: 240, overflowY: 'auto', pr: 0.5 }}>
+                        <Grid item xs={12} sm={4}>
+                            <Box sx={{ maxHeight: 320, overflowY: 'auto', pr: 0.5 }}>
                                 <Stack spacing={1.2}>
                                     {tree.parents.map((p) => {
                                         const expanded = category === p.key;
@@ -441,21 +436,26 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                                     onClick={() => setCategory(expanded ? 'all' : p.key)}
                                                     sx={{ cursor: 'pointer', userSelect: 'none' }}
                                                 >
-                                                    <Box sx={{ color: '#434655', display: 'inline-flex', alignItems: 'center', height: '20px', flexShrink: 0 }}>
+                                                    {/* arrow + dot, locked to first text line height */}
+                                                    <Stack direction="row" alignItems="center" spacing={0.75} sx={{ height: '20px', flexShrink: 0, color: '#434655' }}>
                                                         {expanded
                                                             ? <KeyboardArrowDownRoundedIcon sx={{ fontSize: 16 }} />
                                                             : <KeyboardArrowRightRoundedIcon sx={{ fontSize: 16 }} />}
-                                                    </Box>
-                                                    <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: p.color, flexShrink: 0, mt: '4px' }} />
+                                                        <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: p.color }} />
+                                                    </Stack>
+                                                    {/* label, can wrap */}
                                                     <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: parentActive ? 700 : 500, lineHeight: '20px', flexGrow: 1, minWidth: 0 }}>
                                                         {p.label}
                                                     </Typography>
-                                                    <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 700, lineHeight: '20px', whiteSpace: 'nowrap', flexShrink: 0, ml: 0.5 }}>
-                                                        {p.count.toLocaleString()}
-                                                    </Typography>
-                                                    <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: parentActive ? 700 : 400, lineHeight: '20px', whiteSpace: 'nowrap', flexShrink: 0, opacity: parentActive ? 1 : 0.7 }}>
-                                                        ({parentPercent(p).toFixed(2)}%)
-                                                    </Typography>
+                                                    {/* count + percent, also locked to first text line */}
+                                                    <Stack direction="row" alignItems="center" spacing={0.5} sx={{ height: '20px', flexShrink: 0 }}>
+                                                        <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 700, lineHeight: '20px', whiteSpace: 'nowrap' }}>
+                                                            {p.count.toLocaleString()}
+                                                        </Typography>
+                                                        <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: parentActive ? 700 : 400, lineHeight: '20px', whiteSpace: 'nowrap', opacity: parentActive ? 1 : 0.7 }}>
+                                                            ({parentPercent(p).toFixed(2)}%)
+                                                        </Typography>
+                                                    </Stack>
                                                 </Stack>
 
                                                 {expanded && p.subs.length > 0 && (
@@ -483,18 +483,25 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                             </Box>
                         </Grid>
 
-                        <Grid item xs={12} sm={7}>
-                            <Box sx={{ position: 'relative', height: 380 }}>
+                        <Grid item xs={12} sm={8}>
+                            <Box
+                                sx={{ position: 'relative', height: 360 }}
+                                onMouseMove={(e) => {
+                                    const rect = e.currentTarget.getBoundingClientRect();
+                                    setMousePos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+                                }}
+                                onMouseLeave={() => { setMousePos(null); setActiveKey(null); }}
+                            >
                                 <ResponsiveContainer width="100%" height="100%">
                                     <PieChart>
                                         <Pie
                                             data={donutData}
                                             cx="50%"
-                                            cy="90%"
+                                            cy="92%"
                                             startAngle={180}
                                             endAngle={0}
-                                            innerRadius={140}
-                                            outerRadius={175}
+                                            innerRadius="60%"
+                                            outerRadius="92%"
                                             paddingAngle={1}
                                             dataKey="count"
                                             nameKey="label"
@@ -508,21 +515,31 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                                 <Cell key={s.key} fill={s.color} />
                                             ))}
                                         </Pie>
-                                        <Tooltip
-                                            content={<DetectionDonutTooltip />}
-                                            cursor={false}
-                                            wrapperStyle={{
-                                                pointerEvents: 'none',
-                                                transform: 'translate(-50%, -100%)',
-                                                marginTop: '-12px',
-                                            }}
-                                        />
                                     </PieChart>
                                 </ResponsiveContainer>
+
+                                {/* Custom tooltip overlay — follows cursor, anchored above */}
+                                {activeKey && activeIdx >= 0 && mousePos && (() => {
+                                    const donutTotal = donutData.reduce((a, d) => a + d.count, 0);
+                                    const pct = donutTotal > 0 ? ((donutData[activeIdx].count / donutTotal) * 100).toFixed(0) : '0';
+                                    return (
+                                        <Box sx={{
+                                            position: 'absolute',
+                                            left: `${mousePos.x}px`,
+                                            top: `${mousePos.y - 14}px`,
+                                            transform: 'translate(-50%, -100%)',
+                                            pointerEvents: 'none',
+                                            zIndex: 10,
+                                        }}>
+                                            <DetectionDonutTooltip label={donutData[activeIdx].label} percent={pct} />
+                                        </Box>
+                                    );
+                                })()}
+
                                 <Box
                                     sx={{
                                         position: 'absolute',
-                                        bottom: 45,
+                                        bottom: 30,
                                         left: 0,
                                         right: 0,
                                         display: 'flex',
