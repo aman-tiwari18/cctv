@@ -272,11 +272,11 @@ const KpiCard = ({ title, value, icon, chips = [], loading }) => (
 // DetectionDistributionCard — donut + category list
 // ---------------------------------------------------------------------------
 
-// Hovered segment renders as a slightly larger sector with an orange glow
+// Hovered segment renders as a slightly larger sector with a glow matching its own color
 const renderActiveShape = (props) => {
     const { cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill } = props;
     return (
-        <g style={{ filter: 'drop-shadow(0 0 5px #FB923C)' }}>
+        <g style={{ filter: `drop-shadow(0 0 6px ${fill})` }}>
             <Sector
                 cx={cx}
                 cy={cy}
@@ -296,21 +296,32 @@ const DetectionDonutTooltip = ({ active, payload }) => {
     const label = item?.payload?.label || item?.name || '';
     const percent = ((item?.percent || 0) * 100).toFixed(0);
     return (
-        <Box sx={{
-            bgcolor: '#FFF',
-            border: '1px solid #CED2E0',
-            borderRadius: '8px',
-            padding: '4px 10px',
-            display: 'inline-flex',
-            alignItems: 'center',
-            fontFamily: 'Inter, sans-serif',
-            fontSize: '14px',
-            fontWeight: 700,
-            color: '#191B23',
-            boxShadow: '0 2px 6px 0 rgba(0,0,0,0.08)',
-            whiteSpace: 'nowrap',
-        }}>
-            {label}: {percent}%
+        <Box sx={{ position: 'relative', pb: '10px', pointerEvents: 'none' }}>
+            <Box sx={{
+                bgcolor: '#FFF',
+                border: '1px solid #CED2E0',
+                borderRadius: '8px',
+                padding: '4px 10px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                fontFamily: 'Inter, sans-serif',
+                fontSize: '14px',
+                fontWeight: 700,
+                color: '#191B23',
+                boxShadow: '0 2px 6px 0 rgba(0,0,0,0.08)',
+                whiteSpace: 'nowrap',
+            }}>
+                {label}: {percent}%
+            </Box>
+            {/* Down-pointing triangle, drawn as an SVG so we can stroke only the two legs */}
+            <Box component="svg" width={14} height={9} viewBox="0 0 14 9" sx={{
+                position: 'absolute',
+                bottom: '1px',
+                left: '50%',
+                transform: 'translateX(-50%)',
+            }}>
+                <path d="M 0 0 L 7 8 L 14 0" fill="#FFF" stroke="#CED2E0" strokeWidth="1" />
+            </Box>
         </Box>
     );
 };
@@ -425,24 +436,24 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                             <Box key={p.key}>
                                                 <Stack
                                                     direction="row"
-                                                    alignItems="center"
+                                                    alignItems="flex-start"
                                                     spacing={0.75}
                                                     onClick={() => setCategory(expanded ? 'all' : p.key)}
                                                     sx={{ cursor: 'pointer', userSelect: 'none' }}
                                                 >
-                                                    <Box sx={{ color: '#434655', display: 'inline-flex', alignItems: 'center' }}>
+                                                    <Box sx={{ color: '#434655', display: 'inline-flex', alignItems: 'center', height: '20px', flexShrink: 0 }}>
                                                         {expanded
                                                             ? <KeyboardArrowDownRoundedIcon sx={{ fontSize: 16 }} />
                                                             : <KeyboardArrowRightRoundedIcon sx={{ fontSize: 16 }} />}
                                                     </Box>
-                                                    <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: p.color, flexShrink: 0 }} />
-                                                    <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: parentActive ? 700 : 500 }}>
+                                                    <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: p.color, flexShrink: 0, mt: '4px' }} />
+                                                    <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: parentActive ? 700 : 500, lineHeight: '20px', flexGrow: 1, minWidth: 0 }}>
                                                         {p.label}
                                                     </Typography>
-                                                    <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 700, ml: 0.5 }}>
+                                                    <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 700, lineHeight: '20px', whiteSpace: 'nowrap', flexShrink: 0, ml: 0.5 }}>
                                                         {p.count.toLocaleString()}
                                                     </Typography>
-                                                    <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: parentActive ? 700 : 400, ml: 'auto', opacity: parentActive ? 1 : 0.7 }}>
+                                                    <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: parentActive ? 700 : 400, lineHeight: '20px', whiteSpace: 'nowrap', flexShrink: 0, opacity: parentActive ? 1 : 0.7 }}>
                                                         ({parentPercent(p).toFixed(2)}%)
                                                     </Typography>
                                                 </Stack>
@@ -473,17 +484,17 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                         </Grid>
 
                         <Grid item xs={12} sm={7}>
-                            <Box sx={{ position: 'relative', height: 300 }}>
+                            <Box sx={{ position: 'relative', height: 380 }}>
                                 <ResponsiveContainer width="100%" height="100%">
                                     <PieChart>
                                         <Pie
                                             data={donutData}
                                             cx="50%"
-                                            cy="88%"
+                                            cy="90%"
                                             startAngle={180}
                                             endAngle={0}
-                                            innerRadius={100}
-                                            outerRadius={130}
+                                            innerRadius={140}
+                                            outerRadius={175}
                                             paddingAngle={1}
                                             dataKey="count"
                                             nameKey="label"
@@ -497,13 +508,21 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                                 <Cell key={s.key} fill={s.color} />
                                             ))}
                                         </Pie>
-                                        <Tooltip content={<DetectionDonutTooltip />} />
+                                        <Tooltip
+                                            content={<DetectionDonutTooltip />}
+                                            cursor={false}
+                                            wrapperStyle={{
+                                                pointerEvents: 'none',
+                                                transform: 'translate(-50%, -100%)',
+                                                marginTop: '-12px',
+                                            }}
+                                        />
                                     </PieChart>
                                 </ResponsiveContainer>
                                 <Box
                                     sx={{
                                         position: 'absolute',
-                                        bottom: 50,
+                                        bottom: 45,
                                         left: 0,
                                         right: 0,
                                         display: 'flex',
