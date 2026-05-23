@@ -28,38 +28,62 @@ def get_gpu_stats():
         result = subprocess.run(
             [
                 "nvidia-smi",
-                "--query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu",
+                "--query-gpu=index,name,utilization.gpu,memory.used,memory.total,"
+                "temperature.gpu,driver_version,pcie.link.gen.current",
                 "--format=csv,noheader,nounits"
             ],
             capture_output=True,
             text=True,
             timeout=5
         )
-        
+
         if result.returncode != 0:
             return []
-        
+
         gpus = []
         for line in result.stdout.strip().split('\n'):
             if not line.strip():
                 continue
-            
+
             parts = [p.strip() for p in line.split(',')]
             if len(parts) >= 6:
-                gpus.append({
+                gpu = {
                     "gpu_id": int(parts[0]),
                     "name": parts[1],
                     "utilization": int(parts[2]),
                     "memory_used": int(parts[3]),
                     "memory_total": int(parts[4]),
                     "temperature": int(parts[5]),
-                })
-        
+                }
+                if len(parts) >= 7:
+                    gpu["driver_version"] = parts[6]
+                if len(parts) >= 8:
+                    try:
+                        gpu["pcie_gen"] = int(parts[7])
+                    except ValueError:
+                        gpu["pcie_gen"] = None
+                gpus.append(gpu)
+
         return gpus
-    
+
     except Exception as e:
         logger.error(f"Error getting GPU stats: {e}")
         return []
+
+
+def get_cuda_version() -> str:
+    """Return CUDA toolkit version (e.g. '12.4') by parsing the nvidia-smi header."""
+    try:
+        result = subprocess.run(
+            ["nvidia-smi"], capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            m = re.search(r"CUDA Version:\s*([\d.]+)", result.stdout)
+            if m:
+                return m.group(1)
+    except Exception as exc:
+        logger.debug(f"CUDA version probe failed: {exc}")
+    return ""
 
 
 def get_gpu_processes():
@@ -116,7 +140,21 @@ def get_gpu_processes():
                 try:
                     proc = psutil.Process(pid)
                     cmdline = ' '.join(proc.cmdline())
-                    
+
+                    # Extra fields for the UI: who launched it, how long it's been running
+                    try:
+                        username = proc.username()
+                    except Exception:
+                        username = ""
+                    try:
+                        runtime_seconds = int(datetime.now().timestamp() - proc.create_time())
+                    except Exception:
+                        runtime_seconds = 0
+                    try:
+                        status = proc.status()  # 'running', 'sleeping', etc.
+                    except Exception:
+                        status = "unknown"
+
                     # Extract script name and type
                     script_type = "unknown"
                     script_name = process_name
@@ -148,8 +186,11 @@ def get_gpu_processes():
                         "type": script_type,
                         "memory_mb": memory_mb,
                         "cmdline": cmdline[:200],  # Truncate long commands
+                        "username": username,
+                        "runtime_seconds": runtime_seconds,
+                        "status": status,
                     })
-                
+
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     gpu_processes[gpu_id].append({
                         "pid": pid,
@@ -157,6 +198,9 @@ def get_gpu_processes():
                         "type": "unknown",
                         "memory_mb": memory_mb,
                         "cmdline": "",
+                        "username": "",
+                        "runtime_seconds": 0,
+                        "status": "unknown",
                     })
         
         return gpu_processes
@@ -229,6 +273,7 @@ def get_local_gpu_stats_data():
         "server_id": WORKER_ID,
         "server_name": WORKER_NAME,
         "timestamp": datetime.now().isoformat(),
+        "cuda_version": get_cuda_version(),
         "gpus": gpus,
         "processes": gpu_processes,
         "total_gpus": len(gpus),

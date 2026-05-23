@@ -2,6 +2,7 @@
 # stdlib
 # ---------------------------------------------------------------------------
 import asyncio
+import contextlib
 import json
 import logging
 import multiprocessing
@@ -44,6 +45,7 @@ try:
         update_rtsp_classification,
         update_hls_status,
         update_rtsp_status,
+        update_rtsp_status_and_frame_path,
     )
 except ImportError:
     sys.path.append(os.path.join(os.path.dirname(__file__), "utils"))
@@ -54,6 +56,7 @@ except ImportError:
         update_rtsp_classification,
         update_hls_status,
         update_rtsp_status,
+        update_rtsp_status_and_frame_path,
     )
 
 # ===========================================================================
@@ -78,15 +81,16 @@ logger = logging.getLogger(__name__)
 # ===========================================================================
 _CPU_CORES = multiprocessing.cpu_count()
 
-MAX_WORKERS_NETWORK: int = int(os.getenv("VISION_MAX_WORKERS_NETWORK", "16"))  # 16 for RTSP (was 64 — DVR gets overwhelmed)
-MAX_WORKERS_VLM:     int = int(os.getenv("VISION_MAX_WORKERS_VLM",     "32"))
-THREAD_POOL_SIZE:    int = int(os.getenv("VISION_THREAD_POOL",         str(min(_CPU_CORES * 2, 128))))
+MAX_WORKERS_NETWORK:      int = int(os.getenv("VISION_MAX_WORKERS_NETWORK",      "16"))  # 16 for RTSP (was 64 — DVR gets overwhelmed)
+MAX_WORKERS_VLM:          int = int(os.getenv("VISION_MAX_WORKERS_VLM",          "32"))
+MAX_WORKERS_RTSP_CAPTURE: int = int(os.getenv("VISION_MAX_WORKERS_RTSP_CAPTURE", "6"))   # concurrent FFmpeg RTSP streams per worker; DVR stream limit
+THREAD_POOL_SIZE:         int = int(os.getenv("VISION_THREAD_POOL",              str(min(_CPU_CORES * 2, 128))))
 
 TIMEOUT_EXTRACT_URL: int = 3
 TIMEOUT_TEST_STREAM: int = 3
 TIMEOUT_OPENCV_MS:   int = 3_000
 TIMEOUT_OPENCV_REAL: int = 6        # hard wall-clock thread join for OpenCV
-TIMEOUT_FFMPEG:      int = int(os.getenv("VISION_TIMEOUT_FFMPEG", "15"))  # was 5 — too short for RTSP connection
+TIMEOUT_FFMPEG:      int = int(os.getenv("VISION_TIMEOUT_FFMPEG", "10"))  # 10s: enough for RTSP grab, short enough to release DVR slots quickly
 TIMEOUT_VLM:         int = int(os.getenv("VISION_TIMEOUT_VLM", "120"))
 TIMEOUT_API:         int = int(os.getenv("VISION_TIMEOUT_API",  "10"))
 
@@ -110,8 +114,19 @@ SCENE_COLUMN_TARGET = "Scene Classification"
 os.makedirs(SAVE_FOLDER, exist_ok=True)
 os.makedirs(FRAMES_FOLDER, exist_ok=True)
 
+
+def _frames_dir_for_assignment(assignment_id=None) -> str:
+    """Return per-assignment frame directory, creating it on first call."""
+    subdir = f"assignment_{assignment_id}" if assignment_id else "default"
+    path = os.path.join(FRAMES_FOLDER, subdir)
+    os.makedirs(path, exist_ok=True)
+    return path
+
 # One shared thread-pool for all blocking I/O (OpenCV, FFmpeg, HLS extract, Camview auth)
 _THREAD_POOL = ThreadPoolExecutor(max_workers=THREAD_POOL_SIZE)
+
+# Initialized per pipeline run (needs a running event loop) — limits concurrent DVR RTSP streams
+_RTSP_CAP_SEM: Optional[asyncio.Semaphore] = None
 
 # ===========================================================================
 # Camview DVR Authentication (for RTSP cameras)
@@ -119,8 +134,27 @@ _THREAD_POOL = ThreadPoolExecutor(max_workers=THREAD_POOL_SIZE)
 import hashlib as _hashlib
 import socket as _socket
 
-_CAMVIEW_AUTH_USER  = os.getenv("CAMVIEW_AUTH_USER",  "system")
-_CAMVIEW_AUTH_PASS  = os.getenv("CAMVIEW_AUTH_PASS",  "Coreiseven@@")
+_CAMVIEW_AUTH_USER   = os.getenv("CAMVIEW_AUTH_USER",  "system")
+_CAMVIEW_AUTH_PASS   = os.getenv("CAMVIEW_AUTH_PASS",  "Coreiseven@@")
+
+# Token coordination server — eliminates cross-VM session collision.
+# Camview DVRs allow only ONE active session per username. With 4 workers all
+# authenticating as "system" simultaneously, each new auth invalidates the
+# previous worker's token. The token server on worker-0 holds a single session
+# per DVR server and serves the same token to all workers.
+#
+# Auto-detected: non-worker-0 workers default to the main server (192.168.19.30).
+# Override via env var CAMVIEW_TOKEN_SERVER= (set to "" to disable and auth directly).
+_WORKER_ID = os.getenv("WORKER_ID", "worker-0")
+# All workers (including worker-0) use the token coordination server to avoid
+# cross-VM DVR session collision. Worker-0 uses localhost (it hosts the server);
+# workers 1-3 reach it at the main server IP.
+_DEFAULT_TOKEN_SERVER = (
+    "http://192.168.19.30:8090"
+    if _WORKER_ID not in ("worker-0", "")
+    else "http://localhost:8090"
+)
+_CAMVIEW_TOKEN_SERVER = os.getenv("CAMVIEW_TOKEN_SERVER", _DEFAULT_TOKEN_SERVER).rstrip("/")
 # Per-server password overrides: CAMVIEW_AUTH_PASS_d15=<password> etc.
 _CAMVIEW_PER_SERVER_PASS: dict = {
     k.replace("CAMVIEW_AUTH_PASS_", "").lower() + ".camview.io": v
@@ -272,12 +306,67 @@ def _sync_camview_authenticate(server: str) -> Optional[str]:
     return None
 
 
+def _get_token_from_server(server: str) -> Optional[str]:
+    """Call the token coordination server instead of authenticating directly.
+    All workers (including worker-0 at localhost:8090) go through here so that
+    only ONE session per DVR server exists at any time.
+
+    No direct-auth fallback: if the coordinator fails, we return None so the
+    camera is marked not-accessible. A direct-auth fallback would re-introduce
+    cross-session collision (worker's direct auth invalidates the coordinator's
+    token and vice versa).
+    """
+    import requests as _req
+    try:
+        resp = _req.get(
+            f"{_CAMVIEW_TOKEN_SERVER}/token",
+            params={"server": server},
+            timeout=90,
+        )
+        if resp.status_code == 200:
+            token = resp.json().get("token")
+            if token:
+                # Cache locally so repeated calls within same batch skip the round-trip
+                with _local_cache_lock:
+                    _camview_tokens[server]     = token
+                    _camview_timestamps[server] = time.time()
+                return token
+        logger.warning(f"[Camview] Token server returned {resp.status_code} for {server}")
+        # 503 = DVR auth failed on coordinator side; signal so callers skip DB overwrite
+        return "DVR_UNAVAILABLE" if resp.status_code == 503 else None
+    except Exception as e:
+        logger.warning(f"[Camview] Token server unreachable for {server}: {e}")
+        return None
+
+
+def _evict_token_on_server(server: str) -> None:
+    """Tell the coordination server to evict a stale token (called after 401)."""
+    import requests as _req
+    if not _CAMVIEW_TOKEN_SERVER:
+        return
+    try:
+        _req.post(
+            f"{_CAMVIEW_TOKEN_SERVER}/evict",
+            json={"server": server},
+            timeout=5,
+        )
+    except Exception:
+        pass
+
+
 def _sync_camview_get_token(server: str) -> Optional[str]:
     """Returns cached token or authenticates fresh.
     Uses a per-server lock so d14/d15/d16 can authenticate concurrently.
     Also consults the shared disk cache so parallel worker processes share tokens
     instead of hammering the DVR with simultaneous auth requests.
+
+    If CAMVIEW_TOKEN_SERVER is set, delegates to the coordination server on
+    worker-0 instead of authenticating directly (fixes cross-VM session collision).
     """
+    # ── Token coordination server path (workers 1-3) ─────────────────────────
+    if _CAMVIEW_TOKEN_SERVER:
+        return _get_token_from_server(server)
+
     # ── Fast path: check in-memory cache first (no I/O) ──────────────────────
     lock = _get_camview_server_lock(server)
     with _local_cache_lock:
@@ -421,9 +510,10 @@ def _sync_camview_start_video(server: str, device_id: str, camera_no: str) -> Tu
 
     for attempt in range(1, 3):   # up to 2 attempts
         token = _sync_camview_get_token(server)
-        if not token:
+        if not token or token == "DVR_UNAVAILABLE":
             logger.warning(f"[Camview] StartVideo skipped — no auth token ({cam_label}, attempt {attempt})")
-            return None, None, False
+            sentinel = "DVR_UNAVAILABLE" if token == "DVR_UNAVAILABLE" else None
+            return None, sentinel, False
 
         sv_url  = f"https://{server}/admin/API/MTS/Video/StartVideo?token={token}"
         headers = {"Content-Type": "application/json", "X-Subject-Token": token}
@@ -443,7 +533,36 @@ def _sync_camview_start_video(server: str, device_id: str, camera_no: str) -> Tu
                             timeout=TIMEOUT_API, verify=False)
 
             if res.status_code == 401:
+                # Some Camview firmware versions return HTTP 401 but still include
+                # the stream data in the body (same pattern as the auth challenge
+                # which also returns 401 + data). Check the body before discarding.
+                try:
+                    body_401 = res.json()
+                    data_401 = body_401.get("data") or {}
+                    urls_401: List[str] = []
+                    for key in ("url", "url2"):
+                        raw = data_401.get(key)
+                        if raw:
+                            urls_401.extend(p.strip() for p in raw.split("|") if p.strip())
+                    if urls_401:
+                        logger.info(
+                            f"[Camview] StartVideo returned 401 but body contains URLs "
+                            f"for {cam_label} — using them directly"
+                        )
+                        stream_token_401 = data_401.get("token") or token
+                        if _CAMVIEW_SKIP_PRIV:
+                            public_401 = [u for u in urls_401 if not _is_private_ip_url(u)]
+                            urls_401 = public_401 if public_401 else urls_401
+                        final_401 = [f"{u}?token={stream_token_401}" for u in urls_401]
+                        return final_401, stream_token_401, True
+                    logger.debug(
+                        f"[Camview] StartVideo 401 body (no URLs): {json.dumps(body_401)[:200]}"
+                    )
+                except Exception:
+                    pass
                 logger.warning(f"[Camview] StartVideo 401 — refreshing token and retrying ({cam_label}, attempt {attempt})")
+                # Tell coordination server the token is stale (if using one)
+                _evict_token_on_server(server)
                 # Evict the stale stream token and force a fresh auth.
                 # Do NOT poison with "FAILED" — that triggers the 5s negative-cache
                 # backoff in _sync_camview_get_token, which would block both this
@@ -462,21 +581,28 @@ def _sync_camview_start_video(server: str, device_id: str, camera_no: str) -> Tu
                             _camview_timestamps.pop(server, None)
                     
                     if needs_refresh:
-                        fresh = _sync_camview_authenticate(server)
+                        # When using the coordinator, ask it for a fresh token
+                        # (it already had its token evicted via _evict_token_on_server).
+                        # Direct auth here would create a competing DVR session.
+                        if _CAMVIEW_TOKEN_SERVER:
+                            fresh = _get_token_from_server(server)
+                        else:
+                            fresh = _sync_camview_authenticate(server)
                         now = time.time()
                         if fresh:
                             with _local_cache_lock:
                                 _camview_tokens[server]     = fresh
                                 _camview_timestamps[server] = now
-                            try:
-                                f_lock = open(_TOKEN_LOCK_FILE, "w")
-                                _fcntl.flock(f_lock, _fcntl.LOCK_EX)
-                                _token_cache_save()
-                                _fcntl.flock(f_lock, _fcntl.LOCK_UN)
-                                f_lock.close()
-                            except Exception:
-                                pass
-                            _start_camview_keepalive(server)
+                            if not _CAMVIEW_TOKEN_SERVER:
+                                try:
+                                    f_lock = open(_TOKEN_LOCK_FILE, "w")
+                                    _fcntl.flock(f_lock, _fcntl.LOCK_EX)
+                                    _token_cache_save()
+                                    _fcntl.flock(f_lock, _fcntl.LOCK_UN)
+                                    f_lock.close()
+                                except Exception:
+                                    pass
+                                _start_camview_keepalive(server)
                             logger.info(f"[Camview] Token refreshed successfully for {server}")
                         else:
                             # Auth itself failed — fall back to negative cache
@@ -498,7 +624,9 @@ def _sync_camview_start_video(server: str, device_id: str, camera_no: str) -> Tu
 
             if res.status_code != 200:
                 logger.warning(f"[Camview] StartVideo HTTP {res.status_code} for {cam_label} (attempt {attempt})")
-                return None, None, False
+                # 503 = DVR overloaded/down; signal with sentinel so callers skip DB update
+                sentinel = "DVR_UNAVAILABLE" if res.status_code == 503 else None
+                return None, sentinel, False
 
             body = res.json()
             data = body.get("data") or {}
@@ -512,6 +640,15 @@ def _sync_camview_start_video(server: str, device_id: str, camera_no: str) -> Tu
             stream_token = data.get("token") or token
 
             if not urls:
+                err_code = body.get("code")
+                if err_code == 2084:
+                    # 2084 = "no authorization" — either camera-level permission OR DVR
+                    # concurrent stream capacity exceeded.  Return a sentinel so the
+                    # async caller can retry with backoff without blocking the thread pool.
+                    logger.debug(
+                        f"[Camview] StartVideo 2084 for {cam_label} (attempt {attempt})"
+                    )
+                    return None, "DVR_CAPACITY", False
                 # Log the full response so we can diagnose server-side rejections
                 logger.warning(
                     f"[Camview] StartVideo returned no URLs for {cam_label} "
@@ -545,10 +682,52 @@ def _sync_camview_start_video(server: str, device_id: str, camera_no: str) -> Tu
 
     return None, None, False
 
+
+def _sync_camview_stop_video(server: str, device_id: str, camera_no: str) -> None:
+    """Best-effort StopVideo — explicitly release the DVR RTSP stream slot.
+
+    Called after every FFmpeg capture (success or failure) so the slot is freed
+    immediately instead of waiting for the DVR's own idle timeout (can be 60-300 s).
+    Errors are silently ignored; this is fire-and-forget.
+    """
+    import requests as _req
+    try:
+        token = _sync_camview_get_token(server)
+        if not token or token in ("DVR_UNAVAILABLE", "FAILED", "DVR_CAPACITY"):
+            return
+        url = f"https://{server}/admin/API/MTS/Video/StopVideo?token={token}"
+        payload = {
+            "clientType": "WINPC_V1", "project": "PSDK",
+            "method": "MTS.Video.StopVideo",
+            "data": {"channelId": f"{device_id}$1$0${camera_no}", "streamType": "1"},
+        }
+        _req.post(url,
+                  headers={"Content-Type": "application/json", "X-Subject-Token": token},
+                  data=json.dumps(payload), timeout=3, verify=False)
+    except Exception:
+        pass
+
+
+def _detect_ffmpeg_rtsp_timeout_opt() -> str:
+    """Return -timeout (FFmpeg 6.x) or -stimeout (FFmpeg 4.x) for RTSP connections."""
+    try:
+        out = subprocess.check_output(["ffmpeg", "-version"],
+                                      stderr=subprocess.DEVNULL).decode(errors="replace")
+        m = re.search(r"version (\d+)\.", out)
+        if m and int(m.group(1)) >= 6:
+            return "-timeout"
+    except Exception:
+        pass
+    return "-stimeout"
+
+_FFMPEG_RTSP_TIMEOUT_OPT: str = _detect_ffmpeg_rtsp_timeout_opt()
+
 logger.info("=" * 80)
 logger.info("TCS Camera Classification — DB Mode | H200 Optimized")
 logger.info(f"  CPU cores        : {_CPU_CORES}")
 logger.info(f"  Network workers  : {MAX_WORKERS_NETWORK}")
+logger.info(f"  RTSP cap workers : {MAX_WORKERS_RTSP_CAPTURE}  (concurrent FFmpeg RTSP streams)")
+logger.info(f"  FFmpeg RTSP opt  : {_FFMPEG_RTSP_TIMEOUT_OPT} (auto-detected for installed FFmpeg)")
 logger.info(f"  VLM workers      : {MAX_WORKERS_VLM}")
 logger.info(f"  Thread pool      : {THREAD_POOL_SIZE}")
 logger.info(f"  VLM timeout      : {TIMEOUT_VLM}s")
@@ -804,8 +983,9 @@ def _sync_ffmpeg_capture(url: str, is_rtsp: bool = False) -> Optional[bytes]:
         return None
     cmd = ["ffmpeg", "-y"]
     if is_rtsp:
+        # FFmpeg 6.x uses -timeout; FFmpeg 4.x uses -stimeout (detected at startup).
         cmd += ["-rtsp_transport", "tcp",
-                "-timeout", str(TIMEOUT_FFMPEG * 1_000_000)]
+                _FFMPEG_RTSP_TIMEOUT_OPT, str(TIMEOUT_FFMPEG * 1_000_000)]
     else:
         cmd += ["-timeout", str(TIMEOUT_FFMPEG * 1_000_000)]
     cmd += [
@@ -825,8 +1005,11 @@ def _sync_ffmpeg_capture(url: str, is_rtsp: bool = False) -> Optional[bytes]:
             stderr_txt = res.stderr.decode(errors="replace")
             if "401" in stderr_txt or "Unauthorized" in stderr_txt:
                 logger.debug(f"FFmpeg 401 on {url[:60]}")
-                return None
+                return b"_FFmpeg401_"  # sentinel — caller retries StartVideo for fresh token
             return res.stdout
+        stderr_txt = res.stderr.decode(errors="replace")
+        if "401" in stderr_txt or "Unauthorized" in stderr_txt:
+            return b"_FFmpeg401_"
         return None
     except Exception as e:
         logger.debug(f"FFmpeg error: {e}")
@@ -843,19 +1026,23 @@ async def _capture_frame_bytes(url: str, is_rtsp: bool = False) -> Optional[byte
     process_url = url if is_rtsp else unquote(url)
 
     if is_rtsp:
-        # Go straight to FFmpeg for RTSP — it respects -timeout properly
-        jpeg = await loop.run_in_executor(_THREAD_POOL, _sync_ffmpeg_capture, process_url, True)
-        if jpeg:
-            return jpeg
-        logger.debug("FFmpeg failed for RTSP — trying OpenCV as last resort")
-        return await loop.run_in_executor(_THREAD_POOL, _sync_opencv_capture, process_url)
+        # Acquire per-worker RTSP capture semaphore to prevent DVR concurrent stream overflow.
+        # _RTSP_CAP_SEM is initialized per pipeline run; default 6 concurrent FFmpeg streams.
+        _cap_ctx = _RTSP_CAP_SEM if _RTSP_CAP_SEM is not None else contextlib.nullcontext()
+        async with _cap_ctx:
+            # Go straight to FFmpeg for RTSP — it respects -stimeout properly
+            jpeg = await loop.run_in_executor(_THREAD_POOL, _sync_ffmpeg_capture, process_url, True)
+            if jpeg and jpeg != b"_FFmpeg401_":
+                return jpeg
+            return None  # 401 or capture failure — caller handles retry if needed
 
     # HLS: OpenCV first (faster), then FFmpeg fallback
     jpeg = await loop.run_in_executor(_THREAD_POOL, _sync_opencv_capture, process_url)
     if jpeg:
         return jpeg
     logger.debug("OpenCV failed → FFmpeg fallback")
-    return await loop.run_in_executor(_THREAD_POOL, _sync_ffmpeg_capture, process_url, False)
+    result = await loop.run_in_executor(_THREAD_POOL, _sync_ffmpeg_capture, process_url, False)
+    return None if result == b"_FFmpeg401_" else result
 
 
 async def _capture_frame_with_save(
@@ -891,6 +1078,116 @@ async def _capture_frame_with_save(
             fh.write(jpeg)
     except Exception as e:
         logger.debug(f"Frame save failed for {cam_id}: {e}")
+        fpath = None
+
+    return jpeg, fpath
+
+
+async def _camview_rtsp_capture_and_save(
+    camera: dict, cam_id: str, frames_dir: str
+) -> Tuple[Optional[bytes], Optional[str]]:
+    """Capture a frame from a Camview DVR camera and save it to frames_dir.
+
+    MUST be called while already holding _RTSP_CAP_SEM so that StartVideo
+    is called immediately before FFmpeg — the token never waits in a queue.
+
+    Retries up to 3 times on DVR_CAPACITY (code 2084) with async backoff.
+    Calls StopVideo after every attempt to explicitly release the DVR slot.
+    """
+    device_id   = str(camera.get("device_id") or "").strip()
+    camera_no   = str(camera.get("camera_no")  or "").strip()
+    camera_name = str(camera.get("camera_name") or "")
+    server      = re.sub(r'^https?://', '', str(camera.get("cctv_url", ""))).rstrip('/').lower()
+    loop        = asyncio.get_event_loop()
+    sv_timeout  = (TIMEOUT_API + 3) * 2 + 5
+
+    rtsp_urls: Optional[List[str]] = None
+    ok = False
+    for sv_try in range(4):   # attempt 0 + up to 3 retries on DVR_CAPACITY
+        try:
+            rtsp_urls, sentinel, ok = await asyncio.wait_for(
+                loop.run_in_executor(
+                    _THREAD_POOL, _sync_camview_start_video, server, device_id, camera_no
+                ),
+                timeout=sv_timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.debug(f"[Pass-1] StartVideo timed out for {cam_id}")
+            return None, None
+        except Exception as e:
+            logger.debug(f"[Pass-1] StartVideo error for {cam_id}: {e}")
+            return None, None
+
+        if ok:
+            break
+        if sentinel == "DVR_CAPACITY" and sv_try < 3:
+            backoff = (sv_try + 1) * 3  # 3, 6, 9 seconds — StopVideo frees slots fast now
+            logger.debug(
+                f"[Pass-1] DVR capacity (2084) for {cam_id} — sleeping {backoff}s (retry {sv_try+1}/3)"
+            )
+            await asyncio.sleep(backoff)
+            continue
+        return None, None   # permanent failure or retries exhausted
+
+    if not ok or not rtsp_urls:
+        return None, None
+
+    # Capture — token is fresh, used immediately.
+    # Outer loop: retry StartVideo to get a fresh token if FFmpeg gets 401 (DVR preemption).
+    # Some DVRs return 401 on RTSP OPTIONS but the stream is actually fine — one retry usually works.
+    jpeg: Optional[bytes] = None
+    _FFmpeg401 = b"_FFmpeg401_"
+    for ffmpeg_try in range(3):  # 0 = first attempt; 1,2 = retries on 401
+        if ffmpeg_try > 0:
+            # Release old slot, get a fresh token
+            await loop.run_in_executor(
+                _THREAD_POOL, _sync_camview_stop_video, server, device_id, camera_no
+            )
+            await asyncio.sleep(2)  # brief wait before re-auth
+            try:
+                rtsp_urls, sentinel, ok = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        _THREAD_POOL, _sync_camview_start_video, server, device_id, camera_no
+                    ),
+                    timeout=sv_timeout,
+                )
+            except Exception:
+                break
+            if not ok or not rtsp_urls:
+                break
+            logger.debug(f"[Pass-1] Retry {ffmpeg_try}/2 after 401 for {cam_id}")
+
+        for url in rtsp_urls:
+            jpeg = await loop.run_in_executor(_THREAD_POOL, _sync_ffmpeg_capture, url, True)
+            if jpeg and jpeg != _FFmpeg401:
+                break  # got a real frame
+            if jpeg == _FFmpeg401:
+                jpeg = _FFmpeg401  # keep sentinel, will trigger outer retry
+        if jpeg and jpeg != _FFmpeg401:
+            break  # success — exit outer retry loop
+        if jpeg != _FFmpeg401:
+            break  # genuine failure (None), not a 401 — no point retrying
+        # jpeg == _FFmpeg401 → retry outer loop for fresh token
+
+    if jpeg == _FFmpeg401:
+        jpeg = None  # exhausted retries
+
+    # Explicitly release the DVR stream slot so it's available to other workers immediately.
+    await loop.run_in_executor(
+        _THREAD_POOL, _sync_camview_stop_video, server, device_id, camera_no
+    )
+
+    if not jpeg:
+        return None, None
+
+    safe_name = re.sub(r'[^\w\-]', '_', camera_name)[:40]
+    fname  = f"{device_id}_{camera_no}_{safe_name}.jpg"
+    fpath  = os.path.join(frames_dir, fname)
+    try:
+        with open(fpath, "wb") as fh:
+            fh.write(jpeg)
+    except Exception as e:
+        logger.debug(f"[Pass-1] Frame save failed for {cam_id}: {e}")
         fpath = None
 
     return jpeg, fpath
@@ -1076,11 +1373,20 @@ async def _check_hls_camera(
 async def _check_rtsp_camera(
     camera: dict,
     sem: asyncio.Semaphore,
+    frames_dir: str = "",
 ) -> dict:
     """
-    RTSP Pass-1: authenticate with Camview DVR and obtain token-authenticated URLs.
-    cctv_url is treated as the Camview server address (e.g. d15.camview.io).
-    Falls back to direct RTSP if cctv_url already looks like an rtsp:// URL.
+    RTSP Pass-1: capture a frame from each camera and save it to frames_dir.
+
+    For Camview cameras (cctv_url is a DVR hostname, not an rtsp:// URL):
+      - Acquires sem (sem_net, 16 concurrent) as the outer gate, then
+        acquires _RTSP_CAP_SEM (6 concurrent) as the inner gate.
+      - StartVideo is called INSIDE _RTSP_CAP_SEM so the fresh token is used
+        by FFmpeg immediately — no queue-wait token expiry.
+      - Returns accessible=True + frame_path if a frame is captured.
+
+    For direct rtsp:// URLs: marks accessible=True, frame_path=None.
+      Frame capture is deferred to Pass-2 (no Camview token needed).
     """
     cam_id    = _camera_id(camera)
     device_id = str(camera.get("device_id") or "").strip()
@@ -1088,167 +1394,100 @@ async def _check_rtsp_camera(
     camera_no = str(_cn_raw).strip() if _cn_raw is not None else ""
     raw_url   = str(camera.get("cctv_url") or "").strip()
 
-    if not raw_url:
-        return {"camera_id": cam_id, "cam": camera,
-                "accessible": False, "resolved_url": None,
-                "rtsp_urls": None, "reason": "missing_cctv_url"}
+    _fail = lambda reason: {"camera_id": cam_id, "cam": camera,
+                            "accessible": False, "resolved_url": None,
+                            "rtsp_urls": None, "frame_path": None, "reason": reason}
 
-    # If cctv_url is already a direct RTSP URL, use it as-is (no Camview auth needed)
+    if not raw_url:
+        return _fail("missing_cctv_url")
+
+    # Direct RTSP URL — no Camview auth, defer frame capture to Pass-2
     if raw_url.lower().startswith("rtsp://"):
         return {"camera_id": cam_id, "cam": camera,
                 "accessible": True, "resolved_url": raw_url,
-                "rtsp_urls": [raw_url], "reason": "direct_rtsp"}
+                "rtsp_urls": [raw_url], "frame_path": None, "reason": "direct_rtsp"}
 
-    # Treat cctv_url as Camview server address
     if not device_id or not camera_no:
-        return {"camera_id": cam_id, "cam": camera,
-                "accessible": False, "resolved_url": None,
-                "rtsp_urls": None, "reason": "missing_device_id_or_camera_no"}
+        return _fail("missing_device_id_or_camera_no")
 
-    server = re.sub(r'^https?://', '', raw_url).rstrip('/').lower()
-
+    # Camview camera: capture frame atomically (StartVideo + FFmpeg inside RTSP semaphore)
     async with sem:
-        loop = asyncio.get_event_loop()
-        try:
-            rtsp_urls, stream_token, success = await asyncio.wait_for(
-                loop.run_in_executor(
-                    _THREAD_POOL, _sync_camview_start_video, server, device_id, camera_no
-                ),
-                # Allow room for 2 attempts: each up to (TIMEOUT_API+3)s + 1s sleep between
-                timeout=(TIMEOUT_API + 3) * 2 + 5,
+        _cap_ctx = _RTSP_CAP_SEM if _RTSP_CAP_SEM is not None else contextlib.nullcontext()
+        async with _cap_ctx:
+            jpeg, frame_path = await _camview_rtsp_capture_and_save(
+                camera, cam_id, frames_dir or FRAMES_FOLDER
             )
-        except asyncio.TimeoutError:
-            return {"camera_id": cam_id, "cam": camera,
-                    "accessible": False, "resolved_url": None,
-                    "rtsp_urls": None, "reason": "camview_api_timeout"}
-        except Exception as e:
-            return {"camera_id": cam_id, "cam": camera,
-                    "accessible": False, "resolved_url": None,
-                    "rtsp_urls": None, "reason": str(e)}
 
-    if not success or not rtsp_urls:
-        return {"camera_id": cam_id, "cam": camera,
-                "accessible": False, "resolved_url": None,
-                "rtsp_urls": None, "reason": "camview_api_failed"}
+    if not jpeg:
+        return _fail("frame_capture_failed")
 
     return {"camera_id": cam_id, "cam": camera,
-            "accessible": True, "resolved_url": rtsp_urls[0],
-            "rtsp_urls": rtsp_urls, "reason": "ok"}
+            "accessible": True, "resolved_url": None,
+            "rtsp_urls": None, "frame_path": frame_path, "reason": "ok"}
 
 
 # ===========================================================================
-# Pass-2: frame capture + VLM
+# Pass-2: VLM classification from saved frames
 # ===========================================================================
 
-async def _process_camera(
+async def _classify_frame_from_disk(
     access_result: dict,
     session: aiohttp.ClientSession,
     sem: asyncio.Semaphore,
-    is_rtsp: bool = False,
 ) -> dict:
     """
-    Semaphore limits concurrent Ollama requests to MAX_WORKERS_VLM.
-    Frames are saved to FRAMES_FOLDER; frame_path is returned in the result.
-    For RTSP: refreshes token-authenticated URLs immediately before capture
-    because Pass-1 tokens expire during the ~225s accessibility check phase.
+    Pass-2: classify a camera using its already-saved frame.
+
+    Reads JPEG bytes from access_result["frame_path"] (written by Pass-1).
+    No DVR access, no StartVideo, no RTSP — pure disk read + VLM.
+
+    Fallback: if frame_path is None (direct rtsp:// cameras), captures the
+    frame now via _capture_frame_with_save (which uses _RTSP_CAP_SEM internally).
     """
-    cam_id    = access_result["camera_id"]
-    cam       = access_result["cam"]
-    url       = access_result["resolved_url"]
-    rtsp_urls = access_result.get("rtsp_urls")  # list of token-auth'd URLs from Pass-1
+    cam_id     = access_result["camera_id"]
+    cam        = access_result["cam"]
+    frame_path = access_result.get("frame_path")
+    loop       = asyncio.get_event_loop()
 
-    async with sem:
-        try:
-            # ── RTSP token refresh ──────────────────────────────────────────
-            # Pass-1 tokens are short-lived; by the time Pass-2 runs (~225s
-            # later) they may be expired → 401 → frame_capture_failed.
-            # Re-call StartVideo here to get a fresh token before capturing.
-            # If refresh fails the cached Pass-1 URLs are almost certainly stale,
-            # so we mark the camera Not Accessible instead of attempting capture
-            # with a guaranteed-401 token.
-            token_refresh_failed = False
-            if is_rtsp and cam.get("cctv_url") and not str(cam.get("cctv_url", "")).lower().startswith("rtsp://"):
-                device_id = str(cam.get("device_id") or "").strip()
-                _cn_raw   = cam.get("camera_no")
-                camera_no = str(_cn_raw).strip() if _cn_raw is not None else ""
-                server    = re.sub(r'^https?://', '', str(cam["cctv_url"])).rstrip('/').lower()
-                if device_id and camera_no:
-                    loop = asyncio.get_event_loop()
-                    try:
-                        fresh_urls, _, ok = await asyncio.wait_for(
-                            loop.run_in_executor(
-                                _THREAD_POOL, _sync_camview_start_video, server, device_id, camera_no
-                            ),
-                            timeout=(TIMEOUT_API + 3) * 2 + 5,
-                        )
-                        if ok and fresh_urls:
-                            rtsp_urls = fresh_urls
-                            url       = fresh_urls[0]
-                            logger.debug(f"[Pass-2] Refreshed RTSP token for {cam_id}")
-                        else:
-                            token_refresh_failed = True
-                            logger.warning(f"[Pass-2] Token refresh failed for {cam_id}")
-                    except asyncio.TimeoutError:
-                        token_refresh_failed = True
-                        logger.warning(f"[Pass-2] Token refresh timed out for {cam_id}")
-                    except Exception as e:
-                        token_refresh_failed = True
-                        logger.warning(f"[Pass-2] Token refresh error for {cam_id}: {e}")
-            # ───────────────────────────────────────────────────────────────
+    base = {
+        "camera_id":   cam_id,
+        "device_id":   str(cam.get("device_id") or ""),
+        "camera_no":   str(cam.get("camera_no")  or ""),
+        "camera_name": cam.get("camera_name"),
+        "frame_path":  frame_path,
+    }
 
-            if token_refresh_failed:
-                return {
-                    "camera_id":      cam_id,
-                    "device_id":      str(cam.get("device_id") or ""),
-                    "camera_no":      str(cam.get("camera_no") or ""),
-                    "camera_name":    cam.get("camera_name"),
-                    "classification": "Uncertain",
-                    "status":         "Not Accessible",
-                    "detail":         "token_refresh_failed",
-                    "frame_path":     None,
-                }
-
-            jpeg, frame_path = await _capture_frame_with_save(
-                url, cam_id, is_rtsp=is_rtsp,
-                rtsp_url_list=rtsp_urls if is_rtsp else None,
+    try:
+        if frame_path and os.path.exists(frame_path):
+            # Happy path: read frame saved by Pass-1
+            jpeg = await loop.run_in_executor(
+                _THREAD_POOL,
+                lambda: open(frame_path, "rb").read(),  # noqa: WPS111
             )
+        else:
+            # Fallback for direct rtsp:// cameras (frame_path is None from Pass-1)
+            resolved = access_result.get("resolved_url") or ""
+            rtsp_urls = access_result.get("rtsp_urls")
+            jpeg, new_path = await _capture_frame_with_save(
+                resolved, cam_id, is_rtsp=True,
+                rtsp_url_list=rtsp_urls,
+            )
+            base["frame_path"] = new_path
             if not jpeg:
                 logger.warning(f"[Pass-2] Frame capture failed for {cam_id}")
-                return {
-                    "camera_id":      cam_id,
-                    "device_id":      str(cam.get("device_id") or ""),
-                    "camera_no":      str(cam.get("camera_no") or ""),
-                    "camera_name":    cam.get("camera_name"),
-                    "classification": "Uncertain",
-                    "status":         "Not Accessible",
-                    "detail":         "frame_capture_failed",
-                    "frame_path":     None,
-                }
+                return {**base, "classification": "Uncertain",
+                        "status": "Not Accessible", "detail": "frame_capture_failed"}
 
+        async with sem:
             label, reason = await _classify_with_vlm(jpeg, session)
-            return {
-                "camera_id":      cam_id,
-                "device_id":      str(cam.get("device_id") or ""),
-                "camera_no":      str(cam.get("camera_no") or ""),
-                "camera_name":    cam.get("camera_name"),
-                "classification": label,
-                "status":         "Accessible",
-                "detail":         reason or "classified",
-                "frame_path":     frame_path,
-            }
 
-        except Exception as e:
-            logger.error(f"[Pass-2] Processing error for {cam_id}: {e}", exc_info=True)
-            return {
-                "camera_id":      cam_id,
-                "device_id":      str(cam.get("device_id") or ""),
-                "camera_no":      str(cam.get("camera_no") or ""),
-                "camera_name":    cam.get("camera_name"),
-                "classification": "Uncertain",
-                "status":         "Not Accessible",
-                "detail":         f"processing_error: {e}",
-                "frame_path":     None,
-            }
+        return {**base, "classification": label,
+                "status": "Accessible", "detail": reason or "classified"}
+
+    except Exception as e:
+        logger.error(f"[Pass-2] Error for {cam_id}: {e}", exc_info=True)
+        return {**base, "classification": "Uncertain",
+                "status": "Not Accessible", "detail": f"processing_error: {e}"}
 
 
 # ===========================================================================
@@ -1311,15 +1550,21 @@ def _bulk_persist_status(runtime: dict, statuses: List[dict]) -> int:
                     runtime["assignment_date"], cam_id, status
                 )
             else:
-                device_id = str(item.get("device_id") or "").strip()
-                camera_no = str(item.get("camera_no") or "").strip()
+                device_id  = str(item.get("device_id") or "").strip()
+                camera_no  = str(item.get("camera_no") or "").strip()
+                frame_path = str(item.get("frame_path") or "").strip() or None
                 if not device_id:
                     parts     = cam_id.split("_", 1)
                     device_id = parts[0]
                     camera_no = parts[1] if len(parts) > 1 else ""
-                updated += update_rtsp_status(
-                    runtime["exam_id"], device_id, camera_no, status
-                )
+                if frame_path:
+                    updated += update_rtsp_status_and_frame_path(
+                        runtime["exam_id"], device_id, camera_no, status, frame_path
+                    )
+                else:
+                    updated += update_rtsp_status(
+                        runtime["exam_id"], device_id, camera_no, status
+                    )
         except Exception as e:
             logger.error(f"DB status persist failed for {cam_id}: {e}")
     logger.info(f"Bulk DB status persist complete: {updated} rows updated")
@@ -1452,6 +1697,9 @@ async def run_assignment_mode() -> dict:
             "persisted_classification_updates": 0,
         }
 
+    global _RTSP_CAP_SEM
+    _RTSP_CAP_SEM = asyncio.Semaphore(MAX_WORKERS_RTSP_CAPTURE)
+
     sem_net = asyncio.Semaphore(MAX_WORKERS_NETWORK)
     sem_vlm = asyncio.Semaphore(MAX_WORKERS_VLM)
 
@@ -1466,9 +1714,13 @@ async def run_assignment_mode() -> dict:
             await loop.run_in_executor(_THREAD_POOL, _preauth_camview_servers, cameras)
 
         # ── Pass-1 ────────────────────────────────────────────────────────
-        logger.info(f"Pass-1 | {len(cameras)} cameras | {MAX_WORKERS_NETWORK} concurrent")
+        frames_dir = _frames_dir_for_assignment(runtime.get("assignment_id")) if is_rtsp else ""
+        logger.info(
+            f"Pass-1 | {len(cameras)} cameras | {MAX_WORKERS_NETWORK} concurrent"
+            + (f" | frames → {frames_dir}" if frames_dir else "")
+        )
         p1_coros = (
-            [_check_rtsp_camera(c, sem_net) for c in cameras]
+            [_check_rtsp_camera(c, sem_net, frames_dir) for c in cameras]
             if is_rtsp else
             [_check_hls_camera(c, session, sem_net) for c in cameras]
         )
@@ -1496,9 +1748,14 @@ async def run_assignment_mode() -> dict:
                 "camera_id": x["camera_id"],
                 "device_id": str(x["cam"].get("device_id") or ""),
                 "camera_no": str(x["cam"].get("camera_no") or ""),
-                "status": "Accessible",
+                "status":    "Accessible",
+                "frame_path": x.get("frame_path"),  # written to DB in Pass-1 persist
             })
         for x in failed:
+            # Skip DB update when the failure was a transient DVR-side 503 —
+            # writing "Not Accessible" here would destroy valid status from prior runs.
+            if x.get("reason") == "dvr_service_unavailable":
+                continue
             cam = x.get("cam", {})
             statuses_to_persist.append({
                 "camera_id": x["camera_id"],
@@ -1520,18 +1777,13 @@ async def run_assignment_mode() -> dict:
             }
 
         # ── Pass-2 ────────────────────────────────────────────────────────
-        # Re-warm auth tokens before VLM workers start — Pass-1 may have taken
-        # several minutes and stream tokens can expire in that window.
-        if is_rtsp:
-            logger.info("[Camview] Pre-auth refresh before Pass-2 (force=True)...")
-            await loop.run_in_executor(_THREAD_POOL, _preauth_camview_servers, cameras, True)
-
+        # No DVR access in Pass-2 — frames were saved to disk in Pass-1.
         logger.info(
             f"Pass-2 | {len(accessible)} cameras | "
             f"{MAX_WORKERS_VLM} concurrent vLLM"
         )
         p2_coros = [
-            _process_camera(r, session, sem_vlm, is_rtsp=is_rtsp)
+            _classify_frame_from_disk(r, session, sem_vlm)
             for r in accessible
         ]
         classifications: List[dict] = []
@@ -1596,8 +1848,9 @@ async def run_assignment_mode() -> dict:
 # ===========================================================================
 
 async def _default_pipeline(cameras: List[dict], runtime: dict) -> None:
-    global _df
+    global _df, _RTSP_CAP_SEM
     is_rtsp = runtime["link_type"] == "RTSP"
+    _RTSP_CAP_SEM = asyncio.Semaphore(MAX_WORKERS_RTSP_CAPTURE)
     sem_net = asyncio.Semaphore(MAX_WORKERS_NETWORK)
     sem_vlm = asyncio.Semaphore(MAX_WORKERS_VLM)
 
@@ -1606,9 +1859,13 @@ async def _default_pipeline(cameras: List[dict], runtime: dict) -> None:
     async with aiohttp.ClientSession(connector=_make_connector()) as session:
 
         # Pass-1
-        logger.info(f"Pass-1 | {len(cameras)} cameras | {MAX_WORKERS_NETWORK} concurrent")
+        frames_dir = _frames_dir_for_assignment() if is_rtsp else ""
+        logger.info(
+            f"Pass-1 | {len(cameras)} cameras | {MAX_WORKERS_NETWORK} concurrent"
+            + (f" | frames → {frames_dir}" if frames_dir else "")
+        )
         p1_coros = (
-            [_check_rtsp_camera(c, sem_net) for c in cameras]
+            [_check_rtsp_camera(c, sem_net, frames_dir) for c in cameras]
             if is_rtsp else
             [_check_hls_camera(c, session, sem_net) for c in cameras]
         )
@@ -1639,17 +1896,13 @@ async def _default_pipeline(cameras: List[dict], runtime: dict) -> None:
             logger.warning("No accessible cameras")
             return
 
-        # Pass-2
-        if is_rtsp:
-            logger.info("[Camview] Pre-auth refresh before Pass-2 (force=True)...")
-            await loop.run_in_executor(_THREAD_POOL, _preauth_camview_servers, cameras, True)
-
+        # Pass-2 — frames already on disk, pure VLM
         logger.info(
             f"Pass-2 | {len(accessible)} cameras | "
             f"{MAX_WORKERS_VLM} vLLM workers"
         )
         p2_coros = [
-            _process_camera(r, session, sem_vlm, is_rtsp=is_rtsp)
+            _classify_frame_from_disk(r, session, sem_vlm)
             for r in accessible
         ]
         p2_start = time.time()

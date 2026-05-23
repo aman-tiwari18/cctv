@@ -643,12 +643,19 @@ def get_rtsp_cameras(exam_id: int) -> list:
                 
                 # Apply camera distribution filter for horizontal scaling
                 try:
-                    from app.camera_distributor import filter_cameras
+                    try:
+                        from app.camera_distributor import filter_cameras
+                    except ImportError:
+                        import sys
+                        from pathlib import Path
+                        root_dir = str(Path(__file__).resolve().parents[3])
+                        if root_dir not in sys.path:
+                            sys.path.append(root_dir)
+                        from app.camera_distributor import filter_cameras
                     rows = filter_cameras(rows)
-                except ImportError:
-                    # If distributor not available, return all cameras (single-node mode)
-                    pass
-                
+                except Exception as e:
+                    logger.warning(f"Failed to apply camera distribution filter: {e}")
+
                 logger.info(
                     f"[DB] Loaded {len(rows)} RTSP cameras "
                     f"(exam_id={exam_id})"
@@ -690,12 +697,19 @@ def get_rtsp_cameras_accessible(exam_id: int) -> list:
                 
                 # Apply camera distribution filter for horizontal scaling
                 try:
-                    from app.camera_distributor import filter_cameras
+                    try:
+                        from app.camera_distributor import filter_cameras
+                    except ImportError:
+                        import sys
+                        from pathlib import Path
+                        root_dir = str(Path(__file__).resolve().parents[3])
+                        if root_dir not in sys.path:
+                            sys.path.append(root_dir)
+                        from app.camera_distributor import filter_cameras
                     rows = filter_cameras(rows)
-                except ImportError:
-                    # If distributor not available, return all cameras (single-node mode)
-                    pass
-                
+                except Exception as e:
+                    logger.warning(f"Failed to apply camera distribution filter: {e}")
+
                 logger.info(
                     f"[DB] Loaded {len(rows)} ACCESSIBLE RTSP cameras "
                     f"(exam_id={exam_id})"
@@ -771,6 +785,33 @@ def update_rtsp_status(exam_id: int, device_id: str, camera_no: str, status: str
                 return cur.rowcount
     except Exception as e:
         logger.error(f"[DB] Error updating camera_links_rtsp status (device_id={device_id}, camera_no={camera_no}): {e}")
+        return 0
+
+
+def update_rtsp_status_and_frame_path(
+    exam_id: int, device_id: str, camera_no: str,
+    status: str, frame_path: Optional[str],
+) -> int:
+    """Update status and frame_path in camera_links_rtsp without touching classification."""
+    sql = """
+        UPDATE camera_links_rtsp
+        SET status = %s, frame_path = %s
+        WHERE exam_id = %s
+          AND device_id = %s
+          AND camera_no = %s
+          AND is_active = 1
+    """
+    try:
+        conn = _get_connection()
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (status, frame_path, exam_id, device_id, camera_no))
+                conn.commit()
+                return cur.rowcount
+    except Exception as e:
+        logger.error(
+            f"[DB] Error updating rtsp status+frame_path (device_id={device_id}, camera_no={camera_no}): {e}"
+        )
         return 0
 
 

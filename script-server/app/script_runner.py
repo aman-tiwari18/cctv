@@ -393,54 +393,73 @@ class ScriptRunner:
 
     async def cancel(self, execution_id: str) -> bool:
         """
-        Terminate a running script process by execution_id.
+        Terminate a running script process by execution_id, including all of its
+        mp.Process workers and any descendants (torch DataLoader helpers, etc.)
+        that hold GPU memory.
+
         Returns True if the process was found and kill was attempted, False if not found.
         """
         process = self._active_processes.get(str(execution_id))
         if process is None:
             return False
 
-        # First attempt graceful termination of the whole process group.
+        # Capture pgid up front. Once master_pipeline exits, os.getpgid(pid) raises
+        # ProcessLookupError — so we can't query it later when we need to clean up
+        # workers that outlived the master.
+        pgid = None
         try:
-            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-            logger.info(f"⏹ Cancelled script {execution_id} (SIGTERM sent to process group)")
+            pgid = os.getpgid(process.pid)
         except ProcessLookupError:
             logger.info(f"Script {execution_id} already terminated")
             return False
         except Exception as e:
-            logger.warning(f"Could not kill process group for {execution_id}: {e}")
-            try:
-                process.terminate()
-                logger.info(f"⏹ Cancelled script {execution_id} (SIGTERM sent to main process)")
-            except ProcessLookupError:
-                logger.info(f"Script {execution_id} already terminated")
-                return False
-            except Exception as e2:
-                logger.warning(f"Could not terminate main process for {execution_id}: {e2}")
+            logger.warning(f"Could not get pgid for {execution_id}: {e}")
 
-        # Wait for the process to exit after SIGTERM.
+        # 1. Graceful: SIGTERM to the whole process group.
+        try:
+            if pgid is not None:
+                os.killpg(pgid, signal.SIGTERM)
+                logger.info(f"⏹ {execution_id}: SIGTERM sent to pgid {pgid}")
+            else:
+                process.terminate()
+                logger.info(f"⏹ {execution_id}: SIGTERM sent to main pid (no pgid)")
+        except ProcessLookupError:
+            return False
+        except Exception as e:
+            logger.warning(f"SIGTERM failed for {execution_id}: {e}")
+
+        # 2. Wait for master_pipeline to exit.
         try:
             await asyncio.wait_for(process.wait(), timeout=SCRIPT_TERMINATE_GRACE_SECONDS)
-            return True
+            logger.info(f"⏹ {execution_id}: master pipeline exited after SIGTERM")
         except asyncio.TimeoutError:
-            logger.warning(f"Script {execution_id} did not exit after SIGTERM; escalating to SIGKILL")
+            logger.warning(
+                f"Script {execution_id} did not exit after SIGTERM in "
+                f"{SCRIPT_TERMINATE_GRACE_SECONDS:.0f}s — escalating to SIGKILL"
+            )
 
-        # Escalate to SIGKILL if it is still running.
-        try:
-            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-            logger.info(f"⏹ Cancelled script {execution_id} (SIGKILL sent to process group)")
-        except ProcessLookupError:
-            return True
-        except Exception as e:
-            logger.warning(f"Could not kill process group for {execution_id} with SIGKILL: {e}")
+        # 3. ALWAYS SIGKILL the process group as a cleanup pass.
+        # Even when master_pipeline exits cleanly, its mp.Process workers (which hold
+        # GPU memory) can outlive it — they catch SIGTERM in their own code, get stuck
+        # in CUDA calls, or spawn DataLoader helpers that get orphaned. They stay in
+        # master's pgid (mp.Process with spawn doesn't call setsid), so killpg(SIGKILL)
+        # reaches every survivor. Without this, GPU memory leaks until manual kill.
+        if pgid is not None:
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+                logger.info(f"⏹ {execution_id}: SIGKILL sweep on pgid {pgid} (clears worker stragglers)")
+            except ProcessLookupError:
+                # Group already empty — happy path
+                pass
+            except Exception as e:
+                logger.warning(f"SIGKILL sweep for {execution_id} failed: {e}")
+        else:
             try:
                 process.kill()
-                logger.info(f"⏹ Cancelled script {execution_id} (SIGKILL sent to main process)")
             except ProcessLookupError:
-                return True
-            except Exception as e2:
-                logger.warning(f"Could not kill main process for {execution_id}: {e2}")
+                pass
 
+        # 4. Best-effort wait so the GPU memory is actually freed before we return.
         try:
             await asyncio.wait_for(process.wait(), timeout=5.0)
         except asyncio.TimeoutError:

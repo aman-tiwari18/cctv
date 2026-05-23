@@ -421,9 +421,16 @@ sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Old fastAPI startup hook logic for pipeline cleanup 
-    cleanup_old_pipelines()
-    
+    # cleanup_old_pipelines() pkills every running master_pipeline.py on the host.
+    # That is destructive when a sibling FastAPI worker is mid-flight: it kills
+    # the freshly-spawned detection pipelines instead of just orphans. Gate it
+    # behind an opt-in env var so a true clean restart can still call it.
+    # Why: pipeline_manager.cleanup_old_pipelines sends SIGTERM, SIGTERM, SIGKILL
+    # to every match — which is exactly what was killing scripts ~1 s after they
+    # started on the main server (multiple uvicorn instances each running it).
+    if os.getenv("CLEANUP_OLD_PIPELINES_ON_STARTUP", "0") == "1":
+        cleanup_old_pipelines()
+
     # Startup logic
     logger.info("Starting CCTV Script Execution Server (FastAPI)...")
     logger.info(f"Main backend URL: {MAIN_BACKEND_URL}")
@@ -549,18 +556,45 @@ async def get_running():
     }
 
 @app.post("/executions/{execution_id}/cancel")
-async def cancel_execution(execution_id: str):
+async def cancel_execution(execution_id: str, forwarded: bool = False):
     """
     Manually cancel a running script without stopping the server.
-    Sends SIGTERM to the subprocess, marks the assignment CANCELLED in the DB,
-    and removes it from the poller's running set.
+    Sends SIGTERM (then SIGKILL) to the subprocess and its mp.Process workers,
+    marks the assignment CANCELLED in the DB, and removes it from the poller's running set.
+
+    The frontend always hits the main worker (nginx routes /ss → main), but a script
+    can be running on any worker. So if we don't find the process locally, fan out
+    the cancel to every remote worker. The `forwarded` flag prevents infinite loops
+    when a remote worker receives the forwarded call.
     """
     from app.script_runner import script_runner
 
     killed = await script_runner.cancel(execution_id)
+    forwarded_kill = False
 
-    if not killed:
-        # Not in active processes — check if it's tracked by poller at all
+    # If we didn't kill anything locally, the script may be running on another worker.
+    # Fan out to the other workers (skip when called via forwarding to avoid loops).
+    if not killed and not forwarded:
+        remote_workers = [
+            w for w in GPU_WORKERS
+            if w["ip"] not in ("localhost", "127.0.0.1", "0.0.0.0")
+        ]
+        for w in remote_workers:
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    r = await client.post(
+                        f"http://{w['ip']}:{w['port']}/executions/{execution_id}/cancel",
+                        params={"forwarded": "true"},
+                    )
+                    if r.status_code == 200 and r.json().get("process_killed"):
+                        forwarded_kill = True
+                        logger.info(f"⏹ {execution_id} cancelled on remote worker {w['id']} ({w['ip']})")
+                        break  # one worker had it; no need to ask the rest
+            except Exception as e:
+                logger.debug(f"Cancel fan-out to {w['id']} ({w['ip']}) failed: {e}")
+
+    if not killed and not forwarded_kill:
+        # Not in active processes anywhere — check if poller still tracks it.
         if execution_id not in poller_service.running_scripts:
             raise HTTPException(
                 status_code=404,
@@ -571,7 +605,7 @@ async def cancel_execution(execution_id: str):
     poller_service.running_scripts.discard(execution_id)
 
     # Mark CANCELLED in the main backend DB
-    if IS_MAIN_WORKER:
+    if IS_MAIN_WORKER and not forwarded:
         await poller_service.update_assignment_status(
             execution_id, "CANCELLED", {"error_log": "Manually cancelled via API"}
         )
@@ -580,7 +614,7 @@ async def cancel_execution(execution_id: str):
     return {
         "success": True,
         "message": f"Assignment {execution_id} has been cancelled",
-        "process_killed": killed,
+        "process_killed": killed or forwarded_kill,
     }
 
 @app.get("/executions/recent")
@@ -841,6 +875,44 @@ async def get_local_gpu_monitor():
     Useful for quick local monitoring without network overhead.
     """
     return get_local_gpu_stats_data()
+
+
+@app.get("/metrics")
+def prometheus_metrics():
+    """Prometheus scrape endpoint — exposes per-worker GPU metrics."""
+    from app.metrics import render_metrics
+    body, content_type = render_metrics()
+    return Response(content=body, media_type=content_type)
+
+
+# ── Prometheus query proxy ────────────────────────────────────
+# Browser hits the script-server, script-server forwards to Prometheus.
+# Keeps Prometheus off the public surface and avoids CORS in the SPA.
+PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "http://localhost:9090").rstrip("/")
+_PROM_ALLOWED_PATHS = {"query", "query_range", "series", "labels", "label/__name__/values"}
+
+
+@app.get("/prometheus-api/{path:path}")
+async def prometheus_proxy(path: str, request: Request):
+    """Forward whitelisted Prometheus HTTP API calls."""
+    if path not in _PROM_ALLOWED_PATHS and not path.startswith("label/"):
+        raise HTTPException(status_code=400, detail=f"Path not allowed: {path}")
+
+    url = f"{PROMETHEUS_URL}/api/v1/{path}"
+    # Short connect timeout so the browser doesn't spin when Prometheus is down.
+    timeout = httpx.Timeout(connect=1.5, read=5.0, write=5.0, pool=1.5)
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.get(url, params=dict(request.query_params))
+        return Response(
+            content=r.content,
+            status_code=r.status_code,
+            media_type=r.headers.get("content-type", "application/json"),
+        )
+    except httpx.ConnectError:
+        raise HTTPException(status_code=503, detail="Prometheus not running (start it via docker-compose.prometheus.yml)")
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"Prometheus error: {exc}")
 
 
 # ==========================================
