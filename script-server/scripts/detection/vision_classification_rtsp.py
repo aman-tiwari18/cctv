@@ -105,7 +105,15 @@ DEFAULT_EXAM_DATE: str = datetime.now().strftime("%Y-%m-%d")
 VISION_ASSIGNMENT_PAYLOAD: Optional[str] = os.getenv("VISION_ASSIGNMENT_PAYLOAD")
 
 SAVE_FOLDER         = os.path.join(PROJECT_ROOT, "results/tcs_classification")
-FRAMES_FOLDER       = os.path.join(PROJECT_ROOT, "results/classification_frames")
+# Frames must land on NFS so they persist on the main server AND so Pass-2
+# (same worker, same run) can read them back without re-capturing from the DVR.
+# The detection results dir (/app/scripts/detection/results) is a symlink to
+# /data/nfs/cctv_images on all workers, so basing FRAMES_FOLDER here routes
+# every saved JPEG through NFS to the main server automatically.
+# Pass-2 reads frame_path with os.path.exists() — NFS sync export guarantees
+# Pass-1 writes are durable before Pass-2 reads them.
+_SCRIPT_DIR         = os.path.dirname(os.path.abspath(__file__))
+FRAMES_FOLDER       = os.path.join(_SCRIPT_DIR, "results", "classification_frames")
 CHECKPOINT_FILE     = "checkpoint_progress.json"
 CHECKPOINT_INTERVAL = 500
 RESUME_FROM_CHECKPOINT = True
