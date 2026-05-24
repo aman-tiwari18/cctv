@@ -356,7 +356,7 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
     const [category, setCategory] = useState('all');
     const [activeKey, setActiveKey] = useState(null);
     const [mousePos, setMousePos] = useState(null);
-    const [chartWidth, setChartWidth] = useState(400);
+    const [chartWidth, setChartWidth] = useState(0);
     const chartBoxRef = useRef(null);
 
     // Donut radius = half the available width minus 24px per side (clears the +12
@@ -439,7 +439,7 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                     <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '20px', fontWeight: 700, lineHeight: '24px' }}>
                         Detection Distribution
                     </Typography>
-                    <FormControl size="small" sx={{ minWidth: 140 }}>
+                    <FormControl size="small" sx={{ minWidth: 180 }}>
                         <Select
                             value={category}
                             onChange={(e) => setCategory(e.target.value)}
@@ -551,7 +551,7 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                 onMouseLeave={() => { setMousePos(null); setActiveKey(null); }}
                             >
                                 <ResponsiveContainer width="100%" height="100%">
-                                    <PieChart>
+                                    <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                                         <Pie
                                             data={donutData}
                                             cx="50%"
@@ -561,6 +561,7 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                             innerRadius={innerR}
                                             outerRadius={outerR}
                                             paddingAngle={0}
+                                            cornerRadius={8}
                                             dataKey="count"
                                             nameKey="label"
                                             stroke="none"
@@ -606,7 +607,13 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                         pointerEvents: 'none',
                                     }}
                                 >
-                                    <Typography sx={{ fontFamily: 'Inter, sans-serif', fontSize: '48px', fontWeight: 700, color: '#2E68C9', lineHeight: '60px' }}>
+                                    <Typography sx={{
+                                        fontFamily: 'Inter, sans-serif',
+                                        fontSize: `${Math.max(28, Math.min(48, outerR * 0.32))}px`,
+                                        fontWeight: 700,
+                                        color: '#2E68C9',
+                                        lineHeight: `${Math.max(36, Math.min(60, outerR * 0.4))}px`,
+                                    }}>
                                         {centerValue.toLocaleString()}
                                     </Typography>
                                     <Typography
