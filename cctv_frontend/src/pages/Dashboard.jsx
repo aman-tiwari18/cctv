@@ -281,7 +281,7 @@ const renderActiveShape = (props) => {
                 cx={cx}
                 cy={cy}
                 innerRadius={innerRadius}
-                outerRadius={outerRadius + 12}
+                outerRadius={outerRadius + 6}
                 startAngle={startAngle}
                 endAngle={endAngle}
                 fill={fill}
@@ -459,7 +459,7 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                         <Typography color="text.secondary">No detections in this view.</Typography>
                     </Box>
                 ) : (
-                    <Grid container spacing={2} alignItems="center">
+                    <Grid container spacing={2} alignItems="flex-start">
                         <Grid item xs={12} sm={5}>
                             <Box sx={{ maxHeight: 280, overflowY: 'auto', pr: 0.5 }}>
                                 <Stack spacing={1.2}>
@@ -524,7 +524,7 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
 
                         <Grid item xs={12} sm={7}>
                             <Box
-                                sx={{ position: 'relative', height: BOX_HEIGHT }}
+                                sx={{ position: 'relative', height: BOX_HEIGHT, overflow: 'visible' }}
                                 onMouseMove={(e) => {
                                     const rect = e.currentTarget.getBoundingClientRect();
                                     setMousePos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
