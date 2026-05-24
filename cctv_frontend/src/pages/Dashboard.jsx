@@ -360,8 +360,8 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
     // Fixed donut geometry — recharts ResponsiveContainer handles the overall responsive
     // sizing, but the ring itself is rendered with stable pixel radii so it always renders
     // immediately on first paint (no measurement step, no zero-radius flash).
-    const OUTER_R = 145;
-    const INNER_R = 110;
+    const OUTER_R = 130;
+    const INNER_R = 100;
     const BOX_HEIGHT = 280;
 
     // Build tree: 3 parent categories, each with its sub-detections
@@ -524,7 +524,12 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
 
                         <Grid item xs={12} sm={7}>
                             <Box
-                                sx={{ position: 'relative', height: BOX_HEIGHT, overflow: 'visible' }}
+                                sx={{
+                                    position: 'relative',
+                                    height: BOX_HEIGHT,
+                                    overflow: 'visible',
+                                    '& svg': { overflow: 'visible' },
+                                }}
                                 onMouseMove={(e) => {
                                     const rect = e.currentTarget.getBoundingClientRect();
                                     setMousePos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
@@ -536,7 +541,7 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                         <Pie
                                             data={donutData}
                                             cx="50%"
-                                            cy="85%"
+                                            cy="65%"
                                             startAngle={180}
                                             endAngle={0}
                                             innerRadius={INNER_R}
@@ -579,7 +584,7 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                 <Box
                                     sx={{
                                         position: 'absolute',
-                                        bottom: 42,
+                                        bottom: 98,
                                         left: 0,
                                         right: 0,
                                         display: 'flex',
