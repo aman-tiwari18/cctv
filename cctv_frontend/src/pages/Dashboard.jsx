@@ -359,12 +359,15 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
     const [chartWidth, setChartWidth] = useState(0);
     const chartBoxRef = useRef(null);
 
-    // Donut radius = half the available width minus 24px per side (clears the +12
-    // hover expansion plus the ~6px drop-shadow blur, with 6px slack). Cap at 160
-    // so on wide screens the ring stays a sensible card-sized graphic instead of
+    // Donut radius = half the available width minus 32px per side. The 32px reserves room for:
+    //   +12 hover expansion (active sector outerRadius+12),
+    //    ~6 drop-shadow blur,
+    //    ~6 cornerRadius rounding extending past the arc tangent at the open ends,
+    //    ~8 slack.
+    // Cap at 160 so on wide screens the ring stays a sensible card-sized graphic instead of
     // ballooning to fill the column. No floor — on narrow viewports the radius just
     // shrinks naturally so the ring never clips the box.
-    const outerR = Math.max(0, Math.min(160, Math.floor(chartWidth / 2) - 24));
+    const outerR = Math.max(0, Math.min(160, Math.floor(chartWidth / 2) - 32));
     const innerR = Math.max(0, outerR - 32);
     // Box height + cy track the radius so the half-circle always sits with the
     // same visual padding (35px above the arc, 85px below the chord for the
@@ -556,12 +559,12 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                             data={donutData}
                                             cx="50%"
                                             cy={arcCy}
-                                            startAngle={180}
-                                            endAngle={0}
+                                            startAngle={179}
+                                            endAngle={1}
                                             innerRadius={innerR}
                                             outerRadius={outerR}
-                                            paddingAngle={0}
-                                            cornerRadius={8}
+                                            paddingAngle={1}
+                                            cornerRadius={6}
                                             dataKey="count"
                                             nameKey="label"
                                             stroke="none"
