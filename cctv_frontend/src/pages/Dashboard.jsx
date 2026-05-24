@@ -359,15 +359,16 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
     const [chartWidth, setChartWidth] = useState(400);
     const chartBoxRef = useRef(null);
 
-    // Donut radius scales to fully use the available width (the chart column is
-    // typically much wider than the ring needs). 16px per side clears the +12
-    // hover expansion plus drop-shadow blur margin. Floor at 100 keeps
-    // "TOTAL DETECTIONS" inside the inner circle on narrow Mac viewports.
-    const outerR = Math.max(100, Math.min(280, Math.floor(chartWidth / 2) - 16));
-    const innerR = outerR - 32;
-    // Box height + cy scale with the radius so the half-circle always has the
-    // same visual padding around it (35px above the arc, 85px below the chord
-    // for the "599 / TOTAL DETECTIONS" overlay + breathing room).
+    // Donut radius = half the available width minus 24px per side (clears the +12
+    // hover expansion plus the ~6px drop-shadow blur, with 6px slack). Cap at 160
+    // so on wide screens the ring stays a sensible card-sized graphic instead of
+    // ballooning to fill the column. No floor — on narrow viewports the radius just
+    // shrinks naturally so the ring never clips the box.
+    const outerR = Math.max(0, Math.min(160, Math.floor(chartWidth / 2) - 24));
+    const innerR = Math.max(0, outerR - 32);
+    // Box height + cy track the radius so the half-circle always sits with the
+    // same visual padding (35px above the arc, 85px below the chord for the
+    // "599 / TOTAL DETECTIONS" overlay + breathing room).
     const arcCy = outerR + 35;
     const boxHeight = arcCy + 85;
 
