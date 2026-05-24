@@ -560,7 +560,7 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                             endAngle={0}
                                             innerRadius={innerR}
                                             outerRadius={outerR}
-                                            paddingAngle={1}
+                                            paddingAngle={0}
                                             dataKey="count"
                                             nameKey="label"
                                             stroke="none"
