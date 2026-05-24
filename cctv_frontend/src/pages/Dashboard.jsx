@@ -356,34 +356,13 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
     const [category, setCategory] = useState('all');
     const [activeKey, setActiveKey] = useState(null);
     const [mousePos, setMousePos] = useState(null);
-    const [chartWidth, setChartWidth] = useState(0);
-    const chartBoxRef = useRef(null);
 
-    // Donut radius = half the available width minus 32px per side. The 32px reserves room for:
-    //   +12 hover expansion (active sector outerRadius+12),
-    //    ~6 drop-shadow blur,
-    //    ~6 cornerRadius rounding extending past the arc tangent at the open ends,
-    //    ~8 slack.
-    // Cap at 160 so on wide screens the ring stays a sensible card-sized graphic instead of
-    // ballooning to fill the column. No floor — on narrow viewports the radius just
-    // shrinks naturally so the ring never clips the box.
-    const outerR = Math.max(0, Math.min(160, Math.floor(chartWidth / 2) - 32));
-    const innerR = Math.max(0, outerR - 32);
-    // Box height + cy track the radius so the half-circle always sits with the
-    // same visual padding (35px above the arc, 85px below the chord for the
-    // "599 / TOTAL DETECTIONS" overlay + breathing room).
-    const arcCy = outerR + 35;
-    const boxHeight = arcCy + 85;
-
-    useEffect(() => {
-        const el = chartBoxRef.current;
-        if (!el || typeof ResizeObserver === 'undefined') return;
-        const ro = new ResizeObserver(([entry]) => {
-            if (entry) setChartWidth(entry.contentRect.width);
-        });
-        ro.observe(el);
-        return () => ro.disconnect();
-    }, []);
+    // Fixed donut geometry — recharts ResponsiveContainer handles the overall responsive
+    // sizing, but the ring itself is rendered with stable pixel radii so it always renders
+    // immediately on first paint (no measurement step, no zero-radius flash).
+    const OUTER_R = 145;
+    const INNER_R = 110;
+    const BOX_HEIGHT = 280;
 
     // Build tree: 3 parent categories, each with its sub-detections
     const tree = useMemo(() => {
@@ -545,8 +524,7 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
 
                         <Grid item xs={12} sm={7}>
                             <Box
-                                ref={chartBoxRef}
-                                sx={{ position: 'relative', height: boxHeight }}
+                                sx={{ position: 'relative', height: BOX_HEIGHT }}
                                 onMouseMove={(e) => {
                                     const rect = e.currentTarget.getBoundingClientRect();
                                     setMousePos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
@@ -558,13 +536,13 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                         <Pie
                                             data={donutData}
                                             cx="50%"
-                                            cy={arcCy}
-                                            startAngle={179}
-                                            endAngle={1}
-                                            innerRadius={innerR}
-                                            outerRadius={outerR}
+                                            cy="85%"
+                                            startAngle={180}
+                                            endAngle={0}
+                                            innerRadius={INNER_R}
+                                            outerRadius={OUTER_R}
                                             paddingAngle={1}
-                                            cornerRadius={6}
+                                            cornerRadius={4}
                                             dataKey="count"
                                             nameKey="label"
                                             stroke="none"
@@ -601,7 +579,7 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                 <Box
                                     sx={{
                                         position: 'absolute',
-                                        bottom: 88,
+                                        bottom: 42,
                                         left: 0,
                                         right: 0,
                                         display: 'flex',
@@ -612,10 +590,10 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                 >
                                     <Typography sx={{
                                         fontFamily: 'Inter, sans-serif',
-                                        fontSize: `${Math.max(28, Math.min(48, outerR * 0.32))}px`,
+                                        fontSize: '48px',
                                         fontWeight: 700,
                                         color: '#2E68C9',
-                                        lineHeight: `${Math.max(36, Math.min(60, outerR * 0.4))}px`,
+                                        lineHeight: '60px',
                                     }}>
                                         {centerValue.toLocaleString()}
                                     </Typography>
