@@ -13,6 +13,21 @@ export default defineConfig({
         })
     ],
 
+    build: {
+        rollupOptions: {
+            output: {
+                manualChunks: {
+                    'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+                    'vendor-mui': ['@mui/material', '@emotion/react', '@emotion/styled'],
+                    'vendor-mui-icons': ['@mui/icons-material'],
+                    'vendor-charts': ['recharts'],
+                    'vendor-socket': ['socket.io-client'],
+                    'vendor-excel': ['xlsx'],
+                },
+            },
+        },
+    },
+
     server: {
         port: 5173,
         proxy: {

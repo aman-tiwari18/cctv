@@ -36,7 +36,7 @@ from scripts.detection.backend.pipeline_manager import (
     cleanup_old_pipelines, processes, ALL_ANALYTICS
 )
 
-DETECTION_SCAN_INTERVAL_SECONDS = 2
+DETECTION_SCAN_INTERVAL_SECONDS = 10
 known_detection_files = {}
 # Secondary index: type_key → date_str → Set[tagged_path]
 # Allows O(k) date-filtered lookups instead of O(N) full scans.
@@ -114,50 +114,89 @@ def _epoch_ms(value) -> Optional[int]:
             return None
 
 
-@lru_cache(maxsize=4096)
-def _camera_meta_for_ch(ch_no: str, exam_date_iso: str) -> dict:
+# In-memory camera index — bulk-loaded at startup by _init_camera_index().
+# Keys: (device_id, camera_no) for RTSP; ch_no str for HLS.
+# This replaces per-request DB queries (50 queries × 27 ms = 1.4 s → 50 × 0 ms = ~0 ms).
+_rtsp_cam_index: dict = {}
+_hls_cam_index: dict = {}
+
+
+def _init_camera_index():
+    """Bulk-load all active cameras into memory in a single query per table."""
+    global _rtsp_cam_index, _hls_cam_index
+    try:
+        conn = _get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT device_id, camera_no, camera_name, centre_name, city, state, "
+                "tc_code, cctv_url, classification FROM camera_links_rtsp WHERE is_active=1"
+            )
+            rtsp_rows = cur.fetchall()
+            for row in rtsp_rows:
+                dev = str(row.get("device_id") or "")
+                cam = str(row.get("camera_no") or "")
+                if dev and cam:
+                    _rtsp_cam_index[(dev, cam)] = row
+                if cam:
+                    _rtsp_cam_index.setdefault(("", cam), row)
+
+            cur.execute(
+                "SELECT ch_code, camera_name, centre_name, city, state, "
+                "tc_code, cctv_url, camera_category FROM camera_links_hls WHERE is_active=1"
+            )
+            for row in cur.fetchall():
+                ch = str(row.get("ch_code") or "")
+                if ch:
+                    _hls_cam_index[ch] = row
+        conn.close()
+        logger.info(f"Camera index: {len(rtsp_rows)} RTSP rows → {len(_rtsp_cam_index)} keys")
+    except Exception as e:
+        logger.error(f"Camera index init failed: {e}")
+
+
+def _camera_meta_for_ch(ch_no: str, exam_date_iso: str = "") -> dict:
     if not ch_no:
         return {}
+    hit = _hls_cam_index.get(ch_no)
+    if hit is not None:
+        return hit
+    # Fallback to DB if index empty (e.g. init failed)
     return get_hls_camera_by_ch_code(ch_no, exam_date_iso) or {}
 
 
 @lru_cache(maxsize=4096)
 def _camera_meta_for_rtsp_pk(camera_id_pk: int) -> dict:
-    """Fetch RTSP camera metadata by primary key."""
     if not camera_id_pk:
         return {}
     return get_rtsp_camera_by_id(camera_id_pk) or {}
 
 
-@lru_cache(maxsize=8192)
 def _camera_meta_for_rtsp_device_ch(device_id: str, camera_no: str) -> dict:
-    """Fetch RTSP camera metadata by device_id and camera_no.
-    
-    If device_id is empty, try to find by camera_no alone (useful for HLS->RTSP fallback).
-    """
     if not camera_no:
         return {}
-    
+    if device_id:
+        hit = _rtsp_cam_index.get((device_id, camera_no))
+        if hit is not None:
+            return hit
+    # Try camera_no-only key (covers the fallback path)
+    hit = _rtsp_cam_index.get(("", camera_no))
+    if hit is not None:
+        return hit
+    # Last resort: DB (handles cameras added after startup)
     if device_id:
         result = get_rtsp_camera_by_device_and_ch(device_id, camera_no)
         if result:
             return result
-    
-    # Fallback: try to find by camera_no alone if device_id is missing
     try:
         conn = _get_connection()
         with conn.cursor() as cur:
             cur.execute(
-                """
-                SELECT * FROM camera_links_rtsp
-                WHERE camera_no = %s AND is_active = 1
-                LIMIT 1
-                """,
+                "SELECT * FROM camera_links_rtsp WHERE camera_no = %s AND is_active=1 LIMIT 1",
                 (camera_no,)
             )
             row = cur.fetchone()
-            conn.close()
-            return row or {}
+        conn.close()
+        return row or {}
     except Exception as e:
         logger.error(f"RTSP camera lookup by camera_no failed: {e}")
         return {}
@@ -346,7 +385,8 @@ async def detection_watch_loop():
     while True:
         await asyncio.sleep(DETECTION_SCAN_INTERVAL_SECONDS)
         try:
-            current_snapshot = list_detection_files()
+            # Run in thread — rglob over 90k files blocks for ~0.5s synchronously.
+            current_snapshot = await asyncio.to_thread(list_detection_files)
 
             for type_key, current_files in current_snapshot.items():
                 previous_files = known_detection_files.get(type_key, set())
@@ -385,15 +425,26 @@ async def detection_watch_loop():
                         except Exception:
                             return 0
 
+                    # Sorting calls .stat() per file, which is an NFS round trip
+                    # each. Offload to a thread so the event loop stays free.
+                    sorted_new = await asyncio.to_thread(
+                        lambda paths: sorted(paths, key=_new_file_mtime),
+                        new_files,
+                    )
+
                     emitted = 0
-                    for tagged_path in sorted(new_files, key=_new_file_mtime):
+                    for tagged_path in sorted_new:
                         try:
                             origin, relative_path = tagged_path.split(":", 1)
                             base_dir = RTSP_RESULTS_DIR if origin == "rtsp" else RESULTS_DIR
                             file_path = base_dir / DETECTION_FOLDERS[type_key] / relative_path
-                            payload = parse_detection_filename(
+                            # parse_detection_filename hits the in-memory camera
+                            # index (mostly cache hits) but may also hit MySQL on
+                            # miss — keep it off the event loop just in case.
+                            payload = await asyncio.to_thread(
+                                parse_detection_filename,
                                 relative_path, type_key, file_path,
-                                is_new_image=True, source=origin,
+                                True, origin,
                             )
                             await sio.emit("detection:new", payload)
                             emitted += 1
@@ -442,7 +493,10 @@ async def lifespan(app: FastAPI):
     await poller_service.start()
 
     global known_detection_files, known_detection_by_date
-    known_detection_files = list_detection_files()
+    # Bulk-load all cameras into memory once — eliminates per-request DB queries.
+    await asyncio.to_thread(_init_camera_index)
+    # Run initial file scan in thread — 90k files takes ~0.5s synchronously.
+    known_detection_files = await asyncio.to_thread(list_detection_files)
     known_detection_by_date = _build_date_index(known_detection_files)
     
     # Background log cleanup task
@@ -492,30 +546,66 @@ async def log_requests(request: Request, call_next):
 
 
 # ── Image serving endpoints (replaces StaticFiles mounts) ─────
-def _safe_resolve(base_dir: Path, relative: str) -> Path:
-    """Resolve a relative path against base_dir, preventing directory traversal."""
+# Pre-resolve base dirs once. base_dir.resolve() on an NFS-symlinked dir does
+# a readlink syscall per request; doing it at import time saves N NFS round
+# trips per image. Symlink targets don't change at runtime here.
+_RESULTS_DIR_RESOLVED = str(RESULTS_DIR.resolve())
+_RTSP_RESULTS_DIR_RESOLVED = str(RTSP_RESULTS_DIR.resolve())
+_CLIENT_SELECTED_DIR_RESOLVED = str(CLIENT_SELECTED_DIR.resolve())
+
+
+@lru_cache(maxsize=65536)
+def _safe_resolve_cached(base_dir_resolved: str, relative: str) -> str:
+    """Cached resolution + existence check for a (base_dir, relative) pair.
+
+    Each call previously made 3-4 NFS round trips (.resolve(), .exists(),
+    .is_file()). Detection images are immutable once written, so caching the
+    resolved absolute path eliminates the repeat stat storm when the same
+    thumbnail is fetched across page loads / multiple tabs.
+    """
+    base_dir = Path(base_dir_resolved)
     candidate = (base_dir / relative).resolve()
-    if not str(candidate).startswith(str(base_dir.resolve())):
+    if not str(candidate).startswith(base_dir_resolved):
         raise HTTPException(status_code=400, detail="Invalid path")
     if not candidate.exists() or not candidate.is_file():
+        # Negative results are NOT cached — let the next attempt retry once
+        # the file appears. The cache key is only stored on success.
         raise HTTPException(status_code=404, detail="Image not found")
-    return candidate
+    return str(candidate)
 
 
+def _safe_resolve(base_dir: Path, relative: str) -> Path:
+    """Resolve a relative path against base_dir, preventing directory traversal."""
+    if base_dir is RESULTS_DIR:
+        base = _RESULTS_DIR_RESOLVED
+    elif base_dir is RTSP_RESULTS_DIR:
+        base = _RTSP_RESULTS_DIR_RESOLVED
+    elif base_dir is CLIENT_SELECTED_DIR:
+        base = _CLIENT_SELECTED_DIR_RESOLVED
+    else:
+        base = str(base_dir.resolve())
+    return Path(_safe_resolve_cached(base, relative))
+
+
+# NOTE: These endpoints are intentionally synchronous (`def`, not `async def`).
+# FastAPI runs sync routes in the threadpool, which parallelizes the NFS stat
+# work and keeps the event loop free for Socket.IO, /detections, and the
+# watcher. Previously these were `async def`, so each NFS round trip blocked
+# the loop and one slow image stalled every other request.
 @app.get("/serve-detection-images/{file_path:path}")
-async def serve_detection_image(file_path: str):
+def serve_detection_image(file_path: str):
     resolved = _safe_resolve(RESULTS_DIR, file_path)
     return FileResponse(resolved, media_type="image/jpeg")
 
 
 @app.get("/serve-rtsp-detection-images/{file_path:path}")
-async def serve_rtsp_detection_image(file_path: str):
+def serve_rtsp_detection_image(file_path: str):
     resolved = _safe_resolve(RTSP_RESULTS_DIR, file_path)
     return FileResponse(resolved, media_type="image/jpeg")
 
 
 @app.get("/serve-client-detection-images/{file_path:path}")
-async def serve_client_detection_image(file_path: str):
+def serve_client_detection_image(file_path: str):
     resolved = _safe_resolve(CLIENT_SELECTED_DIR, file_path)
     return FileResponse(resolved, media_type="image/jpeg")
 
@@ -715,7 +805,10 @@ async def fetch_worker_gpu_stats(worker: dict) -> dict:
     # If this is the local server (localhost), call the function directly instead of HTTP request
     if worker['ip'] in ('localhost', '127.0.0.1', '0.0.0.0'):
         try:
-            local_data = get_local_gpu_stats_data()
+            # get_local_gpu_stats_data spawns nvidia-smi subprocesses on cache miss.
+            # Even with a TTL cache, the miss path must not run in the event loop
+            # or the whole server stalls while nvidia-smi runs.
+            local_data = await asyncio.to_thread(get_local_gpu_stats_data)
             _worker_fail_count[worker_id] = 0
             _worker_last_good[worker_id] = local_data
             return {
@@ -874,7 +967,8 @@ async def get_local_gpu_monitor():
     Get GPU statistics for the local server only (no remote calls).
     Useful for quick local monitoring without network overhead.
     """
-    return get_local_gpu_stats_data()
+    # Cache miss path runs nvidia-smi — keep it off the event loop.
+    return await asyncio.to_thread(get_local_gpu_stats_data)
 
 
 @app.get("/metrics")

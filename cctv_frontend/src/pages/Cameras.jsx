@@ -13,10 +13,10 @@ import {
   Videocam as VideocamIcon,
 } from '@mui/icons-material';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
-import AssignmentIcon from '@mui/icons-material/Assignment';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { camerasAPI, examsAPI } from '../services/api';
+import { format } from 'date-fns';
+import { camerasAPI, examsAPI, executionsAPI } from '../services/api';
 import ExamSidebar from '../components/ExamSidebar';
 
 
@@ -110,6 +110,7 @@ const Cameras = () => {
   const [examLinkType, setExamLinkType] = useState(null);
   const [loading, setLoading] = useState(false);
   const [statusCounts, setStatusCounts] = useState({ accessible: 0, notAccessible: 0, unknown: 0 });
+  const [visionSummary, setVisionSummary] = useState(null);
 
   /* ── Search & Sort ── */
   const [searchQuery, setSearchQuery] = useState('');
@@ -160,9 +161,22 @@ const Cameras = () => {
   }, [searchQuery]);
 
 
+  const loadVisionSummary = useCallback(() => {
+    if (!selectedExamId) return;
+    executionsAPI.getVisionSummary({ exam_id: selectedExamId })
+      .then((res) => setVisionSummary(res?.data?.data || null))
+      .catch(() => setVisionSummary(null));
+  }, [selectedExamId]);
+
   useEffect(() => {
-    if (selectedExamId) { loadCameras(); }
-    else { setCameras([]); setTotalCount(0); }
+    if (selectedExamId) {
+      loadCameras();
+      loadVisionSummary();
+    } else {
+      setCameras([]);
+      setTotalCount(0);
+      setVisionSummary(null);
+    }
     setFilterShiftId('');
     setFilterExamDate('');
     setSearchQuery('');
@@ -170,9 +184,20 @@ const Cameras = () => {
     setPage(0);
   }, [selectedExamId]);
 
+  /* Re-fetch vision summary every 60s if started today and workers may still be active */
+  useEffect(() => {
+    if (!visionSummary?.started_at) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const startedToday = visionSummary.started_at.startsWith(today);
+    const durationShort = (visionSummary.duration_minutes ?? 0) < 600;
+    if (!startedToday || !durationShort) return;
+    const timer = setInterval(loadVisionSummary, 60_000);
+    return () => clearInterval(timer);
+  }, [visionSummary, loadVisionSummary]);
+
   useEffect(() => {
     if (selectedExamId) loadCameras();
-  }, [page, rowsPerPage, filterShiftId, filterExamDate, debouncedSearchQuery]);
+  }, [page, rowsPerPage, filterShiftId, filterExamDate, debouncedSearchQuery, orderBy, order]);
 
   const loadCameras = useCallback(async () => {
     if (!selectedExamId) return;
@@ -182,6 +207,7 @@ const Cameras = () => {
       if (filterShiftId) params.shift_id = filterShiftId;
       if (filterExamDate) params.exam_date = parseDDMMYYYYToISO(filterExamDate);
       if (debouncedSearchQuery.trim()) params.search = debouncedSearchQuery.trim();
+      if (orderBy) { params.sort_by = orderBy; params.sort_order = order; }
       const res = await camerasAPI.getByExam(selectedExamId, params);
       setCameras(res.data.data || []);
       setTotalCount(res.data.totalCount || (res.data.data || []).length);
@@ -189,7 +215,7 @@ const Cameras = () => {
       setStatusCounts(res.data.statusCounts || { accessible: 0, notAccessible: 0, unknown: 0 });
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }, [selectedExamId, page, rowsPerPage, filterShiftId, filterExamDate, debouncedSearchQuery]);
+  }, [selectedExamId, page, rowsPerPage, filterShiftId, filterExamDate, debouncedSearchQuery, orderBy, order]);
 
   /* ── Derived ── */
   const selectedExamData = exams.find((e) => String(e.id) === String(selectedExamId));
@@ -201,38 +227,8 @@ const Cameras = () => {
     const isAsc = orderBy === property && order === 'asc';
     setOrder(isAsc ? 'desc' : 'asc');
     setOrderBy(property);
+    setPage(0);
   };
-
-  const sortedCameras = React.useMemo(() => {
-    if (!orderBy) return cameras;
-
-    const comparator = (a, b) => {
-      let aVal = a[orderBy];
-      let bVal = b[orderBy];
-
-      // Handle nested properties
-      if (orderBy === 'shift_name') {
-        const shiftA = shifts.find(s => s.id === a.shift_id);
-        const shiftB = shifts.find(s => s.id === b.shift_id);
-        aVal = shiftA?.shift_name || '';
-        bVal = shiftB?.shift_name || '';
-      }
-
-      // Handle null/undefined
-      if (aVal == null) aVal = '';
-      if (bVal == null) bVal = '';
-
-      // String comparison
-      if (typeof aVal === 'string') aVal = aVal.toLowerCase();
-      if (typeof bVal === 'string') bVal = bVal.toLowerCase();
-
-      if (aVal < bVal) return order === 'asc' ? -1 : 1;
-      if (aVal > bVal) return order === 'asc' ? 1 : -1;
-      return 0;
-    };
-
-    return [...cameras].sort(comparator);
-  }, [cameras, orderBy, order, shifts]);
 
   /* ── Create / Edit ── */
   const handleOpenDialog = (camera = null) => {
@@ -369,9 +365,40 @@ const Cameras = () => {
                       <Chip label="Archived" size="small" color="error" sx={{ fontWeight: 600, height: 24, fontSize: '0.7rem' }} />
                     )}
                   </Box>
-                  <Typography sx={{ fontSize: '0.9rem', color: '#64748b' }}>
-                    {totalCount} camera{totalCount !== 1 ? 's' : ''} • {isHLS ? 'HLS streams' : 'RTSP streams'}
-                  </Typography>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+                    <Typography sx={{ fontSize: '0.9rem', color: '#64748b' }}>
+                      {totalCount} camera{totalCount !== 1 ? 's' : ''} • {isHLS ? 'HLS streams' : 'RTSP streams'}
+                    </Typography>
+                    {visionSummary?.started_at && (() => {
+                      const today = new Date().toISOString().slice(0, 10);
+                      const startedToday = visionSummary.started_at.startsWith(today);
+                      const workersActive = startedToday && (visionSummary.duration_minutes ?? 0) < 600;
+                      const durMins = visionSummary.duration_minutes;
+                      const durStr = durMins == null ? null
+                        : durMins >= 60
+                          ? `${Math.floor(durMins / 60)}h ${durMins % 60}m`
+                          : `${durMins} min`;
+                      return (
+                        <>
+                          <Typography sx={{ fontSize: '0.9rem', color: '#cbd5e1' }}>·</Typography>
+                          <Typography sx={{ fontSize: '0.85rem', color: '#64748b' }}>
+                            Last classification:{' '}
+                            <Box component="span" sx={{ color: '#0369a1', fontWeight: 600 }}>
+                              {format(new Date(visionSummary.started_at), 'dd MMM, HH:mm')}
+                            </Box>
+                            {durStr && (
+                              <Box component="span">
+                                {' '}·{' '}
+                                <Box component="span" sx={{ fontWeight: 600, color: workersActive ? '#d97706' : '#0369a1' }}>
+                                  {durStr}{workersActive ? '…' : ''}
+                                </Box>
+                              </Box>
+                            )}
+                          </Typography>
+                        </>
+                      );
+                    })()}
+                  </Box>
                 </Box>
 
                 {/* Far-right: filters + action buttons */}
@@ -606,7 +633,7 @@ const Cameras = () => {
               {/* ── Table ── */}
               {loading ? (
                 <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}><CircularProgress /></Box>
-              ) : sortedCameras.length > 0 ? (
+              ) : cameras.length > 0 ? (
                 <>
                   <TableContainer component={Paper} sx={{ borderRadius: 2.5, border: '1px solid #e8ecf1', boxShadow: 'none' }}>
                     <Table size="small">
@@ -785,7 +812,7 @@ const Cameras = () => {
                         </TableRow>
                       </TableHead>
                       <TableBody>
-                        {sortedCameras.map((cam) => (
+                        {cameras.map((cam) => (
                           <TableRow key={cam.id} hover sx={{ '&:hover': { bgcolor: '#f8fafc' } }}>
                             {isHLS ? (
                               <>

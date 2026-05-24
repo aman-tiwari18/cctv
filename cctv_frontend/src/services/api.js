@@ -105,7 +105,8 @@ export const executionsAPI = {
     getStatistics: (params) => api.get('/executions/stats/summary', { params }),
     getByShift: (shiftId, params) => api.get(`/executions/shifts/${shiftId}/executions`, { params }),
     getByExam: (examId, params) => api.get('/executions', { params: { ...params, exam_id: examId } }),
-    getRecent: (limit = 20) => api.get(`/executions/recent?limit=${limit}`)
+    getRecent: (limit = 20) => api.get(`/executions/recent?limit=${limit}`),
+    getVisionSummary: (params) => api.get('/executions/vision-summary', { params }),
 };
 
 export const shiftScriptsAPI = {

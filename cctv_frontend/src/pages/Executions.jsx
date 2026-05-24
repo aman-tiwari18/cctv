@@ -197,9 +197,17 @@ const Executions = () => {
     }
   }, [selectedDate, statusFilter, loadExecutions]);
 
-  /* Auto-refresh every 10 s when RUNNING */
+  /* Vision RUNNING assignments older than 2h are displayed as COMPLETED */
+  const isStaleVisionRunning = (ex) => {
+    if (ex.status !== 'RUNNING') return false;
+    if (ex.script?.script_id !== 'vision') return false;
+    if (!ex.started_at) return false;
+    return (Date.now() - new Date(ex.started_at).getTime()) > 2 * 60 * 60 * 1000;
+  };
+
+  /* Auto-refresh every 10 s when RUNNING (excluding stale vision) */
   useEffect(() => {
-    const hasRunning = executions.some((e) => e.status === 'RUNNING');
+    const hasRunning = executions.some((e) => e.status === 'RUNNING' && !isStaleVisionRunning(e));
     if (hasRunning) pollRef.current = setInterval(loadExecutions, 10_000);
     else clearInterval(pollRef.current);
     return () => clearInterval(pollRef.current);
@@ -270,7 +278,7 @@ const Executions = () => {
     setOrderBy(property);
   };
 
-  const runningCount = executions.filter((e) => e.status === 'RUNNING').length;
+  const runningCount = executions.filter((e) => e.status === 'RUNNING' && !isStaleVisionRunning(e)).length;
   const selectedExam = exams.find((e) => String(e.id) === String(selectedExamId));
 
   /* ── Handlers ── */
@@ -481,12 +489,14 @@ const Executions = () => {
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {visibleRows.map((ex) => (
+                    {visibleRows.map((ex) => {
+                      const effectiveStatus = isStaleVisionRunning(ex) ? 'COMPLETED' : ex.status;
+                      return (
                       <TableRow
                         key={ex.id}
                         sx={{
-                          bgcolor: ex.status === 'RUNNING' ? '#f0fdf4' : 'inherit',
-                          '&:hover': { bgcolor: ex.status === 'RUNNING' ? '#dcfce7' : '#f8fafc' },
+                          bgcolor: effectiveStatus === 'RUNNING' ? '#f0fdf4' : 'inherit',
+                          '&:hover': { bgcolor: effectiveStatus === 'RUNNING' ? '#dcfce7' : '#f8fafc' },
                           transition: 'background 0.15s',
                         }}
                       >
@@ -495,8 +505,8 @@ const Executions = () => {
                         <TableCell sx={{ fontSize: '0.88rem' }}>{ex.shift?.shift_name || '-'}</TableCell>
                         <TableCell>
                           <Box display="flex" alignItems="center">
-                            {ex.status === 'RUNNING' && <PulsingDot />}
-                            <StatusChip status={ex.status} />
+                            {effectiveStatus === 'RUNNING' && <PulsingDot />}
+                            <StatusChip status={effectiveStatus} />
                           </Box>
                         </TableCell>
                         <TableCell sx={{ fontSize: '0.85rem', color: '#475569' }}>
@@ -507,7 +517,7 @@ const Executions = () => {
                         </TableCell>
                         <TableCell align="right">
                           <Box display="flex" gap={0.5} justifyContent="flex-end">
-                            {ex.status === 'RUNNING' && (
+                            {effectiveStatus === 'RUNNING' && (
                               <Tooltip title="Stop this script">
                                 <IconButton size="small" onClick={() => handleStopClick(ex)}
                                   sx={{ color: '#ef4444', bgcolor: '#fee2e2', '&:hover': { bgcolor: '#fca5a5' }, borderRadius: 1.5 }}>
@@ -523,7 +533,8 @@ const Executions = () => {
                           </Box>
                         </TableCell>
                       </TableRow>
-                    ))}
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </TableContainer>

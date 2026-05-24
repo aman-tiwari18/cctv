@@ -15,11 +15,25 @@ import os
 import re
 import subprocess
 import psutil
+import threading
+import time
 from pathlib import Path
 from datetime import datetime
 import logging
 
 logger = logging.getLogger(__name__)
+
+# ── nvidia-smi result cache ──────────────────────────────────────────────
+# get_local_gpu_stats_data() fires 4 nvidia-smi subprocesses, each taking
+# 100-800ms. Without caching, every /gpu-monitor/stats poll (every 10s
+# per browser tab) and every /metrics scrape blocks for seconds. Worse,
+# the async /gpu-monitor/stats endpoint used to call this synchronously,
+# freezing the event loop for the duration and stalling every other request.
+#
+# Cache for a few seconds so concurrent callers share one nvidia-smi pass.
+_GPU_CACHE_TTL_SECONDS = 2.5
+_gpu_cache: dict = {"data": None, "ts": 0.0}
+_gpu_cache_lock = threading.Lock()
 
 
 def get_gpu_stats():
@@ -252,22 +266,18 @@ def get_camera_counts():
     return camera_counts
 
 
-def get_local_gpu_stats_data():
-    """
-    Get GPU statistics for the local server.
-    Returns dict with GPU stats, processes, and camera counts.
-    """
+def _compute_local_gpu_stats_data():
+    """Actual nvidia-smi/psutil work — runs 4 subprocess calls."""
     from app.config import WORKER_ID, WORKER_NAME
-    
+
     gpus = get_gpu_stats()
     gpu_processes = get_gpu_processes()
     camera_counts = get_camera_counts()
-    
-    # Enrich processes with camera counts
+
     for gpu_id, processes in gpu_processes.items():
         for proc in processes:
             proc["camera_count"] = camera_counts.get(proc["pid"], 0)
-    
+
     return {
         "success": True,
         "server_id": WORKER_ID,
@@ -279,3 +289,27 @@ def get_local_gpu_stats_data():
         "total_gpus": len(gpus),
         "total_processes": sum(len(procs) for procs in gpu_processes.values()),
     }
+
+
+def get_local_gpu_stats_data():
+    """
+    Get GPU statistics for the local server, cached for a short TTL.
+
+    Concurrent callers share one nvidia-smi invocation. Without this,
+    multiple /gpu-monitor/stats and /metrics calls each fired 4 nvidia-smi
+    subprocesses which serialise on the GPU driver mutex and block the
+    asyncio event loop, stalling unrelated requests for tens of seconds.
+    """
+    now = time.monotonic()
+    cached = _gpu_cache["data"]
+    if cached is not None and (now - _gpu_cache["ts"]) < _GPU_CACHE_TTL_SECONDS:
+        return cached
+
+    with _gpu_cache_lock:
+        now = time.monotonic()
+        if _gpu_cache["data"] is not None and (now - _gpu_cache["ts"]) < _GPU_CACHE_TTL_SECONDS:
+            return _gpu_cache["data"]
+        data = _compute_local_gpu_stats_data()
+        _gpu_cache["data"] = data
+        _gpu_cache["ts"] = time.monotonic()
+        return data

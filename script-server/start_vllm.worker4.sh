@@ -1,0 +1,28 @@
+#!/bin/bash
+export HF_HOME=/app/data/hf_cache
+export VLLM_USE_V1=0
+# Disable flashinfer JIT sampler — nvcc not in runtime image, causes startup crash
+export VLLM_USE_FLASHINFER_SAMPLER=0
+# Give EngineCore extra time during vision-encoder warmup
+export VLLM_RPC_TIMEOUT=60
+
+mkdir -p /app/data/hf_cache
+mkdir -p /app/scripts/logs
+
+# Kill orphaned vLLM GPU subprocesses from previous crashed/killed instances.
+pkill -9 -f "spawn_main.*--multiprocessing-fork" 2>/dev/null || true
+sleep 1
+
+echo "Starting vLLM server on port 8001..."
+echo "Model: Qwen/Qwen2.5-VL-7B-Instruct"
+
+# Apply vLLM deep_gemm patch
+python3 /app/patch_vllm_deep_gemm.py 2>/dev/null || true
+
+exec vllm serve Qwen/Qwen2.5-VL-7B-Instruct \
+    --port 8001 \
+    --host 0.0.0.0 \
+    --max-model-len 2048 \
+    --gpu-memory-utilization 0.25 \
+    --max-num-seqs 8 \
+    --dtype bfloat16

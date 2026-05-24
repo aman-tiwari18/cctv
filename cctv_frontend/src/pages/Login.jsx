@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate, Link as RouterLink } from 'react-router-dom';
 import {
   Box,
@@ -11,27 +11,40 @@ import {
   InputAdornment,
   IconButton,
 } from '@mui/material';
-import { PersonOutline, LockOutlined, VisibilityOutlined, VisibilityOffOutlined, Security } from '@mui/icons-material';
+import { PersonOutline, LockOutlined, VisibilityOutlined, VisibilityOffOutlined } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
 import CameraIcon from '../components/CameraIcon';
+
+// Static objects defined outside component — never recreated on re-render
+const inputFieldSx = {
+  bgcolor: '#f4f6f8',
+  borderRadius: '10px',
+  '& fieldset': { border: 'none' },
+  '&:hover fieldset': { border: 'none' },
+  '&.Mui-focused fieldset': { border: 'none' },
+  input: { py: 1.5, px: 0, fontSize: 14, color: '#374151' },
+};
+
+const usernameInputProps = {
+  startAdornment: (
+    <InputAdornment position="start">
+      <PersonOutline sx={{ color: '#9ca3af', fontSize: 20, ml: 0.5 }} />
+    </InputAdornment>
+  ),
+  sx: inputFieldSx,
+};
 
 const Login = () => {
   const navigate = useNavigate();
   const { login } = useAuth();
-  const [formData, setFormData] = useState({
-    username: '',
-    password: '',
-  });
+  const [formData, setFormData] = useState({ username: '', password: '' });
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value,
-    });
-    setError('');
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+    if (error) setError('');
   };
 
   const handleSubmit = async (e) => {
@@ -50,6 +63,29 @@ const Login = () => {
     setLoading(false);
   };
 
+  // Only recreates when showPassword toggles, not on every keystroke
+  const passwordInputProps = useMemo(() => ({
+    startAdornment: (
+      <InputAdornment position="start">
+        <LockOutlined sx={{ color: '#9ca3af', fontSize: 20, ml: 0.5 }} />
+      </InputAdornment>
+    ),
+    endAdornment: (
+      <InputAdornment position="end">
+        <IconButton
+          onClick={() => setShowPassword((v) => !v)}
+          edge="end"
+          sx={{ color: '#9ca3af', mr: 0.5 }}
+        >
+          {showPassword
+            ? <VisibilityOffOutlined sx={{ fontSize: 20 }} />
+            : <VisibilityOutlined sx={{ fontSize: 20 }} />}
+        </IconButton>
+      </InputAdornment>
+    ),
+    sx: inputFieldSx,
+  }), [showPassword]);
+
   return (
     <Box
       sx={{
@@ -62,7 +98,6 @@ const Login = () => {
         px: 2
       }}
     >
-      {/* Shield Icon */}
       <Paper
         elevation={0}
         sx={{
@@ -114,21 +149,7 @@ const Login = () => {
               onChange={handleChange}
               required
               autoFocus
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <PersonOutline sx={{ color: '#9ca3af', fontSize: 20, ml: 0.5 }} />
-                  </InputAdornment>
-                ),
-                sx: {
-                  bgcolor: '#f4f6f8',
-                  borderRadius: '10px',
-                  '& fieldset': { border: 'none' },
-                  '&:hover fieldset': { border: 'none' },
-                  '&.Mui-focused fieldset': { border: 'none' },
-                  input: { py: 1.5, px: 0, fontSize: 14, color: '#374151' }
-                }
-              }}
+              InputProps={usernameInputProps}
             />
           </Box>
 
@@ -144,32 +165,8 @@ const Login = () => {
               value={formData.password}
               onChange={handleChange}
               required
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <LockOutlined sx={{ color: '#9ca3af', fontSize: 20, ml: 0.5 }} />
-                  </InputAdornment>
-                ),
-                endAdornment: (
-                  <InputAdornment position="end">
-                    <IconButton
-                      onClick={() => setShowPassword(!showPassword)}
-                      edge="end"
-                      sx={{ color: '#9ca3af', mr: 0.5 }}
-                    >
-                      {showPassword ? <VisibilityOffOutlined sx={{ fontSize: 20 }} /> : <VisibilityOutlined sx={{ fontSize: 20 }} />}
-                    </IconButton>
-                  </InputAdornment>
-                ),
-                sx: {
-                  bgcolor: '#f4f6f8',
-                  borderRadius: '10px',
-                  '& fieldset': { border: 'none' },
-                  '&:hover fieldset': { border: 'none' },
-                  '&.Mui-focused fieldset': { border: 'none' },
-                  input: { py: 1.5, px: 0, fontSize: 14, color: '#374151', letterSpacing: formData.password ? 2 : 'inherit' }
-                }
-              }}
+              inputProps={{ style: { letterSpacing: formData.password ? 2 : 'inherit' } }}
+              InputProps={passwordInputProps}
             />
           </Box>
 
@@ -217,9 +214,7 @@ const Login = () => {
               fontWeight: 600,
               color: '#64748b',
               textDecoration: 'none',
-              '&:hover': {
-                color: '#3b82f6',
-              },
+              '&:hover': { color: '#3b82f6' },
             }}
           >
             Forgot Password?
@@ -232,9 +227,7 @@ const Login = () => {
               fontWeight: 600,
               color: '#64748b',
               textDecoration: 'none',
-              '&:hover': {
-                color: '#3b82f6',
-              },
+              '&:hover': { color: '#3b82f6' },
             }}
           >
             Register New User
