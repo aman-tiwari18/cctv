@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
     Box,
+    Button,
     Card,
     CardContent,
     Chip,
@@ -26,6 +27,7 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Sector, Tooltip } from 'recha
 import { format, parseISO } from 'date-fns';
 import KeyboardArrowDownRoundedIcon from '@mui/icons-material/KeyboardArrowDownRounded';
 import KeyboardArrowRightRoundedIcon from '@mui/icons-material/KeyboardArrowRightRounded';
+import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
 import { dashboardAPI } from '../services/api';
 import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
 import { ShiftSvgIcon } from '../components/ShiftSvgIcon';
@@ -993,76 +995,150 @@ const LiveExamsCard = () => {
         };
     }, [page, rowsPerPage]);
 
+    // Match other dashboard accents
+    const ACCENT_BLUE = '#2E68C9';
+    const HEADER_BG = '#efeffb';
+    const HEADER_TEXT = '#5C5F61';
+    const BODY_DARK = '#191B23';
+    const BODY_MID = '#5C5F61';
+    const BODY_LIGHT = '#94A3B8';
+
+    const headerCellSx = {
+        fontFamily: 'Inter, sans-serif',
+        fontWeight: 500,
+        fontSize: '13px',
+        color: HEADER_TEXT,
+        letterSpacing: '0.2px',
+        borderBottom: 'none',
+        py: 1.5,
+    };
+    const bodyCellSx = {
+        fontFamily: 'Inter, sans-serif',
+        fontSize: '14px',
+        color: BODY_DARK,
+        py: 1.75,
+        borderBottom: '1px solid #EEF0F3',
+    };
+
     return (
-        <Card>
+        <Card sx={{ borderRadius: '12px', boxShadow: '0 2px 4px 0 rgba(0,0,0,0.04)' }}>
             <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
-                <Typography variant="h6" sx={{ fontWeight: 700, color: '#0f172a', mb: 2 }}>
-                    Live Exams
-                </Typography>
+                <Stack
+                    direction="row"
+                    justifyContent="space-between"
+                    alignItems="center"
+                    sx={{ mb: 2 }}
+                >
+                    <Typography sx={{
+                        fontFamily: 'Inter, sans-serif',
+                        fontWeight: 700,
+                        fontSize: '22px',
+                        lineHeight: '28px',
+                        color: '#191B23',
+                        letterSpacing: '0.4px',
+                    }}>
+                        Live Exams
+                    </Typography>
+                    <Button
+                        variant="outlined"
+                        size="small"
+                        startIcon={<FileDownloadOutlinedIcon sx={{ fontSize: 18 }} />}
+                        sx={{
+                            textTransform: 'none',
+                            fontFamily: 'Inter, sans-serif',
+                            fontWeight: 500,
+                            fontSize: '13px',
+                            color: '#191B23',
+                            borderColor: '#E5E7EB',
+                            borderRadius: '8px',
+                            px: 1.5,
+                            py: 0.5,
+                            '&:hover': {
+                                borderColor: '#CBD5E1',
+                                bgcolor: '#F8FAFC',
+                            },
+                        }}
+                    >
+                        Export
+                    </Button>
+                </Stack>
 
                 <TableContainer
                     component={Paper}
                     elevation={0}
-                    sx={{ borderRadius: 2.5, border: '1px solid #e8ecf1', boxShadow: 'none' }}
+                    sx={{ borderRadius: '10px', border: '1px solid #E8ECF1', boxShadow: 'none' }}
                 >
                     <Table>
-                        <TableHead sx={{ bgcolor: '#efeffb' }}>
+                        <TableHead sx={{ bgcolor: HEADER_BG }}>
                             <TableRow>
-                                {['Exam', 'Date', 'Shift & Time', 'Cameras', 'Scripts', 'Detections'].map((h) => (
-                                    <TableCell
-                                        key={h}
-                                        sx={{
-                                            fontWeight: 700,
-                                            fontSize: '0.78rem',
-                                            color: '#64748b',
-                                            letterSpacing: '0.04em',
-                                        }}
-                                    >
-                                        {h}
-                                    </TableCell>
-                                ))}
+                                <TableCell sx={{ ...headerCellSx, width: 36, p: 0 }} />
+                                <TableCell sx={headerCellSx}>Exam</TableCell>
+                                <TableCell sx={headerCellSx}>Date</TableCell>
+                                <TableCell sx={headerCellSx}>Shift &amp; Time</TableCell>
+                                <TableCell sx={headerCellSx}>Cameras</TableCell>
+                                <TableCell sx={headerCellSx}>Scripts</TableCell>
+                                <TableCell sx={headerCellSx}>Detections</TableCell>
+                                <TableCell sx={{ ...headerCellSx, width: 110 }} />
                             </TableRow>
                         </TableHead>
                         <TableBody>
                             {loading ? (
                                 <TableRow>
-                                    <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
+                                    <TableCell colSpan={8} align="center" sx={{ py: 4, border: 'none' }}>
                                         <CircularProgress size={28} />
                                     </TableCell>
                                 </TableRow>
                             ) : rows.length === 0 ? (
                                 <TableRow>
-                                    <TableCell colSpan={6} align="center" sx={{ py: 4, color: '#94a3b8' }}>
+                                    <TableCell colSpan={8} align="center" sx={{ py: 4, color: BODY_LIGHT, border: 'none' }}>
                                         No live exams today.
                                     </TableCell>
                                 </TableRow>
                             ) : (
                                 rows.map((row) => (
                                     <TableRow key={`${row.exam_id}::${row.shift_id}`} hover>
-                                        <TableCell sx={{ fontWeight: 700, color: '#0f172a' }}>
+                                        <TableCell sx={{ ...bodyCellSx, width: 36, p: 0, textAlign: 'center', color: '#94A3B8' }}>
+                                            <KeyboardArrowDownRoundedIcon sx={{ fontSize: 20, color: '#94A3B8', verticalAlign: 'middle' }} />
+                                        </TableCell>
+                                        <TableCell sx={{ ...bodyCellSx, fontWeight: 700 }}>
                                             {row.exam_name}
                                         </TableCell>
-                                        <TableCell sx={{ color: '#475569' }}>
+                                        <TableCell sx={{ ...bodyCellSx, color: BODY_MID }}>
                                             {formatShortDate(row.date)}
                                         </TableCell>
-                                        <TableCell>
+                                        <TableCell sx={bodyCellSx}>
                                             {row.shift_bracket && (
-                                                <Typography sx={{ fontWeight: 600, color: '#0f172a', fontSize: '0.9rem' }}>
+                                                <Typography sx={{
+                                                    fontFamily: 'Inter, sans-serif',
+                                                    fontWeight: 700,
+                                                    fontSize: '14px',
+                                                    color: BODY_DARK,
+                                                    lineHeight: '18px',
+                                                }}>
                                                     {row.shift_bracket}
                                                 </Typography>
                                             )}
-                                            <Typography variant="caption" sx={{ color: '#94a3b8' }}>
+                                            <Typography sx={{
+                                                fontFamily: 'Inter, sans-serif',
+                                                fontSize: '12px',
+                                                color: BODY_LIGHT,
+                                                lineHeight: '15px',
+                                                mt: 0.25,
+                                            }}>
                                                 {formatHMM(row.shift_start)} - {formatHMM(row.shift_end)}
                                             </Typography>
                                         </TableCell>
-                                        <TableCell sx={{ color: '#3368c1', fontWeight: 600 }}>
+                                        <TableCell sx={{ ...bodyCellSx, color: ACCENT_BLUE, fontWeight: 700 }}>
                                             {Number(row.cameras || 0).toLocaleString()}
                                         </TableCell>
-                                        <TableCell sx={{ color: '#3368c1', fontWeight: 600 }}>
+                                        <TableCell sx={{ ...bodyCellSx, color: ACCENT_BLUE, fontWeight: 700 }}>
                                             {Number(row.scripts || 0).toLocaleString()}
                                         </TableCell>
-                                        <TableCell sx={{ color: '#475569', fontWeight: 600 }}>
+                                        <TableCell sx={{ ...bodyCellSx, color: BODY_DARK }}>
                                             {Number(row.detections || 0).toLocaleString()}
+                                        </TableCell>
+                                        <TableCell sx={{ ...bodyCellSx, width: 110, color: ACCENT_BLUE, fontWeight: 600, cursor: 'pointer' }}>
+                                            View Details
                                         </TableCell>
                                     </TableRow>
                                 ))
