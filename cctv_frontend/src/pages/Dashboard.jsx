@@ -24,7 +24,6 @@ import { LocalizationProvider, DatePicker } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { Cell, Pie, PieChart, ResponsiveContainer, Sector, Tooltip } from 'recharts';
 import { format, parseISO } from 'date-fns';
-import StarRoundedIcon from '@mui/icons-material/StarRounded';
 import KeyboardArrowDownRoundedIcon from '@mui/icons-material/KeyboardArrowDownRounded';
 import KeyboardArrowRightRoundedIcon from '@mui/icons-material/KeyboardArrowRightRounded';
 import { dashboardAPI } from '../services/api';
@@ -623,38 +622,59 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
 
 const GpuPerformanceCard = () => {
     const utilization = 88.2;
+    // Big gauge: 3 fill bands (darker → mid → lighter) + 1 gray track band.
     const gaugeData = [
-        { name: 'used', value: utilization, color: '#3368c1' },
-        { name: 'free', value: 100 - utilization, color: '#e2e8f0' },
+        { name: 's1', value: utilization / 3, color: '#3368C1' },
+        { name: 's2', value: utilization / 3, color: '#578ADE' },
+        { name: 's3', value: utilization / 3, color: '#94B6EF' },
+        { name: 'free', value: 100 - utilization, color: '#E3E3E3' },
+    ];
+    // Optimal Efficiency mini gauge — visual only, ~82% filled.
+    const miniData = [
+        { name: 'fill', value: 82, color: '#90B6F4' },
+        { name: 'rest', value: 18, color: '#E3E3E3' },
     ];
 
     return (
         <Card sx={{ height: '100%' }}>
             <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
-                <Stack direction="row" justifyContent="space-between" alignItems="flex-start" sx={{ mb: 1.5 }}>
-                    <Box>
-                        <Typography variant="h6" sx={{ fontWeight: 700, color: '#0f172a' }}>
-                            Overall GPU Performance
-                        </Typography>
-                        <Typography variant="caption" sx={{ color: '#64748b' }}>
-                            Real-Time GPU Allocation Efficiency Across Active Nodes
-                        </Typography>
-                    </Box>
-                </Stack>
+                <Box sx={{ mb: 2 }}>
+                    <Typography sx={{
+                        color: '#191B23',
+                        fontFamily: 'Inter, sans-serif',
+                        fontSize: '22px',
+                        fontWeight: 700,
+                        lineHeight: '28px',
+                        letterSpacing: '0.4px',
+                    }}>
+                        Overall GPU Performance
+                    </Typography>
+                    <Typography sx={{
+                        mt: 0.75,
+                        color: '#303336',
+                        fontFamily: 'Inter, sans-serif',
+                        fontSize: '13px',
+                        fontWeight: 400,
+                        lineHeight: '18px',
+                    }}>
+                        Real-Time GPU Allocation Efficiency Across Active Nodes
+                    </Typography>
+                </Box>
 
-                <Grid container spacing={2} alignItems="center">
+                <Grid container spacing={2} alignItems="flex-start">
                     <Grid item xs={12} sm={7}>
-                        <Box sx={{ position: 'relative', height: 200 }}>
+                        <Box sx={{ position: 'relative', height: 240 }}>
                             <ResponsiveContainer width="100%" height="100%">
-                                <PieChart>
+                                <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                                     <Pie
                                         data={gaugeData}
                                         cx="50%"
-                                        cy="80%"
-                                        innerRadius={70}
-                                        outerRadius={95}
+                                        cy="88%"
+                                        innerRadius={95}
+                                        outerRadius={128}
                                         startAngle={180}
                                         endAngle={0}
+                                        paddingAngle={0}
                                         dataKey="value"
                                         stroke="none"
                                     >
@@ -671,94 +691,240 @@ const GpuPerformanceCard = () => {
                                     display: 'flex',
                                     flexDirection: 'column',
                                     alignItems: 'center',
-                                    justifyContent: 'flex-end',
-                                    pb: 1,
+                                    justifyContent: 'center',
+                                    pt: 7,
                                     pointerEvents: 'none',
                                 }}
                             >
-                                <Typography sx={{ fontSize: '1.9rem', fontWeight: 700, color: '#3368c1' }}>
+                                <Typography sx={{
+                                    color: '#2E68C9',
+                                    fontFamily: 'Inter, sans-serif',
+                                    fontSize: '36px',
+                                    fontWeight: 700,
+                                    lineHeight: '40px',
+                                }}>
                                     {utilization}%
                                 </Typography>
-                                <Typography
-                                    variant="caption"
-                                    sx={{ color: '#64748b', letterSpacing: '0.06em', fontWeight: 600 }}
-                                >
-                                    UTILIZATION
+                                <Typography sx={{
+                                    mt: 0.5,
+                                    color: '#5C5F61',
+                                    fontFamily: 'Inter, sans-serif',
+                                    fontSize: '13px',
+                                    fontWeight: 600,
+                                    lineHeight: '16px',
+                                    letterSpacing: '0.6px',
+                                    textTransform: 'uppercase',
+                                }}>
+                                    Utilization
                                 </Typography>
                             </Box>
                         </Box>
+
                         <Box
                             sx={{
-                                mt: 1,
-                                bgcolor: '#f8fafc',
-                                border: '1px solid #e2e8f0',
-                                borderRadius: 2,
+                                mt: 1.5,
+                                mx: 'auto',
+                                maxWidth: 220,
+                                bgcolor: '#fff',
+                                border: '1px solid #E5E7EB',
+                                borderRadius: '10px',
                                 px: 2,
                                 py: 1,
                                 textAlign: 'center',
                             }}
                         >
-                            <Typography sx={{ fontSize: '0.85rem', color: '#475569' }}>
-                                Camera Capacity{' '}
-                                <Box component="span" sx={{ fontWeight: 700, color: '#0f172a' }}>
-                                    MIN 4 • MAX 3688
-                                </Box>
+                            <Typography sx={{
+                                color: '#7A7A7A',
+                                fontFamily: 'Inter, sans-serif',
+                                fontSize: '13px',
+                                fontWeight: 400,
+                                lineHeight: '18px',
+                            }}>
+                                Camera Capacity
+                            </Typography>
+                            <Typography sx={{
+                                color: '#191B23',
+                                fontFamily: 'Inter, sans-serif',
+                                fontSize: '13px',
+                                fontWeight: 700,
+                                lineHeight: '18px',
+                                letterSpacing: '0.5px',
+                                textTransform: 'uppercase',
+                            }}>
+                                MIN 4 • MAX 3688
                             </Typography>
                         </Box>
+
+                        <Stack
+                            direction="row"
+                            alignItems="center"
+                            spacing={0.75}
+                            sx={{ mt: 2, pl: 0.5 }}
+                        >
+                            <Box component="svg" width={14} height={14} viewBox="0 0 16 16" sx={{ flexShrink: 0 }}>
+                                <path
+                                    d="M8 5V8M8 11H8.0075M15.5 8C15.5 12.1421 12.1421 15.5 8 15.5C3.85786 15.5 0.5 12.1421 0.5 8C0.5 3.85786 3.85786 0.5 8 0.5C12.1421 0.5 15.5 3.85786 15.5 8Z"
+                                    stroke="#A6A6A6"
+                                    strokeWidth="1"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    fill="none"
+                                />
+                            </Box>
+                            <Typography sx={{
+                                color: 'rgba(0,0,0,0.45)',
+                                fontFamily: 'Inter, sans-serif',
+                                fontSize: '12px',
+                                fontWeight: 400,
+                                lineHeight: '16px',
+                            }}>
+                                Independent of selected filters | Last Update 10:20:34 AM
+                            </Typography>
+                        </Stack>
                     </Grid>
 
                     <Grid item xs={12} sm={5}>
-                        <Stack spacing={1.2}>
+                        <Stack spacing={1.5}>
+                            <Box sx={{ textAlign: 'center', py: 0.5 }}>
+                                <Box sx={{ position: 'relative', height: 70, mb: 0.5 }}>
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+                                            <Pie
+                                                data={miniData}
+                                                cx="50%"
+                                                cy="92%"
+                                                innerRadius={36}
+                                                outerRadius={52}
+                                                startAngle={180}
+                                                endAngle={0}
+                                                dataKey="value"
+                                                stroke="none"
+                                            >
+                                                {miniData.map((d) => (
+                                                    <Cell key={d.name} fill={d.color} />
+                                                ))}
+                                            </Pie>
+                                        </PieChart>
+                                    </ResponsiveContainer>
+                                    <Box sx={{
+                                        position: 'absolute',
+                                        inset: 0,
+                                        display: 'flex',
+                                        alignItems: 'flex-end',
+                                        justifyContent: 'center',
+                                        pb: 1.5,
+                                        pointerEvents: 'none',
+                                    }}>
+                                        <Box component="svg" width={20} height={19} viewBox="0 0 20 19">
+                                            <path
+                                                fill="#4D87EA"
+                                                d="M9.51062 0L12.7552 5.53423L19.0212 6.90983L14.7605 11.7058L15.3885 18.0902L9.51062 15.52L3.63277 18.0902L4.26079 11.7058L5.53131e-05 6.90983L6.26605 5.53423L9.51062 0Z"
+                                            />
+                                        </Box>
+                                    </Box>
+                                </Box>
+                                <Typography sx={{
+                                    color: '#4D87EA',
+                                    fontFamily: 'Inter, sans-serif',
+                                    fontSize: '13px',
+                                    fontWeight: 700,
+                                    lineHeight: '16px',
+                                }}>
+                                    Optimal
+                                </Typography>
+                                <Typography sx={{
+                                    color: '#5C5F61',
+                                    fontFamily: 'Inter, sans-serif',
+                                    fontSize: '11px',
+                                    fontWeight: 600,
+                                    lineHeight: '15px',
+                                    letterSpacing: '0.5px',
+                                    textTransform: 'uppercase',
+                                }}>
+                                    Efficiency
+                                </Typography>
+                            </Box>
+
                             <Paper
                                 elevation={0}
                                 sx={{
-                                    bgcolor: '#eff6ff',
-                                    border: '1px solid #dbeafe',
-                                    borderRadius: 2,
-                                    p: 1.2,
-                                    textAlign: 'center',
+                                    border: '1px solid #E5E7EB',
+                                    borderRadius: '10px',
+                                    p: 1.5,
                                 }}
                             >
-                                <StarRoundedIcon sx={{ color: '#3368c1', fontSize: 22 }} />
-                                <Typography sx={{ fontWeight: 700, fontSize: '0.85rem', color: '#1b479a' }}>
-                                    Optimal
-                                </Typography>
-                                <Typography variant="caption" sx={{ color: '#64748b' }}>
-                                    EFFICIENCY
-                                </Typography>
-                            </Paper>
-                            <Paper
-                                elevation={0}
-                                sx={{ border: '1px solid #e2e8f0', borderRadius: 2, p: 1.2 }}
-                            >
-                                <Typography variant="caption" sx={{ color: '#64748b', letterSpacing: '0.05em', fontWeight: 600 }}>
-                                    ACCESSIBLE CAMERAS
-                                </Typography>
-                                <Typography sx={{ fontWeight: 700, fontSize: '1.1rem', color: '#0f172a' }}>
+                                <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+                                    <Typography sx={{
+                                        color: '#5C5F61',
+                                        fontFamily: 'Inter, sans-serif',
+                                        fontSize: '11px',
+                                        fontWeight: 700,
+                                        lineHeight: '15px',
+                                        letterSpacing: '0.4px',
+                                        textTransform: 'uppercase',
+                                    }}>
+                                        Accessible Cameras
+                                    </Typography>
+                                    <Box component="svg" width={20} height={14} viewBox="0 0 24 16" sx={{ flexShrink: 0 }}>
+                                        <path
+                                            fill="#5C5F61"
+                                            d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v6c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"
+                                        />
+                                    </Box>
+                                </Stack>
+                                <Typography sx={{
+                                    mt: 0.5,
+                                    color: '#191B23',
+                                    fontFamily: 'Inter, sans-serif',
+                                    fontSize: '22px',
+                                    fontWeight: 800,
+                                    lineHeight: '26px',
+                                }}>
                                     1,234
                                 </Typography>
                             </Paper>
+
                             <Paper
                                 elevation={0}
-                                sx={{ border: '1px solid #e2e8f0', borderRadius: 2, p: 1.2 }}
+                                sx={{
+                                    border: '1px solid #E5E7EB',
+                                    borderRadius: '10px',
+                                    p: 1.5,
+                                }}
                             >
-                                <Typography variant="caption" sx={{ color: '#64748b', letterSpacing: '0.05em', fontWeight: 600 }}>
-                                    MEMORY LOAD
-                                </Typography>
-                                <Typography sx={{ fontWeight: 700, fontSize: '1.1rem', color: '#0f172a' }}>
+                                <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+                                    <Typography sx={{
+                                        color: '#2E68C9',
+                                        fontFamily: 'Inter, sans-serif',
+                                        fontSize: '11px',
+                                        fontWeight: 700,
+                                        lineHeight: '15px',
+                                        letterSpacing: '0.4px',
+                                        textTransform: 'uppercase',
+                                    }}>
+                                        Memory Load
+                                    </Typography>
+                                    <Box component="svg" width={18} height={18} viewBox="0 0 15 15" sx={{ flexShrink: 0 }}>
+                                        <path
+                                            fill="#2E68C9"
+                                            d="M7.5 14.9625C6.4625 14.9625 5.4875 14.7656 4.575 14.3719C3.6625 13.9781 2.86875 13.4406 2.19375 12.7594C1.51875 12.0781 0.984375 11.2812 0.590625 10.3687C0.196875 9.45625 0 8.4875 0 7.4625C0 5.5 0.65 3.8125 1.95 2.4C3.25 0.9875 4.85 0.1875 6.75 0V2.25C5.4625 2.425 4.39062 3.00312 3.53437 3.98438C2.67812 4.96562 2.25 6.125 2.25 7.4625C2.25 8.9125 2.7625 10.15 3.7875 11.175C4.8125 12.2 6.05 12.7125 7.5 12.7125C8.325 12.7125 9.09688 12.5375 9.81563 12.1875C10.5344 11.8375 11.1375 11.3625 11.625 10.7625L13.575 11.8875C12.9 12.825 12.0312 13.5719 10.9688 14.1281C9.90625 14.6844 8.75 14.9625 7.5 14.9625ZM14.3625 10.5L12.4125 9.375C12.525 9.075 12.6094 8.76562 12.6656 8.44687C12.7219 8.12812 12.75 7.8 12.75 7.4625C12.75 6.125 12.3219 4.96562 11.4656 3.98438C10.6094 3.00312 9.5375 2.425 8.25 2.25V0C10.15 0.1875 11.75 0.9875 13.05 2.4C14.35 3.8125 15 5.5 15 7.4625C15 8.0125 14.95 8.54375 14.85 9.05625C14.75 9.56875 14.5875 10.05 14.3625 10.5Z"
+                                        />
+                                    </Box>
+                                </Stack>
+                                <Typography sx={{
+                                    mt: 0.5,
+                                    color: '#2E68C9',
+                                    fontFamily: 'Inter, sans-serif',
+                                    fontSize: '22px',
+                                    fontWeight: 800,
+                                    lineHeight: '26px',
+                                }}>
                                     14.2 GB / 24 GB
                                 </Typography>
                             </Paper>
                         </Stack>
                     </Grid>
                 </Grid>
-
-                <Typography
-                    variant="caption"
-                    sx={{ display: 'block', mt: 1.5, textAlign: 'center', color: '#94a3b8' }}
-                >
-                    Mock data — wiring to real GPU telemetry comes in a later iteration.
-                </Typography>
             </CardContent>
         </Card>
     );
