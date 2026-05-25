@@ -638,7 +638,7 @@ const GpuPerformanceCard = () => {
     return (
         <Card sx={{ height: '100%' }}>
             <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
-                <Box sx={{ mb: 2 }}>
+                <Box sx={{ mb: 1.5 }}>
                     <Typography sx={{
                         color: '#191B23',
                         fontFamily: 'Inter, sans-serif',
@@ -663,15 +663,15 @@ const GpuPerformanceCard = () => {
 
                 <Grid container spacing={2} alignItems="flex-start">
                     <Grid item xs={12} sm={7}>
-                        <Box sx={{ position: 'relative', height: 210 }}>
+                        <Box sx={{ position: 'relative', height: 200 }}>
                             <ResponsiveContainer width="100%" height="100%">
                                 <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                                     <Pie
                                         data={gaugeData}
                                         cx="50%"
-                                        cy="92%"
-                                        innerRadius={100}
-                                        outerRadius={124}
+                                        cy="88%"
+                                        innerRadius={96}
+                                        outerRadius={118}
                                         startAngle={180}
                                         endAngle={0}
                                         paddingAngle={0}
@@ -692,16 +692,16 @@ const GpuPerformanceCard = () => {
                                     flexDirection: 'column',
                                     alignItems: 'center',
                                     justifyContent: 'center',
-                                    pt: 5,
+                                    pt: 4,
                                     pointerEvents: 'none',
                                 }}
                             >
                                 <Typography sx={{
                                     color: '#2E68C9',
                                     fontFamily: 'Inter, sans-serif',
-                                    fontSize: '34px',
+                                    fontSize: '32px',
                                     fontWeight: 700,
-                                    lineHeight: '38px',
+                                    lineHeight: '36px',
                                 }}>
                                     {utilization}%
                                 </Typography>
@@ -722,14 +722,14 @@ const GpuPerformanceCard = () => {
 
                         <Box
                             sx={{
-                                mt: 0.5,
+                                mt: 0,
                                 mx: 'auto',
-                                maxWidth: 220,
+                                maxWidth: 210,
                                 bgcolor: '#fff',
                                 border: '1px solid #E5E7EB',
                                 borderRadius: '10px',
                                 px: 2,
-                                py: 1,
+                                py: 0.75,
                                 textAlign: 'center',
                             }}
                         >
@@ -763,10 +763,10 @@ const GpuPerformanceCard = () => {
                         >
                             <Box
                                 component="svg"
-                                width={13}
-                                height={13}
+                                width={12}
+                                height={12}
                                 viewBox="0 0 16 16"
-                                sx={{ flexShrink: 0, display: 'block' }}
+                                sx={{ flexShrink: 0, display: 'block', mt: '-1px' }}
                             >
                                 <path
                                     d="M8 5V8M8 11H8.0075M15.5 8C15.5 12.1421 12.1421 15.5 8 15.5C3.85786 15.5 0.5 12.1421 0.5 8C0.5 3.85786 3.85786 0.5 8 0.5C12.1421 0.5 15.5 3.85786 15.5 8Z"
@@ -784,8 +784,6 @@ const GpuPerformanceCard = () => {
                                 fontWeight: 400,
                                 lineHeight: '14px',
                                 whiteSpace: 'nowrap',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
                             }}>
                                 Independent of selected filters | Last Update 10:20:34 AM
                             </Typography>
@@ -795,15 +793,15 @@ const GpuPerformanceCard = () => {
                     <Grid item xs={12} sm={5}>
                         <Stack spacing={1.25}>
                             <Box sx={{ textAlign: 'center' }}>
-                                <Box sx={{ position: 'relative', height: 56, mb: 0.5 }}>
+                                <Box sx={{ position: 'relative', height: 50, mb: 0.25 }}>
                                     <ResponsiveContainer width="100%" height="100%">
                                         <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                                             <Pie
                                                 data={miniData}
                                                 cx="50%"
                                                 cy="92%"
-                                                innerRadius={30}
-                                                outerRadius={44}
+                                                innerRadius={28}
+                                                outerRadius={40}
                                                 startAngle={180}
                                                 endAngle={0}
                                                 dataKey="value"
@@ -821,10 +819,10 @@ const GpuPerformanceCard = () => {
                                         display: 'flex',
                                         alignItems: 'flex-end',
                                         justifyContent: 'center',
-                                        pb: 1,
+                                        pb: 0.75,
                                         pointerEvents: 'none',
                                     }}>
-                                        <Box component="svg" width={16} height={15} viewBox="0 0 20 19">
+                                        <Box component="svg" width={14} height={13} viewBox="0 0 20 19">
                                             <path
                                                 fill="#4D87EA"
                                                 d="M9.51062 0L12.7552 5.53423L19.0212 6.90983L14.7605 11.7058L15.3885 18.0902L9.51062 15.52L3.63277 18.0902L4.26079 11.7058L5.53131e-05 6.90983L6.26605 5.53423L9.51062 0Z"
@@ -876,12 +874,12 @@ const GpuPerformanceCard = () => {
                                     </Typography>
                                     <Box
                                         component="svg"
-                                        width={18}
-                                        height={14}
+                                        width={16}
+                                        height={12}
                                         viewBox="0 0 24 24"
                                         fill="none"
                                         stroke="#5C5F61"
-                                        strokeWidth={1.5}
+                                        strokeWidth={1.2}
                                         strokeLinecap="round"
                                         strokeLinejoin="round"
                                         sx={{ flexShrink: 0, mt: 0.25 }}
