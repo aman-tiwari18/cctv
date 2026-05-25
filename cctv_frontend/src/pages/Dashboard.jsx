@@ -28,7 +28,7 @@ import {
 import { LocalizationProvider, DateCalendar } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { Cell, Pie, PieChart, ResponsiveContainer, Sector, Tooltip } from 'recharts';
-import { format, parseISO, isSameDay, subDays } from 'date-fns';
+import { format, parseISO, isSameDay } from 'date-fns';
 import KeyboardArrowDownRoundedIcon from '@mui/icons-material/KeyboardArrowDownRounded';
 import KeyboardArrowRightRoundedIcon from '@mui/icons-material/KeyboardArrowRightRounded';
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
@@ -368,8 +368,8 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
     // Fixed donut geometry — recharts ResponsiveContainer handles the overall responsive
     // sizing, but the ring itself is rendered with stable pixel radii so it always renders
     // immediately on first paint (no measurement step, no zero-radius flash).
-    const OUTER_R = 130;
-    const INNER_R = 100;
+    const OUTER_R = 126;
+    const INNER_R = 106;
     const BOX_HEIGHT = 280;
 
     // Build tree: 3 parent categories, each with its sub-detections
@@ -554,8 +554,8 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                             endAngle={0}
                                             innerRadius={INNER_R}
                                             outerRadius={OUTER_R}
-                                            paddingAngle={1}
-                                            cornerRadius={4}
+                                            paddingAngle={0}
+                                            cornerRadius={0}
                                             dataKey="count"
                                             nameKey="label"
                                             stroke="none"
@@ -651,10 +651,9 @@ const GpuPerformanceCard = () => {
                     <Typography sx={{
                         color: '#191B23',
                         fontFamily: 'Inter, sans-serif',
-                        fontSize: '22px',
+                        fontSize: '20px',
                         fontWeight: 700,
-                        lineHeight: '28px',
-                        letterSpacing: '0.4px',
+                        lineHeight: '24px',
                     }}>
                         Overall GPU Performance
                     </Typography>
@@ -672,15 +671,15 @@ const GpuPerformanceCard = () => {
 
                 <Grid container spacing={2} alignItems="flex-start">
                     <Grid item xs={12} sm={7}>
-                        <Box sx={{ position: 'relative', height: 200 }}>
+                        <Box sx={{ position: 'relative', height: 170 }}>
                             <ResponsiveContainer width="100%" height="100%">
                                 <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                                     <Pie
                                         data={gaugeData}
                                         cx="50%"
-                                        cy="88%"
-                                        innerRadius={96}
-                                        outerRadius={118}
+                                        cy="100%"
+                                        innerRadius={128}
+                                        outerRadius={150}
                                         startAngle={180}
                                         endAngle={0}
                                         paddingAngle={0}
@@ -696,12 +695,12 @@ const GpuPerformanceCard = () => {
                             <Box
                                 sx={{
                                     position: 'absolute',
-                                    inset: 0,
+                                    left: 0,
+                                    right: 0,
+                                    bottom: '6px',
                                     display: 'flex',
                                     flexDirection: 'column',
                                     alignItems: 'center',
-                                    justifyContent: 'center',
-                                    pt: 4,
                                     pointerEvents: 'none',
                                 }}
                             >
@@ -715,7 +714,7 @@ const GpuPerformanceCard = () => {
                                     {utilization}%
                                 </Typography>
                                 <Typography sx={{
-                                    mt: 0.5,
+                                    mt: 0.25,
                                     color: '#5C5F61',
                                     fontFamily: 'Inter, sans-serif',
                                     fontSize: '13px',
@@ -731,9 +730,9 @@ const GpuPerformanceCard = () => {
 
                         <Box
                             sx={{
-                                mt: 0,
+                                mt: 1.5,
                                 mx: 'auto',
-                                maxWidth: 210,
+                                maxWidth: 240,
                                 bgcolor: '#fff',
                                 border: '1px solid #E5E7EB',
                                 borderRadius: '10px',
@@ -755,7 +754,7 @@ const GpuPerformanceCard = () => {
                                 color: '#191B23',
                                 fontFamily: 'Inter, sans-serif',
                                 fontSize: '13px',
-                                fontWeight: 600,
+                                fontWeight: 500,
                                 lineHeight: '18px',
                                 letterSpacing: '0.5px',
                                 textTransform: 'uppercase',
@@ -763,102 +762,68 @@ const GpuPerformanceCard = () => {
                                 MIN 4 • MAX 3688
                             </Typography>
                         </Box>
-
-                        <Stack
-                            direction="row"
-                            alignItems="center"
-                            spacing={0.75}
-                            sx={{ mt: 1.5, pl: 0.5 }}
-                        >
-                            <Box
-                                component="svg"
-                                width={12}
-                                height={12}
-                                viewBox="0 0 16 16"
-                                sx={{ flexShrink: 0, display: 'block', mt: '-1px' }}
-                            >
-                                <path
-                                    d="M8 5V8M8 11H8.0075M15.5 8C15.5 12.1421 12.1421 15.5 8 15.5C3.85786 15.5 0.5 12.1421 0.5 8C0.5 3.85786 3.85786 0.5 8 0.5C12.1421 0.5 15.5 3.85786 15.5 8Z"
-                                    stroke="#A6A6A6"
-                                    strokeWidth="1"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    fill="none"
-                                />
-                            </Box>
-                            <Typography sx={{
-                                color: 'rgba(0,0,0,0.45)',
-                                fontFamily: 'Inter, sans-serif',
-                                fontSize: '11px',
-                                fontWeight: 400,
-                                lineHeight: '14px',
-                                whiteSpace: 'nowrap',
-                            }}>
-                                Independent of selected filters | Last Update 10:20:34 AM
-                            </Typography>
-                        </Stack>
                     </Grid>
 
                     <Grid item xs={12} sm={5}>
-                        <Stack spacing={1.25}>
-                            <Box sx={{ textAlign: 'center' }}>
-                                <Box sx={{ position: 'relative', height: 50, mb: 0.25 }}>
-                                    <ResponsiveContainer width="100%" height="100%">
-                                        <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
-                                            <Pie
-                                                data={miniData}
-                                                cx="50%"
-                                                cy="92%"
-                                                innerRadius={28}
-                                                outerRadius={40}
-                                                startAngle={180}
-                                                endAngle={0}
-                                                dataKey="value"
-                                                stroke="none"
-                                            >
-                                                {miniData.map((d) => (
-                                                    <Cell key={d.name} fill={d.color} />
-                                                ))}
-                                            </Pie>
-                                        </PieChart>
-                                    </ResponsiveContainer>
-                                    <Box sx={{
-                                        position: 'absolute',
-                                        inset: 0,
-                                        display: 'flex',
-                                        alignItems: 'flex-end',
-                                        justifyContent: 'center',
-                                        pb: 0.75,
-                                        pointerEvents: 'none',
-                                    }}>
-                                        <Box component="svg" width={14} height={13} viewBox="0 0 20 19">
-                                            <path
-                                                fill="#4D87EA"
-                                                d="M9.51062 0L12.7552 5.53423L19.0212 6.90983L14.7605 11.7058L15.3885 18.0902L9.51062 15.52L3.63277 18.0902L4.26079 11.7058L5.53131e-05 6.90983L6.26605 5.53423L9.51062 0Z"
-                                            />
-                                        </Box>
+                        <Stack spacing={1.75}>
+                            <Box sx={{ position: 'relative', height: 100 }}>
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+                                        <Pie
+                                            data={miniData}
+                                            cx="50%"
+                                            cy="100%"
+                                            innerRadius={72}
+                                            outerRadius={92}
+                                            startAngle={180}
+                                            endAngle={0}
+                                            dataKey="value"
+                                            stroke="none"
+                                        >
+                                            {miniData.map((d) => (
+                                                <Cell key={d.name} fill={d.color} />
+                                            ))}
+                                        </Pie>
+                                    </PieChart>
+                                </ResponsiveContainer>
+                                <Box sx={{
+                                    position: 'absolute',
+                                    inset: 0,
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    alignItems: 'center',
+                                    justifyContent: 'flex-end',
+                                    pb: '4px',
+                                    pointerEvents: 'none',
+                                }}>
+                                    <Box component="svg" width={18} height={17} viewBox="0 0 20 19">
+                                        <path
+                                            fill="#4D87EA"
+                                            d="M9.51062 0L12.7552 5.53423L19.0212 6.90983L14.7605 11.7058L15.3885 18.0902L9.51062 15.52L3.63277 18.0902L4.26079 11.7058L5.53131e-05 6.90983L6.26605 5.53423L9.51062 0Z"
+                                        />
                                     </Box>
+                                    <Typography sx={{
+                                        mt: 0.25,
+                                        color: '#4D87EA',
+                                        fontFamily: 'Inter, sans-serif',
+                                        fontSize: '13px',
+                                        fontWeight: 600,
+                                        lineHeight: '16px',
+                                    }}>
+                                        Optimal
+                                    </Typography>
+                                    <Typography sx={{
+                                        color: '#5C5F61',
+                                        fontFamily: 'Inter, sans-serif',
+                                        fontSize: '10px',
+                                        fontWeight: 500,
+                                        lineHeight: '14px',
+                                        letterSpacing: '0.5px',
+                                        textTransform: 'uppercase',
+                                    }}>
+                                        Efficiency
+                                    </Typography>
                                 </Box>
-                                <Typography sx={{
-                                    color: '#4D87EA',
-                                    fontFamily: 'Inter, sans-serif',
-                                    fontSize: '12px',
-                                    fontWeight: 600,
-                                    lineHeight: '15px',
-                                }}>
-                                    Optimal
-                                </Typography>
-                                <Typography sx={{
-                                    color: '#5C5F61',
-                                    fontFamily: 'Inter, sans-serif',
-                                    fontSize: '10px',
-                                    fontWeight: 600,
-                                    lineHeight: '14px',
-                                    letterSpacing: '0.5px',
-                                    textTransform: 'uppercase',
-                                }}>
-                                    Efficiency
-                                </Typography>
                             </Box>
 
                             <Paper
@@ -869,7 +834,7 @@ const GpuPerformanceCard = () => {
                                     p: 1.5,
                                 }}
                             >
-                                <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+                                <Stack direction="row" justifyContent="space-between" alignItems="center">
                                     <Typography sx={{
                                         color: '#5C5F61',
                                         fontFamily: 'Inter, sans-serif',
@@ -883,15 +848,15 @@ const GpuPerformanceCard = () => {
                                     </Typography>
                                     <Box
                                         component="svg"
-                                        width={16}
-                                        height={12}
+                                        width={24}
+                                        height={24}
                                         viewBox="0 0 24 24"
                                         fill="none"
                                         stroke="#5C5F61"
-                                        strokeWidth={1.2}
+                                        strokeWidth={1.5}
                                         strokeLinecap="round"
                                         strokeLinejoin="round"
-                                        sx={{ flexShrink: 0, mt: 0.25 }}
+                                        sx={{ flexShrink: 0 }}
                                     >
                                         <path d="m22 8-6 4 6 4V8Z" />
                                         <rect width="14" height="12" x="2" y="6" rx="2" ry="2" />
@@ -950,6 +915,40 @@ const GpuPerformanceCard = () => {
                         </Stack>
                     </Grid>
                 </Grid>
+
+                <Stack
+                    direction="row"
+                    alignItems="center"
+                    spacing={0.75}
+                    sx={{ mt: 2.5, pl: 0.5 }}
+                >
+                    <Box
+                        component="svg"
+                        width={12}
+                        height={12}
+                        viewBox="0 0 16 16"
+                        sx={{ flexShrink: 0, display: 'block', mt: '-1px' }}
+                    >
+                        <path
+                            d="M8 5V8M8 11H8.0075M15.5 8C15.5 12.1421 12.1421 15.5 8 15.5C3.85786 15.5 0.5 12.1421 0.5 8C0.5 3.85786 3.85786 0.5 8 0.5C12.1421 0.5 15.5 3.85786 15.5 8Z"
+                            stroke="#A6A6A6"
+                            strokeWidth="1"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            fill="none"
+                        />
+                    </Box>
+                    <Typography sx={{
+                        color: '#94A3B8',
+                        fontFamily: 'Inter, sans-serif',
+                        fontSize: '11px',
+                        fontWeight: 400,
+                        lineHeight: '14px',
+                        whiteSpace: 'nowrap',
+                    }}>
+                        Independent of selected filters | Last Update 10:20:34 AM
+                    </Typography>
+                </Stack>
             </CardContent>
         </Card>
     );
@@ -1039,10 +1038,9 @@ const LiveExamsCard = () => {
                     <Typography sx={{
                         fontFamily: 'Inter, sans-serif',
                         fontWeight: 700,
-                        fontSize: '22px',
-                        lineHeight: '28px',
+                        fontSize: '20px',
+                        lineHeight: '24px',
                         color: '#191B23',
-                        letterSpacing: '0.4px',
                     }}>
                         Live Exams
                     </Typography>
@@ -1073,7 +1071,7 @@ const LiveExamsCard = () => {
                 <TableContainer
                     component={Paper}
                     elevation={0}
-                    sx={{ borderRadius: '10px', border: '1px solid #E8ECF1', boxShadow: 'none' }}
+                    sx={{ borderRadius: 0, border: 'none', boxShadow: 'none', bgcolor: 'transparent' }}
                 >
                     <Table>
                         <TableHead sx={{ bgcolor: HEADER_BG }}>
@@ -1192,16 +1190,11 @@ const Dashboard = () => {
     const [showGpuWarning, setShowGpuWarning] = useState(true);
     const [filterExam, setFilterExam] = useState('');
     const [filterShift, setFilterShift] = useState('');
-    // Date popover anchor — drives the Today / Yesterday / custom-date picker.
+    // Date popover anchor — drives the Today / custom-date picker.
     const [dateAnchor, setDateAnchor] = useState(null);
     const dateOpen = Boolean(dateAnchor);
     const today = useMemo(() => new Date(), []);
-    const yesterday = useMemo(() => subDays(new Date(), 1), []);
-    const dateLabel = isSameDay(date, today)
-        ? 'Today'
-        : isSameDay(date, yesterday)
-            ? 'Yesterday'
-            : format(date, 'd MMM yyyy');
+    const dateLabel = isSameDay(date, today) ? 'Today' : format(date, 'd MMM yyyy');
 
     useEffect(() => {
         let cancelled = false;
@@ -1259,7 +1252,7 @@ const Dashboard = () => {
                             fontWeight: 400,
                             fontSize: '14px',
                             lineHeight: '20px',
-                            color: '#64748B',
+                            color: '#303336',
                         }}>
                             Monitor Live Exams, Camera Activity, Detections
                         </Typography>
@@ -1270,8 +1263,9 @@ const Dashboard = () => {
                             alignItems="center"
                             spacing={1}
                             sx={{
-                                bgcolor: '#FEE2E2',
-                                color: '#DC2626',
+                                bgcolor: '#FFDAD6',
+                                color: '#93000A',
+                                border: '1px solid rgba(186, 26, 26, 0.20)',
                                 borderRadius: 999,
                                 pl: 1.25,
                                 pr: 0.5,
@@ -1279,7 +1273,7 @@ const Dashboard = () => {
                                 flexShrink: 0,
                             }}
                         >
-                            <ErrorOutlineRoundedIcon sx={{ fontSize: 18, color: '#DC2626' }} />
+                            <ErrorOutlineRoundedIcon sx={{ fontSize: 18, color: '#93000A' }} />
                             <Typography sx={{
                                 fontFamily: 'Inter, sans-serif',
                                 fontSize: '13px',
@@ -1301,7 +1295,7 @@ const Dashboard = () => {
                                     alignItems: 'center',
                                     justifyContent: 'center',
                                     cursor: 'pointer',
-                                    color: '#DC2626',
+                                    color: '#93000A',
                                     '&:hover': { opacity: 0.7 },
                                 }}
                                 aria-label="Dismiss GPU utilization warning"
@@ -1342,9 +1336,9 @@ const Dashboard = () => {
                             '&:hover': { borderColor: '#CBD5E1' },
                         }}
                     >
-                        <CalendarTodayOutlinedIcon sx={{ fontSize: 18, color: '#5C5F61' }} />
+                        <CalendarTodayOutlinedIcon sx={{ fontSize: 18, color: '#191B23' }} />
                         <Box component="span" sx={{ flex: 1 }}>{dateLabel}</Box>
-                        <KeyboardArrowDownRoundedIcon sx={{ fontSize: 20, color: '#5C5F61' }} />
+                        <KeyboardArrowDownRoundedIcon sx={{ fontSize: 20, color: '#191B23' }} />
                     </Box>
 
                     <Popover
@@ -1379,20 +1373,6 @@ const Dashboard = () => {
                                 >
                                     Today
                                 </ListItemButton>
-                                <ListItemButton
-                                    selected={isSameDay(date, yesterday)}
-                                    onClick={() => { setDate(subDays(new Date(), 1)); setDateAnchor(null); }}
-                                    sx={{
-                                        fontFamily: 'Inter, sans-serif',
-                                        fontSize: '14px',
-                                        fontWeight: isSameDay(date, yesterday) ? 600 : 500,
-                                        color: '#191B23',
-                                        py: 1,
-                                        '&.Mui-selected': { bgcolor: '#EEF2FF' },
-                                    }}
-                                >
-                                    Yesterday
-                                </ListItemButton>
                             </List>
                             <Divider />
                             <DateCalendar
@@ -1406,8 +1386,8 @@ const Dashboard = () => {
                                 sx={{
                                     width: 280,
                                     '& .MuiPickersDay-root.Mui-selected': {
-                                        bgcolor: '#5B5BD6',
-                                        '&:hover': { bgcolor: '#4A4ABF' },
+                                        bgcolor: '#4B53C9',
+                                        '&:hover': { bgcolor: '#3F47B0' },
                                     },
                                 }}
                             />
@@ -1462,7 +1442,7 @@ const Dashboard = () => {
                         variant="contained"
                         disableElevation
                         sx={{
-                            bgcolor: '#5B5BD6',
+                            bgcolor: '#4B53C9',
                             color: '#fff',
                             textTransform: 'none',
                             fontFamily: 'Inter, sans-serif',
@@ -1471,7 +1451,7 @@ const Dashboard = () => {
                             borderRadius: '10px',
                             px: 3,
                             py: 1.25,
-                            '&:hover': { bgcolor: '#4A4ABF' },
+                            '&:hover': { bgcolor: '#3F47B0' },
                         }}
                     >
                         Apply Filters
