@@ -6,10 +6,14 @@ import {
     CardContent,
     Chip,
     CircularProgress,
+    Divider,
     FormControl,
     Grid,
+    List,
+    ListItemButton,
     MenuItem,
     Paper,
+    Popover,
     Select,
     Stack,
     Table,
@@ -21,10 +25,10 @@ import {
     TableRow,
     Typography,
 } from '@mui/material';
-import { LocalizationProvider, DatePicker } from '@mui/x-date-pickers';
+import { LocalizationProvider, DateCalendar } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { Cell, Pie, PieChart, ResponsiveContainer, Sector, Tooltip } from 'recharts';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, isSameDay, subDays } from 'date-fns';
 import KeyboardArrowDownRoundedIcon from '@mui/icons-material/KeyboardArrowDownRounded';
 import KeyboardArrowRightRoundedIcon from '@mui/icons-material/KeyboardArrowRightRounded';
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
@@ -1186,9 +1190,18 @@ const Dashboard = () => {
     const [overviewLoading, setOverviewLoading] = useState(true);
     // Visual-only placeholders for the new Overview filter row (wiring lands later).
     const [showGpuWarning, setShowGpuWarning] = useState(true);
-    const [filterDate, setFilterDate] = useState('today');
     const [filterExam, setFilterExam] = useState('');
     const [filterShift, setFilterShift] = useState('');
+    // Date popover anchor — drives the Today / Yesterday / custom-date picker.
+    const [dateAnchor, setDateAnchor] = useState(null);
+    const dateOpen = Boolean(dateAnchor);
+    const today = useMemo(() => new Date(), []);
+    const yesterday = useMemo(() => subDays(new Date(), 1), []);
+    const dateLabel = isSameDay(date, today)
+        ? 'Today'
+        : isSameDay(date, yesterday)
+            ? 'Yesterday'
+            : format(date, 'd MMM yyyy');
 
     useEffect(() => {
         let cancelled = false;
@@ -1306,31 +1319,100 @@ const Dashboard = () => {
                     alignItems={{ xs: 'stretch', sm: 'center' }}
                     sx={{ mb: 2.5 }}
                 >
-                    <FormControl size="small" sx={{ minWidth: 180 }}>
-                        <Select
-                            value={filterDate}
-                            onChange={(e) => setFilterDate(e.target.value)}
-                            renderValue={(v) => (
-                                <Stack direction="row" alignItems="center" spacing={1}>
-                                    <CalendarTodayOutlinedIcon sx={{ fontSize: 18, color: '#5C5F61' }} />
-                                    <span style={{ color: '#191B23' }}>
-                                        {v === 'today' ? 'Today' : v}
-                                    </span>
-                                </Stack>
-                            )}
-                            sx={{
-                                bgcolor: '#fff',
-                                borderRadius: '10px',
-                                fontFamily: 'Inter, sans-serif',
-                                fontSize: '14px',
-                                fontWeight: 500,
-                                '& .MuiOutlinedInput-notchedOutline': { borderColor: '#E5E7EB' },
-                                '& .MuiSelect-select': { py: 1.25, display: 'flex', alignItems: 'center' },
-                            }}
-                        >
-                            <MenuItem value="today">Today</MenuItem>
-                        </Select>
-                    </FormControl>
+                    <Box
+                        component="button"
+                        type="button"
+                        onClick={(e) => setDateAnchor(e.currentTarget)}
+                        sx={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 1,
+                            minWidth: 180,
+                            bgcolor: '#fff',
+                            border: '1px solid #E5E7EB',
+                            borderRadius: '10px',
+                            fontFamily: 'Inter, sans-serif',
+                            fontSize: '14px',
+                            fontWeight: 500,
+                            color: '#191B23',
+                            px: 1.5,
+                            py: 1.25,
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                            '&:hover': { borderColor: '#CBD5E1' },
+                        }}
+                    >
+                        <CalendarTodayOutlinedIcon sx={{ fontSize: 18, color: '#5C5F61' }} />
+                        <Box component="span" sx={{ flex: 1 }}>{dateLabel}</Box>
+                        <KeyboardArrowDownRoundedIcon sx={{ fontSize: 20, color: '#5C5F61' }} />
+                    </Box>
+
+                    <Popover
+                        open={dateOpen}
+                        anchorEl={dateAnchor}
+                        onClose={() => setDateAnchor(null)}
+                        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+                        slotProps={{
+                            paper: {
+                                sx: {
+                                    mt: 0.5,
+                                    borderRadius: '12px',
+                                    boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                                    overflow: 'hidden',
+                                },
+                            },
+                        }}
+                    >
+                        <Box sx={{ display: 'flex', flexDirection: 'column', minWidth: 280 }}>
+                            <List dense disablePadding>
+                                <ListItemButton
+                                    selected={isSameDay(date, today)}
+                                    onClick={() => { setDate(new Date()); setDateAnchor(null); }}
+                                    sx={{
+                                        fontFamily: 'Inter, sans-serif',
+                                        fontSize: '14px',
+                                        fontWeight: isSameDay(date, today) ? 600 : 500,
+                                        color: '#191B23',
+                                        py: 1,
+                                        '&.Mui-selected': { bgcolor: '#EEF2FF' },
+                                    }}
+                                >
+                                    Today
+                                </ListItemButton>
+                                <ListItemButton
+                                    selected={isSameDay(date, yesterday)}
+                                    onClick={() => { setDate(subDays(new Date(), 1)); setDateAnchor(null); }}
+                                    sx={{
+                                        fontFamily: 'Inter, sans-serif',
+                                        fontSize: '14px',
+                                        fontWeight: isSameDay(date, yesterday) ? 600 : 500,
+                                        color: '#191B23',
+                                        py: 1,
+                                        '&.Mui-selected': { bgcolor: '#EEF2FF' },
+                                    }}
+                                >
+                                    Yesterday
+                                </ListItemButton>
+                            </List>
+                            <Divider />
+                            <DateCalendar
+                                value={date}
+                                onChange={(d) => {
+                                    if (d) {
+                                        setDate(d);
+                                        setDateAnchor(null);
+                                    }
+                                }}
+                                sx={{
+                                    width: 280,
+                                    '& .MuiPickersDay-root.Mui-selected': {
+                                        bgcolor: '#5B5BD6',
+                                        '&:hover': { bgcolor: '#4A4ABF' },
+                                    },
+                                }}
+                            />
+                        </Box>
+                    </Popover>
 
                     <FormControl size="small" sx={{ minWidth: 200 }}>
                         <Select
