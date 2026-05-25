@@ -1,0 +1,23 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: cctv
+
+scrape_configs:
+  - job_name: gpu-workers
+    metrics_path: /metrics
+    static_configs:
+      # host.docker.internal lets the container reach the script-server on the host.
+      # Replace with the actual worker IPs when rolling out to multiple boxes.
+      - targets:
+          - host.docker.internal:8000
+        labels:
+          server_id: worker-0
+      # Uncomment and edit as additional workers come online:
+      # - targets: ['192.168.19.43:8000']
+      #   labels: { server_id: worker-1 }
+      # - targets: ['192.168.19.42:8000']
+      #   labels: { server_id: worker-2 }
+      # - targets: ['192.168.19.41:8000']
+      #   labels: { server_id: worker-3 }

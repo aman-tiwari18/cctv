@@ -413,7 +413,7 @@ exports.getAll = async (req, res) => {
             },
             includeShift,
         ],
-        order: [["updated_at", "DESC"]],
+        order: [["id", "DESC"]],
         limit: limit ? parseInt(limit) : 100,
         offset: offset ? parseInt(offset) : 0,
     });
@@ -509,7 +509,7 @@ exports.getByShift = async (req, res) => {
                 attributes: ["id", "name", "script_id"],
             },
         ],
-        order: [["updated_at", "DESC"]],
+        order: [["id", "DESC"]],
         limit: limit ? parseInt(limit) : 100,
         offset: offset ? parseInt(offset) : 0,
     });
@@ -518,6 +518,69 @@ exports.getByShift = async (req, res) => {
         success: true,
         count: assignments.length,
         data: assignments,
+    });
+};
+
+
+/**
+ * Get vision classification summary for an exam
+ * Returns last vision run: started_at, last worker finished (MAX updated_at in camera_links_rtsp), duration
+ */
+exports.getVisionSummary = async (req, res) => {
+    const { exam_id } = req.query;
+    if (!exam_id) {
+        return res.status(400).json({ success: false, message: "exam_id is required" });
+    }
+
+    const { sequelize } = require("../config/db");
+
+    const [rows] = await sequelize.query(`
+        SELECT
+            ssa.id                AS assignment_id,
+            ssa.status,
+            ssa.started_at,
+            ssa.completed_at,
+            ssa.assignment_date,
+            (
+                SELECT MAX(clr.updated_at)
+                FROM camera_links_rtsp clr
+                WHERE clr.exam_id = :exam_id
+                  AND clr.updated_at > ssa.started_at
+            ) AS last_worker_finished_at
+        FROM shift_script_assignments ssa
+        JOIN scripts s ON s.id = ssa.script_id
+        JOIN exam_shifts es ON es.id = ssa.shift_id
+        WHERE s.script_id = 'vision'
+          AND es.exam_id = :exam_id
+          AND ssa.is_active = TRUE
+          AND ssa.started_at IS NOT NULL
+        ORDER BY ssa.started_at DESC
+        LIMIT 1
+    `, { replacements: { exam_id: parseInt(exam_id) } });
+
+    if (!rows || rows.length === 0) {
+        return res.json({ success: true, data: null });
+    }
+
+    const row = rows[0];
+    let duration_minutes = null;
+    const finishedAt = row.last_worker_finished_at || row.completed_at;
+    if (row.started_at && finishedAt) {
+        duration_minutes = Math.round(
+            (new Date(finishedAt) - new Date(row.started_at)) / 60000
+        );
+    }
+
+    res.json({
+        success: true,
+        data: {
+            assignment_id: row.assignment_id,
+            status: row.status,
+            assignment_date: row.assignment_date,
+            started_at: row.started_at,
+            last_worker_finished_at: finishedAt,
+            duration_minutes,
+        },
     });
 };
 

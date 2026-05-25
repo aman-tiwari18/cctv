@@ -504,7 +504,7 @@ exports.createCamera = async (req, res) => {
  */
 exports.getByExam = async (req, res) => {
     const { examId } = req.params;
-    const { is_active = true, shift_id, exam_date, search, page = 1, limit = 50 } = req.query;
+    const { is_active = true, shift_id, exam_date, search, page = 1, limit = 50, sort_by, sort_order = 'asc' } = req.query;
     const { Model, linkType } = await getModelByExam(examId);
 
     const where = {
@@ -545,9 +545,21 @@ exports.getByExam = async (req, res) => {
     const parsedPage = parseInt(page, 10) || 1;
     const offset = (parsedPage - 1) * parsedLimit;
 
+    // Build server-side sort order
+    const SORTABLE_HLS = ['centre_name', 'tc_code', 'city', 'state', 'camera_name', 'ch_code', 'camera_category', 'classification', 'status', 'exam_date', 'shift_id', 'created_at'];
+    const SORTABLE_RTSP = ['device_id', 'camera_no', 'tc_code', 'camera_name', 'centre_name', 'city', 'state', 'classification', 'status', 'created_at'];
+    const validColumns = linkType === 'HLS' ? SORTABLE_HLS : SORTABLE_RTSP;
+    // shift_name is a virtual column — sort by shift_id instead
+    const columnMap = { shift_name: 'shift_id' };
+    const resolvedColumn = columnMap[sort_by] || sort_by;
+    const direction = sort_order?.toLowerCase() === 'desc' ? 'DESC' : 'ASC';
+    const orderClause = (resolvedColumn && validColumns.includes(resolvedColumn))
+        ? [[resolvedColumn, direction]]
+        : [['created_at', 'DESC']];
+
     const result = await Model.findAndCountAll({
         where,
-        order: [["created_at", "DESC"]],
+        order: orderClause,
         limit: parsedLimit,
         offset: offset
     });

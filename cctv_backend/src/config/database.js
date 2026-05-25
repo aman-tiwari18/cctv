@@ -29,6 +29,10 @@ const sequelize = new Sequelize(
 const testConnection = async () => {
   try {
     await sequelize.authenticate();
+    // Increase MySQL memory limits for large JOIN+ORDER BY queries
+    await sequelize.query("SET GLOBAL sort_buffer_size = 67108864");
+    await sequelize.query("SET GLOBAL tmp_table_size = 134217728");
+    await sequelize.query("SET GLOBAL max_heap_table_size = 134217728");
     logger.info("Database connection established successfully");
     return true;
   } catch (error) {

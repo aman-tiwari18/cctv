@@ -40,6 +40,13 @@ router.get(
     asyncHandler(ExecutionController.getByShift)
 );
 
+// Vision classification summary for an exam
+router.get(
+    "/vision-summary",
+    authenticate,
+    asyncHandler(ExecutionController.getVisionSummary)
+);
+
 // All assignments (with filters)
 router.get(
     "/",
