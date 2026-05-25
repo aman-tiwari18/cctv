@@ -28,6 +28,9 @@ import { format, parseISO } from 'date-fns';
 import KeyboardArrowDownRoundedIcon from '@mui/icons-material/KeyboardArrowDownRounded';
 import KeyboardArrowRightRoundedIcon from '@mui/icons-material/KeyboardArrowRightRounded';
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
+import CalendarTodayOutlinedIcon from '@mui/icons-material/CalendarTodayOutlined';
+import ErrorOutlineRoundedIcon from '@mui/icons-material/ErrorOutlineRounded';
+import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
 import { dashboardAPI } from '../services/api';
 import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
 import { ShiftSvgIcon } from '../components/ShiftSvgIcon';
@@ -1181,6 +1184,11 @@ const Dashboard = () => {
     const [date, setDate] = useState(new Date());
     const [overview, setOverview] = useState(null);
     const [overviewLoading, setOverviewLoading] = useState(true);
+    // Visual-only placeholders for the new Overview filter row (wiring lands later).
+    const [showGpuWarning, setShowGpuWarning] = useState(true);
+    const [filterDate, setFilterDate] = useState('today');
+    const [filterExam, setFilterExam] = useState('');
+    const [filterShift, setFilterShift] = useState('');
 
     useEffect(() => {
         let cancelled = false;
@@ -1213,33 +1221,179 @@ const Dashboard = () => {
     return (
         <LocalizationProvider dateAdapter={AdapterDateFns}>
             <Box>
-                {/* Overview header */}
+                {/* Overview header — Row 1: title + warning chip */}
                 <Stack
                     direction={{ xs: 'column', sm: 'row' }}
                     justifyContent="space-between"
-                    alignItems={{ xs: 'flex-start', sm: 'flex-end' }}
+                    alignItems={{ xs: 'flex-start', sm: 'flex-start' }}
                     spacing={2}
-                    sx={{ mb: 2.5 }}
+                    sx={{ mb: 2 }}
                 >
                     <Box>
-                        <Typography variant="h5" sx={{ fontWeight: 700, color: '#0f172a' }}>
+                        <Typography sx={{
+                            fontFamily: 'Inter, sans-serif',
+                            fontWeight: 700,
+                            fontSize: '26px',
+                            lineHeight: '32px',
+                            color: '#191B23',
+                            letterSpacing: '0.2px',
+                        }}>
                             Overview
                         </Typography>
-                        <Typography variant="body2" sx={{ color: '#64748b' }}>
+                        <Typography sx={{
+                            mt: 0.25,
+                            fontFamily: 'Inter, sans-serif',
+                            fontWeight: 400,
+                            fontSize: '14px',
+                            lineHeight: '20px',
+                            color: '#64748B',
+                        }}>
                             Monitor Live Exams, Camera Activity, Detections
                         </Typography>
                     </Box>
-                    <DatePicker
-                        value={date}
-                        onChange={(d) => d && setDate(d)}
-                        format="dd MMM yyyy"
-                        slotProps={{
-                            textField: {
-                                size: 'small',
-                                sx: { minWidth: 180, bgcolor: '#fff', borderRadius: 2 },
-                            },
+                    {showGpuWarning && (
+                        <Stack
+                            direction="row"
+                            alignItems="center"
+                            spacing={1}
+                            sx={{
+                                bgcolor: '#FEE2E2',
+                                color: '#DC2626',
+                                borderRadius: 999,
+                                pl: 1.25,
+                                pr: 0.5,
+                                py: 0.5,
+                                flexShrink: 0,
+                            }}
+                        >
+                            <ErrorOutlineRoundedIcon sx={{ fontSize: 18, color: '#DC2626' }} />
+                            <Typography sx={{
+                                fontFamily: 'Inter, sans-serif',
+                                fontSize: '13px',
+                                fontWeight: 500,
+                                lineHeight: '16px',
+                                whiteSpace: 'nowrap',
+                            }}>
+                                GPU utilization above 85%
+                            </Typography>
+                            <Box
+                                component="button"
+                                type="button"
+                                onClick={() => setShowGpuWarning(false)}
+                                sx={{
+                                    border: 'none',
+                                    bgcolor: 'transparent',
+                                    p: 0.25,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    cursor: 'pointer',
+                                    color: '#DC2626',
+                                    '&:hover': { opacity: 0.7 },
+                                }}
+                                aria-label="Dismiss GPU utilization warning"
+                            >
+                                <CloseRoundedIcon sx={{ fontSize: 16 }} />
+                            </Box>
+                        </Stack>
+                    )}
+                </Stack>
+
+                {/* Overview header — Row 2: filter strip */}
+                <Stack
+                    direction={{ xs: 'column', sm: 'row' }}
+                    spacing={1.5}
+                    alignItems={{ xs: 'stretch', sm: 'center' }}
+                    sx={{ mb: 2.5 }}
+                >
+                    <FormControl size="small" sx={{ minWidth: 180 }}>
+                        <Select
+                            value={filterDate}
+                            onChange={(e) => setFilterDate(e.target.value)}
+                            renderValue={(v) => (
+                                <Stack direction="row" alignItems="center" spacing={1}>
+                                    <CalendarTodayOutlinedIcon sx={{ fontSize: 18, color: '#5C5F61' }} />
+                                    <span style={{ color: '#191B23' }}>
+                                        {v === 'today' ? 'Today' : v}
+                                    </span>
+                                </Stack>
+                            )}
+                            sx={{
+                                bgcolor: '#fff',
+                                borderRadius: '10px',
+                                fontFamily: 'Inter, sans-serif',
+                                fontSize: '14px',
+                                fontWeight: 500,
+                                '& .MuiOutlinedInput-notchedOutline': { borderColor: '#E5E7EB' },
+                                '& .MuiSelect-select': { py: 1.25, display: 'flex', alignItems: 'center' },
+                            }}
+                        >
+                            <MenuItem value="today">Today</MenuItem>
+                        </Select>
+                    </FormControl>
+
+                    <FormControl size="small" sx={{ minWidth: 200 }}>
+                        <Select
+                            value={filterExam}
+                            onChange={(e) => setFilterExam(e.target.value)}
+                            displayEmpty
+                            renderValue={(v) => (
+                                <span style={{ color: v ? '#191B23' : '#94A3B8' }}>
+                                    {v || 'Select Exam'}
+                                </span>
+                            )}
+                            sx={{
+                                bgcolor: '#fff',
+                                borderRadius: '10px',
+                                fontFamily: 'Inter, sans-serif',
+                                fontSize: '14px',
+                                fontWeight: 500,
+                                '& .MuiOutlinedInput-notchedOutline': { borderColor: '#E5E7EB' },
+                                '& .MuiSelect-select': { py: 1.25 },
+                            }}
+                        />
+                    </FormControl>
+
+                    <FormControl size="small" sx={{ minWidth: 180 }}>
+                        <Select
+                            value={filterShift}
+                            onChange={(e) => setFilterShift(e.target.value)}
+                            displayEmpty
+                            renderValue={(v) => (
+                                <span style={{ color: v ? '#191B23' : '#94A3B8' }}>
+                                    {v || 'Select Shift'}
+                                </span>
+                            )}
+                            sx={{
+                                bgcolor: '#fff',
+                                borderRadius: '10px',
+                                fontFamily: 'Inter, sans-serif',
+                                fontSize: '14px',
+                                fontWeight: 500,
+                                '& .MuiOutlinedInput-notchedOutline': { borderColor: '#E5E7EB' },
+                                '& .MuiSelect-select': { py: 1.25 },
+                            }}
+                        />
+                    </FormControl>
+
+                    <Button
+                        variant="contained"
+                        disableElevation
+                        sx={{
+                            bgcolor: '#5B5BD6',
+                            color: '#fff',
+                            textTransform: 'none',
+                            fontFamily: 'Inter, sans-serif',
+                            fontWeight: 700,
+                            fontSize: '14px',
+                            borderRadius: '10px',
+                            px: 3,
+                            py: 1.25,
+                            '&:hover': { bgcolor: '#4A4ABF' },
                         }}
-                    />
+                    >
+                        Apply Filters
+                    </Button>
                 </Stack>
 
                 {/* Row 1 — 4 KPI cards */}
