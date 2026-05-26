@@ -6,14 +6,11 @@ import {
     CardContent,
     Chip,
     CircularProgress,
-    Divider,
     FormControl,
     Grid,
-    List,
-    ListItemButton,
+    InputBase,
     MenuItem,
     Paper,
-    Popover,
     Select,
     Stack,
     Table,
@@ -25,16 +22,13 @@ import {
     TableRow,
     Typography,
 } from '@mui/material';
-import { LocalizationProvider, DateCalendar } from '@mui/x-date-pickers';
-import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { Cell, Pie, PieChart, ResponsiveContainer, Sector, Tooltip } from 'recharts';
-import { format, parseISO, isSameDay } from 'date-fns';
+import { format, parseISO, subDays } from 'date-fns';
 import KeyboardArrowDownRoundedIcon from '@mui/icons-material/KeyboardArrowDownRounded';
-import KeyboardArrowRightRoundedIcon from '@mui/icons-material/KeyboardArrowRightRounded';
 import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
-import CalendarTodayOutlinedIcon from '@mui/icons-material/CalendarTodayOutlined';
 import ErrorOutlineRoundedIcon from '@mui/icons-material/ErrorOutlineRounded';
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
+import TuneRoundedIcon from '@mui/icons-material/TuneRounded';
 import { dashboardAPI } from '../services/api';
 import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
 import { ShiftSvgIcon } from '../components/ShiftSvgIcon';
@@ -383,8 +377,7 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                     label: DETECTION_TYPE_LABELS[d.type] || d.type,
                     count: Number(d.count || 0),
                     color: SUBCATEGORY_COLORS[d.type] || CATEGORY_COLORS[cat],
-                }))
-                .filter((s) => s.count > 0);
+                }));
 
             const count = subs.reduce((a, s) => a + s.count, 0);
             return {
@@ -403,7 +396,6 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
     const { donutData, centerValue, centerLabel } = useMemo(() => {
         if (category === 'all') {
             const data = tree.parents
-                .filter((p) => p.count > 0)
                 .map((p) => ({ key: p.key, label: p.label, count: p.count, color: p.color }));
             return { donutData: data, centerValue: tree.grandTotal, centerLabel: 'TOTAL DETECTIONS' };
         }
@@ -417,9 +409,7 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
         };
     }, [tree, category]);
 
-    const parentPercent = (p) => (tree.grandTotal > 0 ? (p.count / tree.grandTotal) * 100 : 0);
-    const subPercent = (parent, sub) => (parent.count > 0 ? (sub.count / parent.count) * 100 : 0);
-
+    const donutTotal = donutData.reduce((a, d) => a + d.count, 0);
     const activeIdx = donutData.findIndex((d) => d.key === activeKey);
 
     return (
@@ -429,33 +419,57 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                     <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '20px', fontWeight: 700, lineHeight: '24px' }}>
                         Detection Distribution
                     </Typography>
-                    <FormControl size="small" sx={{ minWidth: 180 }}>
-                        <Select
-                            value={category}
-                            onChange={(e) => setCategory(e.target.value)}
+                    <Stack direction="row" alignItems="center" spacing={1}>
+                        <Button
+                            variant="outlined"
+                            size="small"
+                            startIcon={<FileDownloadOutlinedIcon sx={{ fontSize: 18 }} />}
                             sx={{
+                                textTransform: 'none',
+                                fontFamily: 'Inter, sans-serif',
+                                fontWeight: 500,
                                 fontSize: '13px',
+                                color: '#191B23',
+                                borderColor: '#E5E7EB',
                                 borderRadius: '8px',
-                                '& .MuiSelect-select': { fontSize: '13px', py: 0.75 },
-                            }}
-                            MenuProps={{
-                                PaperProps: {
-                                    sx: {
-                                        '& .MuiMenuItem-root': {
-                                            fontSize: '13px',
-                                            minHeight: 32,
-                                            py: 0.75,
-                                        },
-                                    },
+                                px: 1.5,
+                                py: 0.5,
+                                '&:hover': {
+                                    borderColor: '#CBD5E1',
+                                    bgcolor: '#F8FAFC',
                                 },
                             }}
                         >
-                            <MenuItem value="all">All Categories</MenuItem>
-                            <MenuItem value="people">People &amp; Activity</MenuItem>
-                            <MenuItem value="movement">Movement &amp; Alert</MenuItem>
-                            <MenuItem value="camera">Camera &amp; System</MenuItem>
-                        </Select>
-                    </FormControl>
+                            Export
+                        </Button>
+                        <FormControl size="small" sx={{ minWidth: 180 }}>
+                            <Select
+                                value={category}
+                                onChange={(e) => setCategory(e.target.value)}
+                                sx={{
+                                    fontSize: '13px',
+                                    borderRadius: '8px',
+                                    '& .MuiSelect-select': { fontSize: '13px', py: 0.75 },
+                                }}
+                                MenuProps={{
+                                    PaperProps: {
+                                        sx: {
+                                            '& .MuiMenuItem-root': {
+                                                fontSize: '13px',
+                                                minHeight: 32,
+                                                py: 0.75,
+                                            },
+                                        },
+                                    },
+                                }}
+                            >
+                                <MenuItem value="all">All Categories</MenuItem>
+                                <MenuItem value="people">People &amp; Activity</MenuItem>
+                                <MenuItem value="movement">Movement &amp; Alert</MenuItem>
+                                <MenuItem value="camera">Camera &amp; System</MenuItem>
+                            </Select>
+                        </FormControl>
+                    </Stack>
                 </Stack>
 
                 {loading ? (
@@ -468,68 +482,6 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                     </Box>
                 ) : (
                     <Grid container spacing={2} alignItems="flex-start">
-                        <Grid item xs={12} sm={5}>
-                            <Box sx={{ maxHeight: 280, overflowY: 'auto', pr: 0.5 }}>
-                                <Stack spacing={1.2}>
-                                    {tree.parents.map((p) => {
-                                        const expanded = category === p.key;
-                                        const parentActive = activeKey === p.key;
-                                        return (
-                                            <Box key={p.key}>
-                                                <Stack
-                                                    direction="row"
-                                                    alignItems="flex-start"
-                                                    spacing={0.75}
-                                                    onClick={() => setCategory(expanded ? 'all' : p.key)}
-                                                    sx={{ cursor: 'pointer', userSelect: 'none' }}
-                                                >
-                                                    {/* arrow + dot, locked to first text line height */}
-                                                    <Stack direction="row" alignItems="center" spacing={0.75} sx={{ height: '20px', flexShrink: 0, color: '#434655' }}>
-                                                        {expanded
-                                                            ? <KeyboardArrowDownRoundedIcon sx={{ fontSize: 16 }} />
-                                                            : <KeyboardArrowRightRoundedIcon sx={{ fontSize: 16 }} />}
-                                                        <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: p.color }} />
-                                                    </Stack>
-                                                    {/* label, wraps at natural word boundaries */}
-                                                    <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: parentActive ? 700 : 500, lineHeight: '20px', flexGrow: 1, flexShrink: 1 }}>
-                                                        {p.label}
-                                                    </Typography>
-                                                    {/* count + percent, also locked to first text line */}
-                                                    <Stack direction="row" alignItems="center" spacing={0.5} sx={{ height: '20px', flexShrink: 0 }}>
-                                                        <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: 700, lineHeight: '20px', whiteSpace: 'nowrap' }}>
-                                                            {p.count.toLocaleString()}
-                                                        </Typography>
-                                                        <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '12px', fontWeight: parentActive ? 700 : 400, lineHeight: '20px', whiteSpace: 'nowrap', opacity: parentActive ? 1 : 0.7 }}>
-                                                            ({parentPercent(p).toFixed(2)}%)
-                                                        </Typography>
-                                                    </Stack>
-                                                </Stack>
-
-                                                {expanded && p.subs.length > 0 && (
-                                                    <Stack spacing={0.2} sx={{ mt: 0.6, pl: 4, pb: 0.8, borderBottom: '1px solid #eef0f3' }}>
-                                                        {p.subs.map((s) => {
-                                                            const subActive = activeKey === s.key;
-                                                            return (
-                                                                <Stack key={s.key} direction="row" alignItems="center" spacing={1}>
-                                                                    <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: s.color, flexShrink: 0 }} />
-                                                                    <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: subActive ? 700 : 400, lineHeight: '20px' }}>
-                                                                        {s.label}
-                                                                    </Typography>
-                                                                    <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '10px', fontWeight: 700, lineHeight: '20px', ml: 'auto' }}>
-                                                                        {subPercent(p, s).toFixed(0)}%
-                                                                    </Typography>
-                                                                </Stack>
-                                                            );
-                                                        })}
-                                                    </Stack>
-                                                )}
-                                            </Box>
-                                        );
-                                    })}
-                                </Stack>
-                            </Box>
-                        </Grid>
-
                         <Grid item xs={12} sm={7}>
                             <Box
                                 sx={{
@@ -616,6 +568,45 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                         {centerLabel}
                                     </Typography>
                                 </Box>
+                            </Box>
+                        </Grid>
+
+                        <Grid item xs={12} sm={5}>
+                            <Box sx={{ maxHeight: BOX_HEIGHT, overflowY: 'auto', pr: 0.5, pt: 1 }}>
+                                <Stack spacing={1.5}>
+                                    {donutData.map((slice) => {
+                                        const pct = donutTotal > 0 ? (slice.count / donutTotal) * 100 : 0;
+                                        const isActive = activeKey === slice.key;
+                                        const isParentRow = category === 'all';
+                                        return (
+                                            <Stack
+                                                key={slice.key}
+                                                direction="row"
+                                                alignItems="center"
+                                                spacing={1.5}
+                                                onMouseEnter={() => setActiveKey(slice.key)}
+                                                onMouseLeave={() => setActiveKey(null)}
+                                                onClick={isParentRow ? () => setCategory(slice.key) : undefined}
+                                                sx={{
+                                                    cursor: isParentRow ? 'pointer' : 'default',
+                                                    userSelect: 'none',
+                                                }}
+                                            >
+                                                <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: slice.color, flexShrink: 0 }} />
+                                                <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '14px', fontWeight: isActive ? 700 : 500, lineHeight: '20px' }}>
+                                                    {slice.label}
+                                                </Typography>
+                                                <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '14px', fontWeight: 500, lineHeight: '20px' }}>
+                                                    {slice.count.toLocaleString()}
+                                                </Typography>
+                                                <Box sx={{ flexGrow: 1 }} />
+                                                <Typography sx={{ color: '#64748B', fontFamily: 'Inter, sans-serif', fontSize: '14px', fontWeight: 500, lineHeight: '20px', whiteSpace: 'nowrap' }}>
+                                                    ({pct.toFixed(0)}%)
+                                                </Typography>
+                                            </Stack>
+                                        );
+                                    })}
+                                </Stack>
                             </Box>
                         </Grid>
                     </Grid>
@@ -1183,25 +1174,61 @@ const LiveExamsCard = () => {
 // ---------------------------------------------------------------------------
 
 const Dashboard = () => {
-    const [date, setDate] = useState(new Date());
     const [overview, setOverview] = useState(null);
     const [overviewLoading, setOverviewLoading] = useState(true);
-    // Visual-only placeholders for the new Overview filter row (wiring lands later).
     const [showGpuWarning, setShowGpuWarning] = useState(true);
-    const [filterExam, setFilterExam] = useState('');
-    const [filterShift, setFilterShift] = useState('');
-    // Date popover anchor — drives the Today / custom-date picker.
-    const [dateAnchor, setDateAnchor] = useState(null);
-    const dateOpen = Boolean(dateAnchor);
-    const today = useMemo(() => new Date(), []);
-    const dateLabel = isSameDay(date, today) ? 'Today' : format(date, 'd MMM yyyy');
+    const [searchKeyword, setSearchKeyword] = useState('');
+    const [dateChip, setDateChip] = useState('today');
+
+    // Derive API params + active filter chips from the selected date chip.
+    // Today is the default and produces no active chips (so Clear all hides).
+    const { apiParams, activeFilters } = useMemo(() => {
+        const today = new Date();
+        const fmt = (d) => format(d, 'yyyy-MM-dd');
+        switch (dateChip) {
+            case 'yesterday': {
+                const y = subDays(today, 1);
+                return {
+                    apiParams: { date: fmt(y) },
+                    activeFilters: [{ key: 'date', label: 'Yesterday' }],
+                };
+            }
+            case 'last_week': {
+                const start = subDays(today, 6);
+                const range = `${fmt(start)} → ${fmt(today)}`;
+                return {
+                    apiParams: { start_date: fmt(start), end_date: fmt(today) },
+                    activeFilters: [
+                        { key: 'date', label: 'Last week' },
+                        { key: 'date_range', label: range },
+                    ],
+                };
+            }
+            case 'last_month': {
+                const start = subDays(today, 29);
+                const range = `${fmt(start)} → ${fmt(today)}`;
+                return {
+                    apiParams: { start_date: fmt(start), end_date: fmt(today) },
+                    activeFilters: [
+                        { key: 'date', label: 'Last month' },
+                        { key: 'date_range', label: range },
+                    ],
+                };
+            }
+            case 'today':
+            default:
+                return {
+                    apiParams: { date: fmt(today) },
+                    activeFilters: [],
+                };
+        }
+    }, [dateChip]);
 
     useEffect(() => {
         let cancelled = false;
         setOverviewLoading(true);
-        const dateStr = format(date, 'yyyy-MM-dd');
         dashboardAPI
-            .getOverview(dateStr)
+            .getOverview(apiParams)
             .then((res) => {
                 if (!cancelled) setOverview(res?.data?.data || null);
             })
@@ -1216,7 +1243,7 @@ const Dashboard = () => {
         return () => {
             cancelled = true;
         };
-    }, [date]);
+    }, [apiParams]);
 
     const totalExams   = overview?.total_exams   || { total: 0, ongoing: 0 };
     const cameras      = overview?.cameras       || { total: 0, accessible: 0, unclassified: 0 };
@@ -1224,239 +1251,253 @@ const Dashboard = () => {
     const detections   = overview?.detections    || { today: 0, pushed_to_client: 0, false_detection: 0 };
     const distribution = overview?.detection_distribution || [];
 
-    return (
-        <LocalizationProvider dateAdapter={AdapterDateFns}>
-            <Box>
-                {/* Overview header — Row 1: title + warning chip */}
-                <Stack
-                    direction={{ xs: 'column', sm: 'row' }}
-                    justifyContent="space-between"
-                    alignItems={{ xs: 'flex-start', sm: 'flex-start' }}
-                    spacing={2}
-                    sx={{ mb: 2 }}
-                >
-                    <Box>
-                        <Typography sx={{
-                            fontFamily: 'Inter, sans-serif',
-                            fontWeight: 700,
-                            fontSize: '26px',
-                            lineHeight: '32px',
-                            color: '#191B23',
-                            letterSpacing: '0.2px',
-                        }}>
-                            Overview
-                        </Typography>
-                        <Typography sx={{
-                            mt: 0.25,
-                            fontFamily: 'Inter, sans-serif',
-                            fontWeight: 400,
-                            fontSize: '14px',
-                            lineHeight: '20px',
-                            color: '#303336',
-                        }}>
-                            Monitor Live Exams, Camera Activity, Detections
-                        </Typography>
-                    </Box>
-                    {showGpuWarning && (
-                        <Stack
-                            direction="row"
-                            alignItems="center"
-                            spacing={1}
-                            sx={{
-                                bgcolor: '#FFDAD6',
-                                color: '#93000A',
-                                border: '1px solid rgba(186, 26, 26, 0.20)',
-                                borderRadius: 999,
-                                pl: 1.25,
-                                pr: 0.5,
-                                py: 0.5,
-                                flexShrink: 0,
-                            }}
-                        >
-                            <ErrorOutlineRoundedIcon sx={{ fontSize: 18, color: '#93000A' }} />
-                            <Typography sx={{
-                                fontFamily: 'Inter, sans-serif',
-                                fontSize: '13px',
-                                fontWeight: 500,
-                                lineHeight: '16px',
-                                whiteSpace: 'nowrap',
-                            }}>
-                                GPU utilization above 85%
-                            </Typography>
-                            <Box
-                                component="button"
-                                type="button"
-                                onClick={() => setShowGpuWarning(false)}
-                                sx={{
-                                    border: 'none',
-                                    bgcolor: 'transparent',
-                                    p: 0.25,
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    cursor: 'pointer',
-                                    color: '#93000A',
-                                    '&:hover': { opacity: 0.7 },
-                                }}
-                                aria-label="Dismiss GPU utilization warning"
-                            >
-                                <CloseRoundedIcon sx={{ fontSize: 16 }} />
-                            </Box>
-                        </Stack>
-                    )}
-                </Stack>
+    const dateChips = [
+        { key: 'today',      label: 'Today' },
+        { key: 'yesterday',  label: 'Yesterday' },
+        { key: 'last_week',  label: 'Last week' },
+        { key: 'last_month', label: 'Last month' },
+    ];
 
-                {/* Overview header — Row 2: filter strip */}
-                <Stack
-                    direction={{ xs: 'column', sm: 'row' }}
-                    spacing={1.5}
-                    alignItems={{ xs: 'stretch', sm: 'center' }}
-                    sx={{ mb: 2.5 }}
-                >
-                    <Box
-                        component="button"
-                        type="button"
-                        onClick={(e) => setDateAnchor(e.currentTarget)}
+    return (
+        <Box>
+            {/* Overview header — Row 1: title + warning chip */}
+            <Stack
+                direction={{ xs: 'column', sm: 'row' }}
+                justifyContent="space-between"
+                alignItems={{ xs: 'flex-start', sm: 'flex-start' }}
+                spacing={2}
+                sx={{ mb: 2 }}
+            >
+                <Box>
+                    <Typography sx={{
+                        fontFamily: 'Inter, sans-serif',
+                        fontWeight: 700,
+                        fontSize: '26px',
+                        lineHeight: '32px',
+                        color: '#191B23',
+                        letterSpacing: '0.2px',
+                    }}>
+                        Overview
+                    </Typography>
+                    <Typography sx={{
+                        mt: 0.25,
+                        fontFamily: 'Inter, sans-serif',
+                        fontWeight: 400,
+                        fontSize: '14px',
+                        lineHeight: '20px',
+                        color: '#303336',
+                    }}>
+                        Monitor Live Exams, Camera Activity, Detections
+                    </Typography>
+                </Box>
+                {showGpuWarning && (
+                    <Stack
+                        direction="row"
+                        alignItems="center"
+                        spacing={1}
                         sx={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: 1,
-                            minWidth: 180,
-                            bgcolor: '#fff',
-                            border: '1px solid #E5E7EB',
-                            borderRadius: '10px',
+                            bgcolor: '#FFDAD6',
+                            color: '#93000A',
+                            border: '1px solid rgba(186, 26, 26, 0.20)',
+                            borderRadius: 999,
+                            pl: 1.25,
+                            pr: 0.5,
+                            py: 0.5,
+                            flexShrink: 0,
+                        }}
+                    >
+                        <ErrorOutlineRoundedIcon sx={{ fontSize: 18, color: '#93000A' }} />
+                        <Typography sx={{
+                            fontFamily: 'Inter, sans-serif',
+                            fontSize: '13px',
+                            fontWeight: 500,
+                            lineHeight: '16px',
+                            whiteSpace: 'nowrap',
+                        }}>
+                            GPU utilization above 85%
+                        </Typography>
+                        <Box
+                            component="button"
+                            type="button"
+                            onClick={() => setShowGpuWarning(false)}
+                            sx={{
+                                border: 'none',
+                                bgcolor: 'transparent',
+                                p: 0.25,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                                color: '#93000A',
+                                '&:hover': { opacity: 0.7 },
+                            }}
+                            aria-label="Dismiss GPU utilization warning"
+                        >
+                            <CloseRoundedIcon sx={{ fontSize: 16 }} />
+                        </Box>
+                    </Stack>
+                )}
+            </Stack>
+
+            {/* Overview header — Row 2: search input + filter button */}
+            <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 1.5 }}>
+                <Box sx={{
+                    flex: 1,
+                    bgcolor: '#fff',
+                    border: '1px solid #E5E7EB',
+                    borderRadius: '10px',
+                    px: 2,
+                    py: 1.25,
+                    display: 'flex',
+                    alignItems: 'center',
+                }}>
+                    <InputBase
+                        fullWidth
+                        placeholder="Search keywords..."
+                        value={searchKeyword}
+                        onChange={(e) => setSearchKeyword(e.target.value)}
+                        sx={{
                             fontFamily: 'Inter, sans-serif',
                             fontSize: '14px',
                             fontWeight: 500,
                             color: '#191B23',
-                            px: 1.5,
-                            py: 1.25,
-                            cursor: 'pointer',
-                            textAlign: 'left',
-                            '&:hover': { borderColor: '#CBD5E1' },
+                            '& input::placeholder': { color: '#94A3B8', opacity: 1 },
                         }}
-                    >
-                        <CalendarTodayOutlinedIcon sx={{ fontSize: 18, color: '#191B23' }} />
-                        <Box component="span" sx={{ flex: 1 }}>{dateLabel}</Box>
-                        <KeyboardArrowDownRoundedIcon sx={{ fontSize: 20, color: '#191B23' }} />
-                    </Box>
-
-                    <Popover
-                        open={dateOpen}
-                        anchorEl={dateAnchor}
-                        onClose={() => setDateAnchor(null)}
-                        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
-                        slotProps={{
-                            paper: {
-                                sx: {
-                                    mt: 0.5,
-                                    borderRadius: '12px',
-                                    boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
-                                    overflow: 'hidden',
-                                },
-                            },
-                        }}
-                    >
-                        <Box sx={{ display: 'flex', flexDirection: 'column', minWidth: 280 }}>
-                            <List dense disablePadding>
-                                <ListItemButton
-                                    selected={isSameDay(date, today)}
-                                    onClick={() => { setDate(new Date()); setDateAnchor(null); }}
-                                    sx={{
-                                        fontFamily: 'Inter, sans-serif',
-                                        fontSize: '14px',
-                                        fontWeight: isSameDay(date, today) ? 600 : 500,
-                                        color: '#191B23',
-                                        py: 1,
-                                        '&.Mui-selected': { bgcolor: '#EEF2FF' },
-                                    }}
-                                >
-                                    Today
-                                </ListItemButton>
-                            </List>
-                            <Divider />
-                            <DateCalendar
-                                value={date}
-                                onChange={(d) => {
-                                    if (d) {
-                                        setDate(d);
-                                        setDateAnchor(null);
-                                    }
-                                }}
-                                sx={{
-                                    width: 280,
-                                    '& .MuiPickersDay-root.Mui-selected': {
-                                        bgcolor: '#4B53C9',
-                                        '&:hover': { bgcolor: '#3F47B0' },
-                                    },
-                                }}
-                            />
-                        </Box>
-                    </Popover>
-
-                    <FormControl size="small" sx={{ minWidth: 200 }}>
-                        <Select
-                            value={filterExam}
-                            onChange={(e) => setFilterExam(e.target.value)}
-                            displayEmpty
-                            renderValue={(v) => (
-                                <span style={{ color: v ? '#191B23' : '#94A3B8' }}>
-                                    {v || 'Select Exam'}
-                                </span>
-                            )}
-                            sx={{
-                                bgcolor: '#fff',
-                                borderRadius: '10px',
-                                fontFamily: 'Inter, sans-serif',
-                                fontSize: '14px',
-                                fontWeight: 500,
-                                '& .MuiOutlinedInput-notchedOutline': { borderColor: '#E5E7EB' },
-                                '& .MuiSelect-select': { py: 1.25 },
-                            }}
-                        />
-                    </FormControl>
-
-                    <FormControl size="small" sx={{ minWidth: 180 }}>
-                        <Select
-                            value={filterShift}
-                            onChange={(e) => setFilterShift(e.target.value)}
-                            displayEmpty
-                            renderValue={(v) => (
-                                <span style={{ color: v ? '#191B23' : '#94A3B8' }}>
-                                    {v || 'Select Shift'}
-                                </span>
-                            )}
-                            sx={{
-                                bgcolor: '#fff',
-                                borderRadius: '10px',
-                                fontFamily: 'Inter, sans-serif',
-                                fontSize: '14px',
-                                fontWeight: 500,
-                                '& .MuiOutlinedInput-notchedOutline': { borderColor: '#E5E7EB' },
-                                '& .MuiSelect-select': { py: 1.25 },
-                            }}
-                        />
-                    </FormControl>
-
-                    <Button
-                        variant="contained"
-                        disableElevation
-                        sx={{
-                            bgcolor: '#4B53C9',
-                            color: '#fff',
-                            textTransform: 'none',
+                    />
+                </Box>
+                <Box
+                    component="button"
+                    type="button"
+                    sx={{
+                        position: 'relative',
+                        width: 48,
+                        height: 48,
+                        bgcolor: '#4B53C9',
+                        border: 'none',
+                        borderRadius: '10px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        flexShrink: 0,
+                        '&:hover': { bgcolor: '#3F47B0' },
+                    }}
+                    aria-label="Open filters"
+                >
+                    <TuneRoundedIcon sx={{ fontSize: 22, color: '#fff' }} />
+                    {activeFilters.length > 0 && (
+                        <Box sx={{
+                            position: 'absolute',
+                            top: -4,
+                            right: -4,
+                            minWidth: 18,
+                            height: 18,
+                            px: 0.5,
+                            bgcolor: '#fff',
+                            border: '1.5px solid #4B53C9',
+                            borderRadius: 999,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
                             fontFamily: 'Inter, sans-serif',
+                            fontSize: '11px',
                             fontWeight: 700,
-                            fontSize: '14px',
-                            borderRadius: '10px',
-                            px: 3,
-                            py: 1.25,
-                            '&:hover': { bgcolor: '#3F47B0' },
+                            color: '#4B53C9',
+                            lineHeight: 1,
+                        }}>
+                            {activeFilters.length}
+                        </Box>
+                    )}
+                </Box>
+            </Stack>
+
+            {/* Overview header — Row 3: quick date chips */}
+            <Stack
+                direction="row"
+                spacing={1}
+                flexWrap="wrap"
+                useFlexGap
+                sx={{ mb: activeFilters.length ? 1 : 2.5 }}
+            >
+                {dateChips.map((c) => {
+                    const active = c.key === dateChip;
+                    return (
+                        <Box
+                            key={c.key}
+                            component="button"
+                            type="button"
+                            onClick={() => setDateChip(c.key)}
+                            sx={{
+                                bgcolor: active ? '#4B53C9' : '#fff',
+                                color: active ? '#fff' : '#191B23',
+                                border: active ? 'none' : '1px solid #E5E7EB',
+                                borderRadius: 999,
+                                px: 1.75,
+                                py: 0.5,
+                                fontFamily: 'Inter, sans-serif',
+                                fontSize: '14px',
+                                fontWeight: 500,
+                                cursor: 'pointer',
+                                '&:hover': active ? { bgcolor: '#3F47B0' } : { borderColor: '#CBD5E1' },
+                            }}
+                        >
+                            {c.label}
+                        </Box>
+                    );
+                })}
+            </Stack>
+
+            {/* Overview header — Row 4: active filter chips + Clear all */}
+            {activeFilters.length > 0 && (
+                <Stack
+                    direction="row"
+                    alignItems="center"
+                    spacing={1}
+                    flexWrap="wrap"
+                    useFlexGap
+                    sx={{ mb: 2.5 }}
+                >
+                    {activeFilters.map((f) => (
+                        <Chip
+                            key={f.key}
+                            label={f.label}
+                            onDelete={() => setDateChip('today')}
+                            deleteIcon={<CloseRoundedIcon sx={{ fontSize: 14 }} />}
+                            sx={{
+                                bgcolor: '#E5E5FF',
+                                color: '#4B53C9',
+                                fontFamily: 'Inter, sans-serif',
+                                fontSize: '13px',
+                                fontWeight: 500,
+                                borderRadius: 999,
+                                height: 28,
+                                '& .MuiChip-deleteIcon': {
+                                    color: '#4B53C9',
+                                    '&:hover': { color: '#3F47B0' },
+                                },
+                            }}
+                        />
+                    ))}
+                    <Box
+                        component="button"
+                        type="button"
+                        onClick={() => setDateChip('today')}
+                        sx={{
+                            border: 'none',
+                            bgcolor: 'transparent',
+                            color: '#4B53C9',
+                            fontFamily: 'Inter, sans-serif',
+                            fontSize: '13px',
+                            fontWeight: 500,
+                            cursor: 'pointer',
+                            px: 0.5,
+                            '&:hover': { textDecoration: 'underline' },
                         }}
                     >
-                        Apply Filters
-                    </Button>
+                        Clear all
+                    </Box>
                 </Stack>
+            )}
 
                 {/* Row 1 — 4 KPI cards */}
                 <Grid container spacing={2.5} sx={{ mb: 2.5 }}>
@@ -1524,10 +1565,9 @@ const Dashboard = () => {
                     </Grid>
                 </Grid>
 
-                {/* Row 3 — Live Exams table */}
-                <LiveExamsCard />
-            </Box>
-        </LocalizationProvider>
+            {/* Row 3 — Live Exams table */}
+            <LiveExamsCard />
+        </Box>
     );
 };
 

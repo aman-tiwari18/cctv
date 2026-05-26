@@ -151,9 +151,12 @@ export const clientDashboardAPI = {
 export const dashboardAPI = {
     getAdminStats: (timeRange = '24h') => api.get('/dashboard/admin-stats', { params: { timeRange } }),
 
-    // V2 — CCTV Control Center dashboard
-    getOverview: (date) =>
-        api.get('/dashboard/overview', { params: date ? { date } : {} }),
+    // V2 — CCTV Control Center dashboard. Accepts either a "YYYY-MM-DD" string
+    // (back-compat single-day) or an object like { date } / { start_date, end_date }.
+    getOverview: (arg) => {
+        const params = typeof arg === 'string' ? { date: arg } : (arg || {});
+        return api.get('/dashboard/overview', { params });
+    },
 
     getLiveExams: ({ page = 1, limit = 10, exam_id } = {}) =>
         api.get('/dashboard/live-exams', {

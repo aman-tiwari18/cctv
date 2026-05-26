@@ -35,6 +35,20 @@ const getDateRangeBounds = (dateStr) => {
 };
 
 /**
+ * Given "YYYY-MM-DD" start and end (both inclusive), return
+ * { start: "<start> 00:00:00", end: "<end+1> 00:00:00" } for
+ * `created_at >= ? AND created_at < ?` ranges spanning the whole window.
+ */
+const getRangeBounds = (startStr, endStr) => {
+    const [ys, ms, ds] = startStr.split('-').map(Number);
+    const [ye, me, de] = endStr.split('-').map(Number);
+    const start = new Date(ys, ms - 1, ds, 0, 0, 0, 0);
+    const end = new Date(ye, me - 1, de + 1, 0, 0, 0, 0);
+    const fmt = (dt) => `${getLocalDateStr(dt)} ${getLocalTimeStr(dt)}`;
+    return { start: fmt(start), end: fmt(end) };
+};
+
+/**
  * Validate a YYYY-MM-DD string; return null if invalid.
  */
 const validateDateParam = (raw) => {
@@ -278,36 +292,55 @@ exports.getAdminDashboardStats = async (req, res) => {
  */
 exports.getOverview = async (req, res) => {
     try {
-        const date = validateDateParam(req.query.date) || getLocalDateStr();
+        // V2.3: resolve a [startDate, endDate] window (both inclusive YYYY-MM-DD).
+        // Priority: start_date+end_date → date → today.
+        const startParam = validateDateParam(req.query.start_date);
+        const endParam   = validateDateParam(req.query.end_date);
+        const dateParam  = validateDateParam(req.query.date);
+        let startDate, endDate;
+        if (startParam && endParam) {
+            startDate = startParam;
+            endDate   = endParam;
+        } else if (dateParam) {
+            startDate = endDate = dateParam;
+        } else {
+            startDate = endDate = getLocalDateStr();
+        }
+        if (startDate > endDate) {
+            const tmp = startDate;
+            startDate = endDate;
+            endDate = tmp;
+        }
         const nowTime = getLocalTimeStr();
-        const { start: dateStart, end: dateEnd } = getDateRangeBounds(date);
+        const { start: dateStart, end: dateEnd } = getRangeBounds(startDate, endDate);
 
-        // Q1: On-today exam IDs (source of `total` AND scope for cameras/detections).
-        // total_exams.total = activeExams.length per V2 spec (on-today count, not all-time).
+        // Q1: Exam IDs overlapping the queried range (source of `total` AND scope
+        // for cameras/detections). An exam overlaps [startDate, endDate] iff its
+        // start_date <= endDate AND end_date >= startDate.
         const activeExamsP = query(
             `SELECT id FROM exams
              WHERE is_active = 1
                AND start_date IS NOT NULL AND end_date IS NOT NULL
-               AND ? BETWEEN start_date AND end_date`,
-            [date]
+               AND start_date <= ? AND end_date >= ?`,
+            [endDate, startDate]
         );
 
-        // Q1b: Ongoing count — exams with at least one shift currently in time window.
-        // BETWEEN start_time AND end_time is inclusive; assumes same-day shifts
-        // (no overnight wraparound, per current production shift policy).
+        // Q1b: Ongoing count — exams overlapping the range that ALSO have a shift
+        // currently in time window NOW. BETWEEN start_time AND end_time is inclusive;
+        // assumes same-day shifts (no overnight wraparound).
         const ongoingP = query(
             `SELECT COUNT(DISTINCT es.exam_id) AS ongoing
              FROM exam_shifts es
              JOIN exams e ON e.id = es.exam_id
              WHERE e.is_active = 1
                AND e.start_date IS NOT NULL AND e.end_date IS NOT NULL
-               AND ? BETWEEN e.start_date AND e.end_date
+               AND e.start_date <= ? AND e.end_date >= ?
                AND es.is_active = 1
                AND ? BETWEEN es.start_time AND es.end_time`,
-            [date, nowTime]
+            [endDate, startDate, nowTime]
         );
 
-        // Q5: Scripts breakdown (assignment_date = selected date).
+        // Q5: Scripts breakdown for assignments whose assignment_date falls in the range.
         // V2 response renames: run→running, pend→scheduled, done→completed.
         const scriptsP = query(
             `SELECT COUNT(*) AS planned_today,
@@ -315,8 +348,8 @@ exports.getOverview = async (req, res) => {
                     SUM(CASE WHEN status = 'PENDING'   THEN 1 ELSE 0 END) AS scheduled,
                     SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END) AS completed
              FROM shift_script_assignments
-             WHERE assignment_date = ? AND is_active = TRUE`,
-            [date]
+             WHERE assignment_date BETWEEN ? AND ? AND is_active = TRUE`,
+            [startDate, endDate]
         );
 
         const [activeExams, ongoingResult, scripts] = await Promise.all([
@@ -430,7 +463,9 @@ exports.getOverview = async (req, res) => {
         res.json({
             success: true,
             data: {
-                date,
+                date: endDate,
+                start_date: startDate,
+                end_date: endDate,
                 total_exams: {
                     total,
                     ongoing,
