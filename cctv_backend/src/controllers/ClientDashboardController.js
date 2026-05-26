@@ -42,6 +42,20 @@ const getDateRangeBounds = (dateStr) => {
 };
 
 /**
+ * Given "YYYY-MM-DD" start and end (both inclusive), return
+ * { start: "<start> 00:00:00", end: "<end+1> 00:00:00" } for
+ * `created_at >= ? AND created_at < ?` ranges spanning the whole window.
+ */
+const getRangeBounds = (startStr, endStr) => {
+    const [ys, ms, ds] = startStr.split('-').map(Number);
+    const [ye, me, de] = endStr.split('-').map(Number);
+    const start = new Date(ys, ms - 1, ds, 0, 0, 0, 0);
+    const end = new Date(ye, me - 1, de + 1, 0, 0, 0, 0);
+    const fmt = (dt) => `${getLocalDateStr(dt)} ${getLocalTimeStr(dt)}`;
+    return { start: fmt(start), end: fmt(end) };
+};
+
+/**
  * Validate a YYYY-MM-DD string; return null if invalid.
  */
 const validateDateParam = (raw) => {
@@ -876,34 +890,52 @@ exports.getOverview = async (req, res) => {
     try {
         const userCompanyName = req.user?.company_name;
         const userRole = req.user?.role;
-        const date = validateDateParam(req.query.date) || getLocalDateStr();
+        // V2.3: resolve a [startDate, endDate] window (both inclusive YYYY-MM-DD).
+        // Priority: start_date+end_date → date → today.
+        const startParam = validateDateParam(req.query.start_date);
+        const endParam   = validateDateParam(req.query.end_date);
+        const dateParam  = validateDateParam(req.query.date);
+        let startDate, endDate;
+        if (startParam && endParam) {
+            startDate = startParam;
+            endDate   = endParam;
+        } else if (dateParam) {
+            startDate = endDate = dateParam;
+        } else {
+            startDate = endDate = getLocalDateStr();
+        }
+        if (startDate > endDate) {
+            const tmp = startDate;
+            startDate = endDate;
+            endDate = tmp;
+        }
         const nowTime = getLocalTimeStr();
-        const { start: dateStart, end: dateEnd } = getDateRangeBounds(date);
+        const { start: dateStart, end: dateEnd } = getRangeBounds(startDate, endDate);
 
         const companyFilter = buildCompanyFilter(userRole, userCompanyName);
         const companyFilterAliased = buildCompanyFilter(userRole, userCompanyName, 'e.exam_body');
 
-        // Q1: On-today exam IDs scoped to the company filter
-        // (V2: source of total_exams.total AND scope for cameras/detections)
+        // Q1: Exam IDs overlapping the queried range, scoped to the company filter.
+        // An exam overlaps [startDate, endDate] iff start_date <= endDate AND end_date >= startDate.
         const activeExamsP = query(
             `SELECT id FROM exams
              WHERE is_active = 1
                AND start_date IS NOT NULL AND end_date IS NOT NULL
-               AND ? BETWEEN start_date AND end_date${companyFilter.clause}`,
-            [date, ...companyFilter.params]
+               AND start_date <= ? AND end_date >= ?${companyFilter.clause}`,
+            [endDate, startDate, ...companyFilter.params]
         );
 
-        // Q1b: Ongoing count — exams with at least one shift currently in time window
+        // Q1b: Ongoing count — exams overlapping the range that ALSO have a shift currently in window NOW
         const ongoingP = query(
             `SELECT COUNT(DISTINCT es.exam_id) AS ongoing
              FROM exam_shifts es
              JOIN exams e ON e.id = es.exam_id
              WHERE e.is_active = 1
                AND e.start_date IS NOT NULL AND e.end_date IS NOT NULL
-               AND ? BETWEEN e.start_date AND e.end_date
+               AND e.start_date <= ? AND e.end_date >= ?
                AND es.is_active = 1
                AND ? BETWEEN es.start_time AND es.end_time${companyFilterAliased.clause}`,
-            [date, nowTime, ...companyFilterAliased.params]
+            [endDate, startDate, nowTime, ...companyFilterAliased.params]
         );
 
         const [activeExams, ongoingResult] = await Promise.all([activeExamsP, ongoingP]);
@@ -944,9 +976,9 @@ exports.getOverview = async (req, res) => {
                         SUM(CASE WHEN ssa.status = 'COMPLETED' THEN 1 ELSE 0 END) AS completed
                  FROM shift_script_assignments ssa
                  JOIN exam_shifts es ON es.id = ssa.shift_id
-                 WHERE ssa.assignment_date = ? AND ssa.is_active = TRUE
+                 WHERE ssa.assignment_date BETWEEN ? AND ? AND ssa.is_active = TRUE
                    AND es.exam_id IN (?)`,
-                [date, activeExamIds]
+                [startDate, endDate, activeExamIds]
             );
 
             // Q6 + Q7: Detections HLS + RTSP for date range.
@@ -1048,7 +1080,9 @@ exports.getOverview = async (req, res) => {
         res.json({
             success: true,
             data: {
-                date,
+                date: endDate,
+                start_date: startDate,
+                end_date: endDate,
                 total_exams: {
                     total,
                     ongoing,

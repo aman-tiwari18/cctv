@@ -184,7 +184,7 @@ const KPI_ICON_COLOR = '#004AC6';
 // KpiCard — the 4 top cards
 // ---------------------------------------------------------------------------
 
-const KpiCard = ({ title, value, icon, chips = [], loading }) => (
+export const KpiCard = ({ title, value, icon, chips = [], loading }) => (
     <Card sx={{ height: '100%', bgcolor: '#fff', borderRadius: '8px', border: '1px solid #eef0f3' }}>
         <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
             <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
@@ -359,7 +359,7 @@ const DetectionDonutTooltip = ({ label, percent }) => {
     );
 };
 
-const DetectionDistributionCard = ({ distribution = [], loading }) => {
+export const DetectionDistributionCard = ({ distribution = [], loading }) => {
     const [category, setCategory] = useState('all');
     const [activeKey, setActiveKey] = useState(null);
     const [mousePos, setMousePos] = useState(null);
@@ -976,7 +976,7 @@ const formatShortDate = (raw) => {
 
 const formatHMM = (raw) => (typeof raw === 'string' ? raw.slice(0, 5) : '');
 
-const LiveExamsCard = () => {
+export const LiveExamsCard = ({ fetcher = dashboardAPI.getLiveExams }) => {
     const [rows, setRows] = useState([]);
     const [total, setTotal] = useState(0);
     const [loading, setLoading] = useState(true);
@@ -986,8 +986,7 @@ const LiveExamsCard = () => {
     useEffect(() => {
         let cancelled = false;
         setLoading(true);
-        dashboardAPI
-            .getLiveExams({ page: page + 1, limit: rowsPerPage })
+        fetcher({ page: page + 1, limit: rowsPerPage })
             .then((res) => {
                 if (cancelled) return;
                 const data = res?.data?.data || {};
@@ -1006,7 +1005,7 @@ const LiveExamsCard = () => {
         return () => {
             cancelled = true;
         };
-    }, [page, rowsPerPage]);
+    }, [page, rowsPerPage, fetcher]);
 
     // Match other dashboard accents
     const ACCENT_BLUE = '#2E68C9';
@@ -1193,7 +1192,7 @@ const LiveExamsCard = () => {
 
 const SHIFTS = ['morning', 'afternoon', 'evening'];
 
-const AdvancedFiltersDialog = ({
+export const AdvancedFiltersDialog = ({
     open,
     onClose,
     initialFrom,

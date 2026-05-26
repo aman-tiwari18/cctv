@@ -145,7 +145,17 @@ export const clientDashboardAPI = {
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
     },
-    getExamBodyDetails: (examBody, params) => api.get(`/client-dashboard/exam-body/${examBody}/details`, { params })
+    getExamBodyDetails: (examBody, params) => api.get(`/client-dashboard/exam-body/${examBody}/details`, { params }),
+
+    // V2 — CCTV Control Center client dashboard (mirrors admin shape, company-scoped)
+    getOverview: (arg) => {
+        const params = typeof arg === 'string' ? { date: arg } : (arg || {});
+        return api.get('/client-dashboard/overview', { params });
+    },
+    getLiveExams: ({ page = 1, limit = 10, exam_id } = {}) =>
+        api.get('/client-dashboard/live-exams', {
+            params: { page, limit, ...(exam_id ? { exam_id } : {}) },
+        }),
 };
 
 export const dashboardAPI = {
