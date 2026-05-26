@@ -32,6 +32,8 @@ IOU_NMS             = 0.40    # Tighter NMS than Ultralytics default 0.7 — col
 DUPLICATE_IOU       = 0.30    # Pre-pair dedup: equal-size duplicates with IoU>this are merged
 DUPLICATE_IOMIN     = 0.70    # Pre-pair dedup: catches small-box-inside-large-box (e.g. head-only inside head+shoulders) where IoU stays low due to size disparity
 MIN_PAIR_DISTANCE   = 20      # Geometric floor: real adjacent people can't have foot-centers within this many pixels — anything below is residual same-person noise
+Y_ROW_FLOOR         = 40      # Depth-row guard floor: minimum absolute y-diff before two persons are considered to be in different rows
+Y_ROW_RATIO         = 0.30    # Adaptive depth-row threshold: y_diff > avg_bbox_height × this → different rows / different depths (2D pixel distance is misleading due to perspective flattening)
 
 os.makedirs(SAVE_FOLDER, exist_ok=True)
 
@@ -173,6 +175,13 @@ def detect_proximity_in_frame(frame, device_id="unknown", camera_no="unknown", s
                 continue
             h_i = person_boxes[i][3] - person_boxes[i][1]
             h_j = person_boxes[j][3] - person_boxes[j][1]
+            # Depth-row guard: in a tilted CCTV view, bottom-y position is a
+            # perspective-free depth indicator. If the two persons' foot-y values
+            # differ significantly relative to their average bbox height, they're
+            # in different rows (different depths) — 2D pixel distance is misleading.
+            y_diff = abs(person_boxes[i][3] - person_boxes[j][3])
+            if y_diff > max(Y_ROW_FLOOR, ((h_i + h_j) / 2) * Y_ROW_RATIO):
+                continue
             eff_threshold = max(PROXIMITY_THRESHOLD, ((h_i + h_j) / 2) * PROXIMITY_SCALE)
             if d < eff_threshold:
                 violations.append((i, j, d))
@@ -256,6 +265,13 @@ def detect_proximity_batch(items):
                     continue
                 h_i = person_boxes[i][3] - person_boxes[i][1]
                 h_j = person_boxes[j][3] - person_boxes[j][1]
+                # Depth-row guard: in a tilted CCTV view, bottom-y position is a
+                # perspective-free depth indicator. If the two persons' foot-y values
+                # differ significantly relative to their average bbox height, they're
+                # in different rows (different depths) — 2D pixel distance is misleading.
+                y_diff = abs(person_boxes[i][3] - person_boxes[j][3])
+                if y_diff > max(Y_ROW_FLOOR, ((h_i + h_j) / 2) * Y_ROW_RATIO):
+                    continue
                 eff_threshold = max(PROXIMITY_THRESHOLD, ((h_i + h_j) / 2) * PROXIMITY_SCALE)
                 if d < eff_threshold:
                     violations.append((i, j, d))
