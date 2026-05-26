@@ -6,6 +6,7 @@ import {
     CardContent,
     Chip,
     CircularProgress,
+    Dialog,
     FormControl,
     Grid,
     InputBase,
@@ -22,6 +23,9 @@ import {
     TableRow,
     Typography,
 } from '@mui/material';
+import { LocalizationProvider } from '@mui/x-date-pickers';
+import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { Cell, Pie, PieChart, ResponsiveContainer, Sector, Tooltip } from 'recharts';
 import { format, parseISO, subDays } from 'date-fns';
 import KeyboardArrowDownRoundedIcon from '@mui/icons-material/KeyboardArrowDownRounded';
@@ -29,6 +33,7 @@ import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
 import ErrorOutlineRoundedIcon from '@mui/icons-material/ErrorOutlineRounded';
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
 import TuneRoundedIcon from '@mui/icons-material/TuneRounded';
+import HistoryRoundedIcon from '@mui/icons-material/HistoryRounded';
 import { dashboardAPI } from '../services/api';
 import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
 import { ShiftSvgIcon } from '../components/ShiftSvgIcon';
@@ -620,20 +625,31 @@ const DetectionDistributionCard = ({ distribution = [], loading }) => {
 // GpuPerformanceCard — static / dummy data; no API
 // ---------------------------------------------------------------------------
 
+// Four fixed quarter-bands (25% each), light → dark going clockwise.
+// Only the bands the value reaches are emitted; the leftover arc renders as
+// the gray track. e.g. value=88.2 → bands 1+2+3 full, band 4 = 13.2, track = 11.8.
+const BAND_COLORS = ['#B8CFF4', '#94B6EF', '#578ADE', '#3368C1'];
+const BAND_SIZE = 25;
+const buildGaugeSegments = (value) => {
+    const v = Math.max(0, Math.min(100, Number(value) || 0));
+    const segments = [];
+    let remaining = v;
+    BAND_COLORS.forEach((color, idx) => {
+        if (remaining <= 0) return;
+        const fill = Math.min(remaining, BAND_SIZE);
+        segments.push({ name: `b${idx + 1}`, value: fill, color });
+        remaining -= fill;
+    });
+    const free = 100 - v;
+    if (free > 0) segments.push({ name: 'free', value: free, color: '#E3E3E3' });
+    return segments;
+};
+
 const GpuPerformanceCard = () => {
     const utilization = 88.2;
-    // Big gauge: 3 fill bands (darker → mid → lighter) + 1 gray track band.
-    const gaugeData = [
-        { name: 's1', value: utilization / 3, color: '#3368C1' },
-        { name: 's2', value: utilization / 3, color: '#578ADE' },
-        { name: 's3', value: utilization / 3, color: '#94B6EF' },
-        { name: 'free', value: 100 - utilization, color: '#E3E3E3' },
-    ];
+    const gaugeData = buildGaugeSegments(utilization);
     // Optimal Efficiency mini gauge — visual only, ~82% filled.
-    const miniData = [
-        { name: 'fill', value: 82, color: '#90B6F4' },
-        { name: 'rest', value: 18, color: '#E3E3E3' },
-    ];
+    const miniData = buildGaugeSegments(82);
 
     return (
         <Card sx={{ height: '100%' }}>
@@ -1170,6 +1186,302 @@ const LiveExamsCard = () => {
 };
 
 // ---------------------------------------------------------------------------
+// AdvancedFiltersDialog — modal opened by the filter button
+// Holds its own local state for the four controls; only commits to the parent
+// when "Apply filters" is clicked. Cancel / × discard local edits.
+// ---------------------------------------------------------------------------
+
+const SHIFTS = ['morning', 'afternoon', 'evening'];
+
+const AdvancedFiltersDialog = ({
+    open,
+    onClose,
+    initialFrom,
+    initialTo,
+    initialExam,
+    initialShift,
+    onApply,
+}) => {
+    const [from, setFrom] = useState(initialFrom);
+    const [to, setTo] = useState(initialTo);
+    const [exam, setExam] = useState(initialExam);
+    const [shift, setShift] = useState(initialShift);
+
+    // Reset local state whenever the dialog opens so it reflects the parent's
+    // current applied filters.
+    useEffect(() => {
+        if (open) {
+            setFrom(initialFrom);
+            setTo(initialTo);
+            setExam(initialExam);
+            setShift(initialShift);
+        }
+    }, [open, initialFrom, initialTo, initialExam, initialShift]);
+
+    const sameDay = (a, b) => format(a, 'yyyy-MM-dd') === format(b, 'yyyy-MM-dd');
+    const today = new Date();
+    const localBadge =
+        ((!sameDay(from, today) || !sameDay(to, today)) ? 1 : 0) +
+        (exam !== 'all' ? 1 : 0) +
+        (shift ? 1 : 0);
+
+    const handleClearAll = () => {
+        const t = new Date();
+        setFrom(t);
+        setTo(t);
+        setExam('all');
+        setShift(null);
+    };
+
+    const handleApply = () => {
+        let f = from;
+        let t = to;
+        if (f > t) {
+            const tmp = f; f = t; t = tmp;
+        }
+        onApply({ from: f, to: t, exam, shift });
+    };
+
+    const fieldLabelSx = {
+        mb: 0.75,
+        color: '#5C5F61',
+        fontFamily: 'Inter, sans-serif',
+        fontSize: '13px',
+        fontWeight: 500,
+    };
+
+    return (
+        <Dialog
+            open={open}
+            onClose={onClose}
+            PaperProps={{
+                sx: {
+                    borderRadius: '14px',
+                    width: 640,
+                    maxWidth: '90vw',
+                    p: 2.5,
+                },
+            }}
+        >
+            <LocalizationProvider dateAdapter={AdapterDateFns}>
+                {/* Header */}
+                <Stack direction="row" alignItems="center" sx={{ mb: 2.5 }}>
+                    <TuneRoundedIcon sx={{ fontSize: 18, color: '#191B23' }} />
+                    <Typography sx={{
+                        ml: 1,
+                        color: '#191B23',
+                        fontFamily: 'Inter, sans-serif',
+                        fontSize: '16px',
+                        fontWeight: 600,
+                    }}>
+                        Advanced filters
+                    </Typography>
+                    {localBadge > 0 && (
+                        <Box sx={{
+                            ml: 1,
+                            minWidth: 18,
+                            height: 18,
+                            px: 0.5,
+                            bgcolor: '#4B53C9',
+                            borderRadius: 999,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: '#fff',
+                            fontFamily: 'Inter, sans-serif',
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            lineHeight: 1,
+                        }}>
+                            {localBadge}
+                        </Box>
+                    )}
+                    <Box sx={{ flexGrow: 1 }} />
+                    <Box
+                        component="button"
+                        type="button"
+                        onClick={handleClearAll}
+                        sx={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 0.5,
+                            border: 'none',
+                            bgcolor: 'transparent',
+                            cursor: 'pointer',
+                            color: '#5C5F61',
+                            fontFamily: 'Inter, sans-serif',
+                            fontSize: '13px',
+                            fontWeight: 500,
+                            px: 0.5,
+                            '&:hover': { color: '#191B23' },
+                        }}
+                    >
+                        <HistoryRoundedIcon sx={{ fontSize: 16 }} />
+                        Clear all filters
+                    </Box>
+                    <Box
+                        component="button"
+                        type="button"
+                        onClick={onClose}
+                        aria-label="Close filters"
+                        sx={{
+                            ml: 1,
+                            border: 'none',
+                            bgcolor: 'transparent',
+                            cursor: 'pointer',
+                            color: '#5C5F61',
+                            p: 0.5,
+                            display: 'flex',
+                            '&:hover': { color: '#191B23' },
+                        }}
+                    >
+                        <CloseRoundedIcon sx={{ fontSize: 18 }} />
+                    </Box>
+                </Stack>
+
+                {/* Body — 2×2 grid */}
+                <Grid container spacing={2.5} sx={{ mb: 3 }}>
+                    <Grid item xs={12} sm={6}>
+                        <Typography sx={fieldLabelSx}>Exam selection</Typography>
+                        <FormControl fullWidth size="small">
+                            <Select
+                                value={exam}
+                                onChange={(e) => setExam(e.target.value)}
+                                sx={{
+                                    fontFamily: 'Inter, sans-serif',
+                                    fontSize: '14px',
+                                    borderRadius: '10px',
+                                    '& .MuiSelect-select': { py: 1.25 },
+                                }}
+                            >
+                                <MenuItem value="all">All Exams</MenuItem>
+                            </Select>
+                        </FormControl>
+                    </Grid>
+
+                    <Grid item xs={12} sm={6}>
+                        <Typography sx={fieldLabelSx}>Shift selection</Typography>
+                        <Stack direction="row" spacing={1}>
+                            {SHIFTS.map((s) => {
+                                const active = shift === s;
+                                return (
+                                    <Box
+                                        key={s}
+                                        component="button"
+                                        type="button"
+                                        onClick={() => setShift(active ? null : s)}
+                                        sx={{
+                                            flex: 1,
+                                            py: 1.25,
+                                            borderRadius: '10px',
+                                            bgcolor: active ? '#E5E5FF' : '#fff',
+                                            color: active ? '#4B53C9' : '#191B23',
+                                            border: `1px solid ${active ? '#4B53C9' : '#E5E7EB'}`,
+                                            fontFamily: 'Inter, sans-serif',
+                                            fontSize: '14px',
+                                            fontWeight: 500,
+                                            cursor: 'pointer',
+                                            '&:hover': { borderColor: '#4B53C9' },
+                                        }}
+                                    >
+                                        {s[0].toUpperCase() + s.slice(1)}
+                                    </Box>
+                                );
+                            })}
+                        </Stack>
+                    </Grid>
+
+                    <Grid item xs={12} sm={6}>
+                        <Typography sx={fieldLabelSx}>From date</Typography>
+                        <DatePicker
+                            value={from}
+                            onChange={(d) => d && setFrom(d)}
+                            format="d MMM yyyy"
+                            slotProps={{
+                                textField: {
+                                    fullWidth: true,
+                                    size: 'small',
+                                    sx: {
+                                        '& .MuiOutlinedInput-root': {
+                                            borderRadius: '10px',
+                                            fontFamily: 'Inter, sans-serif',
+                                            fontSize: '14px',
+                                        },
+                                    },
+                                },
+                            }}
+                        />
+                    </Grid>
+
+                    <Grid item xs={12} sm={6}>
+                        <Typography sx={fieldLabelSx}>To date</Typography>
+                        <DatePicker
+                            value={to}
+                            onChange={(d) => d && setTo(d)}
+                            format="d MMM yyyy"
+                            slotProps={{
+                                textField: {
+                                    fullWidth: true,
+                                    size: 'small',
+                                    sx: {
+                                        '& .MuiOutlinedInput-root': {
+                                            borderRadius: '10px',
+                                            fontFamily: 'Inter, sans-serif',
+                                            fontSize: '14px',
+                                        },
+                                    },
+                                },
+                            }}
+                        />
+                    </Grid>
+                </Grid>
+
+                {/* Footer */}
+                <Stack direction="row" justifyContent="flex-end" spacing={1.5}>
+                    <Button
+                        variant="outlined"
+                        onClick={onClose}
+                        sx={{
+                            textTransform: 'none',
+                            fontFamily: 'Inter, sans-serif',
+                            fontWeight: 500,
+                            fontSize: '14px',
+                            color: '#5C5F61',
+                            borderColor: '#E5E7EB',
+                            borderRadius: '10px',
+                            px: 3,
+                            py: 1,
+                            '&:hover': { borderColor: '#CBD5E1', bgcolor: '#F8FAFC' },
+                        }}
+                    >
+                        Cancel
+                    </Button>
+                    <Button
+                        variant="contained"
+                        disableElevation
+                        onClick={handleApply}
+                        sx={{
+                            bgcolor: '#4B53C9',
+                            color: '#fff',
+                            textTransform: 'none',
+                            fontFamily: 'Inter, sans-serif',
+                            fontWeight: 700,
+                            fontSize: '14px',
+                            borderRadius: '10px',
+                            px: 3,
+                            py: 1,
+                            '&:hover': { bgcolor: '#3F47B0' },
+                        }}
+                    >
+                        Apply filters
+                    </Button>
+                </Stack>
+            </LocalizationProvider>
+        </Dialog>
+    );
+};
+
+// ---------------------------------------------------------------------------
 // Dashboard (default export)
 // ---------------------------------------------------------------------------
 
@@ -1179,50 +1491,93 @@ const Dashboard = () => {
     const [showGpuWarning, setShowGpuWarning] = useState(true);
     const [searchKeyword, setSearchKeyword] = useState('');
     const [dateChip, setDateChip] = useState('today');
+    const [filterMenuOpen, setFilterMenuOpen] = useState(false);
+    const [customRange, setCustomRange] = useState(null);
+    const [selectedExam, setSelectedExam] = useState('all');
+    const [selectedShift, setSelectedShift] = useState(null);
 
-    // Derive API params + active filter chips from the selected date chip.
-    // Today is the default and produces no active chips (so Clear all hides).
+    // Derive API params + active filter chips from the selected date chip
+    // plus any non-default shift/exam set via the Advanced filters modal.
+    // Today (with default shift/exam) produces no active chips so Row 4 hides.
     const { apiParams, activeFilters } = useMemo(() => {
         const today = new Date();
         const fmt = (d) => format(d, 'yyyy-MM-dd');
+        const rangeChip = (label, start, end) => ({
+            key: 'date',
+            label: `${label} (${fmt(start)} → ${fmt(end)})`,
+        });
+        const extraChips = (chips) => [
+            ...chips,
+            ...(selectedShift
+                ? [{ key: 'shift', label: selectedShift[0].toUpperCase() + selectedShift.slice(1) }]
+                : []),
+        ];
+
         switch (dateChip) {
             case 'yesterday': {
                 const y = subDays(today, 1);
                 return {
                     apiParams: { date: fmt(y) },
-                    activeFilters: [{ key: 'date', label: 'Yesterday' }],
+                    activeFilters: extraChips([{ key: 'date', label: 'Yesterday' }]),
                 };
             }
             case 'last_week': {
                 const start = subDays(today, 6);
-                const range = `${fmt(start)} → ${fmt(today)}`;
                 return {
                     apiParams: { start_date: fmt(start), end_date: fmt(today) },
-                    activeFilters: [
-                        { key: 'date', label: 'Last week' },
-                        { key: 'date_range', label: range },
-                    ],
+                    activeFilters: extraChips([rangeChip('Last week', start, today)]),
                 };
             }
             case 'last_month': {
                 const start = subDays(today, 29);
-                const range = `${fmt(start)} → ${fmt(today)}`;
                 return {
                     apiParams: { start_date: fmt(start), end_date: fmt(today) },
-                    activeFilters: [
-                        { key: 'date', label: 'Last month' },
-                        { key: 'date_range', label: range },
-                    ],
+                    activeFilters: extraChips([rangeChip('Last month', start, today)]),
+                };
+            }
+            case 'last_year': {
+                const start = subDays(today, 364);
+                return {
+                    apiParams: { start_date: fmt(start), end_date: fmt(today) },
+                    activeFilters: extraChips([rangeChip('Last year', start, today)]),
+                };
+            }
+            case 'custom': {
+                const start = customRange?.from ?? today;
+                const end   = customRange?.to   ?? today;
+                return {
+                    apiParams: { start_date: fmt(start), end_date: fmt(end) },
+                    activeFilters: extraChips([
+                        { key: 'date', label: `${fmt(start)} → ${fmt(end)}` },
+                    ]),
                 };
             }
             case 'today':
             default:
                 return {
                     apiParams: { date: fmt(today) },
-                    activeFilters: [],
+                    activeFilters: extraChips([]),
                 };
         }
-    }, [dateChip]);
+    }, [dateChip, customRange, selectedShift]);
+
+    // Removes a single active filter chip by its key — narrower than Clear all.
+    const removeFilter = (key) => {
+        if (key === 'date') {
+            setDateChip('today');
+            setCustomRange(null);
+        } else if (key === 'shift') {
+            setSelectedShift(null);
+        } else if (key === 'exam') {
+            setSelectedExam('all');
+        }
+    };
+    const clearAllFilters = () => {
+        setDateChip('today');
+        setCustomRange(null);
+        setSelectedShift(null);
+        setSelectedExam('all');
+    };
 
     useEffect(() => {
         let cancelled = false;
@@ -1256,7 +1611,40 @@ const Dashboard = () => {
         { key: 'yesterday',  label: 'Yesterday' },
         { key: 'last_week',  label: 'Last week' },
         { key: 'last_month', label: 'Last month' },
+        { key: 'last_year',  label: 'Last year' },
     ];
+
+    // Prefill the modal's From/To from the current chip selection so opening
+    // the modal shows the same range the dashboard is currently using.
+    const dialogInitialDates = useMemo(() => {
+        const today = new Date();
+        if (dateChip === 'custom' && customRange) {
+            return { from: customRange.from, to: customRange.to };
+        }
+        switch (dateChip) {
+            case 'yesterday':  { const y = subDays(today, 1); return { from: y, to: y }; }
+            case 'last_week':  return { from: subDays(today, 6),   to: today };
+            case 'last_month': return { from: subDays(today, 29),  to: today };
+            case 'last_year':  return { from: subDays(today, 364), to: today };
+            default:           return { from: today, to: today };
+        }
+    }, [dateChip, customRange]);
+
+    const handleApplyAdvanced = ({ from, to, exam, shift }) => {
+        setSelectedExam(exam);
+        setSelectedShift(shift);
+        const today = new Date();
+        const sameDay = (a, b) => format(a, 'yyyy-MM-dd') === format(b, 'yyyy-MM-dd');
+        if (sameDay(from, today) && sameDay(to, today)) {
+            // User effectively cleared the date filter — fall back to Today default.
+            setDateChip('today');
+            setCustomRange(null);
+        } else {
+            setDateChip('custom');
+            setCustomRange({ from, to });
+        }
+        setFilterMenuOpen(false);
+    };
 
     return (
         <Box>
@@ -1368,6 +1756,7 @@ const Dashboard = () => {
                 <Box
                     component="button"
                     type="button"
+                    onClick={() => setFilterMenuOpen(true)}
                     sx={{
                         position: 'relative',
                         width: 48,
@@ -1461,7 +1850,7 @@ const Dashboard = () => {
                         <Chip
                             key={f.key}
                             label={f.label}
-                            onDelete={() => setDateChip('today')}
+                            onDelete={() => removeFilter(f.key)}
                             deleteIcon={<CloseRoundedIcon sx={{ fontSize: 14 }} />}
                             sx={{
                                 bgcolor: '#E5E5FF',
@@ -1481,7 +1870,7 @@ const Dashboard = () => {
                     <Box
                         component="button"
                         type="button"
-                        onClick={() => setDateChip('today')}
+                        onClick={clearAllFilters}
                         sx={{
                             border: 'none',
                             bgcolor: 'transparent',
@@ -1499,7 +1888,17 @@ const Dashboard = () => {
                 </Stack>
             )}
 
-                {/* Row 1 — 4 KPI cards */}
+            <AdvancedFiltersDialog
+                open={filterMenuOpen}
+                onClose={() => setFilterMenuOpen(false)}
+                initialFrom={dialogInitialDates.from}
+                initialTo={dialogInitialDates.to}
+                initialExam={selectedExam}
+                initialShift={selectedShift}
+                onApply={handleApplyAdvanced}
+            />
+
+            {/* Row 1 — 4 KPI cards */}
                 <Grid container spacing={2.5} sx={{ mb: 2.5 }}>
                     <Grid item xs={12} sm={6} lg={3}>
                         <KpiCard
