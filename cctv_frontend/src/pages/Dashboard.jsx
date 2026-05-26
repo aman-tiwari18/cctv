@@ -193,9 +193,9 @@ export const KpiCard = ({ title, value, icon, chips = [], loading }) => (
                     sx={{
                         color: '#5C5F61',
                         fontWeight: 700,
-                        fontSize: '15px',
+                        fontSize: '12px',
                         lineHeight: '16px',
-                        letterSpacing: '0.6px',
+                        letterSpacing: '1px',
                         textTransform: 'uppercase',
                     }}
                 >
@@ -724,8 +724,8 @@ const GpuPerformanceCard = () => {
                                     mt: 0.25,
                                     color: '#5C5F61',
                                     fontFamily: 'Inter, sans-serif',
-                                    fontSize: '13px',
-                                    fontWeight: 500,
+                                    fontSize: '12px',
+                                    fontWeight: 600,
                                     lineHeight: '16px',
                                     letterSpacing: '0.6px',
                                     textTransform: 'uppercase',

@@ -31,8 +31,20 @@ import {
 // ---------------------------------------------------------------------------
 
 const TodaysScriptDistributionCard = () => (
-    <Card sx={{ height: '100%', bgcolor: '#fff', borderRadius: '8px', boxShadow: '0 2px 4px 0 rgba(0,0,0,0.05)' }}>
-        <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
+    <Card sx={{
+        height: '100%',
+        bgcolor: '#fff',
+        borderRadius: '8px',
+        boxShadow: '0 2px 4px 0 rgba(0,0,0,0.05)',
+        display: 'flex',
+        flexDirection: 'column',
+    }}>
+        <CardContent sx={{
+            p: { xs: 2, sm: 2.5 },
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+        }}>
             <Box sx={{ mb: 1.5 }}>
                 <Typography sx={{
                     color: '#191B23',
@@ -55,6 +67,7 @@ const TodaysScriptDistributionCard = () => (
                 </Typography>
             </Box>
             <Box sx={{
+                flex: 1,
                 minHeight: 360,
                 display: 'flex',
                 alignItems: 'center',
@@ -540,21 +553,22 @@ const ClientDetectionDashboard = () => {
                 </Grid>
             </Grid>
 
-            {/* Row 2 — Distribution + Today's Script placeholder */}
-            <Grid container spacing={2.5} sx={{ mb: 2.5 }}>
+            {/* Row 2 — Left column: Detection Distribution stacked on Live Exams.
+                Right column: Today's Script Distribution (spans the full height of the left stack). */}
+            <Grid container spacing={2.5} alignItems="stretch">
                 <Grid item xs={12} md={6}>
-                    <DetectionDistributionCard
-                        distribution={distribution}
-                        loading={overviewLoading}
-                    />
+                    <Stack spacing={2.5}>
+                        <DetectionDistributionCard
+                            distribution={distribution}
+                            loading={overviewLoading}
+                        />
+                        <LiveExamsCard fetcher={clientDashboardAPI.getLiveExams} />
+                    </Stack>
                 </Grid>
                 <Grid item xs={12} md={6}>
                     <TodaysScriptDistributionCard />
                 </Grid>
             </Grid>
-
-            {/* Row 3 — Live Exams table (client-scoped) */}
-            <LiveExamsCard fetcher={clientDashboardAPI.getLiveExams} />
         </Box>
     );
 };
