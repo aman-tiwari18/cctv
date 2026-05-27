@@ -299,13 +299,15 @@ def close_proximity_worker_hls(camera_configs, stop_event=None):
     if stop_event is None:
         stop_event = _STOP_EVENT
 
-    # Scene filtering - Close Proximity detection for Inside Lab cameras
+    # Scene filtering — must mirror camera_loader.py SCRIPT_CLASSIFICATION_MAP["proximity"].
+    # Upstream camera_loader has already filtered to this set; this inline filter is
+    # a defense-in-depth safety net. If the proximity scope ever widens, update BOTH
+    # this list and SCRIPT_CLASSIFICATION_MAP["proximity"] together.
     valid_configs = []
     for cfg in camera_configs:
         cls_val = str(cfg.get('classification', '')).lower()
         if not cls_val or any(s in cls_val for s in (
-            'computer lab', 'inside lab', 'exam lab', 'lab',
-            'inside classroom', 'inside_classroom', 'classroom'
+            'inside lab', 'computer lab',
         )):
             valid_configs.append(cfg)
             
