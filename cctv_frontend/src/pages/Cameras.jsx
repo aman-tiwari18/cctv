@@ -11,12 +11,18 @@ import {
   Add, Edit, Delete, Upload, CloudUpload, Download,
   TableChart, Search,
   Videocam as VideocamIcon,
+  Visibility as VisibilityIcon,
+  ImageNotSupported as ImageNotSupportedIcon,
+  CheckCircle as CheckCircleIcon,
+  VerifiedRounded as VerifiedRoundedIcon,
 } from '@mui/icons-material';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { format } from 'date-fns';
 import { camerasAPI, examsAPI, executionsAPI } from '../services/api';
+import { IMG_BASE } from '../constants/data';
+import { useAuth } from '../contexts/AuthContext';
 import ExamSidebar from '../components/ExamSidebar';
 
 
@@ -47,6 +53,21 @@ const parseDDMMYYYYToDate = (value) => {
   if (!match) return null;
   const [, dd, mm, yyyy] = match;
   return new Date(yyyy, mm - 1, dd);
+};
+
+// Stored frame_path examples (absolute, may originate from different worker FS roots):
+//   /data/cctv_dev/cctv/script-server/scripts/detection/results/classification_frames/assignment_X/foo.jpg
+//   /app/scripts/detection/results/classification_frames/assignment_X/foo.jpg
+// The script-server serves /serve-rtsp-detection-images/{path} relative to
+// <SCRIPTS_DIR>/detection/results, so we strip everything before
+// "classification_frames/" to build the URL.
+const buildFrameImageUrl = (framePath) => {
+  if (!framePath) return '';
+  const marker = 'classification_frames/';
+  const idx = framePath.indexOf(marker);
+  if (idx === -1) return '';
+  const relative = framePath.slice(idx);
+  return `${IMG_BASE}/serve-rtsp-detection-images/${relative}`;
 };
 
 const getStatusChipProps = (status) => {
@@ -140,6 +161,18 @@ const Cameras = () => {
   const [uploadError, setUploadError] = useState('');
   const [uploadResult, setUploadResult] = useState(null);
   const [uploading, setUploading] = useState(false);
+
+  /* ── Frame preview dialog ── */
+  const [previewCamera, setPreviewCamera] = useState(null);
+  const [previewError, setPreviewError] = useState(false);
+
+  /* ── Operator manual-verify ── */
+  const { user } = useAuth();
+  const isVerifier = user?.role === 'OPERATOR' || user?.role === 'ADMIN';
+  const [classOptions, setClassOptions] = useState([]);
+  const [verifyChoice, setVerifyChoice] = useState('');
+  const [verifying, setVerifying] = useState(false);
+  const [verifyError, setVerifyError] = useState('');
 
   useEffect(() => { loadExams(); }, [viewingArchived]);
 
@@ -308,6 +341,51 @@ const Cameras = () => {
     if (!selectedExamId) return;
     try { await camerasAPI.downloadTemplate(selectedExamId, type); }
     catch { alert('Download failed'); }
+  };
+
+  /* Load distinct classification values for the verify-dropdown whenever the
+     exam changes (or when a verify completes — that may introduce a new value).
+     The backend already returns these sorted + deduped. We fall back to deriving
+     from the in-memory cameras list if the endpoint isn't reachable yet. */
+  const loadClassOptions = useCallback(async () => {
+    if (!selectedExamId) { setClassOptions([]); return; }
+    try {
+      const res = await camerasAPI.getClassifications(selectedExamId);
+      setClassOptions(Array.isArray(res?.data?.data) ? res.data.data : []);
+    } catch {
+      const local = Array.from(new Set(
+        (cameras || []).map((c) => c.classification).filter((v) => v && String(v).trim())
+      )).sort();
+      setClassOptions(local);
+    }
+  }, [selectedExamId, cameras]);
+
+  useEffect(() => { loadClassOptions(); }, [loadClassOptions]);
+
+  /* Reset verify-dialog state whenever the preview camera changes. */
+  useEffect(() => {
+    setVerifyError('');
+    setVerifyChoice(previewCamera?.classification || '');
+  }, [previewCamera]);
+
+  const handleVerify = async () => {
+    if (!previewCamera || !selectedExamId) return;
+    const value = String(verifyChoice || '').trim();
+    if (!value) { setVerifyError('Pick a classification'); return; }
+    setVerifying(true); setVerifyError('');
+    try {
+      const res = await camerasAPI.verifyClassification(selectedExamId, previewCamera.id, value);
+      const updated = res?.data?.data;
+      // Patch the in-memory row so the table reflects the change immediately.
+      setCameras((rows) => rows.map((c) => (c.id === previewCamera.id ? { ...c, ...updated } : c)));
+      setPreviewCamera((c) => (c ? { ...c, ...updated } : c));
+      // The new classification may not have existed before — refresh dropdown.
+      loadClassOptions();
+    } catch (e) {
+      setVerifyError(e.response?.data?.message || 'Verify failed');
+    } finally {
+      setVerifying(false);
+    }
   };
 
   return (
@@ -731,6 +809,9 @@ const Cameras = () => {
                                   Shift
                                 </TableSortLabel>
                               </TableCell>
+                              <TableCell align="center" sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 70 }}>
+                                View
+                              </TableCell>
                             </>
                           ) : (
                             <>
@@ -806,6 +887,9 @@ const Cameras = () => {
                                   Status
                                 </TableSortLabel>
                               </TableCell>
+                              <TableCell align="center" sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 70 }}>
+                                View
+                              </TableCell>
                             </>
                           )}
                           <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 250 }}>CCTV URL</TableCell>
@@ -826,7 +910,16 @@ const Cameras = () => {
                                 <TableCell>
                                   <Chip label={cam.camera_category || 'N/A'} size="small" />
                                 </TableCell>
-                                <TableCell sx={{ fontSize: '0.85rem' }}>{cam.classification || '-'}</TableCell>
+                                <TableCell sx={{ fontSize: '0.85rem' }}>
+                                  <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
+                                    {cam.classification || '-'}
+                                    {cam.manually_verified ? (
+                                      <Tooltip title="Manually verified by an operator">
+                                        <CheckCircleIcon sx={{ fontSize: 14, color: '#16a34a' }} />
+                                      </Tooltip>
+                                    ) : null}
+                                  </Box>
+                                </TableCell>
                                 <TableCell>
                                   <Chip
                                     size="small"
@@ -840,6 +933,20 @@ const Cameras = () => {
                                     ? (shifts.find((s) => s.id === cam.shift_id)?.shift_name || `#${cam.shift_id}`)
                                     : <Chip label="All shifts" size="small" color="default" variant="outlined" />}
                                 </TableCell>
+                                <TableCell align="center">
+                                  <Tooltip title={cam.frame_path ? `View frame (${cam.classification || 'unclassified'})` : 'No frame captured yet'}>
+                                    <span>
+                                      <IconButton
+                                        size="small"
+                                        disabled={!cam.frame_path}
+                                        onClick={() => { setPreviewError(false); setPreviewCamera(cam); }}
+                                        sx={{ color: cam.frame_path ? 'primary.main' : '#cbd5e1' }}
+                                      >
+                                        <VisibilityIcon fontSize="small" />
+                                      </IconButton>
+                                    </span>
+                                  </Tooltip>
+                                </TableCell>
                               </>
                             ) : (
                               <>
@@ -849,13 +956,36 @@ const Cameras = () => {
                                 <TableCell sx={{ fontSize: '0.85rem' }}>{cam.camera_name || '-'}</TableCell>
                                 <TableCell sx={{ fontSize: '0.85rem' }}>{cam.centre_name || cam.tc_name || '-'}</TableCell>
                                 <TableCell sx={{ fontSize: '0.85rem' }}>{cam.state || '-'}</TableCell>
-                                <TableCell sx={{ fontSize: '0.85rem' }}>{cam.classification || '-'}</TableCell>
+                                <TableCell sx={{ fontSize: '0.85rem' }}>
+                                  <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
+                                    {cam.classification || '-'}
+                                    {cam.manually_verified ? (
+                                      <Tooltip title="Manually verified by an operator">
+                                        <CheckCircleIcon sx={{ fontSize: 14, color: '#16a34a' }} />
+                                      </Tooltip>
+                                    ) : null}
+                                  </Box>
+                                </TableCell>
                                 <TableCell>
                                   <Chip
                                     size="small"
                                     {...getStatusChipProps(cam.status)}
                                     sx={{ fontWeight: 600, fontSize: '0.72rem', ...getStatusChipProps(cam.status).sx }}
                                   />
+                                </TableCell>
+                                <TableCell align="center">
+                                  <Tooltip title={cam.frame_path ? `View frame (${cam.classification || 'unclassified'})` : 'No frame captured yet'}>
+                                    <span>
+                                      <IconButton
+                                        size="small"
+                                        disabled={!cam.frame_path}
+                                        onClick={() => { setPreviewError(false); setPreviewCamera(cam); }}
+                                        sx={{ color: cam.frame_path ? 'primary.main' : '#cbd5e1' }}
+                                      >
+                                        <VisibilityIcon fontSize="small" />
+                                      </IconButton>
+                                    </span>
+                                  </Tooltip>
                                 </TableCell>
                               </>
                             )}
@@ -963,6 +1093,136 @@ const Cameras = () => {
                 startIcon={uploading ? <CircularProgress size={16} /> : <CloudUpload />}>
                 {uploading ? 'Uploading…' : 'Upload'}
               </Button>
+            </Box>
+          </DialogActions>
+        </Dialog>
+
+        {/* ── Frame preview Dialog ── */}
+        <Dialog
+          open={!!previewCamera}
+          onClose={() => setPreviewCamera(null)}
+          maxWidth="md"
+          fullWidth
+        >
+          <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1, pr: 6 }}>
+            <VisibilityIcon fontSize="small" />
+            <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+              <Typography sx={{ fontWeight: 700, fontSize: '1rem', color: '#0f172a', lineHeight: 1.3 }}>
+                {previewCamera?.camera_name || previewCamera?.ch_code || previewCamera?.device_id || 'Camera frame'}
+              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5, flexWrap: 'wrap' }}>
+                {previewCamera?.classification && (
+                  <Chip
+                    icon={previewCamera?.manually_verified ? <CheckCircleIcon sx={{ fontSize: '14px !important', color: '#16a34a !important' }} /> : undefined}
+                    label={`Classification: ${previewCamera.classification}`}
+                    size="small"
+                    color="primary"
+                    variant="outlined"
+                    sx={{ fontWeight: 600, fontSize: '0.7rem' }}
+                  />
+                )}
+                {previewCamera?.camera_category && (
+                  <Chip
+                    label={`Category: ${previewCamera.camera_category}`}
+                    size="small"
+                    sx={{ fontWeight: 600, fontSize: '0.7rem' }}
+                  />
+                )}
+                {previewCamera?.centre_name && (
+                  <Typography sx={{ fontSize: '0.75rem', color: '#64748b' }}>
+                    {previewCamera.centre_name}
+                  </Typography>
+                )}
+              </Box>
+            </Box>
+          </DialogTitle>
+          <DialogContent dividers sx={{ bgcolor: '#f8fafc', p: 2 }}>
+            {previewCamera && (
+              previewError || !buildFrameImageUrl(previewCamera.frame_path) ? (
+                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', py: 6, color: '#94a3b8' }}>
+                  <ImageNotSupportedIcon sx={{ fontSize: 48, mb: 1.5 }} />
+                  <Typography sx={{ fontSize: '0.9rem', fontWeight: 600 }}>
+                    Image not available
+                  </Typography>
+                  <Typography sx={{ fontSize: '0.78rem', mt: 0.5 }}>
+                    The captured frame could not be loaded.
+                  </Typography>
+                  {previewCamera.frame_path && (
+                    <Typography sx={{ fontSize: '0.7rem', mt: 1.5, fontFamily: 'monospace', wordBreak: 'break-all', maxWidth: 520, textAlign: 'center', color: '#cbd5e1' }}>
+                      {previewCamera.frame_path}
+                    </Typography>
+                  )}
+                </Box>
+              ) : (
+                <Box sx={{ display: 'flex', justifyContent: 'center' }}>
+                  <Box
+                    component="img"
+                    src={buildFrameImageUrl(previewCamera.frame_path)}
+                    alt={previewCamera.camera_name || 'frame'}
+                    onError={() => setPreviewError(true)}
+                    sx={{
+                      maxWidth: '100%',
+                      maxHeight: '70vh',
+                      borderRadius: 1.5,
+                      boxShadow: '0 2px 12px rgba(15,23,42,0.12)',
+                      bgcolor: '#000',
+                    }}
+                  />
+                </Box>
+              )
+            )}
+          </DialogContent>
+          <DialogActions sx={{ flexWrap: 'wrap', gap: 1, justifyContent: 'space-between', px: 2, py: 1.5 }}>
+            {/* Operator-only inline verify control */}
+            {isVerifier ? (
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', flex: 1, minWidth: 280 }}>
+                <FormControl size="small" sx={{ minWidth: 200 }}>
+                  <InputLabel id="verify-classification-label">Classification</InputLabel>
+                  <Select
+                    labelId="verify-classification-label"
+                    label="Classification"
+                    value={verifyChoice}
+                    onChange={(e) => setVerifyChoice(e.target.value)}
+                    disabled={verifying}
+                  >
+                    {/* Always include the current value so it shows in the dropdown
+                        even if it isn't in classOptions yet (e.g., first run). */}
+                    {previewCamera?.classification && !classOptions.includes(previewCamera.classification) && (
+                      <MenuItem value={previewCamera.classification}>{previewCamera.classification}</MenuItem>
+                    )}
+                    {classOptions.map((opt) => (
+                      <MenuItem key={opt} value={opt}>{opt}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <Button
+                  size="small"
+                  variant="contained"
+                  color="success"
+                  startIcon={verifying ? <CircularProgress size={14} sx={{ color: '#fff' }} /> : <VerifiedRoundedIcon />}
+                  onClick={handleVerify}
+                  disabled={verifying || !verifyChoice}
+                  sx={{ textTransform: 'none', fontWeight: 600 }}
+                >
+                  {previewCamera?.manually_verified ? 'Re-verify' : 'Verify'}
+                </Button>
+                {verifyError && (
+                  <Typography sx={{ color: '#dc2626', fontSize: '0.75rem' }}>{verifyError}</Typography>
+                )}
+              </Box>
+            ) : <Box sx={{ flex: 1 }} />}
+
+            {/* Existing right-side actions */}
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              {previewCamera?.frame_path && !previewError && (
+                <Button
+                  onClick={() => window.open(buildFrameImageUrl(previewCamera.frame_path), '_blank', 'noopener')}
+                  size="small"
+                >
+                  Open in new tab
+                </Button>
+              )}
+              <Button onClick={() => setPreviewCamera(null)} variant="contained" size="small">Close</Button>
             </Box>
           </DialogActions>
         </Dialog>

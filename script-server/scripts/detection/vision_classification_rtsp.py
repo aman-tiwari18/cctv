@@ -95,7 +95,7 @@ TIMEOUT_VLM:         int = int(os.getenv("VISION_TIMEOUT_VLM", "120"))
 TIMEOUT_API:         int = int(os.getenv("VISION_TIMEOUT_API",  "10"))
 
 VLLM_URL:       str = os.getenv("VISION_VLLM_URL",             "http://localhost:8001/v1/chat/completions")
-VLLM_MODEL:     str = os.getenv("VISION_VLLM_MODEL",           "Qwen/Qwen2.5-VL-7B-Instruct")
+VLLM_MODEL:     str = os.getenv("VISION_VLLM_MODEL",           "Qwen/Qwen3-VL-30B-A3B-Instruct")
 STOP_VLLM_ON_EXIT: bool = os.getenv("VISION_STOP_VLLM_ON_EXIT", "1") == "1"
 
 DEFAULT_EXAM_ID:   int = 2
@@ -755,23 +755,44 @@ CATEGORIES = [
     "Computer Lab",
 ]
 
-VLM_PROMPT = f"""You are an expert computer vision classifier.
-Classify the given image into one of the following categories:
+VLM_PROMPT = f"""You are an expert CCTV scene classifier for an Indian exam-center
+deployment. You MUST classify every image into EXACTLY ONE of these six
+categories (return the category name verbatim, case-sensitive):
 
 {', '.join(CATEGORIES)}.
 
-Rules:
-- "Server Room": small room with limited visibility with laptop or computers.
-- "Computer Lab": large room with many computers, chairs, people or desks.
-- "Outdoor Scene": nature, roads, gardens, sky, trees.
-- "Outside Area": surroundings of a building, campus, boundary, hallway, outdoor environment.
-- "Parking Lot": cars, bikes, open area with marked spaces or vehicles.
-- "Entry": building entrances, gates, doors, signboards, or main access points.
+Category definitions (pick the closest match — exam-center vocabulary in
+parentheses):
+- "Computer Lab": an indoor room with rows or a grid of desktop computers,
+  monitors and chairs/cubicles intended for candidates. Even partial views of
+  multiple monitors with desks qualify. (lab / hall / exam hall / classroom
+  with computers)
+- "Server Room": a small back-office or technical room dominated by server
+  racks, switches, network cabinets, UPS units, blinking LEDs, patch panels,
+  or a single admin desk with one workstation and equipment. (UPS room,
+  hub room, store room, observer/control/office room, biometric room)
+- "Entry": a building entrance — main doors, gates, reception desk,
+  signboards, security check or biometric counter facing the doorway.
+- "Outside Area": building surroundings or interior circulation — corridors,
+  hallways, washroom pathways, lobbies, staircases, boundary walls,
+  external building view.
+- "Parking Lot": open area with cars, bikes or painted parking lines.
+- "Outdoor Scene": open natural scene dominated by sky, trees, gardens, or
+  roads with no building context.
 
-If the image is grey, blank, heavily obstructed, or unclear, respond with "Uncertain".
+Decision policy — read carefully:
+1. You MUST commit to one of the six categories above whenever any scene
+   structure is visible. Pick the single closest match even if the image is
+   dim, blurry, low-contrast, has a timestamp/date overlay, or shows an
+   unfamiliar angle. These are NOT reasons to say Uncertain.
+2. Return "Uncertain" ONLY if the image is completely black, completely
+   white, completely uniform grey, or so scrambled/corrupted that no scene
+   structure can be identified at all. If you can name even one object
+   (chair, door, computer, wall, sky), you MUST pick a real category.
+3. Do not invent categories. Do not return Markdown, prose, or code fences.
 
-Return **only** the JSON response:
-{{"category": "<one of the above categories or Uncertain>", "reason": "<short explanation>"}}"""
+Output format — return ONLY this JSON object on a single line:
+{{"category": "<one of the six categories above, or Uncertain>", "reason": "<one short sentence citing the strongest visual evidence>"}}"""
 
 
 # ===========================================================================
@@ -1278,49 +1299,84 @@ async def _classify_with_vlm(
         "temperature": 0.0,
     }
 
-    try:
-        timeout = aiohttp.ClientTimeout(total=TIMEOUT_VLM)
-        async with session.post(VLLM_URL, json=payload, timeout=timeout) as resp:
-            if resp.status != 200:
-                body = await resp.text()
-                return "Uncertain", f"VLM HTTP {resp.status}: {body}"
+    # Retry once on transient parse/empty failures — Qwen-VL occasionally
+    # emits a truncated/empty turn that succeeds on a clean re-prompt.
+    last_raw = ""
+    for attempt in range(2):
+        try:
+            timeout = aiohttp.ClientTimeout(total=TIMEOUT_VLM)
+            async with session.post(VLLM_URL, json=payload, timeout=timeout) as resp:
+                if resp.status != 200:
+                    body = await resp.text()
+                    if attempt == 0:
+                        last_raw = f"HTTP {resp.status}"
+                        continue
+                    logger.warning(f"VLM HTTP {resp.status}: {body[:200]}")
+                    return "Uncertain", f"VLM HTTP {resp.status}"
 
-            data   = await resp.json(content_type=None)
-            choices = data.get("choices", [])
-            if not choices:
-                return "Uncertain", "Empty choices from VLM"
-            
-            result = choices[0].get("message", {}).get("content", "").strip()
-            if not result:
-                return "Uncertain", "Empty VLM response"
+                data    = await resp.json(content_type=None)
+                choices = data.get("choices", [])
+                if not choices:
+                    if attempt == 0:
+                        last_raw = "empty choices"
+                        continue
+                    return "Uncertain", "Empty choices from VLM"
 
-            # Strip qwen3 chain-of-thought prefix if present
-            result = re.sub(r"<think>.*?</think>", "", result, flags=re.DOTALL).strip()
+                result = choices[0].get("message", {}).get("content", "").strip()
+                last_raw = result
+                if not result:
+                    if attempt == 0:
+                        continue
+                    return "Uncertain", "Empty VLM response"
 
-            # Extract JSON block robustly
-            start = result.find("{")
-            end   = result.rfind("}") + 1
-            if start == -1 or end == 0:
-                return "Uncertain", "No JSON in VLM response"
+                # Strip qwen3 chain-of-thought prefix if present
+                result = re.sub(r"<think>.*?</think>", "", result, flags=re.DOTALL).strip()
 
-            parsed   = json.loads(result[start:end])
-            category = parsed.get("category", "Uncertain").strip()
-            reason   = parsed.get("reason", "").strip()
+                # Extract JSON block robustly
+                start = result.find("{")
+                end   = result.rfind("}") + 1
+                if start == -1 or end == 0:
+                    if attempt == 0:
+                        continue
+                    logger.warning(f"VLM returned no JSON block. Raw: {result[:300]!r}")
+                    return "Uncertain", "No JSON in VLM response"
 
-            if "uncertain" in category.lower() or "unclear" in category.lower():
-                return "Uncertain/Obstructed", reason
+                try:
+                    parsed = json.loads(result[start:end])
+                except json.JSONDecodeError:
+                    if attempt == 0:
+                        continue
+                    logger.warning(f"VLM JSON parse failed. Raw: {result[:300]!r}")
+                    return "Uncertain", "Invalid JSON from VLM"
 
-            return category, reason
+                category = str(parsed.get("category", "")).strip()
+                reason   = str(parsed.get("reason", "")).strip()
 
-    except asyncio.TimeoutError:
-        logger.warning(f"VLM timeout after {TIMEOUT_VLM}s")
-        return "Uncertain", "VLM timeout"
-    except json.JSONDecodeError as e:
-        logger.warning(f"VLM JSON parse error: {e}")
-        return "Uncertain", "Invalid JSON from VLM"
-    except Exception as e:
-        logger.warning(f"VLM error: {e}")
-        return "Uncertain", str(e)
+                # Treat any Uncertain-ish answer as the obstructed bucket so the
+                # UI can distinguish "model unsure" from "model classified".
+                if (not category
+                        or "uncertain" in category.lower()
+                        or "unclear" in category.lower()
+                        or "unknown" in category.lower()):
+                    # Always log when the model bails — this is what we want to
+                    # see disappear after the prompt tightening.
+                    logger.info(f"VLM bailed to Uncertain. Raw: {result[:300]!r}")
+                    return "Uncertain/Obstructed", reason or "model_returned_uncertain"
+
+                return category, reason
+
+        except asyncio.TimeoutError:
+            if attempt == 0:
+                last_raw = "timeout"
+                continue
+            logger.warning(f"VLM timeout after {TIMEOUT_VLM}s")
+            return "Uncertain", "VLM timeout"
+        except Exception as e:
+            if attempt == 0:
+                last_raw = f"exc: {e}"
+                continue
+            logger.warning(f"VLM error: {e}; last_raw={last_raw!r}")
+            return "Uncertain", str(e)
 
 
 # ===========================================================================
@@ -2149,6 +2205,23 @@ def _shutdown_vllm(reason: str) -> None:
             pass
         except Exception as e:
             logger.warning(f"Failed to SIGKILL vLLM pid={pid}: {e}")
+
+    # ── Orphan reaper ────────────────────────────────────────────────────
+    # vLLM's tensor-parallel workers are Python multiprocessing.spawn children.
+    # Even after SIGKILL on the parent, the spawn workers sometimes survive
+    # (they catch CUDA mid-call and ignore the kill). Each leftover process
+    # holds ~3 GB container RAM + ~1-3 GB GPU. Across many runs they pile up
+    # and on workers eventually trip the 32 GB cgroup OOMKiller. The same
+    # pkill is also run at vLLM startup, but if no next job runs, orphans
+    # stay forever — reap them here at shutdown instead.
+    try:
+        subprocess.run(
+            ["pkill", "-9", "-f", "spawn_main.*--multiprocessing-fork"],
+            check=False, timeout=5,
+        )
+        logger.info("orphan reaper: dispatched SIGKILL to lingering spawn_main subprocesses")
+    except Exception as e:
+        logger.debug(f"orphan reaper failed: {e}")
 
 
 def _handle_shutdown_signal(signum, frame):
