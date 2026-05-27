@@ -12,8 +12,15 @@ module.exports = {
         default_duration: 1,
     },
     crowd: {
-        name: 'Crowd Detection',
-        description: 'Detects crowding in active camera feeds.',
+        name: 'Crowd Detection (Entry/Exit)',
+        description: 'Detects crowding at entry/exit camera feeds.',
+        script_path: 'scripts/detection/pipeline/master_pipeline.py',
+        default_frequency: 5,
+        default_duration: 1,
+    },
+    crowd_biometric: {
+        name: 'Crowd Detection (Biometric)',
+        description: 'Detects crowding (>=12 persons) at biometric scanning areas.',
         script_path: 'scripts/detection/pipeline/master_pipeline.py',
         default_frequency: 5,
         default_duration: 1,
@@ -26,7 +33,7 @@ module.exports = {
         default_duration: 1,
     },
     crowd_five: {
-        name: 'Low Person Count Detection (<5)',
+        name: 'Crowd < 5',
         description: 'Detects low occupancy (fewer than 5 persons) in configured HLS camera feeds.',
         script_path: 'scripts/detection/pipeline/master_pipeline.py',
         default_frequency: 5,
@@ -91,6 +98,20 @@ module.exports = {
     blind_spot: {
         name: 'Blind Spot Detection',
         description: 'Detects blind spots, partial visibility, and static camera issues in HLS feeds.',
+        script_path: 'scripts/detection/pipeline/master_pipeline.py',
+        default_frequency: 5,
+        default_duration: 1,
+    },
+    strongroom: {
+        name: 'Strong Room Movement',
+        description: 'Detects any person movement in strong room camera feeds (>0 persons).',
+        script_path: 'scripts/detection/pipeline/master_pipeline.py',
+        default_frequency: 5,
+        default_duration: 1,
+    },
+    qp_box: {
+        name: 'QP Box Detection',
+        description: 'Detects question-paper box presence/absence in strong room camera feeds.',
         script_path: 'scripts/detection/pipeline/master_pipeline.py',
         default_frequency: 5,
         default_duration: 1,

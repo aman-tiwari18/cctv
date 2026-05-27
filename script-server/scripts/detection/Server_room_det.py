@@ -85,7 +85,7 @@ def detect_persons_in_frame(frame, device_id="unknown", camera_no="unknown", scr
     cv2.rectangle(overlay, (10, 10), (460, 100), (0, 0, 0), -1)
     cv2.addWeighted(frame, 0.7, overlay, 0.3, 0, frame)
     status_color = (0, 0, 255) if server_detected else (0, 255, 0)
-    status_text = f"INTRUDER DETECTED! ({person_count})" if server_detected else "All Clear"
+    status_text = f"SERVER ROOM BREACH! ({person_count})" if server_detected else "All Clear"
     cv2.putText(frame, status_text, (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
     cv2.putText(frame, f"Persons: {person_count}", (20, 62),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
@@ -104,7 +104,7 @@ def detect_persons_in_frame(frame, device_id="unknown", camera_no="unknown", scr
             filename = os.path.join(SAVE_FOLDER, fname)
             cv2.imwrite(filename, frame)
             last_save_times[key] = now
-            logger.warning(f"[{device_id}-{camera_no}] 🚨 Server intrusion saved: {filename}")
+            logger.warning(f"[{device_id}-{camera_no}] 🚨 Server room breach (person detected): {filename}")
 
     return frame, server_detected, person_count
 
@@ -144,7 +144,7 @@ def detect_persons_batch(items):
         cv2.rectangle(overlay, (10, 10), (460, 100), (0, 0, 0), -1)
         cv2.addWeighted(frame, 0.7, overlay, 0.3, 0, frame)
         status_color = (0, 0, 255) if server_detected else (0, 255, 0)
-        status_text = f"INTRUDER DETECTED! ({person_count}/{min_persons})" if server_detected else "All Clear"
+        status_text = f"SERVER ROOM BREACH! ({person_count}/{min_persons})" if server_detected else "All Clear"
         cv2.putText(frame, status_text, (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
         cv2.putText(frame, f"Persons: {person_count}", (20, 62),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
@@ -181,9 +181,9 @@ def process_dav_video(video_path):
 
         if frame_count % 50 == 0:
             if detected:
-                logger.warning(f"🚨 Server intrusion! Count={count}")
+                logger.warning(f"🚨 Server room breach! Count={count}")
             else:
-                logger.info("Monitoring... No intrusion")
+                logger.info("Monitoring... No breach")
 
         cv2.imshow("Server Room Detection", processed)
         if cv2.waitKey(1) & 0xFF == ord("q"):

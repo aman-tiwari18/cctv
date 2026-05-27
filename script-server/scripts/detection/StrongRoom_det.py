@@ -59,21 +59,27 @@ def detect_strongroom_in_frame(frame, device_id="unknown", camera_no="unknown", 
     ]
 
     person_count = len(person_detections)
+    violation_detected = person_count > MIN_PERSONS
 
     # Draw detections
     for box in person_detections:
         x1, y1, x2, y2 = map(int, box.xyxy[0])
         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
 
-    cv2.putText(frame, f"Persons: {person_count}", (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-    cv2.putText(frame, f"{device_id} - {camera_no}", (10, 60),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    # Status overlay
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (10, 10), (460, 100), (0, 0, 0), -1)
+    cv2.addWeighted(frame, 0.7, overlay, 0.3, 0, frame)
+    status_color = (0, 0, 255) if violation_detected else (0, 255, 0)
+    status_text = f"STRONG ROOM BREACH! ({person_count})" if violation_detected else "All Clear"
+    cv2.putText(frame, status_text, (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
+    cv2.putText(frame, f"Persons: {person_count}", (20, 62),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+    cv2.putText(frame, f"{device_id} - Cam {camera_no}", (20, 87),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
 
     key = f"{device_id}_{camera_no}"
     now = time.time()
-    
-    violation_detected = person_count > MIN_PERSONS
 
     with _state_lock:
         time_elapsed = now - last_save_times.get(key, 0)
@@ -84,7 +90,7 @@ def detect_strongroom_in_frame(frame, device_id="unknown", camera_no="unknown", 
             filename = os.path.join(SAVE_FOLDER, fname)
             cv2.imwrite(filename, frame)
             last_save_times[key] = now
-            logger.warning(f"[{device_id}-{camera_no}] 🚨 Strongroom intrusion: {filename}")
+            logger.warning(f"[{device_id}-{camera_no}] 🚨 Strong room breach (person detected): {filename}")
 
     return frame, violation_detected, person_count
 
@@ -109,10 +115,18 @@ def detect_strongroom_batch(items):
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
 
         ch_no = item.get('ch_no', item.get('camera_id', 'unknown'))
-        cv2.putText(frame, f"Persons: {person_count}", (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        cv2.putText(frame, f"CH: {ch_no}", (10, 60),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+        # Status overlay
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (10, 10), (460, 100), (0, 0, 0), -1)
+        cv2.addWeighted(frame, 0.7, overlay, 0.3, 0, frame)
+        status_color = (0, 0, 255) if violation_detected else (0, 255, 0)
+        status_text = f"STRONG ROOM BREACH! ({person_count})" if violation_detected else "All Clear"
+        cv2.putText(frame, status_text, (20, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
+        cv2.putText(frame, f"Persons: {person_count}", (20, 62),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+        cv2.putText(frame, f"CH: {ch_no}", (20, 87),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
 
         outputs.append((frame, violation_detected, person_count))
 

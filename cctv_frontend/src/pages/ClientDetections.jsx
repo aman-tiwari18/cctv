@@ -61,32 +61,40 @@ import { useAuth } from '../contexts/AuthContext';
 
 const TYPE_META = {
   proximity: { label: 'Close Proximity', color: '#5cb88a', bg: '#e5f5ed' },
-  crowd: { label: 'Crowd Detection', color: '#e24d7b', bg: '#fce4ec' },
+  crowd: { label: 'Crowd Detection (Entry/Exit)', color: '#e24d7b', bg: '#fce4ec' },
+  crowd_biometric: { label: 'Crowd Detection (Biometric)', color: '#9333ea', bg: '#f3e8ff' },
   crowd_five: { label: 'Crowd < 5', color: '#e06050', bg: '#fce8e6' },
   crowd_zero: { label: 'Zero Person', color: '#6b5b95', bg: '#edeaf3' },
   server: { label: 'Server Room', color: '#a0623d', bg: '#f3ebe4' },
   intruder: { label: 'Intruder', color: '#d94466', bg: '#fce4ea' },
+  strongroom: { label: 'Strong Room Movement', color: '#b91c1c', bg: '#fef2f2' },
+  qp_box: { label: 'QP Box Detection', color: '#dc2626', bg: '#fee2e2' },
   entry_exit: { label: 'Entry/Exit', color: '#1d7a7d', bg: '#e0f0f0' },
   phone: { label: 'Phone', color: '#465a38', bg: '#e8ece5' },
   blind_spot: { label: 'Blind Spot', color: '#b0a850', bg: '#f3f2e4' },
   invigilator: { label: 'Invigilator', color: '#00bfcf', bg: '#e0f7fa' },
   inversion: { label: 'Camera Inversion', color: '#7a86b4', bg: '#eceef5' },
-  tamper: { label: 'Camera Tampering', color: '#00c8d4', bg: '#e0f8fa' },
+  tampering: { label: 'Camera Tampering', color: '#00c8d4', bg: '#e0f8fa' },
+  vision: { label: 'Scene Classification', color: '#3b82f6', bg: '#dbeafe' },
 };
 
 const TYPE_ICONS = {
   proximity: WarningAmber,
   crowd: Groups,
+  crowd_biometric: Groups,
   crowd_five: Groups,
   crowd_zero: PersonOff,
   server: Dns,
   intruder: DirectionsWalk,
+  strongroom: SecurityUpdateWarning,
+  qp_box: SecurityUpdateWarning,
   entry_exit: MeetingRoom,
   phone: Smartphone,
   blind_spot: VisibilityOff,
   invigilator: Visibility,
   inversion: FlipCameraAndroid,
-  tamper: SecurityUpdateWarning,
+  tampering: SecurityUpdateWarning,
+  vision: Visibility,
   default: CameraAlt,
 };
 
