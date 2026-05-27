@@ -16,7 +16,7 @@ Updated cooldown periods across all detection workers to reduce the volume of de
 | **Close Proximity** | `close_proximity_worker.py` | 180s (3 min) | **120s (2 min)** | Match analytics requirement (2 min frequency) |
 | **Mobile Phone** | `phone_worker.py` | 480s (8 min) | **600s (10 min)** | Reduce false positives |
 | **Candidate Count < 5** | `crowd_zero_det_worker.py` | 240s (4 min) | **360s (6 min)** | Reduce detection volume |
-| **Crowd Threshold** | `crowd_five_det_worker.py` | 240s (4 min) | **360s (6 min)** | Reduce detection volume |
+| **Crowd Threshold** | `crowd_five_det_worker.py` | 240s (4 min) | **120s (2 min)** | Code is the source of truth; doc previously claimed 360s. Worker default is `cooldown_time=120` — kept in the 2026-05 accuracy overhaul to surface low-occupancy events promptly. |
 | **Camera Inversion** | `camera_inversion_worker.py` | 120s (2 min) | **240s (4 min)** | Reduce false positives |
 
 ## Analytics Requirements Alignment
@@ -69,7 +69,7 @@ Based on the analytics table from the requirements:
 
 4. **Candidate Count < 5**
    - Required Frequency: Not specified
-   - Cooldown Set: **360 seconds (6 min)**
+   - Cooldown Set: **120 seconds (2 min)**
    - Time Window: 14:00:00 - 18:00:00
 
 ## Impact Analysis
