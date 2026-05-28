@@ -311,99 +311,96 @@ exports.getOverview = async (req, res) => {
             startDate = endDate;
             endDate = tmp;
         }
-        const nowTime = getLocalTimeStr();
         const { start: dateStart, end: dateEnd } = getRangeBounds(startDate, endDate);
 
-        // Q1: Exam IDs overlapping the queried range (source of `total` AND scope
-        // for cameras/detections). An exam overlaps [startDate, endDate] iff its
-        // start_date <= endDate AND end_date >= startDate.
-        const activeExamsP = query(
-            `SELECT id FROM exams
+        // Q1: Exams overlapping the queried range — these are the "total" for all KPIs.
+        // An exam overlaps [startDate, endDate] iff start_date <= endDate AND end_date >= startDate.
+        // We select start_date/end_date too so we can classify by comparison to TODAY.
+        const activeExams = await query(
+            `SELECT id, start_date, end_date FROM exams
              WHERE is_active = 1
                AND start_date IS NOT NULL AND end_date IS NOT NULL
                AND start_date <= ? AND end_date >= ?`,
             [endDate, startDate]
         );
 
-        // Q1b: Ongoing count — exams overlapping the range that ALSO have a shift
-        // currently in time window NOW. BETWEEN start_time AND end_time is inclusive;
-        // assumes same-day shifts (no overnight wraparound).
-        const ongoingP = query(
-            `SELECT COUNT(DISTINCT es.exam_id) AS ongoing
-             FROM exam_shifts es
-             JOIN exams e ON e.id = es.exam_id
-             WHERE e.is_active = 1
-               AND e.start_date IS NOT NULL AND e.end_date IS NOT NULL
-               AND e.start_date <= ? AND e.end_date >= ?
-               AND es.is_active = 1
-               AND ? BETWEEN es.start_time AND es.end_time`,
-            [endDate, startDate, nowTime]
-        );
-
-        // Q5: Scripts breakdown for assignments whose assignment_date falls in the range.
-        // V2 response renames: run→running, pend→scheduled, done→completed.
-        const scriptsP = query(
-            `SELECT COUNT(*) AS planned_today,
-                    SUM(CASE WHEN status = 'RUNNING'   THEN 1 ELSE 0 END) AS running,
-                    SUM(CASE WHEN status = 'PENDING'   THEN 1 ELSE 0 END) AS scheduled,
-                    SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END) AS completed
-             FROM shift_script_assignments
-             WHERE assignment_date BETWEEN ? AND ? AND is_active = TRUE`,
-            [startDate, endDate]
-        );
-
-        const [activeExams, ongoingResult, scripts] = await Promise.all([
-            activeExamsP, ongoingP, scriptsP,
-        ]);
-
+        // Classify exams by their date relationship to TODAY (real today, not the filter end).
+        // ongoing/completed/scheduled partition activeExams; their sum equals `total`.
+        const todayStr = getLocalDateStr();
+        const dateStr = (d) => (d instanceof Date ? getLocalDateStr(d) : String(d).slice(0, 10));
+        let ongoing = 0, completedExams = 0, scheduledExams = 0;
+        activeExams.forEach((e) => {
+            const s = dateStr(e.start_date);
+            const x = dateStr(e.end_date);
+            if (x < todayStr) completedExams++;
+            else if (s > todayStr) scheduledExams++;
+            else ongoing++;
+        });
+        const total = activeExams.length;
         const activeExamIds = activeExams.map((e) => e.id);
 
-        // If no live exams, skip the per-exam-scoped queries
-        let camerasAgg = { total: 0, acc: 0, failed_to_classify: 0 };
-        let detectionsAgg = { pushed: 0, removed: 0 };
+        // If no exams in range, skip the per-exam-scoped queries entirely.
+        let camerasAgg = { total: 0, acc: 0 };
+        let detectionsAgg = { total: 0, pushed: 0 };
         let distribution = [];
+        let scriptsAgg = { planned_today: 0, running: 0, scheduled: 0, completed: 0 };
 
         if (activeExamIds.length > 0) {
-            // Q3 + Q4: Cameras HLS + RTSP
+            // Q3 + Q4: Cameras HLS + RTSP — total + accessible only; inaccessible = total - accessible.
             const hlsCamsP = query(
                 `SELECT COUNT(*) AS total,
-                        SUM(CASE WHEN LOWER(status) = 'accessible' THEN 1 ELSE 0 END) AS acc,
-                        SUM(CASE WHEN classification IS NULL OR classification = '' THEN 1 ELSE 0 END) AS failed_to_classify
+                        SUM(CASE WHEN LOWER(status) = 'accessible' THEN 1 ELSE 0 END) AS acc
                  FROM camera_links_hls
                  WHERE exam_id IN (?) AND is_active = 1`,
                 [activeExamIds]
             );
             const rtspCamsP = query(
                 `SELECT COUNT(*) AS total,
-                        SUM(CASE WHEN LOWER(status) = 'accessible' THEN 1 ELSE 0 END) AS acc,
-                        SUM(CASE WHEN classification IS NULL OR classification = '' THEN 1 ELSE 0 END) AS failed_to_classify
+                        SUM(CASE WHEN LOWER(status) = 'accessible' THEN 1 ELSE 0 END) AS acc
                  FROM camera_links_rtsp
                  WHERE exam_id IN (?) AND is_active = 1`,
                 [activeExamIds]
             );
 
-            // Q6 + Q7: Detections HLS + RTSP for date range
+            // Q5: Scripts breakdown — JOIN exam_shifts so we only count assignments
+            // belonging to exams in the active set (the admin endpoint used to over-count
+            // by including ALL assignments in the date range regardless of exam).
+            const scriptsP = query(
+                `SELECT COUNT(*) AS planned_today,
+                        SUM(CASE WHEN ssa.status = 'RUNNING'   THEN 1 ELSE 0 END) AS running,
+                        SUM(CASE WHEN ssa.status = 'PENDING'   THEN 1 ELSE 0 END) AS scheduled,
+                        SUM(CASE WHEN ssa.status = 'COMPLETED' THEN 1 ELSE 0 END) AS completed
+                 FROM shift_script_assignments ssa
+                 JOIN exam_shifts es ON ssa.shift_id = es.id
+                 WHERE ssa.assignment_date BETWEEN ? AND ?
+                   AND ssa.is_active = TRUE
+                   AND es.exam_id IN (?)`,
+                [startDate, endDate, activeExamIds]
+            );
+
+            // Q6 + Q7: Detections HLS + RTSP — total count + pushed count.
+            // false_detection is derived as total - pushed in the response.
             const hlsDetP = query(
-                `SELECT SUM(CASE WHEN pushed_to_client = 1   THEN 1 ELSE 0 END) AS pushed,
-                        SUM(CASE WHEN remove_from_client = 1 THEN 1 ELSE 0 END) AS removed
+                `SELECT COUNT(*) AS total,
+                        SUM(CASE WHEN pushed_to_client = 1 THEN 1 ELSE 0 END) AS pushed
                  FROM camera_report_hls
                  WHERE exam_id IN (?) AND created_at >= ? AND created_at < ?`,
                 [activeExamIds, dateStart, dateEnd]
             );
             const rtspDetP = query(
-                `SELECT SUM(CASE WHEN pushed_to_client = 1   THEN 1 ELSE 0 END) AS pushed,
-                        SUM(CASE WHEN remove_from_client = 1 THEN 1 ELSE 0 END) AS removed
+                `SELECT COUNT(*) AS total,
+                        SUM(CASE WHEN pushed_to_client = 1 THEN 1 ELSE 0 END) AS pushed
                  FROM camera_report_rtsp
                  WHERE exam_id IN (?) AND created_at >= ? AND created_at < ?`,
                 [activeExamIds, dateStart, dateEnd]
             );
 
-            // Q8: Distribution HLS + RTSP grouped by detection_type
+            // Q8: Distribution HLS + RTSP grouped by detection_type. Admin's donut
+            // shows total counts (per type), so distribution[].count = total_count.
             const hlsDistP = query(
                 `SELECT detection_type,
                         COUNT(*) AS total_count,
-                        SUM(CASE WHEN pushed_to_client = 1   THEN 1 ELSE 0 END) AS pushed_count,
-                        SUM(CASE WHEN remove_from_client = 1 THEN 1 ELSE 0 END) AS removed_count
+                        SUM(CASE WHEN pushed_to_client = 1 THEN 1 ELSE 0 END) AS pushed_count
                  FROM camera_report_hls
                  WHERE exam_id IN (?) AND created_at >= ? AND created_at < ?
                  GROUP BY detection_type`,
@@ -412,39 +409,42 @@ exports.getOverview = async (req, res) => {
             const rtspDistP = query(
                 `SELECT detection_type,
                         COUNT(*) AS total_count,
-                        SUM(CASE WHEN pushed_to_client = 1   THEN 1 ELSE 0 END) AS pushed_count,
-                        SUM(CASE WHEN remove_from_client = 1 THEN 1 ELSE 0 END) AS removed_count
+                        SUM(CASE WHEN pushed_to_client = 1 THEN 1 ELSE 0 END) AS pushed_count
                  FROM camera_report_rtsp
                  WHERE exam_id IN (?) AND created_at >= ? AND created_at < ?
                  GROUP BY detection_type`,
                 [activeExamIds, dateStart, dateEnd]
             );
 
-            const [hlsCams, rtspCams, hlsDet, rtspDet, hlsDist, rtspDist] = await Promise.all([
-                hlsCamsP, rtspCamsP, hlsDetP, rtspDetP, hlsDistP, rtspDistP,
+            const [hlsCams, rtspCams, scripts, hlsDet, rtspDet, hlsDist, rtspDist] = await Promise.all([
+                hlsCamsP, rtspCamsP, scriptsP, hlsDetP, rtspDetP, hlsDistP, rtspDistP,
             ]);
 
-            const sumCam = (a, b) => ({
-                total: Number(a?.total || 0) + Number(b?.total || 0),
-                acc: Number(a?.acc || 0) + Number(b?.acc || 0),
-                failed_to_classify: Number(a?.failed_to_classify || 0) + Number(b?.failed_to_classify || 0),
-            });
-            camerasAgg = sumCam(hlsCams[0], rtspCams[0]);
-
-            detectionsAgg = {
-                pushed: Number(hlsDet[0]?.pushed || 0) + Number(rtspDet[0]?.pushed || 0),
-                removed: Number(hlsDet[0]?.removed || 0) + Number(rtspDet[0]?.removed || 0),
+            camerasAgg = {
+                total: Number(hlsCams[0]?.total || 0) + Number(rtspCams[0]?.total || 0),
+                acc:   Number(hlsCams[0]?.acc   || 0) + Number(rtspCams[0]?.acc   || 0),
             };
 
-            // Merge distribution rows by detection_type
+            scriptsAgg = {
+                planned_today: Number(scripts[0]?.planned_today || 0),
+                running:       Number(scripts[0]?.running       || 0),
+                scheduled:     Number(scripts[0]?.scheduled     || 0),
+                completed:     Number(scripts[0]?.completed     || 0),
+            };
+
+            detectionsAgg = {
+                total:  Number(hlsDet[0]?.total  || 0) + Number(rtspDet[0]?.total  || 0),
+                pushed: Number(hlsDet[0]?.pushed || 0) + Number(rtspDet[0]?.pushed || 0),
+            };
+
+            // Merge distribution rows by detection_type. Admin: count = total_count.
             const distMap = new Map();
             const accumulate = (rows) => {
                 rows.forEach((r) => {
                     const type = r.detection_type || 'unknown';
-                    const cur = distMap.get(type) || { type, count: 0, pushed_count: 0, removed_count: 0 };
+                    const cur = distMap.get(type) || { type, count: 0, pushed_count: 0 };
                     cur.count += Number(r.total_count || 0);
                     cur.pushed_count += Number(r.pushed_count || 0);
-                    cur.removed_count += Number(r.removed_count || 0);
                     distMap.set(type, cur);
                 });
             };
@@ -456,10 +456,6 @@ exports.getOverview = async (req, res) => {
             }));
         }
 
-        // V2: total = on-today count (= activeExams.length). ongoing = currently live by time.
-        const total = activeExams.length;
-        const ongoing = Number(ongoingResult[0]?.ongoing || 0);
-
         res.json({
             success: true,
             data: {
@@ -469,22 +465,19 @@ exports.getOverview = async (req, res) => {
                 total_exams: {
                     total,
                     ongoing,
+                    completed: completedExams,
+                    scheduled: scheduledExams,
                 },
                 cameras: {
                     total: camerasAgg.total,
                     accessible: camerasAgg.acc,
-                    unclassified: camerasAgg.failed_to_classify,
+                    inaccessible: camerasAgg.total - camerasAgg.acc,
                 },
-                scripts: {
-                    planned_today: Number(scripts[0]?.planned_today || 0),
-                    running:       Number(scripts[0]?.running       || 0),
-                    scheduled:     Number(scripts[0]?.scheduled     || 0),
-                    completed:     Number(scripts[0]?.completed     || 0),
-                },
+                scripts: scriptsAgg,
                 detections: {
-                    today: detectionsAgg.pushed + detectionsAgg.removed,
+                    today: detectionsAgg.total,
                     pushed_to_client: detectionsAgg.pushed,
-                    false_detection: detectionsAgg.removed,
+                    false_detection: detectionsAgg.total - detectionsAgg.pushed,
                 },
                 detection_distribution: distribution,
             },
@@ -520,9 +513,9 @@ exports.getLiveExams = async (req, res) => {
         const nowTime = getLocalTimeStr();
         const { start: todayStart, end: tomorrowStart } = getDateRangeBounds(todayDate);
 
-        // V2.2: filter to shifts currently in their time window AND
-        // label by the bracket the CURRENT time falls in (not the shift's start_time).
-        const currentBracket = bracketForTime(nowTime);
+        // V2.3: rows show "Shift N" where N is the shift's 1-based position within
+        // its exam (ordered by start_time ASC). The bracket Morning/Afternoon/Evening
+        // concept is removed.
 
         const liveWhere = `
             WHERE e.is_active = 1 AND es.is_active = 1
@@ -544,7 +537,8 @@ exports.getLiveExams = async (req, res) => {
             baseParams
         );
 
-        // Row driver query (paginated)
+        // Row driver query (paginated). shift_index uses a correlated subquery
+        // so it works on MySQL versions without window functions.
         const rowsP = query(
             `SELECT e.id            AS exam_id,
                     e.exam_name,
@@ -552,7 +546,11 @@ exports.getLiveExams = async (req, res) => {
                     es.id           AS shift_id,
                     es.shift_name,
                     es.start_time,
-                    es.end_time
+                    es.end_time,
+                    (SELECT COUNT(*) FROM exam_shifts es2
+                     WHERE es2.exam_id = es.exam_id
+                       AND es2.is_active = 1
+                       AND es2.start_time < es.start_time) + 1 AS shift_index
              FROM exam_shifts es
              JOIN exams e ON e.id = es.exam_id
              ${liveWhere}
@@ -677,8 +675,8 @@ exports.getLiveExams = async (req, res) => {
                 date: todayDate,
                 exam_name: r.exam_name,
                 shift_name: r.shift_name,
+                shift_index: Number(r.shift_index || 1),
                 link_type: r.link_type,
-                shift_bracket: currentBracket,
                 shift_start: r.start_time,
                 shift_end: r.end_time,
                 cameras,

@@ -1048,7 +1048,7 @@ export const LiveExamsCard = ({ fetcher = dashboardAPI.getLiveExams }) => {
                         lineHeight: '24px',
                         color: '#191B23',
                     }}>
-                        Live Exams
+                        Live Shifts
                     </Typography>
                     <Button
                         variant="outlined"
@@ -1102,7 +1102,7 @@ export const LiveExamsCard = ({ fetcher = dashboardAPI.getLiveExams }) => {
                             ) : rows.length === 0 ? (
                                 <TableRow>
                                     <TableCell colSpan={8} align="center" sx={{ py: 4, color: BODY_LIGHT, border: 'none' }}>
-                                        No live exams today.
+                                        No live shifts right now.
                                     </TableCell>
                                 </TableRow>
                             ) : (
@@ -1118,17 +1118,15 @@ export const LiveExamsCard = ({ fetcher = dashboardAPI.getLiveExams }) => {
                                             {formatShortDate(row.date)}
                                         </TableCell>
                                         <TableCell sx={bodyCellSx}>
-                                            {row.shift_bracket && (
-                                                <Typography sx={{
-                                                    fontFamily: 'Inter, sans-serif',
-                                                    fontWeight: 700,
-                                                    fontSize: '14px',
-                                                    color: BODY_DARK,
-                                                    lineHeight: '18px',
-                                                }}>
-                                                    {row.shift_bracket}
-                                                </Typography>
-                                            )}
+                                            <Typography sx={{
+                                                fontFamily: 'Inter, sans-serif',
+                                                fontWeight: 700,
+                                                fontSize: '14px',
+                                                color: BODY_DARK,
+                                                lineHeight: '18px',
+                                            }}>
+                                                Shift {row.shift_index || 1}
+                                            </Typography>
                                             <Typography sx={{
                                                 fontFamily: 'Inter, sans-serif',
                                                 fontSize: '12px',
@@ -1599,8 +1597,8 @@ const Dashboard = () => {
         };
     }, [apiParams]);
 
-    const totalExams   = overview?.total_exams   || { total: 0, ongoing: 0 };
-    const cameras      = overview?.cameras       || { total: 0, accessible: 0, unclassified: 0 };
+    const totalExams   = overview?.total_exams   || { total: 0, ongoing: 0, completed: 0, scheduled: 0 };
+    const cameras      = overview?.cameras       || { total: 0, accessible: 0, inaccessible: 0 };
     const scripts      = overview?.scripts       || { planned_today: 0, running: 0, scheduled: 0, completed: 0 };
     const detections   = overview?.detections    || { today: 0, pushed_to_client: 0, false_detection: 0 };
     const distribution = overview?.detection_distribution || [];
@@ -1905,8 +1903,9 @@ const Dashboard = () => {
                             value={totalExams.total}
                             icon={<ExamsSvgIcon />}
                             chips={[
-                                { label: 'Ongoing', value: totalExams.ongoing, tone: 'amber' },
-                                { label: 'Total',   value: totalExams.total,   tone: 'violet' },
+                                { label: 'Ongoing',   value: totalExams.ongoing,   tone: 'amber' },
+                                { label: 'Completed', value: totalExams.completed, tone: 'violet' },
+                                { label: 'Scheduled', value: totalExams.scheduled, tone: 'violet' },
                             ]}
                             loading={overviewLoading}
                         />
@@ -1918,14 +1917,14 @@ const Dashboard = () => {
                             icon={<CameraAltIcon />}
                             chips={[
                                 { label: 'Accessible',   value: cameras.accessible,   tone: 'amber' },
-                                { label: 'Unclassified', value: cameras.unclassified, tone: 'violet' },
+                                { label: 'Inaccessible', value: cameras.inaccessible, tone: 'violet' },
                             ]}
                             loading={overviewLoading}
                         />
                     </Grid>
                     <Grid item xs={12} sm={6} lg={3}>
                         <KpiCard
-                            title="SCRIPT BREAKDOWN"
+                            title="ANALYTICS"
                             value={scripts.planned_today}
                             icon={<ShiftSvgIcon />}
                             chips={[

@@ -489,8 +489,8 @@ const ClientDetectionDashboard = () => {
         };
     }, [apiParams]);
 
-    const totalExams   = overview?.total_exams   || { total: 0, ongoing: 0 };
-    const cameras      = overview?.cameras       || { total: 0, accessible: 0, unclassified: 0 };
+    const totalExams   = overview?.total_exams   || { total: 0, ongoing: 0, completed: 0, scheduled: 0 };
+    const cameras      = overview?.cameras       || { total: 0, accessible: 0, inaccessible: 0 };
     const scripts      = overview?.scripts       || { planned_today: 0, running: 0, scheduled: 0, completed: 0 };
     const detections   = overview?.detections    || { today: 0, pushed_to_client: 0, false_detection: 0 };
     const distribution = overview?.detection_distribution || [];
@@ -792,8 +792,9 @@ const ClientDetectionDashboard = () => {
                         value={totalExams.total}
                         icon={<ExamsSvgIcon />}
                         chips={[
-                            { label: 'Ongoing', value: totalExams.ongoing, tone: 'amber' },
-                            { label: 'Total',   value: totalExams.total,   tone: 'violet' },
+                            { label: 'Ongoing',   value: totalExams.ongoing,   tone: 'amber' },
+                            { label: 'Completed', value: totalExams.completed, tone: 'violet' },
+                            { label: 'Scheduled', value: totalExams.scheduled, tone: 'violet' },
                         ]}
                         loading={overviewLoading}
                     />
@@ -805,14 +806,14 @@ const ClientDetectionDashboard = () => {
                         icon={<CameraAltIcon />}
                         chips={[
                             { label: 'Accessible',   value: cameras.accessible,   tone: 'amber' },
-                            { label: 'Unclassified', value: cameras.unclassified, tone: 'violet' },
+                            { label: 'Inaccessible', value: cameras.inaccessible, tone: 'violet' },
                         ]}
                         loading={overviewLoading}
                     />
                 </Grid>
                 <Grid item xs={12} sm={6} lg={3}>
                     <KpiCard
-                        title="SCRIPT BREAKDOWN"
+                        title="ANALYTICS"
                         value={scripts.planned_today}
                         icon={<ShiftSvgIcon />}
                         chips={[
