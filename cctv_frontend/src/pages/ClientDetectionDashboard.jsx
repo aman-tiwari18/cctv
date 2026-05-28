@@ -84,6 +84,7 @@ const TodaysScriptDistributionCard = () => {
     const [examsLoading, setExamsLoading] = useState(true);
     const [selectedExamId, setSelectedExamId] = useState('');
     const [assignments, setAssignments] = useState([]);
+    const [examShifts, setExamShifts] = useState([]);
     const [assignmentsLoading, setAssignmentsLoading] = useState(false);
 
     // Load the exam dropdown from /client-dashboard/live-exams. Each row in
@@ -118,10 +119,12 @@ const TodaysScriptDistributionCard = () => {
         return () => { cancelled = true; };
     }, []);
 
-    // Fetch the chosen exam's script assignments for today.
+    // Fetch the chosen exam's script assignments for today AND all of its shifts
+    // (so a shift without assignments today still occupies its canonical column).
     useEffect(() => {
         if (!selectedExamId) {
             setAssignments([]);
+            setExamShifts([]);
             return undefined;
         }
         let cancelled = false;
@@ -132,11 +135,13 @@ const TodaysScriptDistributionCard = () => {
             .then((res) => {
                 if (cancelled) return;
                 setAssignments(res?.data?.data || []);
+                setExamShifts(res?.data?.shifts || []);
             })
             .catch((err) => {
                 if (cancelled) return;
                 console.error('[TodaysScriptDistribution.getExamShiftScripts]', err);
                 setAssignments([]);
+                setExamShifts([]);
             })
             .finally(() => {
                 if (!cancelled) setAssignmentsLoading(false);
@@ -144,16 +149,12 @@ const TodaysScriptDistributionCard = () => {
         return () => { cancelled = true; };
     }, [selectedExamId]);
 
-    // Build a (scriptKey × shiftIdx → assignment) lookup. Shifts are sorted
-    // by start_time so the earliest becomes SHIFT 1, etc.
+    // Build a (scriptKey × shiftIdx → assignment) lookup. Shift index comes from
+    // examShifts (sorted by start_time ASC) so a shift always sits in its canonical
+    // column even when it has zero assignments today — i.e. an exam's Shift 2 always
+    // renders in the SHIFT 2 column, never collapsing into SHIFT 1.
     const cellMap = useMemo(() => {
-        const shiftsById = new Map();
-        assignments.forEach((a) => {
-            if (a.shift && !shiftsById.has(a.shift_id)) {
-                shiftsById.set(a.shift_id, a.shift);
-            }
-        });
-        const sortedShifts = Array.from(shiftsById.values())
+        const sortedShifts = [...examShifts]
             .sort((a, b) => String(a.start_time || '').localeCompare(String(b.start_time || '')));
         const shiftIdxById = new Map();
         sortedShifts.forEach((s, idx) => shiftIdxById.set(s.id, idx));
@@ -166,7 +167,7 @@ const TodaysScriptDistributionCard = () => {
             map.set(`${scriptKey}::${shiftIdx}`, a);
         });
         return map;
-    }, [assignments]);
+    }, [assignments, examShifts]);
 
     // Shared chip dimensions — empty + filled match exactly because the
     // base has a 1px transparent border that the empty variant overrides.

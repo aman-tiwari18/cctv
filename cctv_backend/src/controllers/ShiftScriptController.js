@@ -322,33 +322,44 @@ exports.getByExam = async (req, res) => {
     if (is_active !== undefined) where.is_active = is_active === "true";
     if (assignment_date) where.assignment_date = assignment_date;
 
-    const assignments = await ShiftScriptAssignment.findAll({
-        where,
-        include: [
-            {
-                model: ExamShift,
-                as: "shift",
-                required: true,
-                where: { exam_id: req.params.examId },
-            },
-            {
-                model: Script,
-                as: "script",
-                attributes: [
-                    "id",
-                    "script_id",
-                    "name",
-                    "default_frequency_minutes",
-                ],
-            },
-        ],
-        order: [["assignment_date", "ASC"], [{ model: Script, as: "script" }, "name", "ASC"]],
-    });
+    // Also return ALL active shifts of the exam (regardless of whether they have
+    // assignments) so the UI can label columns Shift 1 / 2 / 3 by chronological
+    // position even when some shifts have no scripts on the queried date.
+    const [assignments, shifts] = await Promise.all([
+        ShiftScriptAssignment.findAll({
+            where,
+            include: [
+                {
+                    model: ExamShift,
+                    as: "shift",
+                    required: true,
+                    where: { exam_id: req.params.examId },
+                },
+                {
+                    model: Script,
+                    as: "script",
+                    attributes: [
+                        "id",
+                        "script_id",
+                        "name",
+                        "default_frequency_minutes",
+                    ],
+                },
+            ],
+            order: [["assignment_date", "ASC"], [{ model: Script, as: "script" }, "name", "ASC"]],
+        }),
+        ExamShift.findAll({
+            where: { exam_id: req.params.examId, is_active: true },
+            attributes: ["id", "shift_name", "start_time", "end_time"],
+            order: [["start_time", "ASC"]],
+        }),
+    ]);
 
     res.json({
         success: true,
         count: assignments.length,
         data: assignments,
+        shifts,
     });
 };
 
