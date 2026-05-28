@@ -1,6 +1,10 @@
 """
 Crowd Five Worker — supports both RTSP (via master_pipeline producer)
 and HLS (via its own internal OpenCV reader).
+
+Applies G1 (frame-quality short-circuit) before GPU inference, G7 (median-of-5
+temporal smoothing) and G8 (CONSEC_VIOLATIONS) after, and G9 (per-camera cooldown)
+at save time. Per-frame gates G2–G6 live in crowd_five_det.detect_crowd_five_batch.
 """
 
 import queue
@@ -10,6 +14,8 @@ import logging
 import threading
 import signal
 from datetime import datetime
+from collections import deque, defaultdict
+from statistics import median
 import cv2
 import torch
 from concurrent.futures import ThreadPoolExecutor
@@ -56,26 +62,67 @@ GPU_QUEUE_SIZE      = 128
 BATCH_WAIT_TIMEOUT  = 0.2
 THREAD_DELAY        = 0.1
 HLS_SAMPLE_EVERY    = 5
-CONSEC_THRESHOLD    = 2   # Lowered: 3 was eating brief 1-2 frame low-crowd events; 2 still avoids single-frame noise
+
+# G8: sustained violation required before save (~1s RTSP, ~3s HLS at 5 FPS effective)
+CONSEC_VIOLATIONS   = 3
+
+# G7: median-smoothing window length (frames). Defends against single-frame YOLO misses
+# and brief occlusions inflating the smoothed count downward.
+COUNT_WINDOW_LEN    = 5
+
+# Telemetry log throttling — one summary line per camera every N seconds.
+TELEMETRY_LOG_EVERY = 60.0
 
 _gpu_queue = queue.Queue(maxsize=GPU_QUEUE_SIZE)
+
+
+def _init_camera_state():
+    """Fresh per-camera state dict. All gate state lives here so it survives across frames."""
+    return {
+        "last_save":           0,
+        "consec_violations":   0,
+        "count_window":        deque(maxlen=COUNT_WINDOW_LEN),   # G7
+        "frame_hash":          None,                              # G1
+        "gate_counters":       defaultdict(int),                  # telemetry
+        "last_telemetry_log":  0.0,
+    }
+
+
+def _maybe_log_telemetry(state, label):
+    """Emit one summary line of gate-counter activity per camera, throttled to once per TELEMETRY_LOG_EVERY."""
+    now = time.time()
+    if now - state.get("last_telemetry_log", 0.0) < TELEMETRY_LOG_EVERY:
+        return
+    state["last_telemetry_log"] = now
+    c = state.get("gate_counters") or {}
+    if not c:
+        return
+    summary = " ".join(f"{k}={v}" for k, v in sorted(c.items()))
+    logger.info(f"[CrowdFive][{label}] gate telemetry: {summary}")
+    c.clear()
+
 
 # =====================================================
 # 🚀 GPU BATCH WORKER
 # =====================================================
 def _gpu_batch_worker(stop_event, save_folder, cooldown_time=120):
+    """GPU batch worker — gate-chain mode.
+
+    Pipeline per batch:
+      1. G1 frame-quality short-circuit — corrupt frames bypass GPU.
+      2. detect_crowd_five_batch applies G2–G6 (conf, size, aspect, edge, IoMin-dedup).
+      3. G7 pushes effective_count into per-camera deque, takes median.
+      4. G8 requires CONSEC_VIOLATIONS consecutive low-smoothed frames.
+      5. G9 enforces cooldown_time between saves per camera.
     """
-    GPU batch worker — TRUE batch inference.
-    """
-    logger.info("🚀 [CrowdFive] GPU worker started (true batch mode)")
-    
+    logger.info("🚀 [CrowdFive] GPU worker started (gate-chain mode)")
+
     try:
         crowd_five_core.get_yolo_model()
     except Exception:
         logger.exception("[CrowdFive] YOLO model warmup failed")
         stop_event.set()
         return
-    log_counter = 0
 
     while not stop_event.is_set():
         batch = []
@@ -92,7 +139,27 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=120):
             except queue.Empty:
                 time.sleep(0.002)
 
-        # Inference
+        # G1: frame-quality short-circuit BEFORE GPU inference
+        ok_items = []
+        for item in batch:
+            state = item.get('state') or {}
+            reason, new_hash = crowd_five_core._is_frame_corrupt(
+                item.get('frame'), state.get('frame_hash')
+            )
+            state['frame_hash'] = new_hash
+            if reason is not None:
+                state.setdefault('gate_counters', defaultdict(int))[reason] += 1
+                # Corrupt frames must NOT accumulate consec_violations
+                state['consec_violations'] = 0
+                # Drop the frame reference so memory can be freed
+                item.pop('frame', None)
+                continue
+            ok_items.append(item)
+
+        if not ok_items:
+            del batch
+            continue
+
         inference_items = [
             {
                 'frame':     item['frame'],
@@ -100,7 +167,7 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=120):
                 'camera_id': item.get('device_id') or item.get('camera_id'),
                 'state':     item.get('state', {}),
             }
-            for item in batch
+            for item in ok_items
         ]
 
         try:
@@ -108,47 +175,63 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=120):
         except Exception as e:
             logger.error(f"[CrowdFive] Batch inference error: {e}")
             for item in batch:
-                item.pop('frame',None)
+                item.pop('frame', None)
             del batch
             continue
 
-        # Process results
-        for item, (annotated_frame, detected, person_count) in zip(batch, batch_results):
+        for item, (annotated_frame, _initial_violation, effective_count, telemetry) in zip(ok_items, batch_results):
             state = item.get('state', {})
 
-            if not detected:
-                state["consec_violations"] = 0
+            # Merge per-frame G2–G6 telemetry into per-camera counters
+            counters = state.setdefault('gate_counters', defaultdict(int))
+            for k, v in telemetry.items():
+                counters[k] += v
+            counters['frames'] += 1
+
+            cam_label = f"{item.get('device_id') or item.get('camera_id')}-{item.get('ch_no')}"
+            _maybe_log_telemetry(state, cam_label)
+
+            # G7: median smoothing over recent effective_counts for this camera
+            cw = state.setdefault('count_window', deque(maxlen=COUNT_WINDOW_LEN))
+            cw.append(effective_count)
+            smoothed = median(cw)
+
+            is_violation = 0 < smoothed < crowd_five_core.MAX_PERSONS
+            if not is_violation:
+                state['consec_violations'] = 0
                 continue
 
-            # Require CONSEC_THRESHOLD consecutive violation frames before saving
-            state["consec_violations"] = state.get("consec_violations", 0) + 1
-            if state["consec_violations"] < CONSEC_THRESHOLD:
+            # G8: require CONSEC_VIOLATIONS consecutive violation frames
+            state['consec_violations'] = state.get('consec_violations', 0) + 1
+            if state['consec_violations'] < CONSEC_VIOLATIONS:
                 continue
 
+            # G9: per-camera cooldown
             now = time.time()
-            if now - state.get("last_save", 0) < cooldown_time:
+            if now - state.get('last_save', 0) < cooldown_time:
                 continue
 
-            state["last_save"] = now
-            state["consec_violations"] = 0
+            state['last_save'] = now
+            state['consec_violations'] = 0
             ts = time.strftime("%Y%m%d_%H%M%S")
             uid = str(uuid.uuid4())
-            
+
             dev_id = item.get("device_id") or item.get("camera_id")
             ch_no = item.get("ch_no")
             exam_id = item.get("exam_id") or "0"
             script_name = item.get("script_name", "crowd_five")
-            
+
             if item.get("source_type") == "HLS":
                 fname = f"{script_name}_ch{ch_no}_exam{exam_id}_{ts}_{uid}.jpg"
             else:
                 fname = f"{script_name}_{dev_id}_{ch_no}_exam{exam_id}_{ts}_{uid}.jpg"
-            
+
             path = os.path.join(save_folder, fname)
             cv2.imwrite(path, annotated_frame)
-            logger.warning(f"[CrowdFive] 🚨 SAVED low-persons → {path}")
-            
-            # Report to database
+            logger.warning(
+                f"[CrowdFive] 🚨 SAVED low-persons smoothed={smoothed:.1f} → {path}"
+            )
+
             if item.get("source_type") == "HLS":
                 try:
                     from utils.db_client import report_to_db_hls
@@ -159,7 +242,7 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=120):
                     )
                 except Exception as e:
                     logger.error(f"[CrowdFive] HLS DB Reporting Error: {e}")
-            else:  # RTSP
+            else:
                 try:
                     from utils.db_client import report_to_db_rtsp
                     report_to_db_rtsp(
@@ -170,9 +253,10 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=120):
                     )
                 except Exception as e:
                     logger.error(f"[CrowdFive] RTSP DB Reporting Error: {e}")
-            
+
             del annotated_frame
-            if 'frame' in item: del item['frame']
+            if 'frame' in item:
+                del item['frame']
 
         del batch
 
@@ -214,7 +298,7 @@ def crowd_five_det_worker(frame_queue):
 
             cam_key = (device_id, camera_no)
             if cam_key not in camera_states:
-                camera_states[cam_key] = {"last_save": 0}
+                camera_states[cam_key] = _init_camera_state()
 
             try:
                 _gpu_queue.put({
@@ -259,7 +343,7 @@ def _hls_camera_thread(cfg, stop_event):
         return
 
     frame_count = 0
-    state = {"last_save": 0}
+    state = _init_camera_state()
 
     while not stop_event.is_set():
         ret, frame = cap.read()
@@ -298,7 +382,7 @@ def crowd_five_det_worker_hls(camera_configs, stop_event=None):
     if stop_event is None:
         stop_event = _STOP_EVENT
 
-    # Scene filtering - Crowd Five detection for Inside Lab cameras (less than 5 candidates)
+    # Scene filtering — Crowd Five runs on cameras tagged as Inside / Computer Lab.
     valid_configs = []
     for cfg in camera_configs:
         cls_val = str(cfg.get('classification', '')).lower()
@@ -307,7 +391,7 @@ def crowd_five_det_worker_hls(camera_configs, stop_event=None):
             'inside classroom', 'inside_classroom', 'classroom'
         )):
             valid_configs.append(cfg)
-            
+
     if not valid_configs:
         return
 
