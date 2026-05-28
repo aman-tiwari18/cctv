@@ -85,32 +85,40 @@ const pushQueue = new RequestQueue();
 
 const TYPE_META = {
   proximity: { label: 'Close Proximity', color: '#5cb88a', bg: '#e5f5ed', iconKey: 'proximity' },
-  crowd: { label: 'Crowd Detection', color: '#e24d7b', bg: '#fce4ec', iconKey: 'crowd' },
+  crowd: { label: 'Crowd Detection (Entry/Exit)', color: '#e24d7b', bg: '#fce4ec', iconKey: 'crowd' },
+  crowd_biometric: { label: 'Crowd Detection (Biometric)', color: '#9333ea', bg: '#f3e8ff', iconKey: 'crowd_biometric' },
   crowd_five: { label: 'Crowd < 5', color: '#e06050', bg: '#fce8e6', iconKey: 'crowd_five' },
   crowd_zero: { label: 'Zero Person', color: '#6b5b95', bg: '#edeaf3', iconKey: 'crowd_zero' },
   server: { label: 'Server Room', color: '#a0623d', bg: '#f3ebe4', iconKey: 'server' },
   intruder: { label: 'Intruder', color: '#d94466', bg: '#fce4ea', iconKey: 'intruder' },
+  strongroom: { label: 'Strong Room Movement', color: '#b91c1c', bg: '#fef2f2', iconKey: 'strongroom' },
+  qp_box: { label: 'QP Box Detection', color: '#dc2626', bg: '#fee2e2', iconKey: 'qp_box' },
   entry_exit: { label: 'Entry/Exit', color: '#1d7a7d', bg: '#e0f0f0', iconKey: 'entry_exit' },
   phone: { label: 'Phone', color: '#465a38', bg: '#e8ece5', iconKey: 'phone' },
   blind_spot: { label: 'Blind Spot', color: '#b0a850', bg: '#f3f2e4', iconKey: 'blind_spot' },
   invigilator: { label: 'Invigilator', color: '#00bfcf', bg: '#e0f7fa', iconKey: 'invigilator' },
   inversion: { label: 'Camera Inversion', color: '#7a86b4', bg: '#eceef5', iconKey: 'inversion' },
-  tamper: { label: 'Camera Tampering', color: '#00c8d4', bg: '#e0f8fa', iconKey: 'tamper' },
+  tampering: { label: 'Camera Tampering', color: '#00c8d4', bg: '#e0f8fa', iconKey: 'tampering' },
+  vision: { label: 'Scene Classification', color: '#3b82f6', bg: '#dbeafe', iconKey: 'vision' },
 };
 
 const TYPE_ICONS = {
   proximity: WarningAmber,
   crowd: Groups,
+  crowd_biometric: Groups,
   crowd_five: Groups,
   crowd_zero: PersonOff,
   server: Dns,
   intruder: DirectionsWalk,
+  strongroom: SecurityUpdateWarning,
+  qp_box: SecurityUpdateWarning,
   entry_exit: MeetingRoom,
   phone: Smartphone,
   blind_spot: VisibilityOff,
   invigilator: Visibility,
   inversion: FlipCameraAndroid,
-  tamper: SecurityUpdateWarning,
+  tampering: SecurityUpdateWarning,
+  vision: Visibility,
   default: CameraAlt,
 };
 
