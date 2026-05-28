@@ -57,15 +57,26 @@ class CameraDistributor:
         """
         Extract numeric index from worker_id.
         Examples: worker-0 -> 0, worker-1 -> 1, main -> 0
+
+        Honors WORKER_INDEX env var when set. This is required for
+        multi-GPU workers (e.g. worker-4-gpu0..gpu7) whose IDs do not
+        end in a unique trailing integer.
         """
+        explicit = os.environ.get("WORKER_INDEX")
+        if explicit is not None and explicit != "":
+            try:
+                return int(explicit)
+            except ValueError:
+                logger.warning(f"Invalid WORKER_INDEX env var: {explicit!r}; falling back to regex")
+
         if self.worker_id in ["main", "worker-0"]:
             return 0
-        
+
         import re
         match = re.search(r'(\d+)$', self.worker_id)
         if match:
             return int(match.group(1))
-        
+
         return 0
     
     def should_process_camera(self, camera: Dict) -> bool:
