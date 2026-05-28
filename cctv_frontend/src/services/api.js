@@ -156,6 +156,16 @@ export const clientDashboardAPI = {
         api.get('/client-dashboard/live-exams', {
             params: { page, limit, ...(exam_id ? { exam_id } : {}) },
         }),
+
+    // Per-exam shift-script assignments — used by Today's Script Distribution card.
+    // Hits /api/exams/:examId/shift-scripts which returns shift+script joins.
+    getExamShiftScripts: (examId, { assignment_date, is_active = true } = {}) =>
+        api.get(`/exams/${examId}/shift-scripts`, {
+            params: {
+                ...(assignment_date ? { assignment_date } : {}),
+                ...(is_active !== undefined ? { is_active } : {}),
+            },
+        }),
 };
 
 export const dashboardAPI = {

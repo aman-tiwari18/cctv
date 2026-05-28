@@ -4,8 +4,17 @@ import {
     Card,
     CardContent,
     Chip,
+    CircularProgress,
+    FormControl,
     InputBase,
+    MenuItem,
+    Select,
     Stack,
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableRow,
     Typography,
     Grid,
 } from '@mui/material';
@@ -14,6 +23,18 @@ import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
 import ErrorOutlineRoundedIcon from '@mui/icons-material/ErrorOutlineRounded';
 import TuneRoundedIcon from '@mui/icons-material/TuneRounded';
+import Dns from '@mui/icons-material/Dns';
+import Groups from '@mui/icons-material/Groups';
+import DirectionsWalk from '@mui/icons-material/DirectionsWalk';
+import MeetingRoom from '@mui/icons-material/MeetingRoom';
+import WarningAmber from '@mui/icons-material/WarningAmber';
+import Smartphone from '@mui/icons-material/Smartphone';
+import PersonOff from '@mui/icons-material/PersonOff';
+import FlipCameraAndroid from '@mui/icons-material/FlipCameraAndroid';
+import VisibilityOff from '@mui/icons-material/VisibilityOff';
+import Visibility from '@mui/icons-material/Visibility';
+import Extension from '@mui/icons-material/Extension';
+import SecurityUpdateWarning from '@mui/icons-material/SecurityUpdateWarning';
 import { clientDashboardAPI } from '../services/api';
 import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
 import { ShiftSvgIcon } from '../components/ShiftSvgIcon';
@@ -26,67 +47,330 @@ import {
 } from './Dashboard';
 
 // ---------------------------------------------------------------------------
-// TodaysScriptDistributionCard — placeholder for the per-shift schedule table.
-// Real table lands in a later round; for now we reserve the slot.
+// TodaysScriptDistributionCard — per-shift schedule table for the client.
+// Icons + bg colors mirror SCRIPT_META in components/ShiftScriptManager.jsx
+// so the visual treatment stays consistent with the Add Script picker.
+// Dropdown is populated from /client-dashboard/live-exams (deduped by exam_id);
+// grid is populated from /exams/:examId/shift-scripts?assignment_date=today.
 // ---------------------------------------------------------------------------
 
-const TodaysScriptDistributionCard = () => (
-    <Card sx={{
-        height: '100%',
-        bgcolor: '#fff',
+const SCRIPT_DEFS = [
+    // People & Activity
+    { key: 'server',          label: 'Server Room',       icon: Dns,                   iconColor: '#a0623d', bg: '#f3ebe4' },
+    { key: 'crowd',           label: 'Crowd',             icon: Groups,                iconColor: '#e24d7b', bg: '#e9e3f8' },
+    { key: 'crowd_biometric', label: 'Crowd (Biometric)', icon: Groups,                iconColor: '#9333ea', bg: '#f3e8ff' },
+    { key: 'crowd_five',      label: 'Large Crowd',       icon: Groups,                iconColor: '#e06050', bg: '#fce8e6' },
+    { key: 'crowd_zero',      label: 'Zero Person',       icon: PersonOff,             iconColor: '#6b5b95', bg: '#edeaf3' },
+    { key: 'invigilator',     label: 'Invigilator',       icon: Visibility,            iconColor: '#00bfcf', bg: '#cce8fc' },
+    { key: 'phone',           label: 'Phone',             icon: Smartphone,            iconColor: '#465a38', bg: '#e8ece5' },
+    { key: 'intruder',        label: 'Intruder',          icon: DirectionsWalk,        iconColor: '#d94466', bg: '#f0dfef' },
+    { key: 'proximity',       label: 'Proximity',         icon: WarningAmber,          iconColor: '#5cb88a', bg: '#e5f5ed' },
+    // Movement & Alert
+    { key: 'entry_exit',      label: 'Entry Exit',        icon: MeetingRoom,           iconColor: '#1d7a7d', bg: '#e0f0f0' },
+    { key: 'qp_box',          label: 'QP Box',            icon: Extension,             iconColor: '#dc2626', bg: '#fee2e2' },
+    { key: 'strongroom',      label: 'Strong Room',       icon: SecurityUpdateWarning, iconColor: '#b91c1c', bg: '#fef2f2' },
+    // Camera & System
+    { key: 'inversion',       label: 'Camera Inversion',  icon: FlipCameraAndroid,     iconColor: '#7a86b4', bg: '#eceef5' },
+    { key: 'tampering',       label: 'Camera Tampering',  icon: SecurityUpdateWarning, iconColor: '#00c8d4', bg: '#e9f9ff' },
+    { key: 'blind_spot',      label: 'Blind Spot',        icon: VisibilityOff,         iconColor: '#b0a850', bg: '#f3f2e4' },
+    { key: 'vision',          label: 'Vision',            icon: Visibility,            iconColor: '#3b82f6', bg: '#dbeafe' },
+];
+
+// "HH:MM:SS" → "HH:MM" — backend returns time strings already in this shape.
+const fmtTime = (t) => (typeof t === 'string' ? t.slice(0, 5) : '');
+
+const TodaysScriptDistributionCard = () => {
+    const [exams, setExams] = useState([]);
+    const [examsLoading, setExamsLoading] = useState(true);
+    const [selectedExamId, setSelectedExamId] = useState('');
+    const [assignments, setAssignments] = useState([]);
+    const [assignmentsLoading, setAssignmentsLoading] = useState(false);
+
+    // Load the exam dropdown from /client-dashboard/live-exams. Each row in
+    // that response is an (exam, shift) tuple, so dedupe by exam_id.
+    useEffect(() => {
+        let cancelled = false;
+        setExamsLoading(true);
+        clientDashboardAPI
+            .getLiveExams({ page: 1, limit: 100 })
+            .then((res) => {
+                if (cancelled) return;
+                const rows = res?.data?.data?.rows || [];
+                const seen = new Set();
+                const uniq = [];
+                rows.forEach((r) => {
+                    if (!seen.has(r.exam_id)) {
+                        seen.add(r.exam_id);
+                        uniq.push({ exam_id: r.exam_id, exam_name: r.exam_name });
+                    }
+                });
+                setExams(uniq);
+                if (uniq.length > 0) setSelectedExamId(uniq[0].exam_id);
+            })
+            .catch((err) => {
+                if (cancelled) return;
+                console.error('[TodaysScriptDistribution.getLiveExams]', err);
+                setExams([]);
+            })
+            .finally(() => {
+                if (!cancelled) setExamsLoading(false);
+            });
+        return () => { cancelled = true; };
+    }, []);
+
+    // Fetch the chosen exam's script assignments for today.
+    useEffect(() => {
+        if (!selectedExamId) {
+            setAssignments([]);
+            return undefined;
+        }
+        let cancelled = false;
+        setAssignmentsLoading(true);
+        const todayStr = format(new Date(), 'yyyy-MM-dd');
+        clientDashboardAPI
+            .getExamShiftScripts(selectedExamId, { assignment_date: todayStr })
+            .then((res) => {
+                if (cancelled) return;
+                setAssignments(res?.data?.data || []);
+            })
+            .catch((err) => {
+                if (cancelled) return;
+                console.error('[TodaysScriptDistribution.getExamShiftScripts]', err);
+                setAssignments([]);
+            })
+            .finally(() => {
+                if (!cancelled) setAssignmentsLoading(false);
+            });
+        return () => { cancelled = true; };
+    }, [selectedExamId]);
+
+    // Build a (scriptKey × shiftIdx → assignment) lookup. Shifts are sorted
+    // by start_time so the earliest becomes SHIFT 1, etc.
+    const cellMap = useMemo(() => {
+        const shiftsById = new Map();
+        assignments.forEach((a) => {
+            if (a.shift && !shiftsById.has(a.shift_id)) {
+                shiftsById.set(a.shift_id, a.shift);
+            }
+        });
+        const sortedShifts = Array.from(shiftsById.values())
+            .sort((a, b) => String(a.start_time || '').localeCompare(String(b.start_time || '')));
+        const shiftIdxById = new Map();
+        sortedShifts.forEach((s, idx) => shiftIdxById.set(s.id, idx));
+
+        const map = new Map();
+        assignments.forEach((a) => {
+            const scriptKey = a.script?.script_id;
+            const shiftIdx = shiftIdxById.get(a.shift_id);
+            if (scriptKey == null || shiftIdx == null) return;
+            map.set(`${scriptKey}::${shiftIdx}`, a);
+        });
+        return map;
+    }, [assignments]);
+
+    // Shared chip dimensions — empty + filled match exactly because the
+    // base has a 1px transparent border that the empty variant overrides.
+    const chipBaseSx = {
         borderRadius: '8px',
-        boxShadow: '0 2px 4px 0 rgba(0,0,0,0.05)',
+        border: '1px solid transparent',
+        py: 1,
+        px: 1,
+        height: 34,
         display: 'flex',
-        flexDirection: 'column',
-    }}>
-        <CardContent sx={{
-            p: { xs: 2, sm: 2.5 },
-            flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontFamily: 'Inter, sans-serif',
+        fontSize: '13px',
+        fontWeight: 700,
+        lineHeight: '16px',
+        whiteSpace: 'nowrap',
+    };
+
+    const renderCell = (assignment, row) => {
+        if (!assignment) {
+            return <Box sx={{ ...chipBaseSx, bgcolor: '#F8FAFC', borderColor: '#EEF0F3' }} />;
+        }
+        const start = assignment.custom_start_time || assignment.shift?.start_time;
+        const end   = assignment.custom_end_time   || assignment.shift?.end_time;
+        const label = `${fmtTime(start)} - ${fmtTime(end)}`;
+        return (
+            <Box sx={{ ...chipBaseSx, bgcolor: row.bg, color: row.iconColor }}>
+                {label}
+            </Box>
+        );
+    };
+
+    const headerCellSx = {
+        fontFamily: 'Inter, sans-serif',
+        fontSize: '11px',
+        fontWeight: 700,
+        color: '#94A3B8',
+        letterSpacing: '0.8px',
+        textTransform: 'uppercase',
+        borderBottom: '1px solid #EEF0F3',
+        textAlign: 'center',
+        py: 1.25,
+    };
+    const bodyCellSx = {
+        py: 1,
+        borderBottom: 'none',
+    };
+
+    return (
+        <Card sx={{
+            height: '100%',
+            bgcolor: '#fff',
+            borderRadius: '8px',
+            boxShadow: '0 2px 4px 0 rgba(0,0,0,0.05)',
             display: 'flex',
             flexDirection: 'column',
+            overflow: 'hidden',
         }}>
-            <Box sx={{ mb: 1.5 }}>
-                <Typography sx={{
-                    color: '#191B23',
-                    fontFamily: 'Inter, sans-serif',
-                    fontSize: '20px',
-                    fontWeight: 700,
-                    lineHeight: '24px',
-                }}>
-                    Today&rsquo;s Script Distribution
-                </Typography>
-                <Typography sx={{
-                    mt: 0.75,
-                    color: '#303336',
-                    fontFamily: 'Inter, sans-serif',
-                    fontSize: '13px',
-                    fontWeight: 400,
-                    lineHeight: '18px',
-                }}>
-                    Independent of selected filters
-                </Typography>
-            </Box>
-            <Box sx={{
+            <CardContent sx={{
+                p: { xs: 2, sm: 2.5 },
                 flex: 1,
-                minHeight: 360,
+                minHeight: 0,
                 display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                px: 2,
-                textAlign: 'center',
+                flexDirection: 'column',
             }}>
-                <Typography sx={{
-                    color: '#94A3B8',
-                    fontFamily: 'Inter, sans-serif',
-                    fontSize: '14px',
-                    fontWeight: 500,
+                <Stack direction="row" justifyContent="space-between" alignItems="flex-start" sx={{ mb: 2 }}>
+                    <Box>
+                        <Typography sx={{
+                            color: '#191B23',
+                            fontFamily: 'Inter, sans-serif',
+                            fontSize: '20px',
+                            fontWeight: 700,
+                            lineHeight: '24px',
+                        }}>
+                            Today&rsquo;s Script Distribution
+                        </Typography>
+                        <Stack direction="row" alignItems="center" spacing={0.75} sx={{ mt: 0.75 }}>
+                            <Box component="svg" width={12} height={12} viewBox="0 0 16 16" sx={{ flexShrink: 0, display: 'block' }}>
+                                <path
+                                    d="M8 5V8M8 11H8.0075M15.5 8C15.5 12.1421 12.1421 15.5 8 15.5C3.85786 15.5 0.5 12.1421 0.5 8C0.5 3.85786 3.85786 0.5 8 0.5C12.1421 0.5 15.5 3.85786 15.5 8Z"
+                                    stroke="#94A3B8"
+                                    strokeWidth="1"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    fill="none"
+                                />
+                            </Box>
+                            <Typography sx={{
+                                color: '#94A3B8',
+                                fontFamily: 'Inter, sans-serif',
+                                fontSize: '12px',
+                                fontWeight: 400,
+                                lineHeight: '16px',
+                            }}>
+                                Independent of above selected filters
+                            </Typography>
+                        </Stack>
+                    </Box>
+                    <FormControl size="small" sx={{ minWidth: 160 }} disabled={examsLoading || exams.length === 0}>
+                        <Select
+                            value={selectedExamId || ''}
+                            onChange={(e) => setSelectedExamId(e.target.value)}
+                            displayEmpty
+                            renderValue={(v) => {
+                                if (examsLoading) return 'Loading…';
+                                if (!v) return 'No exams today';
+                                const found = exams.find((ex) => ex.exam_id === v);
+                                return found ? found.exam_name : v;
+                            }}
+                            sx={{
+                                fontFamily: 'Inter, sans-serif',
+                                fontSize: '13px',
+                                fontWeight: 500,
+                                color: '#191B23',
+                                borderRadius: '8px',
+                                '& .MuiSelect-select': { py: 0.75 },
+                            }}
+                        >
+                            {exams.map((ex) => (
+                                <MenuItem key={ex.exam_id} value={ex.exam_id}>
+                                    {ex.exam_name}
+                                </MenuItem>
+                            ))}
+                        </Select>
+                    </FormControl>
+                </Stack>
+
+                <Box sx={{
+                    flex: 1,
+                    minHeight: 0,
+                    overflowX: 'auto',
+                    overflowY: 'auto',
+                    position: 'relative',
+                    // Subtle scrollbar so it doesn't dominate the card visually
+                    '&::-webkit-scrollbar': { width: 6 },
+                    '&::-webkit-scrollbar-thumb': { bgcolor: '#E5E7EB', borderRadius: 3 },
+                    '&::-webkit-scrollbar-thumb:hover': { bgcolor: '#CBD5E1' },
                 }}>
-                    Coming soon &mdash; per-shift script schedule will appear here.
-                </Typography>
-            </Box>
-        </CardContent>
-    </Card>
-);
+                    {assignmentsLoading && (
+                        <Box sx={{
+                            position: 'absolute',
+                            inset: 0,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            bgcolor: 'rgba(255,255,255,0.7)',
+                            zIndex: 1,
+                        }}>
+                            <CircularProgress size={28} />
+                        </Box>
+                    )}
+                    <Table sx={{ tableLayout: 'fixed', minWidth: 460 }}>
+                        <colgroup>
+                            <col style={{ width: '32%' }} />
+                            <col style={{ width: '22.66%' }} />
+                            <col style={{ width: '22.66%' }} />
+                            <col style={{ width: '22.66%' }} />
+                        </colgroup>
+                        <TableHead>
+                            <TableRow>
+                                <TableCell sx={{ ...headerCellSx, textAlign: 'left' }} />
+                                <TableCell sx={headerCellSx}>SHIFT 1</TableCell>
+                                <TableCell sx={headerCellSx}>SHIFT 2</TableCell>
+                                <TableCell sx={headerCellSx}>SHIFT 3</TableCell>
+                            </TableRow>
+                        </TableHead>
+                        <TableBody>
+                            {SCRIPT_DEFS.map((row) => {
+                                const Icon = row.icon;
+                                return (
+                                    <TableRow key={row.key}>
+                                        <TableCell sx={bodyCellSx}>
+                                            <Stack direction="row" alignItems="center" spacing={1.25}>
+                                                <Icon sx={{ fontSize: 20, color: row.iconColor, flexShrink: 0 }} />
+                                                <Typography sx={{
+                                                    color: '#191B23',
+                                                    fontFamily: 'Inter, sans-serif',
+                                                    fontSize: '14px',
+                                                    fontWeight: 500,
+                                                    lineHeight: '18px',
+                                                }}>
+                                                    {row.label}
+                                                </Typography>
+                                            </Stack>
+                                        </TableCell>
+                                        {[0, 1, 2].map((shiftIdx) => {
+                                            const assignment = cellMap.get(`${row.key}::${shiftIdx}`);
+                                            return (
+                                                <TableCell key={shiftIdx} sx={{ ...bodyCellSx, px: 0.5 }}>
+                                                    {renderCell(assignment, row)}
+                                                </TableCell>
+                                            );
+                                        })}
+                                    </TableRow>
+                                );
+                            })}
+                        </TableBody>
+                    </Table>
+                </Box>
+            </CardContent>
+        </Card>
+    );
+};
 
 // ---------------------------------------------------------------------------
 // ClientDetectionDashboard — client (company-scoped) mirror of the admin Dashboard.
@@ -554,7 +838,9 @@ const ClientDetectionDashboard = () => {
             </Grid>
 
             {/* Row 2 — Left column: Detection Distribution stacked on Live Exams.
-                Right column: Today's Script Distribution (spans the full height of the left stack). */}
+                Right column: Today's Script Distribution. On md+, the right card is
+                absolutely positioned so the row's height is driven by the LEFT column
+                only; the script table scrolls internally if its 16 rows would overflow. */}
             <Grid container spacing={2.5} alignItems="stretch">
                 <Grid item xs={12} md={6}>
                     <Stack spacing={2.5}>
@@ -565,8 +851,16 @@ const ClientDetectionDashboard = () => {
                         <LiveExamsCard fetcher={clientDashboardAPI.getLiveExams} />
                     </Stack>
                 </Grid>
-                <Grid item xs={12} md={6}>
-                    <TodaysScriptDistributionCard />
+                <Grid item xs={12} md={6} sx={{ position: { md: 'relative' } }}>
+                    <Box sx={{
+                        position: { xs: 'static', md: 'absolute' },
+                        top: { md: 20 },     // matches Grid spacing={2.5} → 20px padding
+                        left: { md: 20 },
+                        right: { md: 0 },
+                        bottom: { md: 0 },
+                    }}>
+                        <TodaysScriptDistributionCard />
+                    </Box>
                 </Grid>
             </Grid>
         </Box>
