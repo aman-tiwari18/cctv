@@ -339,11 +339,37 @@ exports.getOverview = async (req, res) => {
         const total = activeExams.length;
         const activeExamIds = activeExams.map((e) => e.id);
 
+        // Scripts/Analytics — counts assignments across the filter range, but only on
+        // dates that fall inside each exam's OWN [start_date, end_date] window (the
+        // intersection of filter range and exam range). So a daily script for an exam
+        // that ran May 25–27 inside a May 1–31 filter contributes 3 rows, not 31.
+        const scriptsResult = await query(
+            `SELECT COUNT(*) AS planned_today,
+                    SUM(CASE WHEN ssa.status = 'RUNNING'   THEN 1 ELSE 0 END) AS running,
+                    SUM(CASE WHEN ssa.status = 'PENDING'   THEN 1 ELSE 0 END) AS scheduled,
+                    SUM(CASE WHEN ssa.status = 'COMPLETED' THEN 1 ELSE 0 END) AS completed
+             FROM shift_script_assignments ssa
+             JOIN exam_shifts es ON ssa.shift_id = es.id
+             JOIN exams e ON es.exam_id = e.id
+             WHERE ssa.assignment_date BETWEEN ? AND ?
+               AND ssa.assignment_date BETWEEN e.start_date AND e.end_date
+               AND ssa.is_active = TRUE
+               AND e.is_active = 1
+               AND e.start_date IS NOT NULL AND e.end_date IS NOT NULL
+               AND e.start_date <= ? AND e.end_date >= ?`,
+            [startDate, endDate, endDate, startDate]
+        );
+        const scriptsAgg = {
+            planned_today: Number(scriptsResult[0]?.planned_today || 0),
+            running:       Number(scriptsResult[0]?.running       || 0),
+            scheduled:     Number(scriptsResult[0]?.scheduled     || 0),
+            completed:     Number(scriptsResult[0]?.completed     || 0),
+        };
+
         // If no exams in range, skip the per-exam-scoped queries entirely.
         let camerasAgg = { total: 0, acc: 0 };
         let detectionsAgg = { total: 0, pushed: 0 };
         let distribution = [];
-        let scriptsAgg = { planned_today: 0, running: 0, scheduled: 0, completed: 0 };
 
         if (activeExamIds.length > 0) {
             // Q3 + Q4: Cameras HLS + RTSP — total + accessible only; inaccessible = total - accessible.
@@ -360,22 +386,6 @@ exports.getOverview = async (req, res) => {
                  FROM camera_links_rtsp
                  WHERE exam_id IN (?) AND is_active = 1`,
                 [activeExamIds]
-            );
-
-            // Q5: Scripts breakdown — JOIN exam_shifts so we only count assignments
-            // belonging to exams in the active set (the admin endpoint used to over-count
-            // by including ALL assignments in the date range regardless of exam).
-            const scriptsP = query(
-                `SELECT COUNT(*) AS planned_today,
-                        SUM(CASE WHEN ssa.status = 'RUNNING'   THEN 1 ELSE 0 END) AS running,
-                        SUM(CASE WHEN ssa.status = 'PENDING'   THEN 1 ELSE 0 END) AS scheduled,
-                        SUM(CASE WHEN ssa.status = 'COMPLETED' THEN 1 ELSE 0 END) AS completed
-                 FROM shift_script_assignments ssa
-                 JOIN exam_shifts es ON ssa.shift_id = es.id
-                 WHERE ssa.assignment_date BETWEEN ? AND ?
-                   AND ssa.is_active = TRUE
-                   AND es.exam_id IN (?)`,
-                [startDate, endDate, activeExamIds]
             );
 
             // Q6 + Q7: Detections HLS + RTSP — total count + pushed count.
@@ -416,20 +426,13 @@ exports.getOverview = async (req, res) => {
                 [activeExamIds, dateStart, dateEnd]
             );
 
-            const [hlsCams, rtspCams, scripts, hlsDet, rtspDet, hlsDist, rtspDist] = await Promise.all([
-                hlsCamsP, rtspCamsP, scriptsP, hlsDetP, rtspDetP, hlsDistP, rtspDistP,
+            const [hlsCams, rtspCams, hlsDet, rtspDet, hlsDist, rtspDist] = await Promise.all([
+                hlsCamsP, rtspCamsP, hlsDetP, rtspDetP, hlsDistP, rtspDistP,
             ]);
 
             camerasAgg = {
                 total: Number(hlsCams[0]?.total || 0) + Number(rtspCams[0]?.total || 0),
                 acc:   Number(hlsCams[0]?.acc   || 0) + Number(rtspCams[0]?.acc   || 0),
-            };
-
-            scriptsAgg = {
-                planned_today: Number(scripts[0]?.planned_today || 0),
-                running:       Number(scripts[0]?.running       || 0),
-                scheduled:     Number(scripts[0]?.scheduled     || 0),
-                completed:     Number(scripts[0]?.completed     || 0),
             };
 
             detectionsAgg = {

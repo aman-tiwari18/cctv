@@ -1499,10 +1499,7 @@ const Dashboard = () => {
     const { apiParams, activeFilters } = useMemo(() => {
         const today = new Date();
         const fmt = (d) => format(d, 'yyyy-MM-dd');
-        const rangeChip = (label, start, end) => ({
-            key: 'date',
-            label: `${label} (${fmt(start)} → ${fmt(end)})`,
-        });
+        const labelChip = (label) => ({ key: 'date', label });
         const extraChips = (chips) => [
             ...chips,
             ...(selectedShift
@@ -1522,21 +1519,14 @@ const Dashboard = () => {
                 const start = subDays(today, 6);
                 return {
                     apiParams: { start_date: fmt(start), end_date: fmt(today) },
-                    activeFilters: extraChips([rangeChip('Last week', start, today)]),
+                    activeFilters: extraChips([labelChip('Last week')]),
                 };
             }
             case 'last_month': {
                 const start = subDays(today, 29);
                 return {
                     apiParams: { start_date: fmt(start), end_date: fmt(today) },
-                    activeFilters: extraChips([rangeChip('Last month', start, today)]),
-                };
-            }
-            case 'last_year': {
-                const start = subDays(today, 364);
-                return {
-                    apiParams: { start_date: fmt(start), end_date: fmt(today) },
-                    activeFilters: extraChips([rangeChip('Last year', start, today)]),
+                    activeFilters: extraChips([labelChip('Last month')]),
                 };
             }
             case 'custom': {
@@ -1608,7 +1598,6 @@ const Dashboard = () => {
         { key: 'yesterday',  label: 'Yesterday' },
         { key: 'last_week',  label: 'Last week' },
         { key: 'last_month', label: 'Last month' },
-        { key: 'last_year',  label: 'Last year' },
     ];
 
     // Prefill the modal's From/To from the current chip selection so opening
@@ -1620,9 +1609,8 @@ const Dashboard = () => {
         }
         switch (dateChip) {
             case 'yesterday':  { const y = subDays(today, 1); return { from: y, to: y }; }
-            case 'last_week':  return { from: subDays(today, 6),   to: today };
-            case 'last_month': return { from: subDays(today, 29),  to: today };
-            case 'last_year':  return { from: subDays(today, 364), to: today };
+            case 'last_week':  return { from: subDays(today, 6),  to: today };
+            case 'last_month': return { from: subDays(today, 29), to: today };
             default:           return { from: today, to: today };
         }
     }, [dateChip, customRange]);
@@ -1929,7 +1917,7 @@ const Dashboard = () => {
                             icon={<ShiftSvgIcon />}
                             chips={[
                                 { label: 'Running',   value: scripts.running,   tone: 'amber' },
-                                { label: 'Scheduled', value: scripts.scheduled, tone: 'violet' },
+                                { label: 'Pending',   value: scripts.scheduled, tone: 'violet' },
                                 { label: 'Completed', value: scripts.completed, tone: 'violet' },
                             ]}
                             loading={overviewLoading}
