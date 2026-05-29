@@ -1,13 +1,18 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
     Box,
     Card,
     CardContent,
     Chip,
     CircularProgress,
+    ClickAwayListener,
     FormControl,
     InputBase,
+    List,
+    ListItemButton,
     MenuItem,
+    Paper,
+    Popper,
     Select,
     Stack,
     Table,
@@ -35,7 +40,7 @@ import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import Visibility from '@mui/icons-material/Visibility';
 import Extension from '@mui/icons-material/Extension';
 import SecurityUpdateWarning from '@mui/icons-material/SecurityUpdateWarning';
-import { clientDashboardAPI } from '../services/api';
+import { clientDashboardAPI, examsAPI } from '../services/api';
 import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
 import { ShiftSvgIcon } from '../components/ShiftSvgIcon';
 import { CustomSvgIcon } from '../components/DetectionSvgIcon';
@@ -388,7 +393,26 @@ const ClientDetectionDashboard = () => {
     const [filterMenuOpen, setFilterMenuOpen] = useState(false);
     const [customRange, setCustomRange] = useState(null);
     const [selectedExam, setSelectedExam] = useState('all');
-    const [selectedShift, setSelectedShift] = useState(null);
+    const [selectedShifts, setSelectedShifts] = useState([]);
+    const [examsList, setExamsList] = useState([]);
+    const searchInputRef = useRef(null);
+
+    // Fetch the company-scoped exam list once on mount.
+    useEffect(() => {
+        let cancelled = false;
+        examsAPI.getAll({ is_active: 'true' })
+            .then((res) => {
+                if (cancelled) return;
+                const list = res?.data?.data || res?.data || [];
+                setExamsList(Array.isArray(list) ? list : []);
+            })
+            .catch((err) => {
+                if (!cancelled) console.error('[ClientDashboard.examsAPI.getAll]', err);
+            });
+        return () => { cancelled = true; };
+    }, []);
+
+    const examNameById = (id) => examsList.find((e) => e.id === id)?.exam_name;
 
     const { apiParams, activeFilters } = useMemo(() => {
         const today = new Date();
@@ -396,30 +420,34 @@ const ClientDetectionDashboard = () => {
         const labelChip = (label) => ({ key: 'date', label });
         const extraChips = (chips) => [
             ...chips,
-            ...(selectedShift
-                ? [{ key: 'shift', label: selectedShift[0].toUpperCase() + selectedShift.slice(1) }]
+            ...(selectedExam !== 'all'
+                ? [{ key: 'exam', label: examNameById(selectedExam) || `Exam #${selectedExam}` }]
                 : []),
+            ...selectedShifts.map((n) => ({ key: `shift_${n}`, label: `Shift ${n}` })),
         ];
+        const extraParams = {};
+        if (selectedExam !== 'all') extraParams.exam_id = selectedExam;
+        if (selectedShifts.length)  extraParams.shift_indexes = selectedShifts.join(',');
 
         switch (dateChip) {
             case 'yesterday': {
                 const y = subDays(today, 1);
                 return {
-                    apiParams: { date: fmt(y) },
+                    apiParams: { date: fmt(y), ...extraParams },
                     activeFilters: extraChips([{ key: 'date', label: 'Yesterday' }]),
                 };
             }
             case 'last_week': {
                 const start = subDays(today, 6);
                 return {
-                    apiParams: { start_date: fmt(start), end_date: fmt(today) },
+                    apiParams: { start_date: fmt(start), end_date: fmt(today), ...extraParams },
                     activeFilters: extraChips([labelChip('Last week')]),
                 };
             }
             case 'last_month': {
                 const start = subDays(today, 29);
                 return {
-                    apiParams: { start_date: fmt(start), end_date: fmt(today) },
+                    apiParams: { start_date: fmt(start), end_date: fmt(today), ...extraParams },
                     activeFilters: extraChips([labelChip('Last month')]),
                 };
             }
@@ -427,7 +455,7 @@ const ClientDetectionDashboard = () => {
                 const start = customRange?.from ?? today;
                 const end   = customRange?.to   ?? today;
                 return {
-                    apiParams: { start_date: fmt(start), end_date: fmt(end) },
+                    apiParams: { start_date: fmt(start), end_date: fmt(end), ...extraParams },
                     activeFilters: extraChips([
                         { key: 'date', label: `${fmt(start)} → ${fmt(end)}` },
                     ]),
@@ -436,28 +464,51 @@ const ClientDetectionDashboard = () => {
             case 'today':
             default:
                 return {
-                    apiParams: { date: fmt(today) },
+                    apiParams: { date: fmt(today), ...extraParams },
                     activeFilters: extraChips([]),
                 };
         }
-    }, [dateChip, customRange, selectedShift]);
+    }, [dateChip, customRange, selectedShifts, selectedExam, examsList]);
 
     const removeFilter = (key) => {
         if (key === 'date') {
             setDateChip('today');
             setCustomRange(null);
-        } else if (key === 'shift') {
-            setSelectedShift(null);
         } else if (key === 'exam') {
             setSelectedExam('all');
+        } else if (key.startsWith('shift_')) {
+            const n = Number(key.split('_')[1]);
+            setSelectedShifts((prev) => prev.filter((x) => x !== n));
         }
     };
     const clearAllFilters = () => {
         setDateChip('today');
         setCustomRange(null);
-        setSelectedShift(null);
+        setSelectedShifts([]);
         setSelectedExam('all');
     };
+
+    // Search autocomplete suggestions.
+    const suggestions = useMemo(() => {
+        const q = searchKeyword.trim().toLowerCase();
+        if (!q) return [];
+        const items = [
+            { category: 'date', label: 'Today',      apply: () => { setDateChip('today');      setCustomRange(null); } },
+            { category: 'date', label: 'Yesterday',  apply: () => { setDateChip('yesterday');  setCustomRange(null); } },
+            { category: 'date', label: 'Last week',  apply: () => { setDateChip('last_week');  setCustomRange(null); } },
+            { category: 'date', label: 'Last month', apply: () => { setDateChip('last_month'); setCustomRange(null); } },
+            { category: 'shift', label: 'Shift 1', apply: () => setSelectedShifts((p) => p.includes(1) ? p : [...p, 1].sort()) },
+            { category: 'shift', label: 'Shift 2', apply: () => setSelectedShifts((p) => p.includes(2) ? p : [...p, 2].sort()) },
+            { category: 'shift', label: 'Shift 3', apply: () => setSelectedShifts((p) => p.includes(3) ? p : [...p, 3].sort()) },
+            { category: 'exam',  label: 'All Exams', apply: () => setSelectedExam('all') },
+            ...examsList.map((ex) => ({
+                category: 'exam',
+                label: ex.exam_name,
+                apply: () => setSelectedExam(ex.id),
+            })),
+        ];
+        return items.filter((it) => it.label.toLowerCase().includes(q));
+    }, [searchKeyword, examsList]);
 
     useEffect(() => {
         let cancelled = false;
@@ -506,9 +557,9 @@ const ClientDetectionDashboard = () => {
         }
     }, [dateChip, customRange]);
 
-    const handleApplyAdvanced = ({ from, to, exam, shift }) => {
+    const handleApplyAdvanced = ({ from, to, exam, shifts }) => {
         setSelectedExam(exam);
-        setSelectedShift(shift);
+        setSelectedShifts(shifts || []);
         const today = new Date();
         const sameDay = (a, b) => format(a, 'yyyy-MM-dd') === format(b, 'yyyy-MM-dd');
         if (sameDay(from, today) && sameDay(to, today)) {
@@ -604,19 +655,22 @@ const ClientDetectionDashboard = () => {
 
             {/* Overview header — Row 2: search input + filter button */}
             <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 1.5 }}>
-                <Box sx={{
-                    flex: 1,
-                    bgcolor: '#fff',
-                    border: '1px solid #E5E7EB',
-                    borderRadius: '10px',
-                    px: 2,
-                    py: 1.25,
-                    display: 'flex',
-                    alignItems: 'center',
-                }}>
+                <Box
+                    ref={searchInputRef}
+                    sx={{
+                        flex: 1,
+                        bgcolor: '#fff',
+                        border: '1px solid #E5E7EB',
+                        borderRadius: '10px',
+                        px: 2,
+                        py: 1.25,
+                        display: 'flex',
+                        alignItems: 'center',
+                    }}
+                >
                     <InputBase
                         fullWidth
-                        placeholder="Search keywords..."
+                        placeholder={'Try "today", "shift 1", or an exam name…'}
                         value={searchKeyword}
                         onChange={(e) => setSearchKeyword(e.target.value)}
                         sx={{
@@ -628,6 +682,65 @@ const ClientDetectionDashboard = () => {
                         }}
                     />
                 </Box>
+                <Popper
+                    open={searchKeyword.trim().length > 0}
+                    anchorEl={searchInputRef.current}
+                    placement="bottom-start"
+                    modifiers={[{ name: 'offset', options: { offset: [0, 6] } }]}
+                    style={{ zIndex: 1400, width: searchInputRef.current?.clientWidth }}
+                >
+                    <ClickAwayListener onClickAway={() => setSearchKeyword('')}>
+                        <Paper sx={{
+                            borderRadius: '10px',
+                            border: '1px solid #E5E7EB',
+                            boxShadow: '0 8px 24px rgba(0,0,0,0.08)',
+                            maxHeight: 320,
+                            overflowY: 'auto',
+                        }}>
+                            {suggestions.length === 0 ? (
+                                <Box sx={{
+                                    px: 2,
+                                    py: 1.5,
+                                    color: '#94A3B8',
+                                    fontFamily: 'Inter, sans-serif',
+                                    fontSize: '13px',
+                                    fontStyle: 'italic',
+                                }}>
+                                    Nothing like &ldquo;{searchKeyword.trim()}&rdquo; matches a filter
+                                </Box>
+                            ) : (
+                                <List dense disablePadding>
+                                    {suggestions.map((s, idx) => (
+                                        <ListItemButton
+                                            key={`${s.category}::${s.label}::${idx}`}
+                                            onClick={() => { s.apply(); setSearchKeyword(''); }}
+                                            sx={{
+                                                py: 1,
+                                                px: 2,
+                                                fontFamily: 'Inter, sans-serif',
+                                                fontSize: '13px',
+                                                color: '#191B23',
+                                                '&:hover': { bgcolor: '#F5F6FA' },
+                                            }}
+                                        >
+                                            <Box component="span" sx={{
+                                                display: 'inline-flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                minWidth: 22,
+                                                mr: 1,
+                                                fontSize: 14,
+                                            }}>
+                                                {s.category === 'date' ? '📅' : s.category === 'shift' ? '🕒' : '📚'}
+                                            </Box>
+                                            {s.label}
+                                        </ListItemButton>
+                                    ))}
+                                </List>
+                            )}
+                        </Paper>
+                    </ClickAwayListener>
+                </Popper>
                 <Box
                     component="button"
                     type="button"
@@ -769,7 +882,7 @@ const ClientDetectionDashboard = () => {
                 initialFrom={dialogInitialDates.from}
                 initialTo={dialogInitialDates.to}
                 initialExam={selectedExam}
-                initialShift={selectedShift}
+                initialShifts={selectedShifts}
                 onApply={handleApplyAdvanced}
             />
 

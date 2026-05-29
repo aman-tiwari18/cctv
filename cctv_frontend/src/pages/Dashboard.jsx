@@ -6,12 +6,16 @@ import {
     CardContent,
     Chip,
     CircularProgress,
+    ClickAwayListener,
     Dialog,
     FormControl,
     Grid,
     InputBase,
+    List,
+    ListItemButton,
     MenuItem,
     Paper,
+    Popper,
     Select,
     Stack,
     Table,
@@ -34,7 +38,7 @@ import ErrorOutlineRoundedIcon from '@mui/icons-material/ErrorOutlineRounded';
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
 import TuneRoundedIcon from '@mui/icons-material/TuneRounded';
 import HistoryRoundedIcon from '@mui/icons-material/HistoryRounded';
-import { dashboardAPI } from '../services/api';
+import { dashboardAPI, examsAPI } from '../services/api';
 import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
 import { ShiftSvgIcon } from '../components/ShiftSvgIcon';
 import { CustomSvgIcon } from '../components/DetectionSvgIcon';
@@ -1188,7 +1192,7 @@ export const LiveExamsCard = ({ fetcher = dashboardAPI.getLiveExams }) => {
 // when "Apply filters" is clicked. Cancel / × discard local edits.
 // ---------------------------------------------------------------------------
 
-const SHIFTS = ['morning', 'afternoon', 'evening'];
+const SHIFT_INDEXES = [1, 2, 3];
 
 export const AdvancedFiltersDialog = ({
     open,
@@ -1196,13 +1200,15 @@ export const AdvancedFiltersDialog = ({
     initialFrom,
     initialTo,
     initialExam,
-    initialShift,
+    initialShifts,
     onApply,
 }) => {
     const [from, setFrom] = useState(initialFrom);
     const [to, setTo] = useState(initialTo);
     const [exam, setExam] = useState(initialExam);
-    const [shift, setShift] = useState(initialShift);
+    const [shifts, setShifts] = useState(initialShifts || []);
+    const [examOptions, setExamOptions] = useState([]);
+    const [examOptionsLoading, setExamOptionsLoading] = useState(false);
 
     // Reset local state whenever the dialog opens so it reflects the parent's
     // current applied filters.
@@ -1211,23 +1217,64 @@ export const AdvancedFiltersDialog = ({
             setFrom(initialFrom);
             setTo(initialTo);
             setExam(initialExam);
-            setShift(initialShift);
+            setShifts(initialShifts || []);
         }
-    }, [open, initialFrom, initialTo, initialExam, initialShift]);
+    }, [open, initialFrom, initialTo, initialExam, initialShifts]);
+
+    // Fetch the full exam list (company-scoped on the backend) when the dialog opens.
+    useEffect(() => {
+        if (!open) return;
+        let cancelled = false;
+        setExamOptionsLoading(true);
+        examsAPI.getAll({ is_active: 'true' })
+            .then((res) => {
+                if (cancelled) return;
+                const list = res?.data?.data || res?.data || [];
+                setExamOptions(Array.isArray(list) ? list : []);
+            })
+            .catch((err) => {
+                if (cancelled) return;
+                console.error('[AdvancedFilters.getAllExams]', err);
+                setExamOptions([]);
+            })
+            .finally(() => { if (!cancelled) setExamOptionsLoading(false); });
+        return () => { cancelled = true; };
+    }, [open]);
+
+    // Filter to exams overlapping the modal's currently-edited [from, to] range.
+    const visibleExams = useMemo(() => {
+        if (!from || !to) return examOptions;
+        const fromStr = format(from, 'yyyy-MM-dd');
+        const toStr   = format(to,   'yyyy-MM-dd');
+        return examOptions.filter((e) => {
+            const s = e.start_date ? String(e.start_date).slice(0, 10) : null;
+            const x = e.end_date   ? String(e.end_date).slice(0, 10)   : null;
+            if (!s || !x) return false;
+            return s <= toStr && x >= fromStr; // overlap
+        });
+    }, [examOptions, from, to]);
+
+    // If the picked exam falls out of the visible set after a date edit, reset to 'all'.
+    useEffect(() => {
+        if (exam === 'all') return;
+        if (!visibleExams.some((e) => e.id === exam)) {
+            setExam('all');
+        }
+    }, [visibleExams, exam]);
 
     const sameDay = (a, b) => format(a, 'yyyy-MM-dd') === format(b, 'yyyy-MM-dd');
     const today = new Date();
     const localBadge =
         ((!sameDay(from, today) || !sameDay(to, today)) ? 1 : 0) +
         (exam !== 'all' ? 1 : 0) +
-        (shift ? 1 : 0);
+        shifts.length;
 
     const handleClearAll = () => {
         const t = new Date();
         setFrom(t);
         setTo(t);
         setExam('all');
-        setShift(null);
+        setShifts([]);
     };
 
     const handleApply = () => {
@@ -1236,7 +1283,13 @@ export const AdvancedFiltersDialog = ({
         if (f > t) {
             const tmp = f; f = t; t = tmp;
         }
-        onApply({ from: f, to: t, exam, shift });
+        onApply({ from: f, to: t, exam, shifts });
+    };
+
+    const toggleShift = (n) => {
+        setShifts((prev) => prev.includes(n)
+            ? prev.filter((x) => x !== n)
+            : [...prev, n].sort((a, b) => a - b));
     };
 
     const fieldLabelSx = {
@@ -1344,6 +1397,7 @@ export const AdvancedFiltersDialog = ({
                             <Select
                                 value={exam}
                                 onChange={(e) => setExam(e.target.value)}
+                                disabled={examOptionsLoading}
                                 sx={{
                                     fontFamily: 'Inter, sans-serif',
                                     fontSize: '14px',
@@ -1352,6 +1406,11 @@ export const AdvancedFiltersDialog = ({
                                 }}
                             >
                                 <MenuItem value="all">All Exams</MenuItem>
+                                {visibleExams.map((ex) => (
+                                    <MenuItem key={ex.id} value={ex.id}>
+                                        {ex.exam_name}
+                                    </MenuItem>
+                                ))}
                             </Select>
                         </FormControl>
                     </Grid>
@@ -1359,14 +1418,14 @@ export const AdvancedFiltersDialog = ({
                     <Grid item xs={12} sm={6}>
                         <Typography sx={fieldLabelSx}>Shift selection</Typography>
                         <Stack direction="row" spacing={1}>
-                            {SHIFTS.map((s) => {
-                                const active = shift === s;
+                            {SHIFT_INDEXES.map((n) => {
+                                const active = shifts.includes(n);
                                 return (
                                     <Box
-                                        key={s}
+                                        key={n}
                                         component="button"
                                         type="button"
-                                        onClick={() => setShift(active ? null : s)}
+                                        onClick={() => toggleShift(n)}
                                         sx={{
                                             flex: 1,
                                             py: 1.25,
@@ -1381,7 +1440,7 @@ export const AdvancedFiltersDialog = ({
                                             '&:hover': { borderColor: '#4B53C9' },
                                         }}
                                     >
-                                        {s[0].toUpperCase() + s.slice(1)}
+                                        Shift {n}
                                     </Box>
                                 );
                             })}
@@ -1491,41 +1550,64 @@ const Dashboard = () => {
     const [filterMenuOpen, setFilterMenuOpen] = useState(false);
     const [customRange, setCustomRange] = useState(null);
     const [selectedExam, setSelectedExam] = useState('all');
-    const [selectedShift, setSelectedShift] = useState(null);
+    const [selectedShifts, setSelectedShifts] = useState([]);
+    const [examsList, setExamsList] = useState([]);
+    const searchInputRef = useRef(null);
+
+    // Fetch all exams once on mount so we can label active chips + power autocomplete.
+    useEffect(() => {
+        let cancelled = false;
+        examsAPI.getAll({ is_active: 'true' })
+            .then((res) => {
+                if (cancelled) return;
+                const list = res?.data?.data || res?.data || [];
+                setExamsList(Array.isArray(list) ? list : []);
+            })
+            .catch((err) => {
+                if (!cancelled) console.error('[Dashboard.examsAPI.getAll]', err);
+            });
+        return () => { cancelled = true; };
+    }, []);
+
+    const examNameById = (id) => examsList.find((e) => e.id === id)?.exam_name;
 
     // Derive API params + active filter chips from the selected date chip
     // plus any non-default shift/exam set via the Advanced filters modal.
-    // Today (with default shift/exam) produces no active chips so Row 4 hides.
+    // Today (with default shift/exam/exam) produces no active chips so Row 4 hides.
     const { apiParams, activeFilters } = useMemo(() => {
         const today = new Date();
         const fmt = (d) => format(d, 'yyyy-MM-dd');
         const labelChip = (label) => ({ key: 'date', label });
         const extraChips = (chips) => [
             ...chips,
-            ...(selectedShift
-                ? [{ key: 'shift', label: selectedShift[0].toUpperCase() + selectedShift.slice(1) }]
+            ...(selectedExam !== 'all'
+                ? [{ key: 'exam', label: examNameById(selectedExam) || `Exam #${selectedExam}` }]
                 : []),
+            ...selectedShifts.map((n) => ({ key: `shift_${n}`, label: `Shift ${n}` })),
         ];
+        const extraParams = {};
+        if (selectedExam !== 'all') extraParams.exam_id = selectedExam;
+        if (selectedShifts.length)  extraParams.shift_indexes = selectedShifts.join(',');
 
         switch (dateChip) {
             case 'yesterday': {
                 const y = subDays(today, 1);
                 return {
-                    apiParams: { date: fmt(y) },
+                    apiParams: { date: fmt(y), ...extraParams },
                     activeFilters: extraChips([{ key: 'date', label: 'Yesterday' }]),
                 };
             }
             case 'last_week': {
                 const start = subDays(today, 6);
                 return {
-                    apiParams: { start_date: fmt(start), end_date: fmt(today) },
+                    apiParams: { start_date: fmt(start), end_date: fmt(today), ...extraParams },
                     activeFilters: extraChips([labelChip('Last week')]),
                 };
             }
             case 'last_month': {
                 const start = subDays(today, 29);
                 return {
-                    apiParams: { start_date: fmt(start), end_date: fmt(today) },
+                    apiParams: { start_date: fmt(start), end_date: fmt(today), ...extraParams },
                     activeFilters: extraChips([labelChip('Last month')]),
                 };
             }
@@ -1533,7 +1615,7 @@ const Dashboard = () => {
                 const start = customRange?.from ?? today;
                 const end   = customRange?.to   ?? today;
                 return {
-                    apiParams: { start_date: fmt(start), end_date: fmt(end) },
+                    apiParams: { start_date: fmt(start), end_date: fmt(end), ...extraParams },
                     activeFilters: extraChips([
                         { key: 'date', label: `${fmt(start)} → ${fmt(end)}` },
                     ]),
@@ -1542,29 +1624,54 @@ const Dashboard = () => {
             case 'today':
             default:
                 return {
-                    apiParams: { date: fmt(today) },
+                    apiParams: { date: fmt(today), ...extraParams },
                     activeFilters: extraChips([]),
                 };
         }
-    }, [dateChip, customRange, selectedShift]);
+    // examsList is used by examNameById; re-running on its change keeps the chip
+    // label fresh once the exam list arrives.
+    }, [dateChip, customRange, selectedShifts, selectedExam, examsList]);
 
     // Removes a single active filter chip by its key — narrower than Clear all.
     const removeFilter = (key) => {
         if (key === 'date') {
             setDateChip('today');
             setCustomRange(null);
-        } else if (key === 'shift') {
-            setSelectedShift(null);
         } else if (key === 'exam') {
             setSelectedExam('all');
+        } else if (key.startsWith('shift_')) {
+            const n = Number(key.split('_')[1]);
+            setSelectedShifts((prev) => prev.filter((x) => x !== n));
         }
     };
     const clearAllFilters = () => {
         setDateChip('today');
         setCustomRange(null);
-        setSelectedShift(null);
+        setSelectedShifts([]);
         setSelectedExam('all');
     };
+
+    // Search keyword autocomplete vocabulary, built from current data.
+    const suggestions = useMemo(() => {
+        const q = searchKeyword.trim().toLowerCase();
+        if (!q) return [];
+        const items = [
+            { category: 'date', label: 'Today',      apply: () => { setDateChip('today');      setCustomRange(null); } },
+            { category: 'date', label: 'Yesterday',  apply: () => { setDateChip('yesterday');  setCustomRange(null); } },
+            { category: 'date', label: 'Last week',  apply: () => { setDateChip('last_week');  setCustomRange(null); } },
+            { category: 'date', label: 'Last month', apply: () => { setDateChip('last_month'); setCustomRange(null); } },
+            { category: 'shift', label: 'Shift 1', apply: () => setSelectedShifts((p) => p.includes(1) ? p : [...p, 1].sort()) },
+            { category: 'shift', label: 'Shift 2', apply: () => setSelectedShifts((p) => p.includes(2) ? p : [...p, 2].sort()) },
+            { category: 'shift', label: 'Shift 3', apply: () => setSelectedShifts((p) => p.includes(3) ? p : [...p, 3].sort()) },
+            { category: 'exam',  label: 'All Exams', apply: () => setSelectedExam('all') },
+            ...examsList.map((ex) => ({
+                category: 'exam',
+                label: ex.exam_name,
+                apply: () => setSelectedExam(ex.id),
+            })),
+        ];
+        return items.filter((it) => it.label.toLowerCase().includes(q));
+    }, [searchKeyword, examsList]);
 
     useEffect(() => {
         let cancelled = false;
@@ -1615,9 +1722,9 @@ const Dashboard = () => {
         }
     }, [dateChip, customRange]);
 
-    const handleApplyAdvanced = ({ from, to, exam, shift }) => {
+    const handleApplyAdvanced = ({ from, to, exam, shifts }) => {
         setSelectedExam(exam);
-        setSelectedShift(shift);
+        setSelectedShifts(shifts || []);
         const today = new Date();
         const sameDay = (a, b) => format(a, 'yyyy-MM-dd') === format(b, 'yyyy-MM-dd');
         if (sameDay(from, today) && sameDay(to, today)) {
@@ -1714,19 +1821,22 @@ const Dashboard = () => {
 
             {/* Overview header — Row 2: search input + filter button */}
             <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 1.5 }}>
-                <Box sx={{
-                    flex: 1,
-                    bgcolor: '#fff',
-                    border: '1px solid #E5E7EB',
-                    borderRadius: '10px',
-                    px: 2,
-                    py: 1.25,
-                    display: 'flex',
-                    alignItems: 'center',
-                }}>
+                <Box
+                    ref={searchInputRef}
+                    sx={{
+                        flex: 1,
+                        bgcolor: '#fff',
+                        border: '1px solid #E5E7EB',
+                        borderRadius: '10px',
+                        px: 2,
+                        py: 1.25,
+                        display: 'flex',
+                        alignItems: 'center',
+                    }}
+                >
                     <InputBase
                         fullWidth
-                        placeholder="Search keywords..."
+                        placeholder={'Try "today", "shift 1", or an exam name…'}
                         value={searchKeyword}
                         onChange={(e) => setSearchKeyword(e.target.value)}
                         sx={{
@@ -1738,6 +1848,65 @@ const Dashboard = () => {
                         }}
                     />
                 </Box>
+                <Popper
+                    open={searchKeyword.trim().length > 0}
+                    anchorEl={searchInputRef.current}
+                    placement="bottom-start"
+                    modifiers={[{ name: 'offset', options: { offset: [0, 6] } }]}
+                    style={{ zIndex: 1400, width: searchInputRef.current?.clientWidth }}
+                >
+                    <ClickAwayListener onClickAway={() => setSearchKeyword('')}>
+                        <Paper sx={{
+                            borderRadius: '10px',
+                            border: '1px solid #E5E7EB',
+                            boxShadow: '0 8px 24px rgba(0,0,0,0.08)',
+                            maxHeight: 320,
+                            overflowY: 'auto',
+                        }}>
+                            {suggestions.length === 0 ? (
+                                <Box sx={{
+                                    px: 2,
+                                    py: 1.5,
+                                    color: '#94A3B8',
+                                    fontFamily: 'Inter, sans-serif',
+                                    fontSize: '13px',
+                                    fontStyle: 'italic',
+                                }}>
+                                    Nothing like &ldquo;{searchKeyword.trim()}&rdquo; matches a filter
+                                </Box>
+                            ) : (
+                                <List dense disablePadding>
+                                    {suggestions.map((s, idx) => (
+                                        <ListItemButton
+                                            key={`${s.category}::${s.label}::${idx}`}
+                                            onClick={() => { s.apply(); setSearchKeyword(''); }}
+                                            sx={{
+                                                py: 1,
+                                                px: 2,
+                                                fontFamily: 'Inter, sans-serif',
+                                                fontSize: '13px',
+                                                color: '#191B23',
+                                                '&:hover': { bgcolor: '#F5F6FA' },
+                                            }}
+                                        >
+                                            <Box component="span" sx={{
+                                                display: 'inline-flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                minWidth: 22,
+                                                mr: 1,
+                                                fontSize: 14,
+                                            }}>
+                                                {s.category === 'date' ? '📅' : s.category === 'shift' ? '🕒' : '📚'}
+                                            </Box>
+                                            {s.label}
+                                        </ListItemButton>
+                                    ))}
+                                </List>
+                            )}
+                        </Paper>
+                    </ClickAwayListener>
+                </Popper>
                 <Box
                     component="button"
                     type="button"
@@ -1879,7 +2048,7 @@ const Dashboard = () => {
                 initialFrom={dialogInitialDates.from}
                 initialTo={dialogInitialDates.to}
                 initialExam={selectedExam}
-                initialShift={selectedShift}
+                initialShifts={selectedShifts}
                 onApply={handleApplyAdvanced}
             />
 
