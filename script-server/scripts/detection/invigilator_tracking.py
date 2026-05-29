@@ -31,10 +31,13 @@ STANDING_ASPECT_RATIO = 1.5    # h/w >= 1.5 → "standing" pose. Below this → 
 NO_TARGET_TIME_THRESH = 45     # Seconds of zero-standing-person before ABSENT fires
 
 # --- STATIC violation (per-person, perspective-aware) ---
-STATIC_TIME_THRESH    = 600    # Seconds — 10 min of continuous stillness before STATIC fires
-STATIC_THRESH_FLOOR   = 35     # Baseline pixel radius for "still"
-STATIC_THRESH_RATIO   = 0.20   # Adaptive radius = max(floor, bbox_h * ratio) — absorbs jitter on close-up cameras
-POSITION_WINDOW_SEC   = 30     # Rolling foot-position window in seconds (replaces fixed-frame deque)
+STATIC_TIME_THRESH      = 420   # Seconds — 7 min of continuous stillness before STATIC fires (per client spec)
+STATIC_THRESH_FLOOR     = 35    # Baseline pixel radius for "still"
+STATIC_THRESH_RATIO     = 0.20  # Adaptive radius = max(floor, bbox_h * ratio) — absorbs jitter on close-up cameras
+POSITION_WINDOW_SEC     = 30    # Rolling foot-position window in seconds (replaces fixed-frame deque)
+MOVING_TOLERANCE_FRAMES = 2     # Consecutive out-of-radius frames required to reset the stillness timer.
+                                # Absorbs single-frame YOLO bbox jitter (~10-25 px wobble on a static person)
+                                # while still catching real foot movement in ~0.4 s at 5 fps sample rate.
 
 # --- Identity tracking (per-person) ---
 TRACK_MATCH_DIST_RATIO = 0.5   # Match current box to existing track if foot-dist < avg_h * ratio
@@ -151,10 +154,11 @@ class PersonTracker:
             tid = self._next_id
             self._next_id += 1
             self.tracks[tid] = {
-                'positions':    deque([(now, fx, fy)]),
-                'static_start': None,
-                'last_seen':    now,
-                'last_h':       h,
+                'positions':     deque([(now, fx, fy)]),
+                'static_start':  None,
+                'last_seen':     now,
+                'last_h':        h,
+                'moving_streak': 0,
             }
 
         self._evict_stale(now)
@@ -166,6 +170,7 @@ class PersonTracker:
             # Need enough wall-clock history before judging stillness.
             if len(positions) < 5 or (now - positions[0][0]) < STILLNESS_WARMUP_SEC:
                 track['static_start'] = None
+                track['moving_streak'] = 0
                 continue
             xs = [p[1] for p in positions]
             ys = [p[2] for p in positions]
@@ -175,12 +180,22 @@ class PersonTracker:
                           for x, y in zip(xs, ys))
             thresh = max(STATIC_THRESH_FLOOR, track['last_h'] * STATIC_THRESH_RATIO)
             if max_dev < thresh:
+                # Inside radius → clear any pending movement streak.
+                track['moving_streak'] = 0
                 if track['static_start'] is None:
                     track['static_start'] = now
                 if (now - track['static_start']) > STATIC_TIME_THRESH:
                     static_violation = True
+                    # Restart the 7-min cycle so the save cadence is intrinsic
+                    # to STATIC_TIME_THRESH, not load-bearing on the worker cooldown.
+                    track['static_start'] = now
             else:
-                track['static_start'] = None
+                # Outside radius → count consecutive movement frames;
+                # only reset after MOVING_TOLERANCE_FRAMES so single-frame
+                # YOLO bbox jitter doesn't destroy a long stillness run.
+                track['moving_streak'] = track.get('moving_streak', 0) + 1
+                if track['moving_streak'] >= MOVING_TOLERANCE_FRAMES:
+                    track['static_start'] = None
 
         return False, static_violation
 
