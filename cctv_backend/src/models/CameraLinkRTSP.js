@@ -56,6 +56,22 @@ const CameraLinkRTSP = sequelize.define(
             type: DataTypes.STRING,
             allowNull: true,
         },
+        frame_path: {
+            type: DataTypes.TEXT,
+            allowNull: true,
+            comment: "Path to last captured classification frame on the script-server",
+        },
+        manually_verified: {
+            type: DataTypes.BOOLEAN,
+            allowNull: false,
+            defaultValue: false,
+            comment: "1 if an operator confirmed/overrode the classification",
+        },
+        verified_by: {
+            type: DataTypes.INTEGER,
+            allowNull: true,
+            comment: "user_id of the operator who verified; null when manually_verified=0",
+        },
         is_active: {
             type: DataTypes.BOOLEAN,
             defaultValue: true,

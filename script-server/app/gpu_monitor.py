@@ -30,8 +30,12 @@ logger = logging.getLogger(__name__)
 # the async /gpu-monitor/stats endpoint used to call this synchronously,
 # freezing the event loop for the duration and stalling every other request.
 #
-# Cache for a few seconds so concurrent callers share one nvidia-smi pass.
-_GPU_CACHE_TTL_SECONDS = 2.5
+# Cache so concurrent callers share one nvidia-smi pass. Under fleet-wide
+# scraping (Prometheus + dashboard polling across many workers, and 8
+# containers on the multi-GPU box), simultaneous nvidia-smi calls serialise
+# on the NVIDIA driver mutex and each collection slows to several seconds.
+# A longer TTL keeps collections infrequent. Tunable via env (no rebuild).
+_GPU_CACHE_TTL_SECONDS = float(os.getenv("GPU_STATS_CACHE_TTL", "10"))
 _gpu_cache: dict = {"data": None, "ts": 0.0}
 _gpu_cache_lock = threading.Lock()
 
@@ -291,25 +295,73 @@ def _compute_local_gpu_stats_data():
     }
 
 
+_gpu_refresher_started = False
+_gpu_refresher_lock = threading.Lock()
+
+
+def _gpu_refresh_loop():
+    """Background daemon: refresh the GPU stats cache on a fixed interval.
+
+    nvidia-smi runs here ONCE per interval regardless of how many HTTP
+    callers (Prometheus scrapes, dashboard polls, peer workers) ask for
+    stats. Request handlers never run nvidia-smi or wait on a lock, so they
+    return instantly and the threadpool/event loop never stalls under burst
+    load — the failure mode that previously hung /gpu-stats and /metrics for
+    30s and exhausted the worker threadpool.
+    """
+    while True:
+        try:
+            data = _compute_local_gpu_stats_data()
+            _gpu_cache["data"] = data
+            _gpu_cache["ts"] = time.monotonic()
+        except Exception as exc:
+            logger.error(f"GPU stats background refresh failed: {exc}")
+        time.sleep(_GPU_CACHE_TTL_SECONDS)
+
+
+def _ensure_refresher_started():
+    global _gpu_refresher_started
+    if _gpu_refresher_started:
+        return
+    with _gpu_refresher_lock:
+        if _gpu_refresher_started:
+            return
+        threading.Thread(
+            target=_gpu_refresh_loop, daemon=True, name="gpu-stats-refresher"
+        ).start()
+        _gpu_refresher_started = True
+
+
 def get_local_gpu_stats_data():
     """
-    Get GPU statistics for the local server, cached for a short TTL.
+    Return the most recently collected GPU stats. Non-blocking.
 
-    Concurrent callers share one nvidia-smi invocation. Without this,
-    multiple /gpu-monitor/stats and /metrics calls each fired 4 nvidia-smi
-    subprocesses which serialise on the GPU driver mutex and block the
-    asyncio event loop, stalling unrelated requests for tens of seconds.
+    A background daemon (started on first call) refreshes the cache every
+    GPU_STATS_CACHE_TTL seconds. Callers always get the cached snapshot
+    instantly — they never spawn nvidia-smi or block on a lock, so high
+    concurrency (12 workers worth of Prometheus + dashboard traffic) can't
+    stall the event loop or exhaust the threadpool.
     """
-    now = time.monotonic()
-    cached = _gpu_cache["data"]
-    if cached is not None and (now - _gpu_cache["ts"]) < _GPU_CACHE_TTL_SECONDS:
-        return cached
+    _ensure_refresher_started()
 
-    with _gpu_cache_lock:
-        now = time.monotonic()
-        if _gpu_cache["data"] is not None and (now - _gpu_cache["ts"]) < _GPU_CACHE_TTL_SECONDS:
-            return _gpu_cache["data"]
-        data = _compute_local_gpu_stats_data()
-        _gpu_cache["data"] = data
-        _gpu_cache["ts"] = time.monotonic()
-        return data
+    if _gpu_cache["data"] is None:
+        # Cold start: the background thread hasn't produced data yet. Do one
+        # synchronous collection so the very first request has something.
+        with _gpu_cache_lock:
+            if _gpu_cache["data"] is None:
+                try:
+                    _gpu_cache["data"] = _compute_local_gpu_stats_data()
+                    _gpu_cache["ts"] = time.monotonic()
+                except Exception as exc:
+                    logger.error(f"Initial GPU stats collection failed: {exc}")
+                    from app.config import WORKER_ID, WORKER_NAME
+                    return {
+                        "server_id": WORKER_ID,
+                        "server_name": WORKER_NAME,
+                        "gpus": [],
+                        "processes": {},
+                        "total_gpus": 0,
+                        "total_processes": 0,
+                    }
+
+    return _gpu_cache["data"]

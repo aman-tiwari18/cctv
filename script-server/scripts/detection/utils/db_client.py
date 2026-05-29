@@ -375,6 +375,42 @@ _GPU_ID = _get_gpu_id()
 _DETECTION_BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 
+# ── Frame-path canonicalization ──────────────────────────────────────────────
+# Cameras are captured from multiple hosts:
+#   • main server     → /data/cctv_dev/cctv/script-server/scripts/detection/results/classification_frames/…
+#   • main (alt path) → /data/cctv_dev/cctv/script-server/results/classification_frames/…  (symlinked to NFS)
+#   • worker (NFS)    → /app/scripts/detection/results/classification_frames/…             (bind-mounted to NFS)
+#   • worker (LOCAL)  → /app/results/classification_frames/…                               (broken — not NFS)
+#
+# The first three resolve to the same physical file on NFS at
+# /data/nfs/cctv_images/classification_frames/<suffix>. By normalising at the
+# DB boundary, every row stores ONE canonical absolute path that the main
+# server (UI, analytics) can read directly without per-row guesswork.
+#
+# Override via env if your NFS root is mounted elsewhere.
+_NFS_FRAMES_ROOT = os.environ.get(
+    "NFS_FRAMES_ROOT",
+    "/data/nfs/cctv_images/classification_frames",
+).rstrip("/")
+_FRAMES_MARKER = "/classification_frames/"
+
+
+def _canonicalize_frame_path(p: Optional[str]) -> Optional[str]:
+    """Normalize a worker-side frame_path to the canonical NFS form.
+
+    Idempotent — safe to call on an already-canonical path.
+    Leaves the value untouched (None / empty / no marker) if it can't be
+    rewritten safely.
+    """
+    if not p:
+        return p
+    idx = p.find(_FRAMES_MARKER)
+    if idx == -1:
+        return p
+    suffix = p[idx + len(_FRAMES_MARKER):]
+    return f"{_NFS_FRAMES_ROOT}/{suffix}"
+
+
 def _embed_gpu_id_in_image(image_path: str, gpu_id: int) -> None:
     """Embed gpu_id into JPEG EXIF UserComment field."""
     try:
@@ -747,6 +783,7 @@ def get_rtsp_camera_by_id(camera_id_pk: int) -> dict:
 
 def update_rtsp_classification(exam_id: int, device_id: str, camera_no: str, classification: str, status: str = None, frame_path: str = None) -> int:
     """Update classification, status, and frame_path in camera_links_rtsp for one camera."""
+    frame_path = _canonicalize_frame_path(frame_path)
     sql = """
         UPDATE camera_links_rtsp
         SET classification = %s, status = %s, frame_path = %s
@@ -793,6 +830,7 @@ def update_rtsp_status_and_frame_path(
     status: str, frame_path: Optional[str],
 ) -> int:
     """Update status and frame_path in camera_links_rtsp without touching classification."""
+    frame_path = _canonicalize_frame_path(frame_path)
     sql = """
         UPDATE camera_links_rtsp
         SET status = %s, frame_path = %s

@@ -49,6 +49,31 @@ router.get(
     asyncHandler(CameraController.getByExamAndType)
 );
 
+// Stream the classification frame image for one camera.
+// Authenticated — falls back to ssh+docker exec on workers when the frame
+// only exists inline within a worker container (paths under /app/results/).
+router.get(
+    "/exams/:examId/cameras/:id/frame",
+    authenticate,
+    asyncHandler(CameraController.getFrame)
+);
+
+// Distinct classification values for the dropdown in the verify dialog.
+router.get(
+    "/exams/:examId/cameras/classifications",
+    authenticate,
+    asyncHandler(CameraController.getClassificationOptions)
+);
+
+// Operator-driven manual verification of a camera's classification.
+// Sets classification + manually_verified=1 + verified_by=<user.id>.
+router.post(
+    "/exams/:examId/cameras/:id/verify",
+    authenticate,
+    authorize("ADMIN", "OPERATOR"),
+    asyncHandler(CameraController.verifyClassification)
+);
+
 // ── Direct access routes (/api/cameras) ──────────────────────
 router.get(
     "/exams/:examId/cameras/:id",

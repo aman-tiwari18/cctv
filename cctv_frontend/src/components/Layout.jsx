@@ -21,6 +21,7 @@ import {
   Button,
   Snackbar,
   Alert,
+  CircularProgress,
 } from '@mui/material';
 import {
   Menu as MenuIcon,
@@ -46,6 +47,7 @@ import {
   TrendingUp,
   VerifiedUser,
   Memory,
+  DeleteSweep,
 } from '@mui/icons-material';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import { useAuth } from '../contexts/AuthContext';
@@ -116,6 +118,7 @@ const viewerMenuItems = [
 
 // Menu items for OPERATOR role
 const operatorMenuItems = [
+  { text: 'Cameras', icon: <CameraAltIcon />, path: '/cameras' },
   { text: 'Detections', icon: <CustomSvgIcon />, path: '/detections', hasSubItems: true },
 ];
 
@@ -204,7 +207,7 @@ function SidebarContent({ items, currentPath, onNavigate, user }) {
   const { unfilteredCounts, typeFilter, setTypeFilter, } = useDetectionCounts();
   const [detectionsOpen, setDetectionsOpen] = useState(false);
 
-  const isDetectionPage = currentPath === '/detections' || currentPath === '/client-detections';
+  const isDetectionPage = currentPath === '/detections' || currentPath === '/client-detections' || currentPath === '/detections/removed';
 
   useEffect(() => {
     if (isDetectionPage) setDetectionsOpen(true);
@@ -244,7 +247,11 @@ function SidebarContent({ items, currentPath, onNavigate, user }) {
 
       <List sx={{ flex: 1, py: 1, overflowY: 'auto' }}>
         {items.map((item) => {
-          const isActive = currentPath === item.path;
+          // /detections/removed is a sub-route of the Detections page — keep
+          // the Detections sidebar item active so the user has visual anchor
+          // and the type sub-items stay accessible.
+          const isActive = currentPath === item.path
+            || (item.path === '/detections' && currentPath === '/detections/removed');
           const isDetectionItem = item.hasSubItems;
 
           return (
@@ -375,6 +382,29 @@ function LayoutInner() {
   const [anchorEl, setAnchorEl] = useState(null);
   const [liveExamsCount, setLiveExamsCount] = useState(0);
   const [reportSnackbar, setReportSnackbar] = useState({ open: false, message: '', severity: 'warning' });
+  // True while the consolidated-report download is in flight. Drives the spinner
+  // inside the Consolidated Report button so the user sees feedback during the
+  // few-second backend Excel build. Both the admin (/detections + ADMIN) and the
+  // viewer (/detections + VIEWER) buttons share this one flag — they're
+  // mutually exclusive by role so there's no contention.
+  const [downloadingReport, setDownloadingReport] = useState(false);
+
+  // Wraps the page-registered downloadConsolidatedReport so we can toggle the
+  // spinner around the awaited call. The handler may bail out synchronously on
+  // validation errors (no exam / no date selected) — that's fine, the spinner
+  // just flashes for one tick.
+  const handleDownloadReportClick = async () => {
+    setReportSnackbar({ open: false, message: '', severity: 'warning' });
+    if (!downloadConsolidatedReport) return;
+    setDownloadingReport(true);
+    try {
+      await downloadConsolidatedReport();
+    } catch (err) {
+      console.error('downloadConsolidatedReport failed:', err);
+    } finally {
+      setDownloadingReport(false);
+    }
+  };
 
   // Calculate total detections with useMemo for better reactivity
   const totalDetections = React.useMemo(() => {
@@ -404,7 +434,7 @@ function LayoutInner() {
       : menuItems.filter(item => item.text !== 'Client Detections' && item.text !== 'Client Dashboard');
 
   // Allow certain paths that are not in the main menu (footer items)
-  const allowedPaths = ['/user-verification', '/gpu-monitor'];
+  const allowedPaths = ['/user-verification', '/gpu-monitor', '/detections/removed'];
 
   useEffect(() => {
     const isAllowedPath = allowedPaths.includes(location.pathname);
@@ -445,7 +475,7 @@ function LayoutInner() {
   const currentPageTitle =
     adminFooterItems.find((item) => item.path === location.pathname)?.text ||
     filteredMenuItems.find((item) => item.path === location.pathname)?.text ||
-    '';
+    (location.pathname === '/detections/removed' ? 'Removed Detections' : '');
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh' }}>
@@ -498,17 +528,40 @@ function LayoutInner() {
           <Box sx={{ flexGrow: 1 }} />
 
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            {/* Removed Detections shortcut — only shown to VIEWER on /detections.
+                Mirrors the pill styling used by the screenshot reference. */}
+            {location.pathname === '/detections' && user?.role === 'VIEWER' && (
+              <Button
+                variant="outlined"
+                startIcon={<DeleteSweep sx={{ fontSize: 16 }} />}
+                disableElevation
+                onClick={() => navigate('/detections/removed')}
+                sx={{
+                  height: 34,
+                  borderRadius: '8px',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  textTransform: 'none',
+                  borderColor: '#fecaca',
+                  color: '#b91c1c',
+                  bgcolor: '#fff5f5',
+                  px: 2,
+                  '&:hover': { bgcolor: '#fee2e2', borderColor: '#fca5a5' },
+                }}
+              >
+                Removed Detections
+              </Button>
+            )}
+
             {location.pathname === '/detections' && user?.role === 'ADMIN' && (
               <Button
                 variant="contained"
-                startIcon={<Download sx={{ fontSize: 16 }} />}
+                startIcon={downloadingReport
+                  ? <CircularProgress size={14} thickness={5} sx={{ color: '#2563eb' }} />
+                  : <Download sx={{ fontSize: 16 }} />}
                 disableElevation
-                onClick={() => {
-                  setReportSnackbar({ open: false, message: '', severity: 'warning' });
-                  if (downloadConsolidatedReport) {
-                    downloadConsolidatedReport();
-                  }
-                }}
+                onClick={handleDownloadReportClick}
+                disabled={downloadingReport}
                 sx={{
                   height: 34,
                   borderRadius: '8px',
@@ -520,9 +573,44 @@ function LayoutInner() {
                   px: 2,
                   transition: 'all 0.2s ease',
                   '&:hover': { bgcolor: '#e0e7fa', opacity: 0.8, transform: 'translateY(-1px)' },
+                  '&.Mui-disabled': { bgcolor: '#e0e7fa', color: '#2563eb', opacity: 0.7 },
                 }}
               >
-                Consolidated Report
+                {downloadingReport ? 'Generating…' : 'Consolidated Report'}
+              </Button>
+            )}
+
+            {/* Client-side Consolidated Report — same button, different endpoint.
+                A VIEWER hits /detections (RoleBasedRoute swaps in <ClientDetections />)
+                — the URL stays /detections, not /client-detections. That's why the
+                condition matches on `/detections` + role VIEWER, not the route name.
+                ClientDetections.jsx registers handleDownloadClientReport via
+                setDownloadConsolidatedReport so this button slot fires the client
+                endpoint instead of the admin one. */}
+            {location.pathname === '/detections' && user?.role === 'VIEWER' && (
+              <Button
+                variant="contained"
+                startIcon={downloadingReport
+                  ? <CircularProgress size={14} thickness={5} sx={{ color: '#2563eb' }} />
+                  : <Download sx={{ fontSize: 16 }} />}
+                disableElevation
+                onClick={handleDownloadReportClick}
+                disabled={downloadingReport}
+                sx={{
+                  height: 34,
+                  borderRadius: '8px',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  textTransform: 'none',
+                  bgcolor: '#e0e7fa',
+                  color: '#2563eb',
+                  px: 2,
+                  transition: 'all 0.2s ease',
+                  '&:hover': { bgcolor: '#e0e7fa', opacity: 0.8, transform: 'translateY(-1px)' },
+                  '&.Mui-disabled': { bgcolor: '#e0e7fa', color: '#2563eb', opacity: 0.7 },
+                }}
+              >
+                {downloadingReport ? 'Generating…' : 'Consolidated Report'}
               </Button>
             )}
             

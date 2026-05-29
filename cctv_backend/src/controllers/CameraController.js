@@ -2,6 +2,17 @@ const { CameraLinkHLS, CameraLinkRTSP, Exam, ExamShift, ShiftScriptAssignment, S
 const { Op } = require("sequelize");
 const xlsx = require("xlsx");
 const fs = require("fs");
+const path = require("path");
+const { fetchFrameFromAnyWorker } = require("../utils/workerFrameFetch");
+const logger = require("../utils/logger");
+
+// All classification frames live on NFS at this root (script-server side
+// symlinks `scripts/detection/results` and `script-server/results/classification_frames`
+// both resolve here). Any DB-stored frame_path containing `/classification_frames/`
+// can be resolved by taking the suffix after that marker and joining with this root.
+const NFS_FRAMES_ROOT = process.env.NFS_FRAMES_ROOT || "/data/nfs/cctv_images/classification_frames";
+
+const CLASSIFICATION_MARKER = "/classification_frames/";
 
 const buildHlsCameraScope = ({ shiftId, examDate }) => {
     const conditions = [];
@@ -627,6 +638,114 @@ exports.getById = async (req, res) => {
     const camera = await Model.findByPk(id);
     if (!camera) return res.status(404).json({ success: false, message: "Camera not found" });
     res.json({ success: true, type: linkType, data: camera });
+};
+
+/**
+ * Stream the classification frame image for a camera.
+ *
+ * frame_path values seen in the wild:
+ *   /data/cctv_dev/cctv/script-server/scripts/detection/results/classification_frames/…   (main, NFS)
+ *   /data/cctv_dev/cctv/script-server/results/classification_frames/…                     (main, NFS symlink)
+ *   /app/scripts/detection/results/classification_frames/…                                (worker, NFS-mounted)
+ *   /app/results/classification_frames/…                                                  (worker, container-local — not on NFS)
+ *
+ * Resolution order:
+ *   1) translate the suffix after `/classification_frames/` and serve from NFS_FRAMES_ROOT
+ *   2) if the stored path is absolute and exists as-is on this host, serve it
+ *   3) ssh into each worker host and `docker exec <container> cat <frame_path>`
+ */
+exports.getFrame = async (req, res) => {
+    const { examId, id } = req.params;
+    const { Model } = await getModelByExam(examId);
+    const camera = await Model.findByPk(id);
+    if (!camera) return res.status(404).json({ success: false, message: "Camera not found" });
+    if (!camera.frame_path) return res.status(404).json({ success: false, message: "No frame captured for this camera" });
+
+    const framePath = String(camera.frame_path);
+
+    // 1) NFS-relative resolution
+    const markerIdx = framePath.indexOf(CLASSIFICATION_MARKER);
+    if (markerIdx !== -1) {
+        const relative = framePath.slice(markerIdx + CLASSIFICATION_MARKER.length);
+        const resolved = path.resolve(NFS_FRAMES_ROOT, relative);
+        if (resolved.startsWith(path.resolve(NFS_FRAMES_ROOT)) && fs.existsSync(resolved) && fs.statSync(resolved).isFile()) {
+            res.setHeader("Content-Type", "image/jpeg");
+            res.setHeader("Cache-Control", "public, max-age=3600");
+            return fs.createReadStream(resolved).pipe(res);
+        }
+    }
+
+    // 2) try the path as stored (covers any main-server-local outliers)
+    if (framePath.startsWith("/") && fs.existsSync(framePath) && fs.statSync(framePath).isFile()) {
+        res.setHeader("Content-Type", "image/jpeg");
+        res.setHeader("Cache-Control", "public, max-age=3600");
+        return fs.createReadStream(framePath).pipe(res);
+    }
+
+    // 3) ssh + docker exec fallback for container-local paths
+    try {
+        const { workerId, bytes } = await fetchFrameFromAnyWorker(framePath);
+        logger.info(`[getFrame] served ${framePath} from ${workerId} via ssh fallback (${bytes.length} bytes)`);
+        res.setHeader("Content-Type", "image/jpeg");
+        res.setHeader("Cache-Control", "public, max-age=3600");
+        return res.end(bytes);
+    } catch (err) {
+        logger.warn(`[getFrame] frame unreachable for camera ${id}: ${framePath} — ${err.message}`);
+        return res.status(404).json({
+            success: false,
+            message: "Frame image unavailable on main server or any worker",
+            frame_path: framePath,
+        });
+    }
+};
+
+/**
+ * Operator manual verification of a camera's classification.
+ *
+ * Takes the camera's primary key + a new classification value (chosen from
+ * the dropdown in the frame-preview dialog) and:
+ *   - sets classification = <new value>
+ *   - sets manually_verified = 1
+ *   - sets verified_by = <current user id>
+ *
+ * Authorized for OPERATOR and ADMIN only.
+ */
+exports.verifyClassification = async (req, res) => {
+    const { examId, id } = req.params;
+    const { classification } = req.body || {};
+    if (!classification || !String(classification).trim()) {
+        return res.status(400).json({ success: false, message: "classification is required" });
+    }
+    const { Model } = await getModelByExam(examId);
+    const camera = await Model.findByPk(id);
+    if (!camera) return res.status(404).json({ success: false, message: "Camera not found" });
+    await camera.update({
+        classification: String(classification).trim(),
+        manually_verified: true,
+        verified_by: req.user?.id || null,
+    });
+    res.json({ success: true, message: "Classification verified", data: camera });
+};
+
+/**
+ * Distinct classification values for a given exam — used to populate the
+ * dropdown in the verify dialog. Returns a sorted, deduplicated list of
+ * non-empty classification strings already in the table.
+ */
+exports.getClassificationOptions = async (req, res) => {
+    const { examId } = req.params;
+    const { Model } = await getModelByExam(examId);
+    const rows = await Model.findAll({
+        attributes: [[require("sequelize").fn("DISTINCT", require("sequelize").col("classification")), "classification"]],
+        where: { exam_id: examId, is_active: true },
+        raw: true,
+    });
+    const options = rows
+        .map((r) => r.classification)
+        .filter((v) => v != null && String(v).trim() !== "")
+        .map((v) => String(v).trim())
+        .sort((a, b) => a.localeCompare(b));
+    res.json({ success: true, data: Array.from(new Set(options)) });
 };
 
 /**

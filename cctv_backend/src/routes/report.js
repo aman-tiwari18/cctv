@@ -21,4 +21,17 @@ router.get(
     asyncHandler(ReportController.downloadReport)
 );
 
+/**
+ * @route   GET /cctv_analytics/api/report/download/client
+ * @query   exam_id, date (dd-mm-yyyy)
+ * @access  Authenticated (VIEWER / client-facing UI)
+ * @returns Excel file (.xlsx) — only pushed_to_client=1 detections, with a
+ *          per-row "Rejected" column for remove_from_client=1.
+ */
+router.get(
+    '/download/client',
+    authenticate,
+    asyncHandler(ReportController.downloadClientReport)
+);
+
 module.exports = router;

@@ -66,8 +66,11 @@ exports.getAllExams = async (req, res) => {
     if (exam_body)
         where.exam_body = exam_body;
 
-    // Apply company-based filtering for non-admin users
-    if (userRole !== 'ADMIN' && userCompanyName) {
+    // Apply company-based filtering for client-style roles only.
+    // ADMIN and OPERATOR both get the full exam list — OPERATORs verify
+    // camera classifications across every exam, so scoping by company would
+    // hide cameras they're supposed to be reviewing.
+    if (userRole !== 'ADMIN' && userRole !== 'OPERATOR' && userCompanyName) {
         if (userCompanyName === 'EY') {
             // EY users see both SSC and TCS exams
             where.exam_body = ['SSC', 'TCS'];

@@ -46,7 +46,7 @@ import {
   Check,
   Warning,
   Close as CloseIcon,
-  GridView, LocationCity, Close, Memory,
+  GridView, LocationCity, Close, Memory, DeleteOutline, Undo as UndoIcon,
 } from '@mui/icons-material';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -56,37 +56,45 @@ import { API_BASE_1 } from '../constants/data';
 import { useDetectionCounts } from '../contexts/DetectionCountsContext';
 import { useSocket } from '../contexts/SocketContext';
 import { useSearchParams } from 'react-router-dom';
-import { examsAPI } from '../services/api';
+import { examsAPI, reportAPI, clientDetectionsAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 
 const TYPE_META = {
   proximity: { label: 'Close Proximity', color: '#5cb88a', bg: '#e5f5ed' },
-  crowd: { label: 'Crowd Detection', color: '#e24d7b', bg: '#fce4ec' },
+  crowd: { label: 'Crowd Detection (Entry/Exit)', color: '#e24d7b', bg: '#fce4ec' },
+  crowd_biometric: { label: 'Crowd Detection (Biometric)', color: '#9333ea', bg: '#f3e8ff' },
   crowd_five: { label: 'Crowd < 5', color: '#e06050', bg: '#fce8e6' },
   crowd_zero: { label: 'Zero Person', color: '#6b5b95', bg: '#edeaf3' },
   server: { label: 'Server Room', color: '#a0623d', bg: '#f3ebe4' },
   intruder: { label: 'Intruder', color: '#d94466', bg: '#fce4ea' },
+  strongroom: { label: 'Strong Room Movement', color: '#b91c1c', bg: '#fef2f2' },
+  qp_box: { label: 'QP Box Detection', color: '#dc2626', bg: '#fee2e2' },
   entry_exit: { label: 'Entry/Exit', color: '#1d7a7d', bg: '#e0f0f0' },
   phone: { label: 'Phone', color: '#465a38', bg: '#e8ece5' },
   blind_spot: { label: 'Blind Spot', color: '#b0a850', bg: '#f3f2e4' },
   invigilator: { label: 'Invigilator', color: '#00bfcf', bg: '#e0f7fa' },
   inversion: { label: 'Camera Inversion', color: '#7a86b4', bg: '#eceef5' },
-  tamper: { label: 'Camera Tampering', color: '#00c8d4', bg: '#e0f8fa' },
+  tampering: { label: 'Camera Tampering', color: '#00c8d4', bg: '#e0f8fa' },
+  vision: { label: 'Scene Classification', color: '#3b82f6', bg: '#dbeafe' },
 };
 
 const TYPE_ICONS = {
   proximity: WarningAmber,
   crowd: Groups,
+  crowd_biometric: Groups,
   crowd_five: Groups,
   crowd_zero: PersonOff,
   server: Dns,
   intruder: DirectionsWalk,
+  strongroom: SecurityUpdateWarning,
+  qp_box: SecurityUpdateWarning,
   entry_exit: MeetingRoom,
   phone: Smartphone,
   blind_spot: VisibilityOff,
   invigilator: Visibility,
   inversion: FlipCameraAndroid,
-  tamper: SecurityUpdateWarning,
+  tampering: SecurityUpdateWarning,
+  vision: Visibility,
   default: CameraAlt,
 };
 
@@ -132,7 +140,7 @@ const NewBadge = ({ addedAt, sx }) => {
   );
 };
 
-function DetectionCard({ item, onClick, onRemove, isRemoving, removed }) {
+function DetectionCard({ item, onClick, onRemove, onUndo, isRemoving, isPendingRemoval }) {
   const meta = TYPE_META[item.type] || { label: item.type, color: '#94a3b8', bg: '#f1f5f9' };
   const [imgError, setImgError] = useState(false);
   const cameraName = item.cameraName || item.camera_name || item.camera_id || '-';
@@ -145,13 +153,13 @@ function DetectionCard({ item, onClick, onRemove, isRemoving, removed }) {
 
   return (
     <Card
-      onClick={() => onClick(item)}
+      onClick={() => !isPendingRemoval && onClick(item)}
       sx={{
-        cursor: 'pointer',
+        cursor: isPendingRemoval ? 'default' : 'pointer',
         borderRadius: 3,
         overflow: 'hidden',
         transition: 'all 0.22s ease',
-        '&:hover': { transform: 'translateY(-4px) scale(1.005)', boxShadow: '0 14px 30px rgba(15, 23, 42, 0.14)' },
+        '&:hover': isPendingRemoval ? {} : { transform: 'translateY(-4px) scale(1.005)', boxShadow: '0 14px 30px rgba(15, 23, 42, 0.14)' },
         border: '1px solid #e2e8f0',
       }}
     >
@@ -167,8 +175,26 @@ function DetectionCard({ item, onClick, onRemove, isRemoving, removed }) {
             image={item.image_url}
             alt={item.camera_id}
             onError={() => setImgError(true)}
-            sx={{ objectFit: 'cover' }}
+            sx={{ objectFit: 'cover', filter: isPendingRemoval ? 'grayscale(0.4) brightness(0.85)' : 'none', transition: 'filter 0.2s ease' }}
           />
+        )}
+        {/* When pending removal, overlay a trash glyph on the image — matches
+            the spec mock. The image itself stays visible underneath. */}
+        {isPendingRemoval && (
+          <Box sx={{
+            position: 'absolute', inset: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            bgcolor: 'rgba(15, 23, 42, 0.25)', pointerEvents: 'none',
+          }}>
+            <Box sx={{
+              width: 56, height: 56, borderRadius: '50%',
+              bgcolor: 'rgba(255,255,255,0.92)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
+            }}>
+              <DeleteOutline sx={{ fontSize: 28, color: '#64748b' }} />
+            </Box>
+          </Box>
         )}
         <NewBadge
           addedAt={item.updatedAt || item.updated_at}
@@ -276,30 +302,57 @@ function DetectionCard({ item, onClick, onRemove, isRemoving, removed }) {
       </CardContent>
 
       <Box sx={{ mx: 2, mb: 4, mt: 1 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'end', gap: 1.5 }}>
-          <Button
-            variant="contained"
-            disableElevation
-            onClick={(e) => {
-              e.stopPropagation();
-              if (onRemove && !isRemoving && !removed) onRemove(item);
-            }}
-            disabled={isRemoving || removed}
-            sx={{
-              bgcolor: removed ? '#94a3b8' : '#ef4444',
-              color: '#fff',
-              fontWeight: 900,
-              height: "40px",
-              width: "120px",
-              borderRadius: 3,
-              textTransform: 'none',
-              fontSize: 12,
-              '&:hover': { bgcolor: removed ? '#94a3b8' : '#dc2626' },
-            }}
-          >
-            {isRemoving ? 'Removing...' : (removed ? 'Removed' : 'Remove')}
-          </Button>
-        </Box>
+        {isPendingRemoval ? (
+          // 15s undo affordance — replaces the Remove button. The image above
+          // stays visible (dimmed) so the user has visual continuity.
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: 0.5 }}>
+            <Typography sx={{ fontWeight: 700, fontSize: 14, color: '#0f172a' }}>
+              Detection removed
+            </Typography>
+            <Typography sx={{ fontSize: 12, color: '#64748b', mb: 0.5 }}>
+              This action can be undone
+            </Typography>
+            <Button
+              variant="contained"
+              disableElevation
+              startIcon={<UndoIcon sx={{ fontSize: 16 }} />}
+              onClick={(e) => { e.stopPropagation(); if (onUndo) onUndo(item); }}
+              sx={{
+                bgcolor: '#2563eb', color: '#fff', fontWeight: 700,
+                height: 40, width: '100%', borderRadius: 2,
+                textTransform: 'none', fontSize: 13,
+                '&:hover': { bgcolor: '#1d4ed8' },
+              }}
+            >
+              Undo
+            </Button>
+          </Box>
+        ) : (
+          <Box sx={{ display: 'flex', justifyContent: 'end', gap: 1.5 }}>
+            <Button
+              variant="contained"
+              disableElevation
+              onClick={(e) => {
+                e.stopPropagation();
+                if (onRemove && !isRemoving) onRemove(item);
+              }}
+              disabled={isRemoving}
+              sx={{
+                bgcolor: '#ef4444',
+                color: '#fff',
+                fontWeight: 900,
+                height: "40px",
+                width: "120px",
+                borderRadius: 3,
+                textTransform: 'none',
+                fontSize: 12,
+                '&:hover': { bgcolor: '#dc2626' },
+              }}
+            >
+              {isRemoving ? 'Removing...' : 'Remove'}
+            </Button>
+          </Box>
+        )}
       </Box>
     </Card>
   );
@@ -605,10 +658,10 @@ const buildImageKey = (item) => `${item.source}|${item.type}|${item.relativePath
 //   );
 // }
 
-function ListViewPanel({ data, selectedIndex, onSelect, onRemove, removingId, removedUids }) {
+function ListViewPanel({ data, selectedIndex, onSelect, onRemove, onUndo, removingId, pendingRemovals }) {
   const item = data[selectedIndex];
   const itemRefs = useRef([]); // ✅ ref array for each list item
-  const removed = item ? removedUids.has(item.uid) : false;
+  const isPendingRemoval = item ? pendingRemovals.has(item.uid) : false;
   const isRemoving = item ? removingId === item.uid : false;
 
   useEffect(() => {
@@ -643,6 +696,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, removingId, re
       >
         {data.map((listItem, idx) => {
           const isActive = idx === selectedIndex;
+          const itemPending = pendingRemovals.has(listItem.uid);
           const centerName = listItem.centerName || listItem.centre_name || '-';
           const cameraName = listItem.cameraName || listItem.camera_id || listItem.filename || '-';
           const city = listItem.city || '-';
@@ -678,6 +732,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, removingId, re
                     objectFit: 'cover',
                     alignSelf: 'center',
                     borderRadius: 1,
+                    filter: itemPending ? 'grayscale(0.5) brightness(0.85)' : 'none',
                   }}
                   onError={(e) => { e.target.style.display = 'none'; }}
                 />
@@ -828,28 +883,53 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, removingId, re
                 </CardContent>
 
                 <Box sx={{ mt: 2.5 }}>
-                  <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1.5 }}>
-                    <Button
-                      variant="contained"
-                      disableElevation
-                      onClick={() => {
-                        if (onRemove && !isRemoving && !removed) onRemove(item);
-                      }}
-                      disabled={isRemoving || removed}
-                      sx={{
-                        bgcolor: removed ? '#94a3b8' : '#ef4444', color: '#fff', fontWeight: 900,
-                        height: "40px",
-                        width: "160px",
-                        borderRadius: 2, textTransform: 'none', fontSize: 14,
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        pl: 2,
-                        pr: 0.5,
-                        '&:hover': { bgcolor: removed ? '#94a3b8' : '#dc2626' },
-                      }}
-                    >
-                      <span>{isRemoving ? 'Removing...' : (removed ? 'Removed' : 'Remove')}</span>
-                      {!removed && (
+                  {isPendingRemoval ? (
+                    // List-view undo: same content as DetectionCard but sized
+                    // to fill the right-pane action area.
+                    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: 0.5 }}>
+                      <Typography sx={{ fontWeight: 700, fontSize: 15, color: '#0f172a' }}>
+                        Detection removed
+                      </Typography>
+                      <Typography sx={{ fontSize: 13, color: '#64748b', mb: 0.5 }}>
+                        This action can be undone
+                      </Typography>
+                      <Button
+                        variant="contained"
+                        disableElevation
+                        startIcon={<UndoIcon sx={{ fontSize: 18 }} />}
+                        onClick={() => { if (onUndo) onUndo(item); }}
+                        sx={{
+                          bgcolor: '#2563eb', color: '#fff', fontWeight: 700,
+                          height: 40, width: 200, borderRadius: 2,
+                          textTransform: 'none', fontSize: 14,
+                          '&:hover': { bgcolor: '#1d4ed8' },
+                        }}
+                      >
+                        Undo
+                      </Button>
+                    </Box>
+                  ) : (
+                    <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1.5 }}>
+                      <Button
+                        variant="contained"
+                        disableElevation
+                        onClick={() => {
+                          if (onRemove && !isRemoving) onRemove(item);
+                        }}
+                        disabled={isRemoving}
+                        sx={{
+                          bgcolor: '#ef4444', color: '#fff', fontWeight: 900,
+                          height: "40px",
+                          width: "160px",
+                          borderRadius: 2, textTransform: 'none', fontSize: 14,
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          pl: 2,
+                          pr: 0.5,
+                          '&:hover': { bgcolor: '#dc2626' },
+                        }}
+                      >
+                        <span>{isRemoving ? 'Removing...' : 'Remove'}</span>
                         <Box
                           sx={{
                             width: 32,
@@ -863,9 +943,9 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, removingId, re
                         >
                           <Box component="img" src="/cctv_analytics/icon.svg" alt="right" sx={{ width: 16, height: 16, display: 'block' }} />
                         </Box>
-                      )}
-                    </Button>
-                  </Box>
+                      </Button>
+                    </Box>
+                  )}
                 </Box>
               </Box>
             </Box>
@@ -910,7 +990,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, removingId, re
 }
 
 const ClientDetections = () => {
-  const { setUnfilteredCounts, typeFilter, setTypeFilter } = useDetectionCounts();
+  const { setUnfilteredCounts, typeFilter, setTypeFilter, setDownloadConsolidatedReport, setReportValidationError } = useDetectionCounts();
   const { user } = useAuth(); // Get user from context
   const [searchParams] = useSearchParams();
 
@@ -934,9 +1014,22 @@ const ClientDetections = () => {
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [listSelectedIndex, setListSelectedIndex] = useState(0);
   const [selected, setSelected] = useState(null);
-  const [removedUids, setRemovedUids] = useState(new Set());
+  // pendingRemovals: uids inside the 15s undo window — still rendered, but the
+  //   card swaps its action area for the "Detection removed / Undo" UI.
+  // confirmedRemoved: uids past the undo window — filtered out of the grid.
+  // removalTimersRef: per-uid setTimeout handles so Undo can cancel them.
+  const [pendingRemovals, setPendingRemovals] = useState(new Set());
+  const [confirmedRemoved, setConfirmedRemoved] = useState(new Set());
+  const removalTimersRef = useRef(new Map());
+  // Mirror of pendingRemovals readable from inside callbacks that close over
+  // stale state — namely the socket handler, which can't depend on the Set
+  // without re-subscribing every render.
+  const pendingRemovalsRef = useRef(pendingRemovals);
+  useEffect(() => { pendingRemovalsRef.current = pendingRemovals; }, [pendingRemovals]);
   const [removingId, setRemovingId] = useState(null);
   const [keyboardHintShown, setKeyboardHintShown] = useState(false);
+
+  const UNDO_WINDOW_MS = 15000;
 
   const fetchClientImages = useCallback(async (pg = 1, rpp = rowsPerPage) => {
     setLoading(true);
@@ -1005,6 +1098,46 @@ const ClientDetections = () => {
     setListSelectedIndex(0);
     fetchClientImages(1, rowsPerPage);
   }, [fetchClientImages, rowsPerPage]);
+
+  /* Consolidated client report — hits the new /report/download/client endpoint
+     which filters detections to pushed_to_client=1 and adds a per-row Rejected
+     column for remove_from_client=1. Wired into the Layout button via
+     setDownloadConsolidatedReport so the button appears in the AppBar. */
+  const handleDownloadClientReport = useCallback(async () => {
+    if (!examFilter) {
+      setReportValidationError('Please select an Exam from the top filter to generate the report.');
+      return;
+    }
+    if (!dateFilter) {
+      setReportValidationError('Please select a Date from the top filter to generate the report.');
+      return;
+    }
+    setReportValidationError('');
+    try {
+      const params = { exam_id: examFilter, date: parseDateForQuery(dateFilter) };
+      if (typeFilter.length > 0) params.type = typeFilter.join(',');
+      if (search.trim()) params.search = search.trim();
+      if (appliedStartTime) params.start_time = appliedStartTime;
+      if (appliedEndTime) params.end_time = appliedEndTime;
+
+      const response = await reportAPI.downloadClientReport(params);
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `client_report_${parseDateForQuery(dateFilter)}.xlsx`);
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Download client report failed:', err);
+      setReportValidationError('Failed to download report. Please try again.');
+    }
+  }, [examFilter, dateFilter, typeFilter, search, appliedStartTime, appliedEndTime, setReportValidationError]);
+
+  useEffect(() => {
+    setDownloadConsolidatedReport(() => handleDownloadClientReport);
+  }, [handleDownloadClientReport, setDownloadConsolidatedReport]);
 
   // Memoized filter function to check if an item matches current filters
   const matchesFilters = useCallback((item) => {
@@ -1104,6 +1237,13 @@ const ClientDetections = () => {
     const handleClientDetectionRemove = (data) => {
       console.log('[ClientDetections] Detection removed:', data.uid);
 
+      // If this client is mid-undo-window for the same uid, ignore the socket
+      // echo — handleRemove already owns the lifecycle and the post-15s timer
+      // will do the final purge. Otherwise (another tab / another user) drop
+      // the card immediately. Read via ref so we don't have to re-subscribe
+      // on every pendingRemovals change.
+      if (pendingRemovalsRef.current.has(data.uid)) return;
+
       const removedType = data?.type;
       if (removedType) {
         setCounts(prev => ({ ...prev, [removedType]: Math.max(0, (prev[removedType] || 0) - 1) }));
@@ -1122,32 +1262,62 @@ const ClientDetections = () => {
     };
   }, [socket, matchesFilters, rowsPerPage, typeFilter]);
 
-  // Memoize filtered images to prevent unnecessary recalculations
+  // Memoize filtered images to prevent unnecessary recalculations.
+  // pendingRemovals stay in the list (rendered as "Detection removed / Undo");
+  // only confirmedRemoved are filtered out so the grid layout doesn't reflow
+  // until the undo window closes.
   const filteredImages = useMemo(() => {
-    return images.filter(item => !removedUids.has(item.uid));
-  }, [images, removedUids]);
+    return images.filter(item => !confirmedRemoved.has(item.uid));
+  }, [images, confirmedRemoved]);
+
+  // Clear any in-flight removal timers on unmount so we don't setState on a
+  // dead component after the user navigates away mid-undo-window.
+  useEffect(() => {
+    const timers = removalTimersRef.current;
+    return () => { timers.forEach((id) => clearTimeout(id)); timers.clear(); };
+  }, []);
 
   const handleRemove = async (item) => {
     if (!item || !item.uid) return;
-    setRemovingId(item.uid);
+    const uid = item.uid;
+    setRemovingId(uid);
+    // Optimistically mark as pending so the live "client-detection:remove"
+    // socket echo (which fires for ALL clients, including the originator)
+    // doesn't yank the card out from under the undo affordance.
+    setPendingRemovals(prev => {
+      const next = new Set(prev);
+      next.add(uid);
+      return next;
+    });
     try {
-      await axios.post(`${API_BASE_1}/client-detections/remove`, {
-        uid: item.uid,
-      });
+      await axios.post(`${API_BASE_1}/client-detections/remove`, { uid });
 
-      setRemovedUids((prev) => {
-        const next = new Set(prev);
-        next.add(item.uid);
-        return next;
-      });
-
-      setSnackbar({
-        open: true,
-        message: 'Image removed from client detections',
-        severity: 'success'
-      });
+      // Schedule the hard-removal commit. If the user clicks Undo before this
+      // fires, handleUndo clears the timer and pulls the uid back out.
+      const timerId = setTimeout(() => {
+        removalTimersRef.current.delete(uid);
+        setPendingRemovals(prev => {
+          if (!prev.has(uid)) return prev;
+          const next = new Set(prev);
+          next.delete(uid);
+          return next;
+        });
+        setConfirmedRemoved(prev => {
+          const next = new Set(prev);
+          next.add(uid);
+          return next;
+        });
+      }, UNDO_WINDOW_MS);
+      removalTimersRef.current.set(uid, timerId);
     } catch (err) {
       console.error(err);
+      // Rollback optimistic pending state on API failure.
+      setPendingRemovals(prev => {
+        if (!prev.has(uid)) return prev;
+        const next = new Set(prev);
+        next.delete(uid);
+        return next;
+      });
       setSnackbar({
         open: true,
         message: 'Failed to remove image',
@@ -1155,6 +1325,36 @@ const ClientDetections = () => {
       });
     } finally {
       setRemovingId(null);
+    }
+  };
+
+  // Reverses a removal that's still inside the 15-second undo window.
+  // Optimistically clears the pending state + cancels the commit timer; if
+  // the server fails we surface a snackbar but leave the card visible so the
+  // user isn't suddenly stuck with a stale "Removed" state.
+  const handleUndo = async (item) => {
+    if (!item || !item.uid) return;
+    const uid = item.uid;
+    const timerId = removalTimersRef.current.get(uid);
+    if (timerId) {
+      clearTimeout(timerId);
+      removalTimersRef.current.delete(uid);
+    }
+    setPendingRemovals(prev => {
+      if (!prev.has(uid)) return prev;
+      const next = new Set(prev);
+      next.delete(uid);
+      return next;
+    });
+    try {
+      await clientDetectionsAPI.undoRemove(uid);
+    } catch (err) {
+      console.error('Undo failed:', err);
+      setSnackbar({
+        open: true,
+        message: 'Undo failed on server — refresh to see authoritative state',
+        severity: 'error'
+      });
     }
   };
 
@@ -1465,8 +1665,9 @@ const ClientDetections = () => {
                 item={item}
                 onClick={setSelected}
                 onRemove={handleRemove}
+                onUndo={handleUndo}
                 isRemoving={removingId === item.uid}
-                removed={removedUids.has(item.uid)}
+                isPendingRemoval={pendingRemovals.has(item.uid)}
               />
             </Grid>
           ))}
@@ -1477,8 +1678,9 @@ const ClientDetections = () => {
           selectedIndex={listSelectedIndex}
           onSelect={setListSelectedIndex}
           onRemove={handleRemove}
+          onUndo={handleUndo}
           removingId={removingId}
-          removedUids={removedUids}
+          pendingRemovals={pendingRemovals}
         />
       )}
 

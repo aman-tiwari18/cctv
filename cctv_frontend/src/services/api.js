@@ -85,6 +85,17 @@ export const camerasAPI = {
     },
     update: (id, cameraData, examId) => api.put(`/exams/${examId}/cameras/${id}`, cameraData),
     delete: (id, examId) => api.delete(`/exams/${examId}/cameras/${id}`),
+    // Returns the classification frame as a Blob. Backend handles NFS lookup
+    // and ssh+docker exec fallback for worker-only paths.
+    getFrame: (examId, id) =>
+        api.get(`/exams/${examId}/cameras/${id}/frame`, { responseType: "blob" }),
+    // Distinct classification values for the verify-dropdown.
+    getClassifications: (examId) =>
+        api.get(`/exams/${examId}/cameras/classifications`),
+    // Operator-only: confirm/override a camera's classification.
+    // Backend sets manually_verified=1 + verified_by=<current user id>.
+    verifyClassification: (examId, id, classification) =>
+        api.post(`/exams/${examId}/cameras/${id}/verify`, { classification }),
 };
 
 export const shiftsAPI = {
@@ -123,7 +134,23 @@ export const reportAPI = {
     downloadReport: (params) => api.get('/report/download', {
         params: params,
         responseType: 'blob'
-    })
+    }),
+    // VIEWER-facing variant: only pushed_to_client=1 detections, with a
+    // "Rejected" column reflecting remove_from_client=1.
+    downloadClientReport: (params) => api.get('/report/download/client', {
+        params: params,
+        responseType: 'blob'
+    }),
+};
+
+export const clientDetectionsAPI = {
+    // VIEWER "Removed Detections" page — pushed_to_client=1 AND remove_from_client=1.
+    // Lives on cctv_backend (not script-server) so company-scoping uses the JWT
+    // and the auth interceptor on this axios instance.
+    getRemoved: (params) => api.get('/client-detections/removed', { params }),
+    // Reverts a /client-detections/remove (script-server) by flipping
+    // remove_from_client back to 0. Hits cctv_backend so undo is JWT-scoped.
+    undoRemove: (uid) => api.post('/client-detections/undo', { uid }),
 };
 
 export const clientDashboardAPI = {
