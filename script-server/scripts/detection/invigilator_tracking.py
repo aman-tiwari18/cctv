@@ -31,7 +31,7 @@ STANDING_ASPECT_RATIO = 1.5    # h/w >= 1.5 → "standing" pose. Below this → 
 NO_TARGET_TIME_THRESH = 45     # Seconds of zero-standing-person before ABSENT fires
 
 # --- STATIC violation (per-person, perspective-aware) ---
-STATIC_TIME_THRESH    = 600    # Seconds — 10 min of continuous stillness before STATIC fires
+STATIC_TIME_THRESH    = 420    # Seconds — 7 min of continuous stillness before STATIC fires (per detection frequency spec)
 STATIC_THRESH_FLOOR   = 35     # Baseline pixel radius for "still"
 STATIC_THRESH_RATIO   = 0.20   # Adaptive radius = max(floor, bbox_h * ratio) — absorbs jitter on close-up cameras
 POSITION_WINDOW_SEC   = 30     # Rolling foot-position window in seconds (replaces fixed-frame deque)

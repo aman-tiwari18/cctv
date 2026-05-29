@@ -62,7 +62,7 @@ _gpu_queue = queue.Queue(maxsize=GPU_QUEUE_SIZE)
 # =====================================================
 # 🚀 GPU BATCH WORKER
 # =====================================================
-def _gpu_batch_worker(stop_event, save_folder, cooldown_time=900):
+def _gpu_batch_worker(stop_event, save_folder, cooldown_time=420):
     """
     GPU batch worker — TRUE batch inference.
     """

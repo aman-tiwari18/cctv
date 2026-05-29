@@ -169,6 +169,16 @@ const NewBadge = ({ addedAt, sx }) => {
   );
 };
 
+const getDetectionTcCode = (item = {}) => item.tcCode || item.tc_code || item.tc || '-';
+
+const getDetectionShiftName = (item = {}) => (
+  item.shiftName
+  || item.shift_name
+  || item.shift?.shift_name
+  || item.shift?.name
+  || (item.shift_id ? `Shift #${item.shift_id}` : '-')
+);
+
 function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onSkip }) {
   const meta = TYPE_META[item.type] || { label: item.type, color: '#94a3b8', bg: '#f1f5f9' };
   const [imgError, setImgError] = useState(false);
@@ -176,6 +186,8 @@ function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onS
   const centerName = item.centerName || item.centre_name || '-';
   const city = item.city || '-';
   const examDate = item.examDate || (item.date ? item.date.split('-').reverse().join('-') : '-');
+  const tcCode = getDetectionTcCode(item);
+  const shiftName = getDetectionShiftName(item);
   const invigilatorEventLabel = item.type === 'invigilator'
     ? (item.issueLabel || (item.issueType ? String(item.issueType).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : ''))
     : '';
@@ -292,6 +304,16 @@ function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onS
           <Typography sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
             {city}
           </Typography>
+
+          <Dns sx={{ fontSize: 14, color: '#777' }} />
+          <Typography noWrap title={tcCode} sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
+            TC Code: {tcCode}
+          </Typography>
+
+          <Event sx={{ fontSize: 14, color: '#777' }} />
+          <Typography noWrap title={shiftName} sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
+            Shift: {shiftName}
+          </Typography>
         </Box>
 
         {item.confidence != null && (
@@ -405,6 +427,9 @@ function Lightbox({ item, onClose }) {
             </Typography>
           )}
           {item.tcCode && <Typography variant="body2" color="#94a3b8">TC: {item.tcCode}</Typography>}
+          {(item.shiftName || item.shift_name || item.shift_id) && (
+            <Typography variant="body2" color="#94a3b8">Shift: {getDetectionShiftName(item)}</Typography>
+          )}
         </Box>
       </DialogContent>
     </Dialog>
@@ -466,6 +491,8 @@ const todayDate = formatDateDDMMYYYY(new Date());
 function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingToClient, pushedUids }) {
   const item = data[selectedIndex];
   const isPushed = item ? (pushedUids.has(item.uid || item.id || item.image_url) || item.pushed_to_client === 1 || item.pushed_to_client === true) : false;
+  const tcCode = item ? getDetectionTcCode(item) : '-';
+  const shiftName = item ? getDetectionShiftName(item) : '-';
   const itemRefs = useRef([]);
 
   const goNext = useCallback(() => onSelect(Math.min(data.length - 1, selectedIndex + 1)), [data.length, selectedIndex, onSelect]);
@@ -640,6 +667,16 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
                     <Typography sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
                       {item.city || '-'}
                     </Typography>
+
+                    <Dns sx={{ fontSize: 14, color: '#777' }} />
+                    <Typography noWrap title={tcCode} sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
+                      TC Code: {tcCode}
+                    </Typography>
+
+                    <Event sx={{ fontSize: 14, color: '#777' }} />
+                    <Typography noWrap title={shiftName} sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
+                      Shift: {shiftName}
+                    </Typography>
                     <Box
                       sx={{
                         display: 'flex',
@@ -647,6 +684,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
                         justifyContent: 'start',
                         gap: 2,
                         mt: 0.5,
+                        gridColumn: '1 / -1',
                       }}
                     >
                       <Typography
