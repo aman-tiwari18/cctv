@@ -20,15 +20,28 @@ SCRIPT_LOGS_DIR.mkdir(parents=True, exist_ok=True)
 SCRIPT_TERMINATE_GRACE_SECONDS = float(os.getenv("SCRIPT_TERMINATE_GRACE_SECONDS", "20"))
 
 
+def _sanitize_log_component(value: str, fallback: str) -> str:
+    """
+    Make a script/exam/shift name safe for use inside a filename.
+
+    Strips whitespace AND any character that is not alphanumeric, dot, or
+    hyphen — in particular path separators like '/' which appear in names such
+    as "Crowd Detection (Entry/Exit)" and would otherwise be treated as a
+    directory boundary, raising FileNotFoundError when the log file is opened.
+    """
+    cleaned = re.sub(r'[^A-Za-z0-9.\-]', '', str(value or ''))
+    return cleaned or fallback
+
+
 def _get_named_log_path(execution: dict) -> Path:
     """
     Build a log file path like:
       scripts/logs/ProximityDetection_JNTU_Morning_20260318.log
     """
     meta        = execution.get("execution_metadata", {})
-    script_name = re.sub(r'\s+', '', meta.get("script_name", "Script"))
-    exam_name   = re.sub(r'\s+', '', meta.get("exam_name",   "Exam"))
-    shift_name  = re.sub(r'\s+', '', meta.get("shift_name",  "Shift"))
+    script_name = _sanitize_log_component(meta.get("script_name"), "Script")
+    exam_name   = _sanitize_log_component(meta.get("exam_name"),   "Exam")
+    shift_name  = _sanitize_log_component(meta.get("shift_name"),  "Shift")
     date_str    = datetime.now(IST).strftime("%Y%m%d")
     filename    = f"{script_name}_{exam_name}_{shift_name}_{date_str}.log"
     return SCRIPT_LOGS_DIR / filename
