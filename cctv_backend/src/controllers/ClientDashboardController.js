@@ -930,11 +930,32 @@ exports.getOverview = async (req, res) => {
         );
 
         // Apply exam_id filter: intersect with the activeExams set.
-        const activeExams = examIdFilter !== null
+        let activeExams = examIdFilter !== null
             ? allActiveExams.filter((e) => e.id === examIdFilter)
             : allActiveExams;
 
-        // Classify exams by their date relationship to TODAY (real today, not the filter end).
+        // Apply shift_indexes filter: drop exams that don't have a shift at any of the
+        // selected chronological positions. Picking "Shift 2" narrows total_exams to
+        // exams that actually have a 2nd shift.
+        let targetShiftIds = null;
+        const useShiftFilter = shiftIndexes.length > 0;
+        if (useShiftFilter && activeExams.length > 0) {
+            const examIdsPreShift = activeExams.map((e) => e.id);
+            const shiftRows = await query(
+                `SELECT es.id, es.exam_id FROM exam_shifts es
+                 WHERE es.exam_id IN (?) AND es.is_active = 1
+                   AND ((SELECT COUNT(*) FROM exam_shifts es2
+                         WHERE es2.exam_id = es.exam_id
+                           AND es2.is_active = 1
+                           AND es2.start_time < es.start_time) + 1) IN (?)`,
+                [examIdsPreShift, shiftIndexes]
+            );
+            const examsWithMatchingShift = new Set(shiftRows.map((r) => r.exam_id));
+            activeExams = activeExams.filter((e) => examsWithMatchingShift.has(e.id));
+            targetShiftIds = shiftRows.map((r) => r.id);
+        }
+
+        // Classify exams by their date relationship to TODAY (post-filters).
         const todayStr = getLocalDateStr();
         const dateStr = (d) => (d instanceof Date ? getLocalDateStr(d) : String(d).slice(0, 10));
         let ongoing = 0, completedExams = 0, scheduledExams = 0;
@@ -948,26 +969,9 @@ exports.getOverview = async (req, res) => {
         const total = activeExams.length;
         const activeExamIds = activeExams.map((e) => e.id);
 
-        // Resolve target shift IDs when shift_indexes is non-empty.
-        let targetShiftIds = null;
-        if (shiftIndexes.length > 0 && activeExamIds.length > 0) {
-            const shiftRows = await query(
-                `SELECT es.id FROM exam_shifts es
-                 WHERE es.exam_id IN (?) AND es.is_active = 1
-                   AND ((SELECT COUNT(*) FROM exam_shifts es2
-                         WHERE es2.exam_id = es.exam_id
-                           AND es2.is_active = 1
-                           AND es2.start_time < es.start_time) + 1) IN (?)`,
-                [activeExamIds, shiftIndexes]
-            );
-            targetShiftIds = shiftRows.map((r) => r.id);
-        }
-        const useShiftFilter = shiftIndexes.length > 0;
-        const shiftFilterEmpty = useShiftFilter && (!targetShiftIds || targetShiftIds.length === 0);
-
         // Scripts/Analytics — honors exam_id + shift_indexes advanced filters.
         let scriptsAgg = { planned_today: 0, running: 0, scheduled: 0, completed: 0 };
-        if (activeExamIds.length > 0 && !shiftFilterEmpty) {
+        if (activeExamIds.length > 0) {
             let scriptsSql = `SELECT COUNT(*) AS planned_today,
                                     SUM(CASE WHEN ssa.status = 'RUNNING'   THEN 1 ELSE 0 END) AS running,
                                     SUM(CASE WHEN ssa.status = 'PENDING'   THEN 1 ELSE 0 END) AS scheduled,
@@ -1015,89 +1019,76 @@ exports.getOverview = async (req, res) => {
                 [activeExamIds]
             );
 
-            const promises = [hlsCamsP, rtspCamsP];
-
             const shiftClause = useShiftFilter ? ` AND shift_id IN (?)` : '';
             const shiftBind = useShiftFilter ? [targetShiftIds] : [];
 
-            let hlsDetP, rtspDetP, hlsDistP, rtspDistP;
-            if (!shiftFilterEmpty) {
-                hlsDetP = query(
-                    `SELECT COUNT(*) AS total,
-                            SUM(CASE WHEN pushed_to_client = 1 THEN 1 ELSE 0 END) AS pushed
-                     FROM camera_report_hls
-                     WHERE exam_id IN (?) AND created_at >= ? AND created_at < ?${shiftClause}`,
-                    [activeExamIds, dateStart, dateEnd, ...shiftBind]
-                );
-                rtspDetP = query(
-                    `SELECT COUNT(*) AS total,
-                            SUM(CASE WHEN pushed_to_client = 1 THEN 1 ELSE 0 END) AS pushed
-                     FROM camera_report_rtsp
-                     WHERE exam_id IN (?) AND created_at >= ? AND created_at < ?${shiftClause}`,
-                    [activeExamIds, dateStart, dateEnd, ...shiftBind]
-                );
-                hlsDistP = query(
-                    `SELECT detection_type,
-                            COUNT(*) AS total_count,
-                            SUM(CASE WHEN pushed_to_client = 1 THEN 1 ELSE 0 END) AS pushed_count
-                     FROM camera_report_hls
-                     WHERE exam_id IN (?) AND created_at >= ? AND created_at < ?${shiftClause}
-                     GROUP BY detection_type`,
-                    [activeExamIds, dateStart, dateEnd, ...shiftBind]
-                );
-                rtspDistP = query(
-                    `SELECT detection_type,
-                            COUNT(*) AS total_count,
-                            SUM(CASE WHEN pushed_to_client = 1 THEN 1 ELSE 0 END) AS pushed_count
-                     FROM camera_report_rtsp
-                     WHERE exam_id IN (?) AND created_at >= ? AND created_at < ?${shiftClause}
-                     GROUP BY detection_type`,
-                    [activeExamIds, dateStart, dateEnd, ...shiftBind]
-                );
-                promises.push(hlsDetP, rtspDetP, hlsDistP, rtspDistP);
-            }
+            const hlsDetP = query(
+                `SELECT COUNT(*) AS total,
+                        SUM(CASE WHEN pushed_to_client = 1 THEN 1 ELSE 0 END) AS pushed
+                 FROM camera_report_hls
+                 WHERE exam_id IN (?) AND created_at >= ? AND created_at < ?${shiftClause}`,
+                [activeExamIds, dateStart, dateEnd, ...shiftBind]
+            );
+            const rtspDetP = query(
+                `SELECT COUNT(*) AS total,
+                        SUM(CASE WHEN pushed_to_client = 1 THEN 1 ELSE 0 END) AS pushed
+                 FROM camera_report_rtsp
+                 WHERE exam_id IN (?) AND created_at >= ? AND created_at < ?${shiftClause}`,
+                [activeExamIds, dateStart, dateEnd, ...shiftBind]
+            );
+            const hlsDistP = query(
+                `SELECT detection_type,
+                        COUNT(*) AS total_count,
+                        SUM(CASE WHEN pushed_to_client = 1 THEN 1 ELSE 0 END) AS pushed_count
+                 FROM camera_report_hls
+                 WHERE exam_id IN (?) AND created_at >= ? AND created_at < ?${shiftClause}
+                 GROUP BY detection_type`,
+                [activeExamIds, dateStart, dateEnd, ...shiftBind]
+            );
+            const rtspDistP = query(
+                `SELECT detection_type,
+                        COUNT(*) AS total_count,
+                        SUM(CASE WHEN pushed_to_client = 1 THEN 1 ELSE 0 END) AS pushed_count
+                 FROM camera_report_rtsp
+                 WHERE exam_id IN (?) AND created_at >= ? AND created_at < ?${shiftClause}
+                 GROUP BY detection_type`,
+                [activeExamIds, dateStart, dateEnd, ...shiftBind]
+            );
 
-            const results = await Promise.all(promises);
-            const hlsCams = results[0];
-            const rtspCams = results[1];
+            const [hlsCams, rtspCams, hlsDet, rtspDet, hlsDist, rtspDist] = await Promise.all([
+                hlsCamsP, rtspCamsP, hlsDetP, rtspDetP, hlsDistP, rtspDistP,
+            ]);
 
             camerasAgg = {
                 total: Number(hlsCams[0]?.total || 0) + Number(rtspCams[0]?.total || 0),
                 acc:   Number(hlsCams[0]?.acc   || 0) + Number(rtspCams[0]?.acc   || 0),
             };
 
-            if (!shiftFilterEmpty) {
-                const hlsDet = results[2];
-                const rtspDet = results[3];
-                const hlsDist = results[4];
-                const rtspDist = results[5];
+            detectionsAgg = {
+                total:  Number(hlsDet[0]?.total  || 0) + Number(rtspDet[0]?.total  || 0),
+                pushed: Number(hlsDet[0]?.pushed || 0) + Number(rtspDet[0]?.pushed || 0),
+            };
 
-                detectionsAgg = {
-                    total:  Number(hlsDet[0]?.total  || 0) + Number(rtspDet[0]?.total  || 0),
-                    pushed: Number(hlsDet[0]?.pushed || 0) + Number(rtspDet[0]?.pushed || 0),
-                };
-
-                // CLIENT override: distribution[].count = pushed_count so the donut renders
-                // pushed-only counts (per spec). Total/false counts stay admin-equivalent.
-                const distMap = new Map();
-                const accumulate = (rows) => {
-                    rows.forEach((r) => {
-                        const type = r.detection_type || 'unknown';
-                        const cur = distMap.get(type) || { type, total_count: 0, pushed_count: 0 };
-                        cur.total_count += Number(r.total_count || 0);
-                        cur.pushed_count += Number(r.pushed_count || 0);
-                        distMap.set(type, cur);
-                    });
-                };
-                accumulate(hlsDist);
-                accumulate(rtspDist);
-                distribution = Array.from(distMap.values()).map((d) => ({
-                    type: d.type,
-                    count: d.pushed_count, // donut uses this — pushed-only on client
-                    pushed_count: d.pushed_count,
-                    accuracy: d.total_count > 0 ? ((d.pushed_count / d.total_count) * 100).toFixed(2) : '0.00',
-                }));
-            }
+            // CLIENT override: distribution[].count = pushed_count so the donut renders
+            // pushed-only counts (per spec). Total/false counts stay admin-equivalent.
+            const distMap = new Map();
+            const accumulate = (rows) => {
+                rows.forEach((r) => {
+                    const type = r.detection_type || 'unknown';
+                    const cur = distMap.get(type) || { type, total_count: 0, pushed_count: 0 };
+                    cur.total_count += Number(r.total_count || 0);
+                    cur.pushed_count += Number(r.pushed_count || 0);
+                    distMap.set(type, cur);
+                });
+            };
+            accumulate(hlsDist);
+            accumulate(rtspDist);
+            distribution = Array.from(distMap.values()).map((d) => ({
+                type: d.type,
+                count: d.pushed_count, // donut uses this — pushed-only on client
+                pushed_count: d.pushed_count,
+                accuracy: d.total_count > 0 ? ((d.pushed_count / d.total_count) * 100).toFixed(2) : '0.00',
+            }));
         }
 
         res.json({

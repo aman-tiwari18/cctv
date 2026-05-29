@@ -720,20 +720,22 @@ const ClientDetectionDashboard = () => {
                                                 fontFamily: 'Inter, sans-serif',
                                                 fontSize: '13px',
                                                 color: '#191B23',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: 1,
                                                 '&:hover': { bgcolor: '#F5F6FA' },
                                             }}
                                         >
+                                            <Box component="span">{s.label}</Box>
                                             <Box component="span" sx={{
-                                                display: 'inline-flex',
-                                                alignItems: 'center',
-                                                justifyContent: 'center',
-                                                minWidth: 22,
-                                                mr: 1,
-                                                fontSize: 14,
+                                                ml: 'auto',
+                                                color: '#94A3B8',
+                                                fontSize: '11px',
+                                                textTransform: 'uppercase',
+                                                letterSpacing: '0.5px',
                                             }}>
-                                                {s.category === 'date' ? '📅' : s.category === 'shift' ? '🕒' : '📚'}
+                                                {s.category}
                                             </Box>
-                                            {s.label}
                                         </ListItemButton>
                                     ))}
                                 </List>
