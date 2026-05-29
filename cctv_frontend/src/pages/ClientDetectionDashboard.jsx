@@ -22,6 +22,8 @@ import {
     TableRow,
     Typography,
     Grid,
+    useMediaQuery,
+    useTheme,
 } from '@mui/material';
 import { format, subDays } from 'date-fns';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
@@ -91,6 +93,8 @@ const TodaysScriptDistributionCard = () => {
     const [assignments, setAssignments] = useState([]);
     const [examShifts, setExamShifts] = useState([]);
     const [assignmentsLoading, setAssignmentsLoading] = useState(false);
+    const theme = useTheme();
+    const isXs = useMediaQuery(theme.breakpoints.down('sm'));
 
     // Load the exam dropdown from /client-dashboard/live-exams. Each row in
     // that response is an (exam, shift) tuple, so dedupe by exam_id.
@@ -181,12 +185,12 @@ const TodaysScriptDistributionCard = () => {
         border: '1px solid transparent',
         py: 1,
         px: 1,
-        height: 34,
+        height: isXs ? 30 : 34,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         fontFamily: 'Inter, sans-serif',
-        fontSize: '13px',
+        fontSize: isXs ? '12px' : '13px',
         fontWeight: 700,
         lineHeight: '16px',
         whiteSpace: 'nowrap',
@@ -239,12 +243,18 @@ const TodaysScriptDistributionCard = () => {
                 display: 'flex',
                 flexDirection: 'column',
             }}>
-                <Stack direction="row" justifyContent="space-between" alignItems="flex-start" sx={{ mb: 2 }}>
+                <Stack
+                    direction={{ xs: 'column', sm: 'row' }}
+                    justifyContent="space-between"
+                    alignItems={{ xs: 'stretch', sm: 'flex-start' }}
+                    spacing={{ xs: 1.5, sm: 0 }}
+                    sx={{ mb: 2 }}
+                >
                     <Box>
                         <Typography sx={{
                             color: '#191B23',
                             fontFamily: 'Inter, sans-serif',
-                            fontSize: '20px',
+                            fontSize: { xs: '17px', sm: '20px' },
                             fontWeight: 700,
                             lineHeight: '24px',
                         }}>
@@ -272,7 +282,7 @@ const TodaysScriptDistributionCard = () => {
                             </Typography>
                         </Stack>
                     </Box>
-                    <FormControl size="small" sx={{ minWidth: 160 }} disabled={examsLoading || exams.length === 0}>
+                    <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 160 } }} disabled={examsLoading || exams.length === 0}>
                         <Select
                             value={selectedExamId || ''}
                             onChange={(e) => setSelectedExamId(e.target.value)}
@@ -285,7 +295,7 @@ const TodaysScriptDistributionCard = () => {
                             }}
                             sx={{
                                 fontFamily: 'Inter, sans-serif',
-                                fontSize: '13px',
+                                fontSize: { xs: '12px', sm: '13px' },
                                 fontWeight: 500,
                                 color: '#191B23',
                                 borderRadius: '8px',
@@ -351,7 +361,7 @@ const TodaysScriptDistributionCard = () => {
                                                 <Typography sx={{
                                                     color: '#191B23',
                                                     fontFamily: 'Inter, sans-serif',
-                                                    fontSize: '14px',
+                                                    fontSize: { xs: '13px', sm: '14px' },
                                                     fontWeight: 500,
                                                     lineHeight: '18px',
                                                 }}>
@@ -586,8 +596,8 @@ const ClientDetectionDashboard = () => {
                     <Typography sx={{
                         fontFamily: 'Inter, sans-serif',
                         fontWeight: 700,
-                        fontSize: '26px',
-                        lineHeight: '32px',
+                        fontSize: { xs: '22px', sm: '26px' },
+                        lineHeight: { xs: '28px', sm: '32px' },
                         color: '#191B23',
                         letterSpacing: '0.2px',
                     }}>
@@ -597,7 +607,7 @@ const ClientDetectionDashboard = () => {
                         mt: 0.25,
                         fontFamily: 'Inter, sans-serif',
                         fontWeight: 400,
-                        fontSize: '14px',
+                        fontSize: { xs: '13px', sm: '14px' },
                         lineHeight: '20px',
                         color: '#303336',
                     }}>
@@ -623,7 +633,7 @@ const ClientDetectionDashboard = () => {
                         <ErrorOutlineRoundedIcon sx={{ fontSize: 18, color: '#93000A' }} />
                         <Typography sx={{
                             fontFamily: 'Inter, sans-serif',
-                            fontSize: '13px',
+                            fontSize: { xs: '12px', sm: '13px' },
                             fontWeight: 500,
                             lineHeight: '16px',
                             whiteSpace: 'nowrap',
@@ -662,8 +672,8 @@ const ClientDetectionDashboard = () => {
                         bgcolor: '#fff',
                         border: '1px solid #E5E7EB',
                         borderRadius: '10px',
-                        px: 2,
-                        py: 1.25,
+                        px: { xs: 1.5, sm: 2 },
+                        py: { xs: 1, sm: 1.25 },
                         display: 'flex',
                         alignItems: 'center',
                     }}
@@ -675,7 +685,7 @@ const ClientDetectionDashboard = () => {
                         onChange={(e) => setSearchKeyword(e.target.value)}
                         sx={{
                             fontFamily: 'Inter, sans-serif',
-                            fontSize: '14px',
+                            fontSize: { xs: '13px', sm: '14px' },
                             fontWeight: 500,
                             color: '#191B23',
                             '& input::placeholder': { color: '#94A3B8', opacity: 1 },
@@ -694,7 +704,7 @@ const ClientDetectionDashboard = () => {
                             borderRadius: '10px',
                             border: '1px solid #E5E7EB',
                             boxShadow: '0 8px 24px rgba(0,0,0,0.08)',
-                            maxHeight: 320,
+                            maxHeight: { xs: '50vh', sm: 320 },
                             overflowY: 'auto',
                         }}>
                             {suggestions.length === 0 ? (
@@ -811,10 +821,10 @@ const ClientDetectionDashboard = () => {
                                 color: active ? '#fff' : '#191B23',
                                 border: active ? 'none' : '1px solid #E5E7EB',
                                 borderRadius: 999,
-                                px: 1.75,
+                                px: { xs: 1.25, sm: 1.75 },
                                 py: 0.5,
                                 fontFamily: 'Inter, sans-serif',
-                                fontSize: '14px',
+                                fontSize: { xs: '13px', sm: '14px' },
                                 fontWeight: 500,
                                 cursor: 'pointer',
                                 '&:hover': active ? { bgcolor: '#3F47B0' } : { borderColor: '#CBD5E1' },
@@ -834,7 +844,7 @@ const ClientDetectionDashboard = () => {
                     spacing={1}
                     flexWrap="wrap"
                     useFlexGap
-                    sx={{ mb: 2.5 }}
+                    sx={{ mb: { xs: 1.5, sm: 2.5 } }}
                 >
                     {activeFilters.map((f) => (
                         <Chip
@@ -846,7 +856,7 @@ const ClientDetectionDashboard = () => {
                                 bgcolor: '#E5E5FF',
                                 color: '#4B53C9',
                                 fontFamily: 'Inter, sans-serif',
-                                fontSize: '13px',
+                                fontSize: { xs: '12px', sm: '13px' },
                                 fontWeight: 500,
                                 borderRadius: 999,
                                 height: 28,
@@ -866,7 +876,7 @@ const ClientDetectionDashboard = () => {
                             bgcolor: 'transparent',
                             color: '#4B53C9',
                             fontFamily: 'Inter, sans-serif',
-                            fontSize: '13px',
+                            fontSize: { xs: '12px', sm: '13px' },
                             fontWeight: 500,
                             cursor: 'pointer',
                             px: 0.5,
@@ -889,7 +899,7 @@ const ClientDetectionDashboard = () => {
             />
 
             {/* Row 1 — 4 KPI cards */}
-            <Grid container spacing={2.5} sx={{ mb: 2.5 }}>
+            <Grid container spacing={{ xs: 1.5, sm: 2, lg: 2.5 }} sx={{ mb: { xs: 2, sm: 2.5 } }}>
                 <Grid item xs={12} sm={6} lg={3}>
                     <KpiCard
                         title="TOTAL EXAMS"

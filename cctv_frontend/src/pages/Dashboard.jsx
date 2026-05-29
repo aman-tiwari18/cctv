@@ -26,6 +26,8 @@ import {
     TablePagination,
     TableRow,
     Typography,
+    useMediaQuery,
+    useTheme,
 } from '@mui/material';
 import { LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -209,27 +211,31 @@ export const KpiCard = ({ title, value, icon, chips = [], loading }) => (
                     sx={{
                         bgcolor: KPI_ICON_BG,
                         borderRadius: '8px',
-                        width: 40,
-                        height: 40,
+                        // 4-step gradient: shrinks again at lg because the KPI grid
+                        // goes 4-up, making each card narrower than at md (2-up).
+                        width:  { xs: 32, sm: 36, md: 40, lg: 36 },
+                        height: { xs: 32, sm: 36, md: 40, lg: 36 },
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                     }}
                 >
-                    {React.cloneElement(icon, { sx: { fontSize: 18, color: KPI_ICON_COLOR } })}
+                    {React.cloneElement(icon, { sx: { fontSize: { xs: 14, sm: 16, md: 18, lg: 16 }, color: KPI_ICON_COLOR } })}
                 </Box>
             </Stack>
 
-            <Box sx={{ mt: 1.5, mb: 2, minHeight: 48 }}>
+            <Box sx={{ mt: 1.5, mb: 2, minHeight: { xs: 36, sm: 44, md: 48, lg: 44 } }}>
                 {loading ? (
                     <CircularProgress size={22} />
                 ) : (
                     <Typography
                         sx={{
-                            fontSize: '36px',
+                            // md peaks (2-up KPI grid has the widest cards);
+                            // lg drops back so the 4-up layout doesn't look bloated.
+                            fontSize:   { xs: '28px', sm: '32px', md: '38px', lg: '34px' },
                             fontWeight: 700,
                             color: '#2E68C9',
-                            lineHeight: '42px',
+                            lineHeight: { xs: '34px', sm: '38px', md: '44px', lg: '40px' },
                         }}
                     >
                         {Number(value || 0).toLocaleString()}
@@ -257,17 +263,20 @@ export const KpiCard = ({ title, value, icon, chips = [], loading }) => (
                                 bgcolor: tone.bg,
                                 color: tone.text,
                                 borderRadius: '8px',
-                                height: 51,
+                                // 4-step gradient so the pill sits balanced in every
+                                // KPI layout regime — peaks at md (widest cards),
+                                // pulls back at lg (narrower 4-up cards).
+                                height: { xs: 44, sm: 48, md: 51, lg: 48 },
                                 py: 0,
-                                px: 0.4,
+                                px: { xs: 0.3, sm: 0.4, md: 0.5, lg: 0.35 },
                                 boxShadow: '0 1px 2px 0 rgba(0,0,0,0.05)',
                                 fontFamily: 'Manrope, Inter, sans-serif',
                                 '& .MuiChip-label': {
-                                    px: 1.2,
-                                    fontSize: '12px',
+                                    px: { xs: 1, sm: 1.1, md: 1.2, lg: 1 },
+                                    fontSize:   { xs: '11px', sm: '12px', md: '12px', lg: '11.5px' },
                                     fontWeight: 600,
-                                    lineHeight: '17px',
-                                    letterSpacing: '1px',
+                                    lineHeight: { xs: '15px', sm: '17px', md: '17px', lg: '15px' },
+                                    letterSpacing: { xs: '0.5px', md: '1px' },
                                     textTransform: 'capitalize',
                                 },
                             }}
@@ -368,12 +377,21 @@ export const DetectionDistributionCard = ({ distribution = [], loading }) => {
     const [activeKey, setActiveKey] = useState(null);
     const [mousePos, setMousePos] = useState(null);
 
-    // Fixed donut geometry — recharts ResponsiveContainer handles the overall responsive
-    // sizing, but the ring itself is rendered with stable pixel radii so it always renders
-    // immediately on first paint (no measurement step, no zero-radius flash).
-    const OUTER_R = 126;
-    const INNER_R = 106;
-    const BOX_HEIGHT = 280;
+    // Donut radii follow the actual measured chart container so the half-circle
+    // grows on wide screens and shrinks (without clipping) on narrow ones,
+    // instead of being locked to fixed pixel sizes per breakpoint.
+    // cy = 65%, so the arc's height budget is 62% of container H (3% margin).
+    // Horizontally it can occupy almost the full width — outerR ≤ W/2 - 8px.
+    const [chartSize, setChartSize] = useState({ w: 0, h: 0 });
+    const outerR = (chartSize.w > 0 && chartSize.h > 0)
+        ? Math.max(40, Math.min(chartSize.w / 2 - 8, chartSize.h * 0.62))
+        : 100;
+    const innerR = outerR * (106 / 126);
+    // Center value font tracks innerR so the number stays in proportion to the
+    // donut hole at every viewport — not just at the sm boundary.
+    const centerFontPx = Math.round(Math.max(24, Math.min(56, innerR * 0.42)));
+    const centerLineHt = Math.round(centerFontPx * 1.1);
+    const BOX_HEIGHT_SX = { xs: 220, sm: 260, md: 280, lg: 320 };
 
     // Build tree: 3 parent categories, each with its sub-detections
     const tree = useMemo(() => {
@@ -425,7 +443,7 @@ export const DetectionDistributionCard = ({ distribution = [], loading }) => {
         <Card sx={{ height: '100%', bgcolor: '#fff', borderRadius: '8px', boxShadow: '0 2px 4px 0 rgba(0,0,0,0.05)' }}>
             <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
                 <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-                    <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '20px', fontWeight: 700, lineHeight: '24px' }}>
+                    <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: { xs: '17px', sm: '20px' }, fontWeight: 700, lineHeight: '24px' }}>
                         Detection Distribution
                     </Typography>
                     <Stack direction="row" alignItems="center" spacing={1}>
@@ -451,20 +469,20 @@ export const DetectionDistributionCard = ({ distribution = [], loading }) => {
                         >
                             Export
                         </Button>
-                        <FormControl size="small" sx={{ minWidth: 180 }}>
+                        <FormControl size="small" sx={{ minWidth: { xs: 140, sm: 180 } }}>
                             <Select
                                 value={category}
                                 onChange={(e) => setCategory(e.target.value)}
                                 sx={{
-                                    fontSize: '13px',
+                                    fontSize: { xs: '12px', sm: '13px' },
                                     borderRadius: '8px',
-                                    '& .MuiSelect-select': { fontSize: '13px', py: 0.75 },
+                                    '& .MuiSelect-select': { fontSize: { xs: '12px', sm: '13px' }, py: 0.75 },
                                 }}
                                 MenuProps={{
                                     PaperProps: {
                                         sx: {
                                             '& .MuiMenuItem-root': {
-                                                fontSize: '13px',
+                                                fontSize: { xs: '12px', sm: '13px' },
                                                 minHeight: 32,
                                                 py: 0.75,
                                             },
@@ -495,7 +513,7 @@ export const DetectionDistributionCard = ({ distribution = [], loading }) => {
                             <Box
                                 sx={{
                                     position: 'relative',
-                                    height: BOX_HEIGHT,
+                                    height: BOX_HEIGHT_SX,
                                     overflow: 'visible',
                                     '& svg': { overflow: 'visible' },
                                 }}
@@ -505,7 +523,11 @@ export const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                 }}
                                 onMouseLeave={() => { setMousePos(null); setActiveKey(null); }}
                             >
-                                <ResponsiveContainer width="100%" height="100%">
+                                <ResponsiveContainer
+                                    width="100%"
+                                    height="100%"
+                                    onResize={(w, h) => setChartSize({ w, h })}
+                                >
                                     <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                                         <Pie
                                             data={donutData}
@@ -513,8 +535,8 @@ export const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                             cy="65%"
                                             startAngle={180}
                                             endAngle={0}
-                                            innerRadius={INNER_R}
-                                            outerRadius={OUTER_R}
+                                            innerRadius={innerR}
+                                            outerRadius={outerR}
                                             paddingAngle={0}
                                             cornerRadius={0}
                                             dataKey="count"
@@ -553,7 +575,9 @@ export const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                 <Box
                                     sx={{
                                         position: 'absolute',
-                                        bottom: 98,
+                                        // cy is at 65% of height; sit the label group ON that line
+                                        // so it stays centered in the donut hole at any box height.
+                                        bottom: '35%',
                                         left: 0,
                                         right: 0,
                                         display: 'flex',
@@ -564,10 +588,10 @@ export const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                 >
                                     <Typography sx={{
                                         fontFamily: 'Inter, sans-serif',
-                                        fontSize: '48px',
+                                        fontSize: `${centerFontPx}px`,
                                         fontWeight: 700,
                                         color: '#2E68C9',
-                                        lineHeight: '60px',
+                                        lineHeight: `${centerLineHt}px`,
                                     }}>
                                         {centerValue.toLocaleString()}
                                     </Typography>
@@ -581,7 +605,7 @@ export const DetectionDistributionCard = ({ distribution = [], loading }) => {
                         </Grid>
 
                         <Grid item xs={12} sm={5}>
-                            <Box sx={{ maxHeight: BOX_HEIGHT, overflowY: 'auto', pr: 0.5, pt: 1 }}>
+                            <Box sx={{ maxHeight: BOX_HEIGHT_SX, overflowY: 'auto', pr: 0.5, pt: 1 }}>
                                 <Stack spacing={1.5}>
                                     {donutData.map((slice) => {
                                         const pct = donutTotal > 0 ? (slice.count / donutTotal) * 100 : 0;
@@ -602,14 +626,25 @@ export const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                                 }}
                                             >
                                                 <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: slice.color, flexShrink: 0 }} />
-                                                <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '14px', fontWeight: isActive ? 700 : 500, lineHeight: '20px' }}>
+                                                <Typography sx={{
+                                                    color: '#191B23',
+                                                    fontFamily: 'Inter, sans-serif',
+                                                    fontSize: { xs: '13px', sm: '14px' },
+                                                    fontWeight: isActive ? 700 : 500,
+                                                    lineHeight: '20px',
+                                                    minWidth: 0,
+                                                    flexShrink: 1,
+                                                    overflow: 'hidden',
+                                                    textOverflow: 'ellipsis',
+                                                    whiteSpace: 'nowrap',
+                                                }}>
                                                     {slice.label}
                                                 </Typography>
-                                                <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: '14px', fontWeight: 500, lineHeight: '20px' }}>
+                                                <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: { xs: '13px', sm: '14px' }, fontWeight: 500, lineHeight: '20px', flexShrink: 0 }}>
                                                     {slice.count.toLocaleString()}
                                                 </Typography>
-                                                <Box sx={{ flexGrow: 1 }} />
-                                                <Typography sx={{ color: '#64748B', fontFamily: 'Inter, sans-serif', fontSize: '14px', fontWeight: 500, lineHeight: '20px', whiteSpace: 'nowrap' }}>
+                                                <Box sx={{ flexGrow: 1, minWidth: 4 }} />
+                                                <Typography sx={{ color: '#64748B', fontFamily: 'Inter, sans-serif', fontSize: { xs: '13px', sm: '14px' }, fontWeight: 500, lineHeight: '20px', whiteSpace: 'nowrap', flexShrink: 0 }}>
                                                     ({pct.toFixed(0)}%)
                                                 </Typography>
                                             </Stack>
@@ -655,6 +690,33 @@ const GpuPerformanceCard = () => {
     // Optimal Efficiency mini gauge — visual only, ~82% filled.
     const miniData = buildGaugeSegments(82);
 
+    // Gauges measure their own containers via ResponsiveContainer.onResize and
+    // derive radii from the live width/height. With cy=100%, the arc occupies
+    // ~outerR pixels of height and 2*outerR of width, so the cap is the smaller
+    // of (W/2 - 4px margin) and (H - 6px margin). This keeps the half-circle
+    // flush to the card edges on wide screens AND uncllipped on narrow ones.
+    const [gaugeSize, setGaugeSize] = useState({ w: 0, h: 0 });
+    const [miniSize,  setMiniSize]  = useState({ w: 0, h: 0 });
+
+    const gaugeOuter = (gaugeSize.w > 0 && gaugeSize.h > 0)
+        ? Math.max(60, Math.min(gaugeSize.w / 2 - 4, gaugeSize.h - 6))
+        : 130;
+    const gaugeInner = gaugeOuter * (128 / 150);
+
+    const miniOuter = (miniSize.w > 0 && miniSize.h > 0)
+        ? Math.max(40, Math.min(miniSize.w / 2 - 4, miniSize.h - 6))
+        : 80;
+    const miniInner = miniOuter * (72 / 92);
+
+    // Text inside the gauges tracks the same source that drives the radii,
+    // so the labels stay in proportion to the half-circles continuously.
+    const gaugeValuePx = Math.round(Math.max(20, Math.min(40, gaugeOuter * 0.22)));
+    const miniLabelPx  = Math.round(Math.max(11, Math.min(15, miniOuter  * 0.15)));
+    const miniStarPx   = Math.round(Math.max(14, Math.min(22, miniOuter  * 0.22)));
+
+    const gaugeHeight = { xs: 150, sm: 170, md: 190, lg: 210 };
+    const miniHeight  = { xs: 90,  sm: 100, md: 110, lg: 120 };
+
     return (
         <Card sx={{ height: '100%' }}>
             <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
@@ -662,7 +724,7 @@ const GpuPerformanceCard = () => {
                     <Typography sx={{
                         color: '#191B23',
                         fontFamily: 'Inter, sans-serif',
-                        fontSize: '20px',
+                        fontSize: { xs: '17px', sm: '20px' },
                         fontWeight: 700,
                         lineHeight: '24px',
                     }}>
@@ -672,7 +734,7 @@ const GpuPerformanceCard = () => {
                         mt: 0.75,
                         color: '#303336',
                         fontFamily: 'Inter, sans-serif',
-                        fontSize: '13px',
+                        fontSize: { xs: '12px', sm: '13px' },
                         fontWeight: 400,
                         lineHeight: '18px',
                     }}>
@@ -681,16 +743,20 @@ const GpuPerformanceCard = () => {
                 </Box>
 
                 <Grid container spacing={2} alignItems="flex-start">
-                    <Grid item xs={12} sm={7}>
-                        <Box sx={{ position: 'relative', height: 170 }}>
-                            <ResponsiveContainer width="100%" height="100%">
+                    <Grid item xs={12} md={7}>
+                        <Box sx={{ position: 'relative', height: gaugeHeight }}>
+                            <ResponsiveContainer
+                                width="100%"
+                                height="100%"
+                                onResize={(w, h) => setGaugeSize({ w, h })}
+                            >
                                 <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                                     <Pie
                                         data={gaugeData}
                                         cx="50%"
                                         cy="100%"
-                                        innerRadius={128}
-                                        outerRadius={150}
+                                        innerRadius={gaugeInner}
+                                        outerRadius={gaugeOuter}
                                         startAngle={180}
                                         endAngle={0}
                                         paddingAngle={0}
@@ -718,9 +784,9 @@ const GpuPerformanceCard = () => {
                                 <Typography sx={{
                                     color: '#2E68C9',
                                     fontFamily: 'Inter, sans-serif',
-                                    fontSize: '32px',
+                                    fontSize: `${gaugeValuePx}px`,
                                     fontWeight: 700,
-                                    lineHeight: '36px',
+                                    lineHeight: 1.15,
                                 }}>
                                     {utilization}%
                                 </Typography>
@@ -743,7 +809,7 @@ const GpuPerformanceCard = () => {
                             sx={{
                                 mt: 1.5,
                                 mx: 'auto',
-                                maxWidth: 240,
+                                maxWidth: { xs: '100%', sm: 240 },
                                 bgcolor: '#fff',
                                 border: '1px solid #E5E7EB',
                                 borderRadius: '10px',
@@ -755,7 +821,7 @@ const GpuPerformanceCard = () => {
                             <Typography sx={{
                                 color: '#7A7A7A',
                                 fontFamily: 'Inter, sans-serif',
-                                fontSize: '13px',
+                                fontSize: { xs: '12px', sm: '13px' },
                                 fontWeight: 400,
                                 lineHeight: '18px',
                             }}>
@@ -764,7 +830,7 @@ const GpuPerformanceCard = () => {
                             <Typography sx={{
                                 color: '#191B23',
                                 fontFamily: 'Inter, sans-serif',
-                                fontSize: '13px',
+                                fontSize: { xs: '12px', sm: '13px' },
                                 fontWeight: 500,
                                 lineHeight: '18px',
                                 letterSpacing: '0.5px',
@@ -775,17 +841,21 @@ const GpuPerformanceCard = () => {
                         </Box>
                     </Grid>
 
-                    <Grid item xs={12} sm={5}>
+                    <Grid item xs={12} md={5}>
                         <Stack spacing={1.75}>
-                            <Box sx={{ position: 'relative', height: 100 }}>
-                                <ResponsiveContainer width="100%" height="100%">
+                            <Box sx={{ position: 'relative', height: miniHeight }}>
+                                <ResponsiveContainer
+                                    width="100%"
+                                    height="100%"
+                                    onResize={(w, h) => setMiniSize({ w, h })}
+                                >
                                     <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                                         <Pie
                                             data={miniData}
                                             cx="50%"
                                             cy="100%"
-                                            innerRadius={72}
-                                            outerRadius={92}
+                                            innerRadius={miniInner}
+                                            outerRadius={miniOuter}
                                             startAngle={180}
                                             endAngle={0}
                                             dataKey="value"
@@ -807,7 +877,7 @@ const GpuPerformanceCard = () => {
                                     pb: '4px',
                                     pointerEvents: 'none',
                                 }}>
-                                    <Box component="svg" width={18} height={17} viewBox="0 0 20 19">
+                                    <Box component="svg" width={miniStarPx} height={miniStarPx} viewBox="0 0 20 19">
                                         <path
                                             fill="#4D87EA"
                                             d="M9.51062 0L12.7552 5.53423L19.0212 6.90983L14.7605 11.7058L15.3885 18.0902L9.51062 15.52L3.63277 18.0902L4.26079 11.7058L5.53131e-05 6.90983L6.26605 5.53423L9.51062 0Z"
@@ -817,9 +887,9 @@ const GpuPerformanceCard = () => {
                                         mt: 0.25,
                                         color: '#4D87EA',
                                         fontFamily: 'Inter, sans-serif',
-                                        fontSize: '13px',
+                                        fontSize: `${miniLabelPx}px`,
                                         fontWeight: 600,
-                                        lineHeight: '16px',
+                                        lineHeight: 1.25,
                                     }}>
                                         Optimal
                                     </Typography>
@@ -877,7 +947,7 @@ const GpuPerformanceCard = () => {
                                     mt: 0.5,
                                     color: '#191B23',
                                     fontFamily: 'Inter, sans-serif',
-                                    fontSize: '22px',
+                                    fontSize: { xs: '20px', sm: '22px' },
                                     fontWeight: 800,
                                     lineHeight: '26px',
                                 }}>
@@ -916,7 +986,7 @@ const GpuPerformanceCard = () => {
                                     mt: 0.5,
                                     color: '#2E68C9',
                                     fontFamily: 'Inter, sans-serif',
-                                    fontSize: '22px',
+                                    fontSize: { xs: '20px', sm: '22px' },
                                     fontWeight: 800,
                                     lineHeight: '26px',
                                 }}>
@@ -1048,7 +1118,7 @@ export const LiveExamsCard = ({ fetcher = dashboardAPI.getLiveExams }) => {
                     <Typography sx={{
                         fontFamily: 'Inter, sans-serif',
                         fontWeight: 700,
-                        fontSize: '20px',
+                        fontSize: { xs: '17px', sm: '20px' },
                         lineHeight: '24px',
                         color: '#191B23',
                     }}>
@@ -1086,14 +1156,14 @@ export const LiveExamsCard = ({ fetcher = dashboardAPI.getLiveExams }) => {
                     <Table>
                         <TableHead sx={{ bgcolor: HEADER_BG }}>
                             <TableRow>
-                                <TableCell sx={{ ...headerCellSx, width: 36, p: 0 }} />
+                                <TableCell sx={{ ...headerCellSx, width: 36, p: 0, display: { xs: 'none', sm: 'table-cell' } }} />
                                 <TableCell sx={headerCellSx}>Exam</TableCell>
                                 <TableCell sx={headerCellSx}>Date</TableCell>
                                 <TableCell sx={headerCellSx}>Shift &amp; Time</TableCell>
                                 <TableCell sx={headerCellSx}>Cameras</TableCell>
                                 <TableCell sx={headerCellSx}>Scripts</TableCell>
                                 <TableCell sx={headerCellSx}>Detections</TableCell>
-                                <TableCell sx={{ ...headerCellSx, width: 110 }} />
+                                <TableCell sx={{ ...headerCellSx, width: 110, display: { xs: 'none', sm: 'table-cell' } }} />
                             </TableRow>
                         </TableHead>
                         <TableBody>
@@ -1112,20 +1182,20 @@ export const LiveExamsCard = ({ fetcher = dashboardAPI.getLiveExams }) => {
                             ) : (
                                 rows.map((row) => (
                                     <TableRow key={`${row.exam_id}::${row.shift_id}`} hover>
-                                        <TableCell sx={{ ...bodyCellSx, width: 36, p: 0, textAlign: 'center', color: '#94A3B8' }}>
+                                        <TableCell sx={{ ...bodyCellSx, width: 36, p: 0, textAlign: 'center', color: '#94A3B8', display: { xs: 'none', sm: 'table-cell' } }}>
                                             <KeyboardArrowDownRoundedIcon sx={{ fontSize: 20, color: '#94A3B8', verticalAlign: 'middle' }} />
                                         </TableCell>
-                                        <TableCell sx={{ ...bodyCellSx, fontWeight: 700 }}>
+                                        <TableCell sx={{ ...bodyCellSx, fontWeight: 700, fontSize: { xs: '13px', sm: '14px' } }}>
                                             {row.exam_name}
                                         </TableCell>
-                                        <TableCell sx={{ ...bodyCellSx, color: BODY_MID }}>
+                                        <TableCell sx={{ ...bodyCellSx, color: BODY_MID, fontSize: { xs: '13px', sm: '14px' } }}>
                                             {formatShortDate(row.date)}
                                         </TableCell>
                                         <TableCell sx={bodyCellSx}>
                                             <Typography sx={{
                                                 fontFamily: 'Inter, sans-serif',
                                                 fontWeight: 700,
-                                                fontSize: '14px',
+                                                fontSize: { xs: '13px', sm: '14px' },
                                                 color: BODY_DARK,
                                                 lineHeight: '18px',
                                             }}>
@@ -1133,7 +1203,7 @@ export const LiveExamsCard = ({ fetcher = dashboardAPI.getLiveExams }) => {
                                             </Typography>
                                             <Typography sx={{
                                                 fontFamily: 'Inter, sans-serif',
-                                                fontSize: '12px',
+                                                fontSize: { xs: '11px', sm: '12px' },
                                                 color: BODY_LIGHT,
                                                 lineHeight: '15px',
                                                 mt: 0.25,
@@ -1141,16 +1211,16 @@ export const LiveExamsCard = ({ fetcher = dashboardAPI.getLiveExams }) => {
                                                 {formatHMM(row.shift_start)} - {formatHMM(row.shift_end)}
                                             </Typography>
                                         </TableCell>
-                                        <TableCell sx={{ ...bodyCellSx, color: ACCENT_BLUE, fontWeight: 700 }}>
+                                        <TableCell sx={{ ...bodyCellSx, color: ACCENT_BLUE, fontWeight: 700, fontSize: { xs: '13px', sm: '14px' } }}>
                                             {Number(row.cameras || 0).toLocaleString()}
                                         </TableCell>
-                                        <TableCell sx={{ ...bodyCellSx, color: ACCENT_BLUE, fontWeight: 700 }}>
+                                        <TableCell sx={{ ...bodyCellSx, color: ACCENT_BLUE, fontWeight: 700, fontSize: { xs: '13px', sm: '14px' } }}>
                                             {Number(row.scripts || 0).toLocaleString()}
                                         </TableCell>
-                                        <TableCell sx={{ ...bodyCellSx, color: BODY_DARK }}>
+                                        <TableCell sx={{ ...bodyCellSx, color: BODY_DARK, fontSize: { xs: '13px', sm: '14px' } }}>
                                             {Number(row.detections || 0).toLocaleString()}
                                         </TableCell>
-                                        <TableCell sx={{ ...bodyCellSx, width: 110, color: ACCENT_BLUE, fontWeight: 600, cursor: 'pointer' }}>
+                                        <TableCell sx={{ ...bodyCellSx, width: 110, color: ACCENT_BLUE, fontWeight: 600, cursor: 'pointer', display: { xs: 'none', sm: 'table-cell' } }}>
                                             View Details
                                         </TableCell>
                                     </TableRow>
@@ -1176,7 +1246,7 @@ export const LiveExamsCard = ({ fetcher = dashboardAPI.getLiveExams }) => {
                         '.MuiTablePagination-toolbar': { minHeight: '44px !important', px: 1 },
                         '.MuiTablePagination-selectLabel, .MuiTablePagination-select, .MuiTablePagination-displayedRows': {
                             m: 0,
-                            fontSize: 13,
+                            fontSize: { xs: 12, sm: 13 },
                             color: '#334155',
                         },
                     }}
@@ -1292,11 +1362,14 @@ export const AdvancedFiltersDialog = ({
             : [...prev, n].sort((a, b) => a - b));
     };
 
+    const theme = useTheme();
+    const fullScreen = useMediaQuery(theme.breakpoints.down('sm'));
+
     const fieldLabelSx = {
         mb: 0.75,
         color: '#5C5F61',
         fontFamily: 'Inter, sans-serif',
-        fontSize: '13px',
+        fontSize: { xs: '12px', sm: '13px' },
         fontWeight: 500,
     };
 
@@ -1304,12 +1377,13 @@ export const AdvancedFiltersDialog = ({
         <Dialog
             open={open}
             onClose={onClose}
+            fullScreen={fullScreen}
             PaperProps={{
                 sx: {
-                    borderRadius: '14px',
-                    width: 640,
-                    maxWidth: '90vw',
-                    p: 2.5,
+                    borderRadius: fullScreen ? 0 : '14px',
+                    width: fullScreen ? '100%' : 640,
+                    maxWidth: fullScreen ? '100%' : '90vw',
+                    p: { xs: 2, sm: 2.5 },
                 },
             }}
         >
@@ -1400,7 +1474,7 @@ export const AdvancedFiltersDialog = ({
                                 disabled={examOptionsLoading}
                                 sx={{
                                     fontFamily: 'Inter, sans-serif',
-                                    fontSize: '14px',
+                                    fontSize: { xs: '13px', sm: '14px' },
                                     borderRadius: '10px',
                                     '& .MuiSelect-select': { py: 1.25 },
                                 }}
@@ -1434,7 +1508,7 @@ export const AdvancedFiltersDialog = ({
                                             color: active ? '#4B53C9' : '#191B23',
                                             border: `1px solid ${active ? '#4B53C9' : '#E5E7EB'}`,
                                             fontFamily: 'Inter, sans-serif',
-                                            fontSize: '14px',
+                                            fontSize: { xs: '13px', sm: '14px' },
                                             fontWeight: 500,
                                             cursor: 'pointer',
                                             '&:hover': { borderColor: '#4B53C9' },
@@ -1461,7 +1535,7 @@ export const AdvancedFiltersDialog = ({
                                         '& .MuiOutlinedInput-root': {
                                             borderRadius: '10px',
                                             fontFamily: 'Inter, sans-serif',
-                                            fontSize: '14px',
+                                            fontSize: { xs: '13px', sm: '14px' },
                                         },
                                     },
                                 },
@@ -1483,7 +1557,7 @@ export const AdvancedFiltersDialog = ({
                                         '& .MuiOutlinedInput-root': {
                                             borderRadius: '10px',
                                             fontFamily: 'Inter, sans-serif',
-                                            fontSize: '14px',
+                                            fontSize: { xs: '13px', sm: '14px' },
                                         },
                                     },
                                 },
@@ -1501,7 +1575,7 @@ export const AdvancedFiltersDialog = ({
                             textTransform: 'none',
                             fontFamily: 'Inter, sans-serif',
                             fontWeight: 500,
-                            fontSize: '14px',
+                            fontSize: { xs: '13px', sm: '14px' },
                             color: '#5C5F61',
                             borderColor: '#E5E7EB',
                             borderRadius: '10px',
@@ -1522,7 +1596,7 @@ export const AdvancedFiltersDialog = ({
                             textTransform: 'none',
                             fontFamily: 'Inter, sans-serif',
                             fontWeight: 700,
-                            fontSize: '14px',
+                            fontSize: { xs: '13px', sm: '14px' },
                             borderRadius: '10px',
                             px: 3,
                             py: 1,
@@ -1752,8 +1826,8 @@ const Dashboard = () => {
                     <Typography sx={{
                         fontFamily: 'Inter, sans-serif',
                         fontWeight: 700,
-                        fontSize: '26px',
-                        lineHeight: '32px',
+                        fontSize: { xs: '22px', sm: '26px' },
+                        lineHeight: { xs: '28px', sm: '32px' },
                         color: '#191B23',
                         letterSpacing: '0.2px',
                     }}>
@@ -1763,7 +1837,7 @@ const Dashboard = () => {
                         mt: 0.25,
                         fontFamily: 'Inter, sans-serif',
                         fontWeight: 400,
-                        fontSize: '14px',
+                        fontSize: { xs: '13px', sm: '14px' },
                         lineHeight: '20px',
                         color: '#303336',
                     }}>
@@ -1789,7 +1863,7 @@ const Dashboard = () => {
                         <ErrorOutlineRoundedIcon sx={{ fontSize: 18, color: '#93000A' }} />
                         <Typography sx={{
                             fontFamily: 'Inter, sans-serif',
-                            fontSize: '13px',
+                            fontSize: { xs: '12px', sm: '13px' },
                             fontWeight: 500,
                             lineHeight: '16px',
                             whiteSpace: 'nowrap',
@@ -1828,8 +1902,8 @@ const Dashboard = () => {
                         bgcolor: '#fff',
                         border: '1px solid #E5E7EB',
                         borderRadius: '10px',
-                        px: 2,
-                        py: 1.25,
+                        px: { xs: 1.5, sm: 2 },
+                        py: { xs: 1, sm: 1.25 },
                         display: 'flex',
                         alignItems: 'center',
                     }}
@@ -1841,7 +1915,7 @@ const Dashboard = () => {
                         onChange={(e) => setSearchKeyword(e.target.value)}
                         sx={{
                             fontFamily: 'Inter, sans-serif',
-                            fontSize: '14px',
+                            fontSize: { xs: '13px', sm: '14px' },
                             fontWeight: 500,
                             color: '#191B23',
                             '& input::placeholder': { color: '#94A3B8', opacity: 1 },
@@ -1860,7 +1934,7 @@ const Dashboard = () => {
                             borderRadius: '10px',
                             border: '1px solid #E5E7EB',
                             boxShadow: '0 8px 24px rgba(0,0,0,0.08)',
-                            maxHeight: 320,
+                            maxHeight: { xs: '50vh', sm: 320 },
                             overflowY: 'auto',
                         }}>
                             {suggestions.length === 0 ? (
@@ -1977,10 +2051,10 @@ const Dashboard = () => {
                                 color: active ? '#fff' : '#191B23',
                                 border: active ? 'none' : '1px solid #E5E7EB',
                                 borderRadius: 999,
-                                px: 1.75,
+                                px: { xs: 1.25, sm: 1.75 },
                                 py: 0.5,
                                 fontFamily: 'Inter, sans-serif',
-                                fontSize: '14px',
+                                fontSize: { xs: '13px', sm: '14px' },
                                 fontWeight: 500,
                                 cursor: 'pointer',
                                 '&:hover': active ? { bgcolor: '#3F47B0' } : { borderColor: '#CBD5E1' },
@@ -2000,7 +2074,7 @@ const Dashboard = () => {
                     spacing={1}
                     flexWrap="wrap"
                     useFlexGap
-                    sx={{ mb: 2.5 }}
+                    sx={{ mb: { xs: 1.5, sm: 2.5 } }}
                 >
                     {activeFilters.map((f) => (
                         <Chip
@@ -2012,7 +2086,7 @@ const Dashboard = () => {
                                 bgcolor: '#E5E5FF',
                                 color: '#4B53C9',
                                 fontFamily: 'Inter, sans-serif',
-                                fontSize: '13px',
+                                fontSize: { xs: '12px', sm: '13px' },
                                 fontWeight: 500,
                                 borderRadius: 999,
                                 height: 28,
@@ -2032,7 +2106,7 @@ const Dashboard = () => {
                             bgcolor: 'transparent',
                             color: '#4B53C9',
                             fontFamily: 'Inter, sans-serif',
-                            fontSize: '13px',
+                            fontSize: { xs: '12px', sm: '13px' },
                             fontWeight: 500,
                             cursor: 'pointer',
                             px: 0.5,
@@ -2055,7 +2129,7 @@ const Dashboard = () => {
             />
 
             {/* Row 1 — 4 KPI cards */}
-                <Grid container spacing={2.5} sx={{ mb: 2.5 }}>
+                <Grid container spacing={{ xs: 1.5, sm: 2, lg: 2.5 }} sx={{ mb: { xs: 2, sm: 2.5 } }}>
                     <Grid item xs={12} sm={6} lg={3}>
                         <KpiCard
                             title="TOTAL EXAMS"
