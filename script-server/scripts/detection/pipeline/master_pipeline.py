@@ -298,7 +298,7 @@ signal.signal(signal.SIGINT,  handle_sigterm)
 # DSS AUTH — FIXED: Pure file-lock based, no mp.Manager()
 # ============================================================
 
-def make_api_call(url, payload, headers, timeout=10):
+def make_api_call(url, payload, headers, timeout=5):
     try:
         response = requests.post(url, headers=headers, data=json.dumps(payload), timeout=timeout)
         if response.status_code in (200, 401):
@@ -398,14 +398,11 @@ def authenticate_server(server_address, max_attempts=2):
         if code2 not in (None, 1000, 0):
             err_desc = resp_json2.get("desc", "Unknown error")
             logger.error(f"DSS auth Step 2 failed for {server_address}: {err_desc} (code: {code2})")
-            
-            if code2 == 2002:  # User locked
+
+            if code2 == 2002:  # User locked — bail; caller negative-caches as FAILED.
                 logger.warning(f"User '{DSS_USER}' is locked on {server_address}.")
-                _server_tokens_local[server_address] = "LOCKED"
-                _server_token_timestamps_local[server_address] = time.time()
-                _save_token_cache()
                 return None
-            
+
             time.sleep(1)
             continue
         
@@ -418,73 +415,139 @@ def authenticate_server(server_address, max_attempts=2):
     return None
 
 
-def get_server_token(server_address):
-    """
-    FIXED: Pure file-lock based token management. 
-    No mp.Manager() — it doesn't work across your 4 separate workers.
-    
-    Uses fcntl.flock on a shared file. All 4 workers serialize through this.
-    """
-    global _server_tokens_local, _server_token_timestamps_local
-    
-    # Fast path: check local memory (no lock needed, may be stale but will be refreshed)
-    with _local_lock:
-        if server_address in _server_tokens_local:
-            elapsed = time.time() - _server_token_timestamps_local.get(server_address, 0)
-            token = _server_tokens_local[server_address]
-            if token == "LOCKED" and elapsed < LOCKOUT_WAIT_SECONDS:
-                logger.debug(f"Server {server_address} locked (local cache)")
-                return None
-            if token != "LOCKED" and elapsed < TOKEN_EXPIRY_SECONDS:
-                return token
-    
-    # Slow path: acquire file lock, reload from disk, auth if needed
-    f_lock = None
+# Sentinel tokens — anything in this set is a negative-cache marker, not a real token.
+_NEGATIVE_TOKENS = ("LOCKED", "FAILED", "AUTH_IN_PROGRESS")
+# Max time we trust an AUTH_IN_PROGRESS marker before treating it as stale and re-claiming.
+AUTH_IN_PROGRESS_TIMEOUT = 45
+
+
+def _with_file_lock(fn):
+    """Acquire TOKEN_LOCK_FILE exclusively, call fn(), release. Returns fn()'s value."""
+    os.makedirs(os.path.dirname(TOKEN_LOCK_FILE) or ".", exist_ok=True)
+    f_lock = open(TOKEN_LOCK_FILE, "w")
     try:
-        # Ensure directory exists
-        os.makedirs(os.path.dirname(TOKEN_LOCK_FILE) or ".", exist_ok=True)
-        
-        f_lock = open(TOKEN_LOCK_FILE, "w")
-        # BLOCKING exclusive lock — all 4 workers serialize here
         fcntl.flock(f_lock, fcntl.LOCK_EX)
-        
-        # CRITICAL: Reload from disk to see what other workers have done
+        return fn()
+    finally:
+        try:
+            fcntl.flock(f_lock, fcntl.LOCK_UN)
+            f_lock.close()
+        except Exception:
+            pass
+
+
+def _claim_auth_slot(server_address):
+    """
+    Under the file lock, decide what to do next for this server:
+      ("token", <token>) — cached valid token, use it
+      ("skip",  None)    — recent negative or auth-in-progress; back off
+      ("auth",  None)    — caller should authenticate (we just claimed the slot)
+    Holding time: just a cache read + optional write. No network I/O here.
+    """
+    def _do():
         _load_token_cache()
-        
-        # Check again after loading fresh data
-        if server_address in _server_tokens_local:
-            elapsed = time.time() - _server_token_timestamps_local.get(server_address, 0)
-            token = _server_tokens_local[server_address]
-            if token == "LOCKED" and elapsed < LOCKOUT_WAIT_SECONDS:
-                logger.debug(f"Server {server_address} locked (disk cache)")
-                return None
-            if token != "LOCKED" and elapsed < TOKEN_EXPIRY_SECONDS:
-                # Token valid — update local cache and return
-                with _local_lock:
-                    _server_tokens_local[server_address] = token
-                    _server_token_timestamps_local[server_address] = time.time()
-                return token
-        
-        # Need to authenticate — we're the only process doing this right now
-        token = authenticate_server(server_address)
+        now = time.time()
+        token = _server_tokens_local.get(server_address)
+        ts    = _server_token_timestamps_local.get(server_address, 0)
+        elapsed = now - ts
+
+        if token in _NEGATIVE_TOKENS:
+            ttl = AUTH_IN_PROGRESS_TIMEOUT if token == "AUTH_IN_PROGRESS" else LOCKOUT_WAIT_SECONDS
+            if elapsed < ttl:
+                return ("skip", None)
+        elif token and elapsed < TOKEN_EXPIRY_SECONDS:
+            return ("token", token)
+
+        # Claim the slot so other workers see AUTH_IN_PROGRESS and skip.
+        _server_tokens_local[server_address] = "AUTH_IN_PROGRESS"
+        _server_token_timestamps_local[server_address] = now
+        _save_token_cache()
+        return ("auth", None)
+
+    return _with_file_lock(_do)
+
+
+def _record_auth_result(server_address, token):
+    """Under the file lock, persist the auth outcome (token or FAILED sentinel)."""
+    def _do():
+        _load_token_cache()
+        now = time.time()
         if token:
             _server_tokens_local[server_address] = token
-            _server_token_timestamps_local[server_address] = time.time()
-            _save_token_cache()
-            start_keepalive(server_address)
-        
-        return token
-        
+        else:
+            # Any non-success is negative-cached as FAILED for LOCKOUT_WAIT_SECONDS,
+            # so the storm of workers behind us doesn't each pay the auth-timeout cost.
+            _server_tokens_local[server_address] = "FAILED"
+        _server_token_timestamps_local[server_address] = now
+        _save_token_cache()
+
+    _with_file_lock(_do)
+
+
+def get_server_token(server_address):
+    """
+    Token management with claim-and-release file locking.
+
+    The file lock is now held only for cache reads/writes (microseconds);
+    the actual auth network round-trip happens OUTSIDE the lock. The first
+    worker to find an expired/missing token writes AUTH_IN_PROGRESS into
+    the cache, releases the lock, does the auth, and writes the result.
+    Other workers seeing AUTH_IN_PROGRESS skip immediately rather than
+    serializing behind the auth call.
+
+    Auth timeouts (e.g. DVR offline) are negative-cached as FAILED, so
+    subsequent workers skip the server fast instead of each paying the
+    full request timeout.
+    """
+    global _server_tokens_local, _server_token_timestamps_local
+
+    # Fast path: in-memory cache, no lock at all.
+    with _local_lock:
+        token = _server_tokens_local.get(server_address)
+        ts    = _server_token_timestamps_local.get(server_address, 0)
+        elapsed = time.time() - ts
+        if token in _NEGATIVE_TOKENS:
+            ttl = AUTH_IN_PROGRESS_TIMEOUT if token == "AUTH_IN_PROGRESS" else LOCKOUT_WAIT_SECONDS
+            if elapsed < ttl:
+                return None
+        elif token and elapsed < TOKEN_EXPIRY_SECONDS:
+            return token
+
+    # Slow path: consult shared cache, possibly claim the auth slot.
+    try:
+        decision, token = _claim_auth_slot(server_address)
     except Exception as e:
-        logger.error(f"Error in get_server_token: {e}")
+        logger.error(f"Error claiming auth slot for {server_address}: {e}")
         return None
-    finally:
-        if f_lock:
-            try:
-                fcntl.flock(f_lock, fcntl.LOCK_UN)
-                f_lock.close()
-            except Exception:
-                pass
+
+    if decision == "token":
+        with _local_lock:
+            _server_tokens_local[server_address] = token
+            _server_token_timestamps_local[server_address] = time.time()
+        return token
+
+    if decision == "skip":
+        return None
+
+    # decision == "auth": we own the auth slot. Do the auth OUTSIDE the file lock.
+    new_token = None
+    try:
+        new_token = authenticate_server(server_address)
+    except Exception as e:
+        logger.error(f"authenticate_server raised for {server_address}: {e}")
+
+    try:
+        _record_auth_result(server_address, new_token)
+    except Exception as e:
+        logger.error(f"Failed to record auth result for {server_address}: {e}")
+
+    if new_token:
+        with _local_lock:
+            _server_tokens_local[server_address] = new_token
+            _server_token_timestamps_local[server_address] = time.time()
+        start_keepalive(server_address)
+
+    return new_token
 
 
 def keepalive_loop(server_address, stop_event, interval=22):
