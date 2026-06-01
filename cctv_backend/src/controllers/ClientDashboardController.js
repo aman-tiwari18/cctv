@@ -1028,14 +1028,16 @@ exports.getOverview = async (req, res) => {
 
             const hlsDetP = query(
                 `SELECT COUNT(*) AS total,
-                        SUM(CASE WHEN pushed_to_client = 1 THEN 1 ELSE 0 END) AS pushed
+                        SUM(CASE WHEN pushed_to_client = 1 THEN 1 ELSE 0 END) AS pushed,
+                        SUM(CASE WHEN pushed_to_client = 1 AND remove_from_client = 1 THEN 1 ELSE 0 END) AS removed
                  FROM camera_report_hls
                  WHERE exam_id IN (?) AND created_at >= ? AND created_at < ?${shiftClause}`,
                 [activeExamIds, dateStart, dateEnd, ...shiftBind]
             );
             const rtspDetP = query(
                 `SELECT COUNT(*) AS total,
-                        SUM(CASE WHEN pushed_to_client = 1 THEN 1 ELSE 0 END) AS pushed
+                        SUM(CASE WHEN pushed_to_client = 1 THEN 1 ELSE 0 END) AS pushed,
+                        SUM(CASE WHEN pushed_to_client = 1 AND remove_from_client = 1 THEN 1 ELSE 0 END) AS removed
                  FROM camera_report_rtsp
                  WHERE exam_id IN (?) AND created_at >= ? AND created_at < ?${shiftClause}`,
                 [activeExamIds, dateStart, dateEnd, ...shiftBind]
@@ -1069,8 +1071,9 @@ exports.getOverview = async (req, res) => {
             };
 
             detectionsAgg = {
-                total:  Number(hlsDet[0]?.total  || 0) + Number(rtspDet[0]?.total  || 0),
-                pushed: Number(hlsDet[0]?.pushed || 0) + Number(rtspDet[0]?.pushed || 0),
+                total:   Number(hlsDet[0]?.total   || 0) + Number(rtspDet[0]?.total   || 0),
+                pushed:  Number(hlsDet[0]?.pushed  || 0) + Number(rtspDet[0]?.pushed  || 0),
+                removed: Number(hlsDet[0]?.removed || 0) + Number(rtspDet[0]?.removed || 0),
             };
 
             // CLIENT override: distribution[].count = pushed_count so the donut renders
@@ -1117,6 +1120,10 @@ exports.getOverview = async (req, res) => {
                     today: detectionsAgg.total,
                     pushed_to_client: detectionsAgg.pushed,
                     false_detection: detectionsAgg.total - detectionsAgg.pushed,
+                    // Subset of pushed rows the viewer later marked Removed.
+                    // Client KPI card uses this for the "Removed" chip; admin
+                    // controller doesn't expose this since admin doesn't bind to it.
+                    removed_from_client: detectionsAgg.removed,
                 },
                 detection_distribution: distribution,
             },

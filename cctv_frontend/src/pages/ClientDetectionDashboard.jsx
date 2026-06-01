@@ -544,7 +544,7 @@ const ClientDetectionDashboard = () => {
     const totalExams   = overview?.total_exams   || { total: 0, ongoing: 0, completed: 0, scheduled: 0 };
     const cameras      = overview?.cameras       || { total: 0, accessible: 0, inaccessible: 0 };
     const scripts      = overview?.scripts       || { planned_today: 0, running: 0, scheduled: 0, completed: 0 };
-    const detections   = overview?.detections    || { today: 0, pushed_to_client: 0, false_detection: 0 };
+    const detections   = overview?.detections    || { today: 0, pushed_to_client: 0, false_detection: 0, removed_from_client: 0 };
     const distribution = overview?.detection_distribution || [];
 
     const dateChips = [
@@ -894,11 +894,13 @@ const ClientDetectionDashboard = () => {
                 <Grid item xs={12} sm={6} lg={3}>
                     <KpiCard
                         title="TOTAL DETECTIONS"
-                        value={detections.today}
+                        // Viewer-relevant headline: count of detections actually pushed to
+                        // the client. Admin card stays on the raw `today` total.
+                        value={detections.pushed_to_client}
                         icon={<CustomSvgIcon />}
                         chips={[
-                            { label: 'Pushed',          value: detections.pushed_to_client, tone: 'amber' },
-                            { label: 'False Detection', value: detections.false_detection,  tone: 'violet' },
+                            { label: 'Removed', value: detections.removed_from_client, tone: 'amber' },
+                            { label: 'Total',   value: detections.pushed_to_client,    tone: 'violet' },
                         ]}
                         loading={overviewLoading}
                     />
