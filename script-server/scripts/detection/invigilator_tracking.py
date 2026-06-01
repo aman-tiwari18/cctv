@@ -86,10 +86,6 @@ class PersonTracker:
         self.no_target_start = None
         self.tracks = {}                # track_id -> dict
         self._next_id = 0
-        # Set on each update() pass: the start_frame of the track that just
-        # fired STATIC (or None). Caller composites it with the current frame
-        # to build a BEFORE/AFTER violation image. Temporary verification aid.
-        self.last_fired_start_frame = None
 
     @staticmethod
     def _foot(box):
@@ -105,17 +101,11 @@ class PersonTracker:
         for tid in stale:
             del self.tracks[tid]
 
-    def update(self, person_boxes, frame=None):
+    def update(self, person_boxes):
         """
         person_boxes : list of [x1,y1,x2,y2] for STANDING-classified boxes.
-        frame: optional. When provided, a copy is stashed per-track the moment
-               stillness begins, and exposed via `self.last_fired_start_frame`
-               when STATIC fires — caller composites it with the current frame
-               into the saved violation image (temporary verification aid).
         Returns (absent_violation: bool, static_violation: bool).
         """
-        # Reset the per-call "which start frame fired" output before this pass.
-        self.last_fired_start_frame = None
         now = time.time()
 
         # --- ABSENT branch -------------------------------------------------
@@ -169,7 +159,6 @@ class PersonTracker:
                 'last_seen':     now,
                 'last_h':        h,
                 'moving_streak': 0,
-                'start_frame':   None,   # snapshot stashed when stillness begins; consumed on fire
             }
 
         self._evict_stale(now)
@@ -182,7 +171,6 @@ class PersonTracker:
             if len(positions) < 5 or (now - positions[0][0]) < STILLNESS_WARMUP_SEC:
                 track['static_start'] = None
                 track['moving_streak'] = 0
-                track['start_frame'] = None
                 continue
             xs = [p[1] for p in positions]
             ys = [p[2] for p in positions]
@@ -196,20 +184,11 @@ class PersonTracker:
                 track['moving_streak'] = 0
                 if track['static_start'] is None:
                     track['static_start'] = now
-                    # Stash a snapshot of the current frame at the moment
-                    # stillness begins, so we can composite BEFORE/AFTER
-                    # when STATIC fires 7 min later.
-                    if frame is not None:
-                        track['start_frame'] = frame.copy()
                 if (now - track['static_start']) > STATIC_TIME_THRESH:
                     static_violation = True
-                    # Expose the stashed start_frame so the caller can build
-                    # a side-by-side BEFORE/AFTER violation image this pass.
-                    self.last_fired_start_frame = track.get('start_frame')
                     # Restart the 7-min cycle so the save cadence is intrinsic
                     # to STATIC_TIME_THRESH, not load-bearing on the worker cooldown.
                     track['static_start'] = now
-                    track['start_frame'] = None
             else:
                 # Outside radius → count consecutive movement frames;
                 # only reset after MOVING_TOLERANCE_FRAMES so single-frame
@@ -217,35 +196,12 @@ class PersonTracker:
                 track['moving_streak'] = track.get('moving_streak', 0) + 1
                 if track['moving_streak'] >= MOVING_TOLERANCE_FRAMES:
                     track['static_start'] = None
-                    track['start_frame'] = None
 
         return False, static_violation
 
 # ================= STATE ===================
 trackers = {}
 _state_lock = threading.Lock()
-
-# =====================================================
-# TEMP VERIFICATION HELPER — remove after sign-off
-# =====================================================
-def _build_static_composite(before, after):
-    """Stack BEFORE (stillness-onset) and AFTER (STATIC fire) frames side-by-side
-    with banner labels. Used so a single STATIC violation image in the frontend
-    shows both frames for visual verification of the 7-min stillness window."""
-    h = max(before.shape[0], after.shape[0])
-    w = before.shape[1] + after.shape[1]
-    composite = np.zeros((h, w, 3), dtype=np.uint8)
-    composite[:before.shape[0], :before.shape[1]] = before
-    composite[:after.shape[0], before.shape[1]:before.shape[1] + after.shape[1]] = after
-
-    def _banner(img, text, x_offset):
-        cv2.rectangle(img, (x_offset, 0), (x_offset + 520, 40), (0, 0, 0), -1)
-        cv2.putText(img, text, (x_offset + 14, 28),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)
-
-    _banner(composite, "BEFORE: stillness began (7 min ago)", 0)
-    _banner(composite, "AFTER: STATIC fired NOW", before.shape[1])
-    return composite
 
 # =====================================================
 # CORE DETECTION LOGIC
@@ -276,7 +232,7 @@ def detect_invigilator_in_frame(frame, device_id="unknown", camera_no="unknown",
             trackers[key] = PersonTracker()
         tracker = trackers[key]
 
-    absent, static_violation = tracker.update(person_boxes, frame=frame)
+    absent, static_violation = tracker.update(person_boxes)
     violation_detected = absent or static_violation
     status = "ABSENT" if absent else ("STATIC" if static_violation else "Active")
 
@@ -306,11 +262,6 @@ def detect_invigilator_in_frame(frame, device_id="unknown", camera_no="unknown",
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
     cv2.putText(frame, f"{device_id} - Cam {camera_no}", (20, 90),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
-
-    # TEMP verification: if STATIC fired, composite the stashed start_frame
-    # next to the annotated current frame so the saved image shows BEFORE/AFTER.
-    if static_violation and tracker.last_fired_start_frame is not None:
-        frame = _build_static_composite(tracker.last_fired_start_frame, frame)
 
     if violation_detected:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -355,7 +306,7 @@ def detect_invigilator_batch(items):
                 trackers[key] = PersonTracker()
             tracker = trackers[key]
 
-        absent, static_violation = tracker.update(person_boxes, frame=frame)
+        absent, static_violation = tracker.update(person_boxes)
         violation_detected = absent or static_violation
         status = "ABSENT" if absent else ("STATIC" if static_violation else "Active")
 
@@ -384,11 +335,6 @@ def detect_invigilator_batch(items):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
         cv2.putText(frame, f"CH: {camera_no}", (20, 90),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
-
-        # TEMP verification: if STATIC fired, composite the stashed start_frame
-        # next to the annotated current frame so the saved image shows BEFORE/AFTER.
-        if static_violation and tracker.last_fired_start_frame is not None:
-            frame = _build_static_composite(tracker.last_fired_start_frame, frame)
 
         outputs.append((frame, violation_detected, 1 if violation_detected else 0))
 
