@@ -56,7 +56,7 @@ import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
 import { CustomSvgIcon } from './DetectionSvgIcon';
 import { ShiftSvgIcon } from './ShiftSvgIcon';
 import CameraIcon from './CameraIcon';
-import { examsAPI } from '../services/api';
+import { dashboardAPI } from '../services/api';
 
 const DRAWER_WIDTH = 260;
 const APPBAR_HEIGHT = 64;
@@ -412,25 +412,13 @@ function LayoutInner() {
     return total;
   }, [unfilteredCounts]);
 
-  // Fetch live exams (active today)
+  // Fetch live exams (currently-running shift today) — must match /live-exams table
   useEffect(() => {
     if (location.pathname === '/') {
       const fetchLiveExams = async () => {
         try {
-          const res = await examsAPI.getAll({ is_active: true });
-          const exams = res.data?.data || [];
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
-
-          const liveCount = exams.filter(exam => {
-            if (!exam.start_date || !exam.end_date) return false;
-            const start = new Date(exam.start_date);
-            const end = new Date(exam.end_date);
-            start.setHours(0, 0, 0, 0);
-            end.setHours(0, 0, 0, 0);
-            return today >= start && today <= end;
-          }).length;
-          setLiveExamsCount(liveCount);
+          const res = await dashboardAPI.getLiveExams({ page: 1, limit: 1 });
+          setLiveExamsCount(res.data?.data?.total || 0);
         } catch (err) {
           console.error("Failed to fetch live exams:", err);
         }
