@@ -407,7 +407,7 @@ const Cameras = () => {
         />
 
         {/* ════ RIGHT PANEL ════ */}
-        <Box sx={{ flex: 1, p: 3.5, overflowY: 'auto', minWidth: 0 }}>
+        <Box sx={{ flex: 1, p: { xs: 1.5, sm: 2.5, md: 3.5 }, overflowY: 'auto', minWidth: 0 }}>
 
           {!selectedExamId ? (
             /* Empty state */
@@ -426,7 +426,7 @@ const Cameras = () => {
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2, flexWrap: 'wrap', gap: 2 }}>
                 <Box>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5 }}>
-                    <Typography variant="h6" sx={{ fontWeight: 600, color: '#0f172a', fontSize: '1.5rem' }}>
+                    <Typography variant="h6" sx={{ fontWeight: 600, color: '#0f172a', fontSize: { xs: '1.15rem', sm: '1.5rem' } }}>
                       {selectedExamData ? `${selectedExamData.exam_name} (${selectedExamData.exam_body})` : 'Cameras'}
                     </Typography>
                     {selectedExamData && (
@@ -480,7 +480,7 @@ const Cameras = () => {
                 </Box>
 
                 {/* Far-right: filters + action buttons */}
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap', flexShrink: 0 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap', flexShrink: 0, width: { xs: '100%', md: 'auto' } }}>
                   {/* Search */}
                   <TextField
                     size="small"
@@ -508,13 +508,13 @@ const Cameras = () => {
                         '& input': { color: '#334155', '&::placeholder': { color: '#94a3b8', opacity: 1 } }
                       }
                     }}
-                    sx={{ minWidth: 260, maxWidth: 300 }}
+                    sx={{ flex: { xs: '1 1 100%', sm: '0 0 auto' }, minWidth: { xs: '100%', sm: 260 }, maxWidth: { xs: 'none', sm: 300 } }}
                   />
 
                   {/* HLS filters */}
                   {isHLS && (
                     <>
-                      <FormControl size="small" sx={{ minWidth: 140 }}>
+                      <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 140 }, flex: { xs: '1 1 100%', sm: '0 0 auto' } }}>
                         <InputLabel id="cam-shift-label">Shift</InputLabel>
                         <Select
                           labelId="cam-shift-label"
@@ -534,7 +534,7 @@ const Cameras = () => {
                       </FormControl>
 
                       {/* Native date input — same style as Detections.jsx */}
-                      <Box sx={{ position: 'relative', minWidth: 150 }}>
+                      <Box sx={{ position: 'relative', minWidth: { xs: '100%', sm: 150 }, flex: { xs: '1 1 100%', sm: '0 0 auto' } }}>
                         <TextField
                           type="date"
                           size="small"

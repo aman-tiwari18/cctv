@@ -172,11 +172,43 @@ export const clientDashboardAPI = {
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
     },
-    getExamBodyDetails: (examBody, params) => api.get(`/client-dashboard/exam-body/${examBody}/details`, { params })
+    getExamBodyDetails: (examBody, params) => api.get(`/client-dashboard/exam-body/${examBody}/details`, { params }),
+
+    // V2 — CCTV Control Center client dashboard (mirrors admin shape, company-scoped)
+    getOverview: (arg) => {
+        const params = typeof arg === 'string' ? { date: arg } : (arg || {});
+        return api.get('/client-dashboard/overview', { params });
+    },
+    getLiveExams: ({ page = 1, limit = 10, exam_id } = {}) =>
+        api.get('/client-dashboard/live-exams', {
+            params: { page, limit, ...(exam_id ? { exam_id } : {}) },
+        }),
+
+    // Per-exam shift-script assignments — used by Today's Script Distribution card.
+    // Hits /api/exams/:examId/shift-scripts which returns shift+script joins.
+    getExamShiftScripts: (examId, { assignment_date, is_active = true } = {}) =>
+        api.get(`/exams/${examId}/shift-scripts`, {
+            params: {
+                ...(assignment_date ? { assignment_date } : {}),
+                ...(is_active !== undefined ? { is_active } : {}),
+            },
+        }),
 };
 
 export const dashboardAPI = {
-    getAdminStats: (timeRange = '24h') => api.get('/dashboard/admin-stats', { params: { timeRange } })
+    getAdminStats: (timeRange = '24h') => api.get('/dashboard/admin-stats', { params: { timeRange } }),
+
+    // V2 — CCTV Control Center dashboard. Accepts either a "YYYY-MM-DD" string
+    // (back-compat single-day) or an object like { date } / { start_date, end_date }.
+    getOverview: (arg) => {
+        const params = typeof arg === 'string' ? { date: arg } : (arg || {});
+        return api.get('/dashboard/overview', { params });
+    },
+
+    getLiveExams: ({ page = 1, limit = 10, exam_id } = {}) =>
+        api.get('/dashboard/live-exams', {
+            params: { page, limit, ...(exam_id ? { exam_id } : {}) },
+        }),
 };
 
 export default api;

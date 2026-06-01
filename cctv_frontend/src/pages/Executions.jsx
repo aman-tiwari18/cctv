@@ -150,28 +150,25 @@ const Executions = () => {
         // Get unique dates from executions
         const dates = [...new Set(list.map((e) => e.assignment_date).filter(Boolean))].sort((a, b) => new Date(b) - new Date(a));
         
-        if (dates.length > 0) {
-          const today = new Date().toISOString().split('T')[0];
-          
-          // Get exam details to check date range
-          const selectedExam = exams.find((e) => String(e.id) === String(selectedExamId));
-          
-          if (selectedExam && selectedExam.start_date && selectedExam.end_date) {
-            const startDate = new Date(selectedExam.start_date);
-            const endDate = new Date(selectedExam.end_date);
-            const todayDate = new Date(today);
-            
-            // If today is within exam range and has executions, select today
-            if (todayDate >= startDate && todayDate <= endDate && dates.includes(today)) {
-              setSelectedDate(today);
-            } else {
-              // Otherwise select the last date (most recent)
-              setSelectedDate(dates[0]);
-            }
-          } else {
-            // No exam date range, select today if available, otherwise last date
-            setSelectedDate(dates.includes(today) ? today : dates[0]);
-          }
+        // Local-date YYYY-MM-DD. toISOString() returns UTC, which after IST
+        // midnight resolves to the previous day and made yesterday auto-select.
+        const now = new Date();
+        const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        const selectedExam = exams.find((e) => String(e.id) === String(selectedExamId));
+
+        // Prefer today whenever it falls inside the exam window — scripts
+        // trigger throughout the day, so executions may not exist yet at page
+        // load; the user still expects today's view.
+        const todayInRange =
+          !selectedExam?.start_date || !selectedExam?.end_date
+            ? true
+            : new Date(today) >= new Date(selectedExam.start_date) &&
+              new Date(today) <= new Date(selectedExam.end_date);
+
+        if (todayInRange) {
+          setSelectedDate(today);
+        } else if (dates.length > 0) {
+          setSelectedDate(dates[0]);
         } else {
           setSelectedDate('');
         }
@@ -215,12 +212,20 @@ const Executions = () => {
 
   /* ── Derive available dates from loaded executions ── */
   const availableDates = useMemo(() => {
-    // When no filters are applied, we need to fetch all dates
-    // This will be populated during initial load
-    return [
-      ...new Set(executions.map((e) => e.assignment_date).filter(Boolean)),
-    ].sort((a, b) => new Date(b) - new Date(a));
-  }, [executions]);
+    const set = new Set(executions.map((e) => e.assignment_date).filter(Boolean));
+    // Always include today if it falls inside the selected exam window so the
+    // dropdown surfaces it even before any executions have triggered today.
+    const exam = exams.find((e) => String(e.id) === String(selectedExamId));
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const todayInRange =
+      !exam?.start_date || !exam?.end_date
+        ? !!selectedExamId
+        : new Date(today) >= new Date(exam.start_date) &&
+          new Date(today) <= new Date(exam.end_date);
+    if (todayInRange) set.add(today);
+    return [...set].sort((a, b) => new Date(b) - new Date(a));
+  }, [executions, exams, selectedExamId]);
 
   /* ── Filter rows (only search filter now, date and status are backend-filtered) ── */
   const visibleRows = useMemo(() => {
@@ -324,7 +329,7 @@ const Executions = () => {
       />
 
       {/* ════ RIGHT PANEL ════ */}
-      <Box sx={{ flex: 1, p: 3.5, overflowY: 'auto' }}>
+      <Box sx={{ flex: 1, p: { xs: 1.5, sm: 2.5, md: 3.5 }, overflowY: 'auto', minWidth: 0 }}>
         {!selectedExamId ? (
           /* Empty state */
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 'calc(100vh - 200px)', textAlign: 'center', px: 4 }}>
@@ -339,10 +344,10 @@ const Executions = () => {
         ) : (
           <>
             {/* ── Title row ── */}
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3.5 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3.5, flexWrap: 'wrap', gap: 2 }}>
               <Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5 }}>
-                  <Typography variant="h6" sx={{ fontWeight: 600, color: '#0f172a', fontSize: '1.5rem' }}>
+                  <Typography variant="h6" sx={{ fontWeight: 600, color: '#0f172a', fontSize: { xs: '1.15rem', sm: '1.5rem' } }}>
                     {selectedExam ? `${selectedExam.exam_name} (${selectedExam.exam_body})` : 'Exam'}
                   </Typography>
                   {selectedExam && selectedExam.is_active === false && (
@@ -364,7 +369,7 @@ const Executions = () => {
               </Box>
 
               {/* Far-right: Search + Date + Status filters */}
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexShrink: 0 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexShrink: 0, flexWrap: 'wrap', width: { xs: '100%', md: 'auto' } }}>
                 {/* Search */}
                 <TextField
                   size="small"
@@ -387,11 +392,11 @@ const Executions = () => {
                       '& input': { color: '#334155', '&::placeholder': { color: '#94a3b8', opacity: 1 } }
                     }
                   }}
-                  sx={{ minWidth: 260, maxWidth: 300 }}
+                  sx={{ flex: { xs: '1 1 100%', sm: '0 0 auto' }, minWidth: { xs: '100%', sm: 260 }, maxWidth: { xs: 'none', sm: 300 } }}
                 />
 
                 {availableDates.length > 0 && (
-                  <FormControl size="small" sx={{ minWidth: 165 }}>
+                  <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 165 }, flex: { xs: '1 1 100%', sm: '0 0 auto' } }}>
                     <InputLabel id="exec-date-label">Execution Date</InputLabel>
                     <Select
                       labelId="exec-date-label"
@@ -407,7 +412,7 @@ const Executions = () => {
                   </FormControl>
                 )}
 
-                <FormControl size="small" sx={{ minWidth: 140 }}>
+                <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 140 }, flex: { xs: '1 1 100%', sm: '0 0 auto' } }}>
                   <InputLabel id="exec-status-label">Status</InputLabel>
                   <Select
                     labelId="exec-status-label"

@@ -56,7 +56,7 @@ import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
 import { CustomSvgIcon } from './DetectionSvgIcon';
 import { ShiftSvgIcon } from './ShiftSvgIcon';
 import CameraIcon from './CameraIcon';
-import { examsAPI } from '../services/api';
+import { dashboardAPI } from '../services/api';
 
 const DRAWER_WIDTH = 260;
 const APPBAR_HEIGHT = 64;
@@ -412,25 +412,13 @@ function LayoutInner() {
     return total;
   }, [unfilteredCounts]);
 
-  // Fetch live exams (active today)
+  // Fetch live exams (currently-running shift today) — must match /live-exams table
   useEffect(() => {
     if (location.pathname === '/') {
       const fetchLiveExams = async () => {
         try {
-          const res = await examsAPI.getAll({ is_active: true });
-          const exams = res.data?.data || [];
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
-
-          const liveCount = exams.filter(exam => {
-            if (!exam.start_date || !exam.end_date) return false;
-            const start = new Date(exam.start_date);
-            const end = new Date(exam.end_date);
-            start.setHours(0, 0, 0, 0);
-            end.setHours(0, 0, 0, 0);
-            return today >= start && today <= end;
-          }).length;
-          setLiveExamsCount(liveCount);
+          const res = await dashboardAPI.getLiveExams({ page: 1, limit: 1 });
+          setLiveExamsCount(res.data?.data?.total || 0);
         } catch (err) {
           console.error("Failed to fetch live exams:", err);
         }
@@ -495,8 +483,8 @@ function LayoutInner() {
         position="fixed"
         elevation={0}
         sx={{
-          width: { sm: `calc(100% - ${DRAWER_WIDTH}px)` },
-          ml: { sm: `${DRAWER_WIDTH}px` },
+          width: { md: `calc(100% - ${DRAWER_WIDTH}px)` },
+          ml: { md: `${DRAWER_WIDTH}px` },
           bgcolor: 'rgba(255, 255, 255, 0.96)',
           backdropFilter: 'blur(8px)',
           borderBottom: `1px solid ${sidebarPalette.border}`,
@@ -507,14 +495,21 @@ function LayoutInner() {
         <Toolbar sx={{ height: APPBAR_HEIGHT, minHeight: `${APPBAR_HEIGHT}px !important` }}>
           <IconButton
             onClick={() => setMobileOpen(!mobileOpen)}
-            sx={{ display: { sm: 'none' }, mr: 1.5, color: '#334155' }}
+            sx={{ display: { md: 'none' }, mr: 1.5, color: '#334155' }}
           >
             <MenuIcon />
           </IconButton>
 
           <Typography
             variant="h6"
-            sx={{ fontWeight: 600, fontSize: '1.5rem' }}
+            sx={{
+              fontWeight: 600,
+              fontSize: { xs: '1.1rem', sm: '1.5rem' },
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              flexShrink: 1,
+            }}
           >
             {currentPageTitle}
           </Typography>
@@ -525,6 +520,7 @@ function LayoutInner() {
               variant="outlined"
               sx={{
                 ml: 2,
+                display: { xs: 'none', md: 'flex' },
                 fontWeight: 700,
                 fontSize: '0.75rem',
                 border: 'none',
@@ -539,7 +535,7 @@ function LayoutInner() {
 
           <Box sx={{ flexGrow: 1 }} />
 
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 0.5, sm: 1 }, flexShrink: 0 }}>
             {/* Removed Detections shortcut — only shown to VIEWER on /detections.
                 Mirrors the pill styling used by the screenshot reference. */}
             {location.pathname === '/detections' && user?.role === 'VIEWER' && (
@@ -557,11 +553,13 @@ function LayoutInner() {
                   borderColor: '#fecaca',
                   color: '#b91c1c',
                   bgcolor: '#fff5f5',
-                  px: 2,
+                  px: { xs: 1, md: 2 },
+                  minWidth: { xs: 40, md: 'auto' },
+                  '& .MuiButton-startIcon': { mr: { xs: 0, md: 1 }, ml: { xs: 0, md: -0.5 } },
                   '&:hover': { bgcolor: '#fee2e2', borderColor: '#fca5a5' },
                 }}
               >
-                Removed Detections
+                <Box component="span" sx={{ display: { xs: 'none', md: 'inline' } }}>Removed Detections</Box>
               </Button>
             )}
 
@@ -582,13 +580,17 @@ function LayoutInner() {
                   textTransform: 'none',
                   bgcolor: '#e0e7fa',
                   color: '#2563eb',
-                  px: 2,
+                  px: { xs: 1, md: 2 },
+                  minWidth: { xs: 40, md: 'auto' },
+                  '& .MuiButton-startIcon': { mr: { xs: 0, md: 1 }, ml: { xs: 0, md: -0.5 } },
                   transition: 'all 0.2s ease',
                   '&:hover': { bgcolor: '#e0e7fa', opacity: 0.8, transform: 'translateY(-1px)' },
                   '&.Mui-disabled': { bgcolor: '#e0e7fa', color: '#2563eb', opacity: 0.7 },
                 }}
               >
-                {downloadingReport ? 'Generating…' : 'Consolidated Report'}
+                <Box component="span" sx={{ display: { xs: 'none', md: 'inline' } }}>
+                  {downloadingReport ? 'Generating…' : 'Consolidated Report'}
+                </Box>
               </Button>
             )}
 
@@ -616,13 +618,17 @@ function LayoutInner() {
                   textTransform: 'none',
                   bgcolor: '#e0e7fa',
                   color: '#2563eb',
-                  px: 2,
+                  px: { xs: 1, md: 2 },
+                  minWidth: { xs: 40, md: 'auto' },
+                  '& .MuiButton-startIcon': { mr: { xs: 0, md: 1 }, ml: { xs: 0, md: -0.5 } },
                   transition: 'all 0.2s ease',
                   '&:hover': { bgcolor: '#e0e7fa', opacity: 0.8, transform: 'translateY(-1px)' },
                   '&.Mui-disabled': { bgcolor: '#e0e7fa', color: '#2563eb', opacity: 0.7 },
                 }}
               >
-                {downloadingReport ? 'Generating…' : 'Consolidated Report'}
+                <Box component="span" sx={{ display: { xs: 'none', md: 'inline' } }}>
+                  {downloadingReport ? 'Generating…' : 'Consolidated Report'}
+                </Box>
               </Button>
             )}
             
@@ -640,12 +646,14 @@ function LayoutInner() {
                     textTransform: 'none',
                     bgcolor: '#e0e7fa',
                     color: '#2563eb',
-                    px: 2,
+                    px: { xs: 1, md: 2 },
+                    minWidth: { xs: 40, md: 'auto' },
+                    '& .MuiButton-startIcon': { mr: { xs: 0, md: 1 }, ml: { xs: 0, md: -0.5 } },
                     transition: 'all 0.2s ease',
                     '&:hover': { bgcolor: '#e0e7fa', opacity: 0.8, transform: 'translateY(-1px)' },
                   }}
                 >
-                  Export detections
+                  <Box component="span" sx={{ display: { xs: 'none', md: 'inline' } }}>Export detections</Box>
               </Button>
             )}
 
@@ -706,14 +714,14 @@ function LayoutInner() {
         </MenuItem>
       </Menu>
 
-      <Box component="nav" sx={{ width: { sm: DRAWER_WIDTH }, flexShrink: 0 }}>
+      <Box component="nav" sx={{ width: { md: DRAWER_WIDTH }, flexShrink: 0 }}>
         <Drawer
           variant="temporary"
           open={mobileOpen}
           onClose={() => setMobileOpen(false)}
           ModalProps={{ keepMounted: true }}
           sx={{
-            display: { xs: 'block', sm: 'none' },
+            display: { xs: 'block', md: 'none' },
             '& .MuiDrawer-paper': { width: DRAWER_WIDTH, border: 'none' },
           }}
         >
@@ -728,7 +736,7 @@ function LayoutInner() {
         <Drawer
           variant="permanent"
           sx={{
-            display: { xs: 'none', sm: 'block' },
+            display: { xs: 'none', md: 'block' },
             '& .MuiDrawer-paper': {
               width: DRAWER_WIDTH,
               borderRight: `1px solid ${sidebarPalette.border}`,
@@ -749,10 +757,12 @@ function LayoutInner() {
         component="main"
         sx={{
           flexGrow: 1,
-          p: { xs: 2, sm: 3 },
+          p: { xs: 1.5, sm: 2, md: 3 },
           mt: `${APPBAR_HEIGHT}px`,
-          width: { sm: `calc(100% - ${DRAWER_WIDTH}px)` },
+          width: { md: `calc(100% - ${DRAWER_WIDTH}px)` },
+          minWidth: 0,
           minHeight: `calc(100vh - ${APPBAR_HEIGHT}px)`,
+          overflowX: 'hidden',
         }}
       >
         <Outlet />

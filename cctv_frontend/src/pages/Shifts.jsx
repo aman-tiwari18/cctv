@@ -112,7 +112,7 @@ const Shifts = () => {
       {/* ════ LEFT SIDEBAR ════ */}
       <Box
         sx={{
-          width: 280,
+          width: { xs: 140, sm: 220, md: 280 },
           flexShrink: 0,
           borderRight: '1px solid #e8ecf1',
           bgcolor: '#ffffff',
@@ -214,7 +214,7 @@ const Shifts = () => {
       </Box>
 
       {/* ════ RIGHT PANEL ════ */}
-      <Box sx={{ flex: 1, p: 3.5, overflowY: 'auto' }}>
+      <Box sx={{ flex: 1, p: { xs: 1.5, sm: 2.5, md: 3.5 }, overflowY: 'auto', minWidth: 0 }}>
         {error && (
           <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError('')}>
             {error}
@@ -256,10 +256,10 @@ const Shifts = () => {
         ) : (
           <>
             {/* Title row — exam name left, date dropdown + right */}
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3.5 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3.5, flexWrap: 'wrap', gap: 2 }}>
               <Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5 }}>
-                  <Typography variant="h6" sx={{ fontWeight: 600, color: '#0f172a', fontSize: '1.5rem' }}>
+                  <Typography variant="h6" sx={{ fontWeight: 600, color: '#0f172a', fontSize: { xs: '1.15rem', sm: '1.5rem' } }}>
                     {selectedExam ? `${selectedExam.exam_name} (${selectedExam.exam_body})` : 'Exam'}
                   </Typography>
                   {selectedExam && selectedExam.is_active === false && (

@@ -141,7 +141,7 @@ const UserVerification = () => {
   );
 
   return (
-    <Box sx={{ p: 3 }}>
+    <Box sx={{ p: { xs: 0, sm: 3 } }}>
       {alert.show && (
         <Alert 
           severity={alert.severity} 
@@ -185,7 +185,7 @@ const UserVerification = () => {
           </Tabs>
         </Box>
 
-        <Box sx={{ p: 3 }}>
+        <Box sx={{ p: { xs: 1.5, sm: 3 } }}>
           <TextField
             fullWidth
             placeholder="Search by name, email, or company..."
@@ -221,8 +221,8 @@ const UserVerification = () => {
               <CircularProgress size={40} sx={{ color: '#3b82f6' }} />
             </Box>
           ) : (
-            <TableContainer>
-              <Table>
+            <TableContainer sx={{ overflowX: 'auto' }}>
+              <Table sx={{ minWidth: 720 }}>
                 <TableHead>
                   <TableRow>
                     <TableCell sx={{ fontWeight: 600, color: '#374151' }}>User</TableCell>

@@ -6,6 +6,7 @@ import {
   ToggleButtonGroup, ToggleButton, Pagination, TablePagination,
   IconButton, Skeleton, Grid, Checkbox, FormControlLabel, Dialog, DialogContent,
   InputAdornment, Button, Snackbar, Alert, LinearProgress, CircularProgress,
+  useMediaQuery, useTheme,
 } from '@mui/material';
 import {
   Search, CameraAlt, GridView, Close,
@@ -31,6 +32,25 @@ import * as XLSX from 'xlsx';
 // ============================================================
 // PERFORMANCE UTILITIES
 // ============================================================
+
+// Map fleet-wide gpu_id slot (0..N-1, set by db_client._get_gpu_id) to a
+// human-readable "Worker X GPU Y" label. The slot ranges below mirror the
+// current fleet's WORKER_INDEX layout — keep in sync if workers are
+// added/removed.
+//   0           → Main (worker-0)
+//   1..3        → single-GPU workers (worker-1..3)
+//   4..11       → worker-5 GPU 0..7
+//   12..19      → worker-6 GPU 0..7
+//   20..27      → worker-4 GPU 0..7  (reserved for when worker-4 rejoins)
+function workerGpuLabel(slot) {
+  if (slot == null) return null;
+  if (slot === 0) return 'Worker 0 (Main)';
+  if (slot >= 1 && slot <= 3) return `Worker ${slot}`;
+  if (slot >= 4 && slot <= 11) return `Worker 5 · GPU ${slot - 4}`;
+  if (slot >= 12 && slot <= 19) return `Worker 6 · GPU ${slot - 12}`;
+  if (slot >= 20 && slot <= 27) return `Worker 4 · GPU ${slot - 20}`;
+  return `Slot ${slot}`;
+}
 
 // Debounce hook for search input
 function useDebounce(value, delay) {
@@ -331,7 +351,7 @@ function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onS
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.8 }}>
             <Memory sx={{ fontSize: 13, color: '#64748b' }} />
             <Typography sx={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>
-              GPU {item.gpu_id} — {item.gpu_id === 0 ? 'Master' : `Worker ${item.gpu_id}`}
+              {workerGpuLabel(item.gpu_id)} · slot {item.gpu_id}
             </Typography>
           </Box>
         )}
@@ -342,12 +362,13 @@ function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onS
           {!isPushed && (
             <Button
               variant="outlined"
-              fullWidth
               disableElevation
               onClick={(e) => { e.stopPropagation(); if (onSkip) onSkip(item); }}
               sx={{
                 borderColor: '#c3c5d8', color: '#475569', fontWeight: 900,
-                width: "80px",
+                flex: '0 0 auto',
+                minWidth: 72,
+                px: 1,
                 height: "40px",
                 borderRadius: 3, textTransform: 'none', fontSize: 12,
                 '&:hover': { bgcolor: '#c3c5d8', borderColor: '#c3c5d8' },
@@ -369,11 +390,14 @@ function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onS
               bgcolor: isPushed ? '#94a3b8' : '#3c81f6',
               color: '#fff',
               fontWeight: 900,
+              flex: 1,
+              minWidth: 0,
+              px: 1,
               height: "40px",
-              width: "140px",
               borderRadius: 3,
               textTransform: 'none',
               fontSize: 12,
+              whiteSpace: 'nowrap',
               '&:hover': { bgcolor: isPushed ? '#94a3b8' : '#1e40af' },
               '&.Mui-disabled': {
                 bgcolor: '#94a3b8',
@@ -527,10 +551,13 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      <Box sx={{ display: 'flex', gap: 2, height: 'calc(100vh - 310px)', minHeight: 500 }}>
+      <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2, height: { xs: 'auto', md: 'calc(100vh - 310px)' }, minHeight: { xs: 0, md: 500 } }}>
         <Box sx={{
-        width: 300, flexShrink: 0, overflowY: 'auto',
-        borderRight: '1px solid #e2e8f0', pr: 1,
+        width: { xs: '100%', md: 300 }, flexShrink: 0, overflowY: 'auto',
+        maxHeight: { xs: 280, md: 'none' },
+        borderRight: { xs: 'none', md: '1px solid #e2e8f0' },
+        borderBottom: { xs: '1px solid #e2e8f0', md: 'none' },
+        pr: 1,
         bgcolor: '#ffffff',
         scrollbarWidth: 'none',
         msOverflowStyle: 'none',
@@ -591,7 +618,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.3, mt: 0.3 }}>
                           <Memory sx={{ fontSize: 11, color: '#94a3b8' }} />
                           <Typography sx={{ fontSize: 10, color: '#94a3b8', fontWeight: 600 }}>
-                            GPU {listItem.gpu_id}
+                            {workerGpuLabel(listItem.gpu_id)}
                           </Typography>
                         </Box>
                       )}
@@ -612,10 +639,11 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
               {(TYPE_META[item.type] || { label: item.type }).label}
             </Typography>
 
-            <Box sx={{ display: 'flex', gap: 2.5, flex: 1, minHeight: 0 }}>
+            <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2.5, flex: 1, minHeight: 0 }}>
               {/* Image */}
               <Box sx={{
                 flex: 1, position: 'relative', borderRadius: 3, overflow: 'hidden',
+                minHeight: { xs: 240, md: 0 },
                 bgcolor: '#fff'
               }}>
                 <Box
@@ -628,7 +656,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
               </Box>
 
               <Box sx={{
-                width: 360, flexShrink: 0,
+                width: { xs: '100%', md: 360 }, flexShrink: 0,
                 bgcolor: '#fff', borderRadius: 3, p: 2.5,
                 display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
               }}>
@@ -735,7 +763,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.8 }}>
                       <Memory sx={{ fontSize: 13, color: '#64748b' }} />
                       <Typography sx={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>
-                        GPU {item.gpu_id} — {item.gpu_id === 0 ? 'Master' : `Worker ${item.gpu_id}`}
+                        {workerGpuLabel(item.gpu_id)} · slot {item.gpu_id}
                       </Typography>
                     </Box>
                   )}
@@ -866,6 +894,10 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
 
 export default function Detections() {
   const { user } = useAuth();
+  const theme = useTheme();
+  // List view relies on keyboard navigation (↑↓ → ←) which is irrelevant on
+  // touch devices, so we force Grid view and hide the toggle below md.
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const { setAllCounts, setUnfilteredCounts, typeFilter, setTypeFilter, setExportToExcel, setDownloadConsolidatedReport, setReportValidationError } = useDetectionCounts();
   const [searchParams] = useSearchParams();
 
@@ -1519,7 +1551,7 @@ export default function Detections() {
               }
             }
           }}
-          sx={{ width: 170 }}
+          sx={{ width: { xs: 'calc(50% - 6px)', sm: 170 } }}
         />
 
         {/* End Time */}
@@ -1551,10 +1583,18 @@ export default function Detections() {
               }
             }
           }}
-          sx={{ width: 170 }}
+          sx={{ width: { xs: 'calc(50% - 6px)', sm: 170 } }}
         />
 
-        <Box sx={{ ml: 'auto', display: 'flex', gap: 1.5, alignItems: 'center' }}>
+        <Box sx={{
+          ml: { xs: 0, md: 'auto' },
+          width: { xs: '100%', md: 'auto' },
+          display: 'flex',
+          gap: 1.5,
+          alignItems: 'center',
+          justifyContent: { xs: 'space-between', md: 'flex-end' },
+          flexWrap: 'wrap',
+        }}>
           <TablePagination
             component="div"
             count={total}
@@ -1576,35 +1616,43 @@ export default function Detections() {
               overflow: 'hidden',
               minHeight: 36,
               height: 36,
-              '.MuiTablePagination-toolbar': { minHeight: '36px !important', height: '36px !important', px: 1 },
+              flexShrink: 0,
+              '.MuiTablePagination-toolbar': { minHeight: '36px !important', height: '36px !important', px: { xs: 0, sm: 1 } },
               '.MuiTablePagination-selectLabel, .MuiTablePagination-select, .MuiTablePagination-displayedRows': { m: 0, fontSize: 13, color: '#334155' },
-              '.MuiTablePagination-actions': { color: '#64748b' },
+              '.MuiTablePagination-actions': { color: '#64748b', ml: { xs: 0.5, sm: 2 } },
+              // On phones the "Images per page" label + rows selector eat the row;
+              // collapse to just "1–50 of 200  ‹ ›" so the Search button stays visible.
+              '.MuiTablePagination-selectLabel': { display: { xs: 'none', sm: 'block' } },
+              '.MuiTablePagination-input': { display: { xs: 'none', sm: 'inline-flex' } },
               borderBottom: 'none'
             }}
           />
 
-          {(typeFilter.length > 0 || dateFilter !== todayDate || search || startTime || endTime) && (
+          <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center', flexShrink: 0 }}>
+            {(typeFilter.length > 0 || dateFilter !== todayDate || search || startTime || endTime) && (
+              <Button
+                size="small"
+                onClick={() => { setTypeFilter([]); setDateFilter(todayDate); setSearch(''); setStartTime(''); setEndTime(''); setAppliedStartTime(''); setAppliedEndTime(''); }}
+                sx={{ height: 36, borderRadius: '8px', fontSize: 13, textTransform: 'none', color: '#64748b', flexShrink: 0, minWidth: 56 }}
+              >
+                Clear
+              </Button>
+            )}
             <Button
-              size="small"
-              onClick={() => { setTypeFilter([]); setDateFilter(todayDate); setSearch(''); setStartTime(''); setEndTime(''); setAppliedStartTime(''); setAppliedEndTime(''); }}
-              sx={{ height: 36, borderRadius: '8px', fontSize: 13, textTransform: 'none', color: '#64748b' }}
+              variant="contained"
+              // startIcon={<FilterList sx={{ fontSize: 16 }} />}
+              onClick={() => { setAppliedStartTime(startTime); setAppliedEndTime(endTime); }}
+              disableElevation
+              sx={{
+                bgcolor: '#3c81f6',
+                height: 36, borderRadius: '8px', fontSize: 13, fontWeight: 600, textTransform: 'none', px: 2.5,
+                flexShrink: 0, minWidth: 96,
+                '&:hover': { bgcolor: '#1e40af' }
+              }}
             >
-              Clear
+              Search
             </Button>
-          )}
-          <Button
-            variant="contained"
-            // startIcon={<FilterList sx={{ fontSize: 16 }} />}
-            onClick={() => { setAppliedStartTime(startTime); setAppliedEndTime(endTime); }}
-            disableElevation
-            sx={{
-              bgcolor: '#3c81f6',
-              height: 36, borderRadius: '8px', fontSize: 13, fontWeight: 600, textTransform: 'none', px: 2.5,
-              '&:hover': { bgcolor: '#1e40af' }
-            }}
-          >
-            Search
-          </Button>
+          </Box>
         </Box>
       </Box>
 
@@ -1650,6 +1698,8 @@ export default function Detections() {
             }} 
             size="small"
             sx={{
+              // List view is keyboard-driven; hide the switcher on touch screens.
+              display: { xs: 'none', md: 'flex' },
               bgcolor: '#ffffff',
               border: '0.5px solid #e2e8f0',
               height: 36,
@@ -1690,10 +1740,10 @@ export default function Detections() {
             Try changing your filters or run a script to generate detections
           </Typography>
         </Box>
-      ) : view === 'grid' ? (
+      ) : (view === 'grid' || isMobile) ? (
         <Grid container spacing={2}>
           {filteredData.map((item, i) => (
-            <Grid item xs={12} sm={6} md={3} key={`${item.chNo}-${i}`}>
+            <Grid item xs={12} sm={6} md={4} lg={3} key={`${item.chNo}-${i}`}>
               <DetectionCard
                 item={item}
                 onClick={setSelected}
