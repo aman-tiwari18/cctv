@@ -101,9 +101,14 @@ class PersonTracker:
         for tid in stale:
             del self.tracks[tid]
 
-    def update(self, person_boxes):
+    def update(self, person_boxes, frame=None, cam_label=""):
         """
         person_boxes : list of [x1,y1,x2,y2] for STANDING-classified boxes.
+        frame, cam_label: optional. When both provided, a STATIC-start frame
+                          is written to SAVE_FOLDER the moment a track's
+                          stillness timer begins — pair with the regular
+                          end-frame save 7 min later to visually verify the
+                          person actually stayed in one spot.
         Returns (absent_violation: bool, static_violation: bool).
         """
         now = time.time()
@@ -184,6 +189,22 @@ class PersonTracker:
                 track['moving_streak'] = 0
                 if track['static_start'] is None:
                     track['static_start'] = now
+                    # TEMP verification: write a labelled START frame to the
+                    # regular results folder so it pairs with the END frame
+                    # the worker saves ~7 min later. Remove this block to disable.
+                    if frame is not None and cam_label:
+                        try:
+                            snap = frame.copy()
+                            ts_str = datetime.now().strftime("%H:%M:%S")
+                            cv2.rectangle(snap, (10, 10), (560, 80), (0, 0, 0), -1)
+                            cv2.putText(snap, "STATIC START - 7 MIN TIMER BEGAN",
+                                        (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 165, 255), 2)
+                            cv2.putText(snap, f"Stillness started at {ts_str}",
+                                        (20, 68), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
+                            fname = f"invigilator_{cam_label}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_START.jpg"
+                            cv2.imwrite(os.path.join(SAVE_FOLDER, fname), snap)
+                        except Exception as e:
+                            logger.error(f"[Invigilator] Failed to save START frame: {e}")
                 if (now - track['static_start']) > STATIC_TIME_THRESH:
                     static_violation = True
                     # Restart the 7-min cycle so the save cadence is intrinsic
@@ -232,7 +253,7 @@ def detect_invigilator_in_frame(frame, device_id="unknown", camera_no="unknown",
             trackers[key] = PersonTracker()
         tracker = trackers[key]
 
-    absent, static_violation = tracker.update(person_boxes)
+    absent, static_violation = tracker.update(person_boxes, frame=frame, cam_label=f"{device_id}_{camera_no}")
     violation_detected = absent or static_violation
     status = "ABSENT" if absent else ("STATIC" if static_violation else "Active")
 
@@ -306,7 +327,7 @@ def detect_invigilator_batch(items):
                 trackers[key] = PersonTracker()
             tracker = trackers[key]
 
-        absent, static_violation = tracker.update(person_boxes)
+        absent, static_violation = tracker.update(person_boxes, frame=frame, cam_label=f"{device_id}_{camera_no}")
         violation_detected = absent or static_violation
         status = "ABSENT" if absent else ("STATIC" if static_violation else "Active")
 
