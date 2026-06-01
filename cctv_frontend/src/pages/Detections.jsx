@@ -32,6 +32,25 @@ import * as XLSX from 'xlsx';
 // PERFORMANCE UTILITIES
 // ============================================================
 
+// Map fleet-wide gpu_id slot (0..N-1, set by db_client._get_gpu_id) to a
+// human-readable "Worker X GPU Y" label. The slot ranges below mirror the
+// current fleet's WORKER_INDEX layout — keep in sync if workers are
+// added/removed.
+//   0           → Main (worker-0)
+//   1..3        → single-GPU workers (worker-1..3)
+//   4..11       → worker-5 GPU 0..7
+//   12..19      → worker-6 GPU 0..7
+//   20..27      → worker-4 GPU 0..7  (reserved for when worker-4 rejoins)
+function workerGpuLabel(slot) {
+  if (slot == null) return null;
+  if (slot === 0) return 'Worker 0 (Main)';
+  if (slot >= 1 && slot <= 3) return `Worker ${slot}`;
+  if (slot >= 4 && slot <= 11) return `Worker 5 · GPU ${slot - 4}`;
+  if (slot >= 12 && slot <= 19) return `Worker 6 · GPU ${slot - 12}`;
+  if (slot >= 20 && slot <= 27) return `Worker 4 · GPU ${slot - 20}`;
+  return `Slot ${slot}`;
+}
+
 // Debounce hook for search input
 function useDebounce(value, delay) {
   const [debouncedValue, setDebouncedValue] = useState(value);
@@ -331,7 +350,7 @@ function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onS
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.8 }}>
             <Memory sx={{ fontSize: 13, color: '#64748b' }} />
             <Typography sx={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>
-              GPU {item.gpu_id} — {item.gpu_id === 0 ? 'Master' : `Worker ${item.gpu_id}`}
+              {workerGpuLabel(item.gpu_id)} · slot {item.gpu_id}
             </Typography>
           </Box>
         )}
@@ -591,7 +610,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.3, mt: 0.3 }}>
                           <Memory sx={{ fontSize: 11, color: '#94a3b8' }} />
                           <Typography sx={{ fontSize: 10, color: '#94a3b8', fontWeight: 600 }}>
-                            GPU {listItem.gpu_id}
+                            {workerGpuLabel(listItem.gpu_id)}
                           </Typography>
                         </Box>
                       )}
@@ -735,7 +754,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.8 }}>
                       <Memory sx={{ fontSize: 13, color: '#64748b' }} />
                       <Typography sx={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>
-                        GPU {item.gpu_id} — {item.gpu_id === 0 ? 'Master' : `Worker ${item.gpu_id}`}
+                        {workerGpuLabel(item.gpu_id)} · slot {item.gpu_id}
                       </Typography>
                     </Box>
                   )}

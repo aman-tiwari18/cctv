@@ -91,7 +91,25 @@ class Poller:
                 for item in (pending_data + running_data):
                     seen[str(item["id"])] = item
                 all_data = list(seen.values())
-                
+
+                # Main worker sweeps vision assignments whose shift window has
+                # ended → COMPLETED. Vision is kept RUNNING during its window so
+                # late/restarted workers can finish their camera shard (see
+                # run_assignment); this closes it once the window is over so it
+                # doesn't linger as RUNNING forever.
+                if IS_MAIN_WORKER:
+                    for a in running_data:
+                        code = str((a.get("execution_metadata") or {}).get("script_code")
+                                   or a.get("script_code") or "").strip().lower()
+                        aid = str(a["id"])
+                        if (code in ("vision", "scene_classification")
+                                and aid not in self.completed_scripts
+                                and self._shift_window_closed(a)):
+                            await self.update_assignment_status(
+                                aid, "COMPLETED",
+                                {"result_data": {"note": "shift window closed — sweep"}})
+                            self.completed_scripts.add(aid)
+
                 if all_data:
                     logger.info(f"Fetched {len(all_data)} assignment(s) (Pending: {len(pending_data)}, Running: {len(running_data)})")
                     for assignment in all_data:
@@ -184,18 +202,30 @@ class Poller:
             
             result = await script_runner.execute_script(assignment)
             
-            # Only main worker updates global status to COMPLETED
-            if IS_MAIN_WORKER:
-                await self.update_assignment_status(assignment_id, "COMPLETED", {"result_data": result})
-            
             logger.info(f"✔ Assignment {assignment_id} completed")
-            
+
             # Remember that this completed successfully so we never restart it
             # ONLY FOR VISION scripts! Other scripts should restart if they exit early.
             meta = assignment.get("execution_metadata", {})
             raw_code = str(meta.get("script_code") or assignment.get("script_code") or "").strip().lower()
-            if raw_code in ("vision", "scene_classification"):
+            is_vision = raw_code in ("vision", "scene_classification")
+            if is_vision:
                 self.completed_scripts.add(assignment_id)
+
+            # Only main worker updates global status to COMPLETED.
+            # BUGFIX (camera coverage): a vision assignment runs ONCE per worker
+            # over that worker's own camera shard. If the main worker flips the
+            # whole assignment to COMPLETED the moment ITS 1/N shard finishes, the
+            # assignment immediately vanishes from /executions/{pending,running},
+            # so any worker that has not started yet — a restarted container, a
+            # late-joining VM, or one that simply polled in a gap — can never fetch
+            # it again and its share of cameras is never classified. So for vision
+            # we keep the assignment RUNNING until the shift window closes, letting
+            # stragglers catch up via /executions/running; a sweep (see poll())
+            # marks it COMPLETED once the window ends. Non-vision detectors re-run
+            # every frequency cycle, so they still complete immediately.
+            if IS_MAIN_WORKER and (not is_vision or self._shift_window_closed(assignment)):
+                await self.update_assignment_status(assignment_id, "COMPLETED", {"result_data": result})
             
         except Exception as e:
             if "__TIMEOUT_COMPLETED__" in str(e):
@@ -230,6 +260,27 @@ class Poller:
                 logger.debug(f"Assignment {assignment_id} → {status}")
         except Exception as e:
             logger.error(f"Failed to update assignment {assignment_id} status: {e}")
+
+    def _shift_window_closed(self, assignment) -> bool:
+        """True once the assignment's shift window has ended (compared in IST).
+
+        Used to decide when it is safe to mark a vision assignment globally
+        COMPLETED. Before the window closes we keep it RUNNING so late/restarted
+        workers can still run their own camera shard (see run_assignment / poll).
+        Falls back to True (immediate completion) when no window info is present."""
+        end_str = assignment.get("custom_end_time") or assignment.get("shift_end_time")
+        if not end_str:
+            return True
+        try:
+            parts = [int(x) for x in str(end_str).split(":")[:3]]
+            while len(parts) < 3:
+                parts.append(0)
+            now = datetime.now(IST)
+            end_dt = now.replace(hour=parts[0], minute=parts[1],
+                                 second=parts[2], microsecond=0)
+            return now >= end_dt
+        except Exception:
+            return True
 
     def get_status(self):
         return {

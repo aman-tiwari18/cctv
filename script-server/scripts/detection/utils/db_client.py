@@ -361,8 +361,20 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 # ── GPU / Worker ID ──────────────────────────────────────────────────────────
-# Derived from WORKER_ID env var: worker-0/main=0, worker-1=1, worker-2=2, ...
+# Returns the unique fleet-wide worker slot (0..N-1) that identifies the
+# *exact* container that produced a detection. With multi-GPU boxes (where
+# WORKER_ID is e.g. "worker-5-gpu3"), the trailing-digit regex would collide
+# across boxes (worker-5-gpu0 and worker-6-gpu0 both produce 0). To avoid
+# that, honor WORKER_INDEX env when set — that's the unique slot the camera
+# distributor uses. Fall back to the regex for single-GPU workers that don't
+# set WORKER_INDEX.
 def _get_gpu_id() -> int:
+    idx = os.environ.get("WORKER_INDEX")
+    if idx is not None and idx.strip() != "":
+        try:
+            return int(idx)
+        except ValueError:
+            pass
     wid = os.environ.get("WORKER_ID", "main")
     if wid in ("main", "worker-0"):
         return 0
