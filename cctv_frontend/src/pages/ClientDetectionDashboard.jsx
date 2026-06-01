@@ -614,53 +614,6 @@ const ClientDetectionDashboard = () => {
                         Monitor Live Exams, Camera Activity, Detections
                     </Typography>
                 </Box>
-                {showGpuWarning && (
-                    <Stack
-                        direction="row"
-                        alignItems="center"
-                        spacing={1}
-                        sx={{
-                            bgcolor: '#FFDAD6',
-                            color: '#93000A',
-                            border: '1px solid rgba(186, 26, 26, 0.20)',
-                            borderRadius: 999,
-                            pl: 1.25,
-                            pr: 0.5,
-                            py: 0.5,
-                            flexShrink: 0,
-                        }}
-                    >
-                        <ErrorOutlineRoundedIcon sx={{ fontSize: 18, color: '#93000A' }} />
-                        <Typography sx={{
-                            fontFamily: 'Inter, sans-serif',
-                            fontSize: { xs: '12px', sm: '13px' },
-                            fontWeight: 500,
-                            lineHeight: '16px',
-                            whiteSpace: 'nowrap',
-                        }}>
-                            GPU utilization above 85%
-                        </Typography>
-                        <Box
-                            component="button"
-                            type="button"
-                            onClick={() => setShowGpuWarning(false)}
-                            sx={{
-                                border: 'none',
-                                bgcolor: 'transparent',
-                                p: 0.25,
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                cursor: 'pointer',
-                                color: '#93000A',
-                                '&:hover': { opacity: 0.7 },
-                            }}
-                            aria-label="Dismiss GPU utilization warning"
-                        >
-                            <CloseRoundedIcon sx={{ fontSize: 16 }} />
-                        </Box>
-                    </Stack>
-                )}
             </Stack>
 
             {/* Overview header — Row 2: search input + filter button */}
