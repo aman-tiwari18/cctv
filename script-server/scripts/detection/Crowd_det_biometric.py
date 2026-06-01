@@ -24,7 +24,7 @@ SAVE_FOLDER = os.path.join(BASE_DIR, "results/crowd_detection_biometric")
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
-COOLDOWN_TIME = 240       # Seconds between saves
+COOLDOWN_TIME = 120       # Seconds between saves (2 min — per detection frequency spec)
 MIN_PERSONS = 12          # Threshold for crowd violation at biometric area
 CONF_THRESHOLD = 0.45     # Confidence for person detection
 

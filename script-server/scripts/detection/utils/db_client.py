@@ -440,6 +440,32 @@ def _ensure_status_column(conn):
         "ALTER TABLE camera_links_hls ADD COLUMN status VARCHAR(255) DEFAULT NULL",
         "ALTER TABLE camera_links_rtsp ADD COLUMN status VARCHAR(255) DEFAULT NULL",
         "ALTER TABLE camera_links_rtsp ADD COLUMN frame_path TEXT DEFAULT NULL",
+        # Per-run classification history tables (mirrors migration 024).
+        # Created here as well so workers come up cleanly without a manual migration step.
+        """CREATE TABLE IF NOT EXISTS camera_classification_hls (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            camera_id INT NOT NULL,
+            shift_id INT NULL,
+            exam_date DATE NULL,
+            frame_path TEXT NULL,
+            classification VARCHAR(255) NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_camera_id (camera_id),
+            INDEX idx_shift_date (shift_id, exam_date),
+            INDEX idx_created_at (created_at)
+        )""",
+        """CREATE TABLE IF NOT EXISTS camera_classification_rtsp (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            camera_id INT NOT NULL,
+            shift_id INT NULL,
+            exam_date DATE NULL,
+            frame_path TEXT NULL,
+            classification VARCHAR(255) NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_camera_id (camera_id),
+            INDEX idx_shift_date (shift_id, exam_date),
+            INDEX idx_created_at (created_at)
+        )""",
     ]
     for sql in migrations:
         try:
@@ -588,10 +614,15 @@ def get_hls_cameras_accessible(exam_id: int, shift_id: int, exam_date: str) -> l
 
 
 def update_hls_classification(exam_id: int, shift_id: int, exam_date: str, ch_code: str, classification: str, status: str = None) -> int:
-    """Update classification and status in camera_links_hls for one camera."""
+    """Update classification and status in camera_links_hls for one camera.
+    Reclassification clears any prior manual verification: a fresh VLM result
+    invalidates the operator's prior override, so the camera goes back to the
+    untouched/VLM-only state until a human re-verifies it.
+    """
     sql = """
         UPDATE camera_links_hls
-        SET classification = %s, status = %s
+        SET classification = %s, status = %s,
+            manually_verified = 0, verified_by = NULL
         WHERE exam_id = %s
           AND ch_code = %s
           AND is_active = 1
@@ -782,11 +813,14 @@ def get_rtsp_camera_by_id(camera_id_pk: int) -> dict:
         return {}
 
 def update_rtsp_classification(exam_id: int, device_id: str, camera_no: str, classification: str, status: str = None, frame_path: str = None) -> int:
-    """Update classification, status, and frame_path in camera_links_rtsp for one camera."""
+    """Update classification, status, and frame_path in camera_links_rtsp for one camera.
+    Reclassification clears any prior manual verification (see update_hls_classification).
+    """
     frame_path = _canonicalize_frame_path(frame_path)
     sql = """
         UPDATE camera_links_rtsp
-        SET classification = %s, status = %s, frame_path = %s
+        SET classification = %s, status = %s, frame_path = %s,
+            manually_verified = 0, verified_by = NULL
         WHERE exam_id = %s
           AND device_id = %s
           AND camera_no = %s
@@ -849,6 +883,70 @@ def update_rtsp_status_and_frame_path(
     except Exception as e:
         logger.error(
             f"[DB] Error updating rtsp status+frame_path (device_id={device_id}, camera_no={camera_no}): {e}"
+        )
+        return 0
+
+
+# ============================================================
+# 📚  CLASSIFICATION HISTORY  (append-only per-run log)
+# ============================================================
+
+def insert_hls_classification_history(
+    camera_id: int,
+    shift_id: Optional[int],
+    exam_date: Optional[str],
+    frame_path: Optional[str],
+    classification: Optional[str],
+) -> int:
+    """Append one row to camera_classification_hls for this run."""
+    if not camera_id:
+        return 0
+    frame_path = _canonicalize_frame_path(frame_path)
+    sql = """
+        INSERT INTO camera_classification_hls
+            (camera_id, shift_id, exam_date, frame_path, classification)
+        VALUES (%s, %s, %s, %s, %s)
+    """
+    try:
+        conn = _get_connection()
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (camera_id, shift_id, exam_date, frame_path, classification))
+                conn.commit()
+                return cur.rowcount
+    except Exception as e:
+        logger.error(
+            f"[DB] Error inserting camera_classification_hls (camera_id={camera_id}): {e}"
+        )
+        return 0
+
+
+def insert_rtsp_classification_history(
+    camera_id: int,
+    shift_id: Optional[int],
+    exam_date: Optional[str],
+    frame_path: Optional[str],
+    classification: Optional[str],
+) -> int:
+    """Append one row to camera_classification_rtsp for this run."""
+    if not camera_id:
+        return 0
+    frame_path = _canonicalize_frame_path(frame_path)
+    sql = """
+        INSERT INTO camera_classification_rtsp
+            (camera_id, shift_id, exam_date, frame_path, classification)
+        VALUES (%s, %s, %s, %s, %s)
+    """
+    try:
+        conn = _get_connection()
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, (camera_id, shift_id, exam_date, frame_path, classification))
+                conn.commit()
+                return cur.rowcount
+    except Exception as e:
+        logger.error(
+            f"[DB] Error inserting camera_classification_rtsp (camera_id={camera_id}): {e}"
         )
         return 0
 

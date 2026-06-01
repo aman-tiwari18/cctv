@@ -22,7 +22,7 @@ SAVE_FOLDER = os.path.join(BASE_DIR, "results/proximity_detection")
 # This detection runs on cameras classified as:
 # - Computer Lab / Inside Lab / Exam Lab / Inside Classroom
 
-COOLDOWN_TIME       = 60      # Seconds between saves (matches worker)
+COOLDOWN_TIME       = 120     # Seconds between saves (2 min — per detection frequency spec)
 PROXIMITY_THRESHOLD = 100     # Pixels — floor distance for background figures
 PROXIMITY_SCALE     = 0.50    # Adaptive: effective_threshold = max(PROXIMITY_THRESHOLD, avg_box_height * PROXIMITY_SCALE)
 CONF_THRESHOLD      = 0.55    # Raised from 0.45 — drops weak phantom detections (chairs/bags usually land at conf 0.50–0.70; real students ≥ 0.70)

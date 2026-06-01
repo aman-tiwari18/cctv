@@ -141,7 +141,7 @@ def _init_camera_index():
                     _rtsp_cam_index.setdefault(("", cam), row)
 
             cur.execute(
-                "SELECT ch_code, camera_name, centre_name, city, state, "
+                "SELECT exam_id, shift_id, ch_code, camera_name, centre_name, city, state, "
                 "tc_code, cctv_url, camera_category FROM camera_links_hls WHERE is_active=1"
             )
             for row in cur.fetchall():
@@ -200,6 +200,93 @@ def _camera_meta_for_rtsp_device_ch(device_id: str, camera_no: str) -> dict:
     except Exception as e:
         logger.error(f"RTSP camera lookup by camera_no failed: {e}")
         return {}
+
+
+def _shift_names_for_ids(shift_ids) -> dict:
+    ids = []
+    for shift_id in shift_ids:
+        if shift_id in (None, ""):
+            continue
+        try:
+            ids.append(int(shift_id))
+        except (TypeError, ValueError):
+            continue
+
+    ids = sorted(set(ids))
+    if not ids:
+        return {}
+
+    conn = None
+    try:
+        conn = _get_connection()
+        with conn.cursor() as cur:
+            fmt = ",".join(["%s"] * len(ids))
+            cur.execute(
+                f"SELECT id, shift_name FROM exam_shifts WHERE id IN ({fmt})",
+                tuple(ids),
+            )
+            return {row.get("id"): row.get("shift_name") for row in cur.fetchall()}
+    except Exception as e:
+        logger.error(f"Shift name lookup failed: {e}")
+        return {}
+    finally:
+        if conn:
+            conn.close()
+
+
+def _enrich_detection_item_from_report(item: dict) -> dict:
+    uid = item.get("uid")
+    if not uid:
+        return item
+
+    source = item.get("source")
+    if source == "rtsp":
+        tables = ["camera_report_rtsp"]
+    elif source == "hls":
+        tables = ["camera_report_hls"]
+    else:
+        tables = ["camera_report_hls", "camera_report_rtsp"]
+
+    conn = None
+    try:
+        conn = _get_connection()
+        with conn.cursor() as cur:
+            for table in tables:
+                cur.execute(
+                    f"""
+                    SELECT cr.shift_id, cr.tc_code, cr.gpu_id, cr.pushed_to_client,
+                           es.shift_name
+                    FROM {table} AS cr
+                    LEFT JOIN exam_shifts AS es ON es.id = cr.shift_id
+                    WHERE cr.unique_id = %s
+                    LIMIT 1
+                    """,
+                    (uid,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    continue
+
+                if row.get("tc_code"):
+                    item["tcCode"] = row.get("tc_code")
+                    item["tc_code"] = row.get("tc_code")
+                if row.get("shift_id") is not None:
+                    item["shift_id"] = row.get("shift_id")
+                if row.get("shift_name"):
+                    item["shiftName"] = row.get("shift_name")
+                    item["shift_name"] = row.get("shift_name")
+                if row.get("gpu_id") is not None:
+                    item["gpu_id"] = row.get("gpu_id")
+                if row.get("pushed_to_client") is not None:
+                    item["pushed_to_client"] = row.get("pushed_to_client")
+                break
+    except Exception as e:
+        logger.error(f"Detection report metadata lookup failed: {e}")
+    finally:
+        if conn:
+            conn.close()
+
+    return item
 
 
 # RTSP filenames follow: {script}_{camera_id_pk}_{camera_no}_{date}_{time}_{extra}.jpg
@@ -446,6 +533,7 @@ async def detection_watch_loop():
                                 relative_path, type_key, file_path,
                                 True, origin,
                             )
+                            payload = await asyncio.to_thread(_enrich_detection_item_from_report, payload)
                             await sio.emit("detection:new", payload)
                             emitted += 1
                         except Exception as exc:
@@ -1174,6 +1262,7 @@ def parse_detection_filename(
     city = cam_meta.get("city") or ""
     state = cam_meta.get("state") or ""
     tc_code = cam_meta.get("tc_code")
+    shift_id = cam_meta.get("shift_id")
     category = cam_meta.get("camera_category") or cam_meta.get("classification") or ""
     cctv_url = cam_meta.get("cctv_url") or ""
 
@@ -1228,6 +1317,8 @@ def parse_detection_filename(
         "city":        city,
         "state":       state,
         "tcCode":      tc_code,
+        "tc_code":     tc_code,
+        "shift_id":    shift_id,
         "category":    category,
         "cctvUrl":     cctv_url,
         "path":        str(file_path) if file_path else "",
@@ -1358,7 +1449,7 @@ def list_detections(
     # ── DB: pushed_to_client + gpu_id for the paginated slice only ─────────────
     uids_to_check = [item.get("uid") for item in paginated if item.get("uid")]
     pushed_uids = set()
-    uid_gpu_map = {}
+    uid_db_meta = {}
     if uids_to_check:
         try:
             from scripts.detection.utils.db_client import _get_connection
@@ -1368,33 +1459,57 @@ def list_detections(
 
                 try:
                     cur.execute(
-                        f"SELECT unique_id, pushed_to_client, gpu_id FROM camera_report_hls "
-                        f"USE INDEX (idx_unique_id) WHERE unique_id IN ({fmt})",
+                        f"""
+                        SELECT cr.unique_id, cr.pushed_to_client, cr.gpu_id,
+                               cr.shift_id, cr.tc_code, es.shift_name
+                        FROM camera_report_hls AS cr USE INDEX (idx_unique_id)
+                        LEFT JOIN exam_shifts AS es ON es.id = cr.shift_id
+                        WHERE cr.unique_id IN ({fmt})
+                        """,
                         tuple(uids_to_check)
                     )
                     for row in cur.fetchall():
                         uid = row.get("unique_id")
                         if uid:
+                            meta = uid_db_meta.setdefault(uid, {})
                             if row.get("pushed_to_client") == 1:
                                 pushed_uids.add(uid)
                             if row.get("gpu_id") is not None:
-                                uid_gpu_map[uid] = row["gpu_id"]
+                                meta["gpu_id"] = row["gpu_id"]
+                            if row.get("shift_id") is not None:
+                                meta["shift_id"] = row.get("shift_id")
+                            if row.get("shift_name"):
+                                meta["shiftName"] = row.get("shift_name")
+                            if row.get("tc_code"):
+                                meta["tcCode"] = row.get("tc_code")
                 except Exception as e:
                     logger.error(f"HLS pushed uids fetch failed: {e}")
 
                 try:
                     cur.execute(
-                        f"SELECT unique_id, pushed_to_client, gpu_id FROM camera_report_rtsp "
-                        f"USE INDEX (idx_unique_id) WHERE unique_id IN ({fmt})",
+                        f"""
+                        SELECT cr.unique_id, cr.pushed_to_client, cr.gpu_id,
+                               cr.shift_id, cr.tc_code, es.shift_name
+                        FROM camera_report_rtsp AS cr USE INDEX (idx_unique_id)
+                        LEFT JOIN exam_shifts AS es ON es.id = cr.shift_id
+                        WHERE cr.unique_id IN ({fmt})
+                        """,
                         tuple(uids_to_check)
                     )
                     for row in cur.fetchall():
                         uid = row.get("unique_id")
                         if uid:
+                            meta = uid_db_meta.setdefault(uid, {})
                             if row.get("pushed_to_client") == 1:
                                 pushed_uids.add(uid)
                             if row.get("gpu_id") is not None:
-                                uid_gpu_map[uid] = row["gpu_id"]
+                                meta["gpu_id"] = row["gpu_id"]
+                            if row.get("shift_id") is not None:
+                                meta["shift_id"] = row.get("shift_id")
+                            if row.get("shift_name"):
+                                meta["shiftName"] = row.get("shift_name")
+                            if row.get("tc_code"):
+                                meta["tcCode"] = row.get("tc_code")
                 except Exception as e:
                     logger.error(f"RTSP pushed uids fetch failed: {e}")
             conn.close()
@@ -1403,8 +1518,17 @@ def list_detections(
 
     for item in paginated:
         uid = item.get("uid")
+        meta = uid_db_meta.get(uid, {})
         item["pushed_to_client"] = 1 if uid in pushed_uids else 0
-        item["gpu_id"] = uid_gpu_map.get(uid)
+        item["gpu_id"] = meta.get("gpu_id")
+        if meta.get("shift_id") is not None:
+            item["shift_id"] = meta.get("shift_id")
+        if meta.get("shiftName"):
+            item["shiftName"] = meta.get("shiftName")
+            item["shift_name"] = meta.get("shiftName")
+        if meta.get("tcCode"):
+            item["tcCode"] = meta.get("tcCode")
+            item["tc_code"] = meta.get("tcCode")
 
     return {
         "success": True,
@@ -1533,6 +1657,8 @@ async def copy_client_detections(payload: ClientDetectionCopyRequest):
                         "city": row.get("city"),
                         "state": row.get("state"),
                         "tcCode": row.get("tc_code"),
+                        "tc_code": row.get("tc_code"),
+                        "shift_id": row.get("shift_id"),
                         "category": row.get("camera_category", ""),
                         "uid": row.get("unique_id"),
                         "updatedAt": pushed_at_ms,
@@ -1540,6 +1666,17 @@ async def copy_client_detections(payload: ClientDetectionCopyRequest):
                     })
                     copied.append(copied_item)
                     
+            shift_name_map = _shift_names_for_ids(item.get("shift_id") for item in copied)
+            for item in copied:
+                shift_id = item.get("shift_id")
+                try:
+                    shift_name = shift_name_map.get(int(shift_id)) if shift_id is not None else None
+                except (TypeError, ValueError):
+                    shift_name = None
+                if shift_name:
+                    item["shiftName"] = shift_name
+                    item["shift_name"] = shift_name
+
             # After all updates, emit client detections and updated client counts
             for item in copied:
                 await sio.emit("client-detection:new", item)
@@ -1683,6 +1820,7 @@ def list_client_detections(
                     logger.error(f"Client detections fetch failed ({table}): {e}")
 
             db_rows.sort(key=lambda x: str(x.get("created_at", "")), reverse=True)
+            shift_name_map = _shift_names_for_ids(row.get("shift_id") for row in db_rows)
 
             # ── Light pass: cheap filtering without calling parse_detection_filename ──
             # Date/time filtering uses the LRU-cached _basic_detection_meta (regex only,
@@ -1755,6 +1893,10 @@ def list_client_detections(
                     "city":        row.get("city"),
                     "state":       row.get("state"),
                     "tcCode":      row.get("tc_code"),
+                    "tc_code":     row.get("tc_code"),
+                    "shift_id":    row.get("shift_id"),
+                    "shiftName":   shift_name_map.get(row.get("shift_id")),
+                    "shift_name":  shift_name_map.get(row.get("shift_id")),
                     "category":    row.get("camera_category", ""),
                     "exam_id":     row.get("exam_id"),
                     "uid":         row.get("unique_id"),

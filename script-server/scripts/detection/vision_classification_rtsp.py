@@ -46,6 +46,8 @@ try:
         update_hls_status,
         update_rtsp_status,
         update_rtsp_status_and_frame_path,
+        insert_hls_classification_history,
+        insert_rtsp_classification_history,
     )
 except ImportError:
     sys.path.append(os.path.join(os.path.dirname(__file__), "utils"))
@@ -57,6 +59,8 @@ except ImportError:
         update_hls_status,
         update_rtsp_status,
         update_rtsp_status_and_frame_path,
+        insert_hls_classification_history,
+        insert_rtsp_classification_history,
     )
 
 # ===========================================================================
@@ -1515,6 +1519,7 @@ async def _classify_frame_from_disk(
 
     base = {
         "camera_id":   cam_id,
+        "camera_pk":   cam.get("id"),    # camera_links_{hls,rtsp}.id — for history insert
         "device_id":   str(cam.get("device_id") or ""),
         "camera_no":   str(cam.get("camera_no")  or ""),
         "camera_name": cam.get("camera_name"),
@@ -1561,11 +1566,13 @@ async def _classify_frame_from_disk(
 def _bulk_persist(runtime: dict, classifications: List[dict]) -> int:
     updated = 0
     skipped = 0
+    history_inserted = 0
     for item in classifications:
         cam_id     = str(item.get("camera_id") or "").strip()
         label      = str(item.get("classification") or "").strip()
         status     = str(item.get("status") or "").strip() or None
         frame_path = str(item.get("frame_path") or "").strip() or None
+        camera_pk  = item.get("camera_pk")
         if not cam_id or not label:
             continue
         # Only persist when the camera classified successfully. Transient
@@ -1580,6 +1587,10 @@ def _bulk_persist(runtime: dict, classifications: List[dict]) -> int:
                     runtime["exam_id"], runtime["shift_id"],
                     runtime["assignment_date"], cam_id, label, status
                 )
+                history_inserted += insert_hls_classification_history(
+                    camera_pk, runtime.get("shift_id"),
+                    runtime.get("assignment_date"), frame_path, label,
+                )
             else:
                 # For RTSP use device_id + camera_no from item, fall back to splitting cam_id
                 device_id = str(item.get("device_id") or "").strip()
@@ -1591,12 +1602,22 @@ def _bulk_persist(runtime: dict, classifications: List[dict]) -> int:
                 updated += update_rtsp_classification(
                     runtime["exam_id"], device_id, camera_no, label, status, frame_path
                 )
+                history_inserted += insert_rtsp_classification_history(
+                    camera_pk, runtime.get("shift_id"),
+                    runtime.get("assignment_date"), frame_path, label,
+                )
         except Exception as e:
             logger.error(f"DB persist failed for {cam_id}: {e}")
     if skipped:
-        logger.info(f"Bulk DB persist: {updated} rows updated, {skipped} frame_capture_failed skipped")
+        logger.info(
+            f"Bulk DB persist: {updated} rows updated, {history_inserted} history rows inserted, "
+            f"{skipped} frame_capture_failed skipped"
+        )
     else:
-        logger.info(f"Bulk DB persist complete: {updated} rows updated")
+        logger.info(
+            f"Bulk DB persist complete: {updated} rows updated, "
+            f"{history_inserted} history rows inserted"
+        )
     return updated
 
 
@@ -1861,6 +1882,7 @@ async def run_assignment_mode() -> dict:
             res = await fut
             classifications.append({
                 "camera_id":      res["camera_id"],
+                "camera_pk":      res.get("camera_pk"),
                 "device_id":      res.get("device_id", ""),
                 "camera_no":      res.get("camera_no", ""),
                 "camera_name":    res.get("camera_name"),
@@ -2045,11 +2067,17 @@ def main() -> None:
     # Bulk DB persist — include device_id / camera_no / frame_path for RTSP
     classifications = []
     for _, row in _df[_df["Status"] == "Accessible"].iterrows():
+        try:
+            cam_pk = int(row.get("id")) if row.get("id") not in (None, "") else None
+        except (TypeError, ValueError):
+            cam_pk = None
         classifications.append({
             "camera_id":      row["cam_id_ref"],
+            "camera_pk":      cam_pk,
             "device_id":      str(row.get("device_id") or ""),
             "camera_no":      str(row.get("camera_no") or ""),
             "classification": row[SCENE_COLUMN_TARGET],
+            "status":         "Accessible",
             "frame_path":     str(row.get("frame_path") or "") or None,
         })
     _bulk_persist(runtime, classifications)
