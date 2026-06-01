@@ -1054,6 +1054,8 @@ const ClientDetections = () => {
   const [search, setSearch] = useState('');
   const [examFilter, setExamFilter] = useState('');
   const [exams, setExams] = useState([]);
+  const [examShifts, setExamShifts] = useState([]);
+  const [shiftFilter, setShiftFilter] = useState('');
   const [sourceFilter, setSourceFilter] = useState('');
   const [dateFilter, setDateFilter] = useState(todayDate);
   const [startTime, setStartTime] = useState('');
@@ -1091,6 +1093,7 @@ const ClientDetections = () => {
       if (appliedStartTime) params.append('start_time', appliedStartTime);
       if (appliedEndTime) params.append('end_time', appliedEndTime);
       if (examFilter) params.append('exam_id', examFilter);
+      if (shiftFilter) params.append('shift_id', shiftFilter);
       
       // Pass user info for filtering
       if (user?.role) params.append('user_role', user.role);
@@ -1122,7 +1125,7 @@ const ClientDetections = () => {
     } finally {
       setLoading(false);
     }
-  }, [sourceFilter, typeFilter, dateFilter, search, appliedStartTime, appliedEndTime, examFilter, rowsPerPage, user?.role, user?.company_name]);
+  }, [sourceFilter, typeFilter, dateFilter, search, appliedStartTime, appliedEndTime, examFilter, shiftFilter, rowsPerPage, user?.role, user?.company_name]);
 
   // Load exams for filter dropdown
   useEffect(() => {
@@ -1140,6 +1143,19 @@ const ClientDetections = () => {
     const examId = searchParams.get('exam_id');
     if (examId) setExamFilter(examId);
   }, [searchParams]);
+
+  // Populate the dependent Shift filter from the selected exam — the exam list
+  // (examsAPI.getAll) already embeds each exam's `examShifts`.
+  useEffect(() => {
+    if (!examFilter) {
+      setExamShifts([]);
+      setShiftFilter('');
+      return;
+    }
+    const exam = exams.find((e) => String(e.id) === String(examFilter));
+    setExamShifts(Array.isArray(exam?.examShifts) ? exam.examShifts : []);
+    setShiftFilter('');
+  }, [examFilter, exams]);
 
   // Fetch images when filters change
   useEffect(() => {
@@ -1241,8 +1257,13 @@ const ClientDetections = () => {
       return false;
     }
 
+    // Shift filter (backend already filters; this is a client-side safety net)
+    if (shiftFilter && String(item.shift_id) !== String(shiftFilter)) {
+      return false;
+    }
+
     return true;
-  }, [search, typeFilter, sourceFilter, dateFilter, appliedStartTime, appliedEndTime, examFilter]);
+  }, [search, typeFilter, sourceFilter, dateFilter, appliedStartTime, appliedEndTime, examFilter, shiftFilter]);
 
   // Handle live socket updates for client detections
   const { socket } = useSocket();
@@ -1456,6 +1477,23 @@ const ClientDetections = () => {
             ))}
           </Select>
         </FormControl>
+        {/* Shift Filter — dependent on the selected exam */}
+        {examFilter && examShifts.length > 0 && (
+          <FormControl size="small" sx={{ minWidth: 130 }}>
+            <InputLabel sx={{ fontSize: 13 }}>Shift</InputLabel>
+            <Select
+              value={shiftFilter}
+              label="Shift"
+              onChange={(e) => { setShiftFilter(e.target.value); setPage(1); }}
+              sx={{ borderRadius: '8px', bgcolor: '#f8fafc', height: 36, fontSize: 14, '& fieldset': { border: 'none' } }}
+            >
+              <MenuItem value=""><em>All Shifts</em></MenuItem>
+              {examShifts.map((sh) => (
+                <MenuItem key={sh.id} value={sh.id}>{sh.shift_name || `Shift #${sh.id}`}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        )}
         <Box sx={{ position: 'relative', minWidth: 100, maxWidth: 150 }}>
           <TextField
             type="date"
@@ -1599,10 +1637,10 @@ const ClientDetections = () => {
           />
 
 
-          {(typeFilter.length > 0 || dateFilter !== todayDate || search || sourceFilter || startTime || endTime) && (
+          {(typeFilter.length > 0 || dateFilter !== todayDate || search || sourceFilter || startTime || endTime || shiftFilter) && (
             <Button
               size="small"
-              onClick={() => { setTypeFilter([]); setDateFilter(todayDate); setSearch(''); setSourceFilter(''); setStartTime(''); setEndTime(''); setAppliedStartTime(''); setAppliedEndTime(''); }}
+              onClick={() => { setTypeFilter([]); setDateFilter(todayDate); setSearch(''); setSourceFilter(''); setStartTime(''); setEndTime(''); setAppliedStartTime(''); setAppliedEndTime(''); setShiftFilter(''); }}
               sx={{ height: 36, borderRadius: '8px', fontSize: 13, textTransform: 'none', color: '#64748b' }}
             >
               Clear

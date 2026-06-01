@@ -24,6 +24,10 @@ if DETECTION_ROOT not in sys.path:
 # Import core detection module
 import blind_spot_det as blind_spot_core
 
+# ================= GPU MEMORY GUARD =================
+from workers.gpu_memory_guard import apply_gpu_memory_limit
+apply_gpu_memory_limit()  # FIXED: cap per-process VRAM before any CUDA alloc
+
 # ================= GRACEFUL STOP FLAG =================
 _STOP_EVENT = threading.Event()
 
@@ -49,8 +53,8 @@ os.makedirs(RTSP_SAVE_FOLDER, exist_ok=True)
 os.makedirs(HLS_SAVE_FOLDER,  exist_ok=True)
 
 # GPU Queue Config
-GPU_BATCH_SIZE      = 64
-GPU_QUEUE_SIZE      = 128
+GPU_BATCH_SIZE      = 16  # FIXED: was 64, reduces VRAM per worker
+GPU_QUEUE_SIZE      = 32   # FIXED: was 128, reduces frame buffer VRAM
 BATCH_WAIT_TIMEOUT  = 0.2
 THREAD_DELAY        = 0.1
 HLS_SAMPLE_EVERY    = 10
@@ -68,6 +72,7 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=180):
     blind_spot_core.get_yolo_model()
     
     last_save_time = {}
+    log_counter = 0
 
     while not stop_event.is_set():
         batch = []
@@ -101,12 +106,13 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=180):
                 
                 ch_no = item.get("ch_no") or "0"
                 exam_id = item.get("exam_id", "0")
+                shift_id = item.get("shift_id") or os.environ.get("SHIFT_ID", "0")
                 script_name = "blind_spot"
                 
                 if item.get("source_type") == "HLS":
-                    fname = f"{script_name}_ch{ch_no}_exam{exam_id}_{ts}_{uid}.jpg"
+                    fname = f"{script_name}_ch{ch_no}_exam{exam_id}_shift{shift_id}_{ts}_{uid}.jpg"
                 else:
-                    fname = f"{script_name}_{cam_id}_{ch_no}_exam{exam_id}_{ts}_{uid}.jpg"
+                    fname = f"{script_name}_{cam_id}_{ch_no}_exam{exam_id}_shift{shift_id}_{ts}_{uid}.jpg"
                 
                 path = os.path.join(save_folder, fname)
                 cv2.imwrite(path, annotated)
@@ -139,6 +145,12 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=180):
                 if 'frame' in item: del item['frame']
 
             del batch
+            # Periodically flush CUDA cache to avoid memory fragmentation
+            log_counter += 1
+            if log_counter % 50 == 0:
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                logger.debug(f"[BlindSpot] GPU batch #{log_counter} processed")
 
         except Exception as e:
             logger.error(f"[BlindSpot] Batch inference error: {e}")
@@ -186,6 +198,7 @@ def blind_spot_worker(frame_queue):
                     "device_id":    device_id,
                     "ch_no":        camera_no,
                     "exam_id":      exam_id,
+                    "shift_id":     os.environ.get("SHIFT_ID", "0"),
                     "source_type":  "RTSP",
                 }, timeout=0.1)
             except queue.Full:
@@ -269,7 +282,7 @@ def blind_spot_worker_hls(camera_configs, stop_event=None):
     )
     gpu_t.start()
 
-    with ThreadPoolExecutor(max_workers=64) as executor:
+    with ThreadPoolExecutor(max_workers=16) as executor:  # FIXED: was 64, reduces concurrent HLS stream threads
         for cfg in camera_configs:
             executor.submit(_hls_camera_thread, cfg, stop_event)
             time.sleep(THREAD_DELAY)

@@ -234,6 +234,76 @@ def _shift_names_for_ids(shift_ids) -> dict:
             conn.close()
 
 
+@lru_cache(maxsize=2048)
+def _resolve_shift_window(shift_id):
+    """Return (start_hm, end_hm) as 'HH:MM' for an exam_shifts row, or (None,None).
+
+    Detections are filtered by shift via this TIME WINDOW rather than a stored
+    shift tag — every detection has a timestamp, but historical rows often lack a
+    reliable shift_id (NULL / per-execution value), so time is the robust key."""
+    if not shift_id:
+        return (None, None)
+    conn = None
+    try:
+        conn = _get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT start_time, end_time FROM exam_shifts WHERE id = %s LIMIT 1",
+                (int(shift_id),),
+            )
+            row = cur.fetchone()
+        if not row:
+            return (None, None)
+
+        def _hm(t):
+            s = str(t) if t is not None else ""
+            return s[:5] if len(s) >= 5 else None  # 'HH:MM:SS' -> 'HH:MM'
+
+        return (_hm(row.get("start_time")), _hm(row.get("end_time")))
+    except Exception as e:
+        logger.error(f"Shift window lookup failed for shift_id={shift_id}: {e}")
+        return (None, None)
+    finally:
+        if conn:
+            conn.close()
+
+
+def _apply_shift_window(shift_id, start_time, end_time):
+    """Fold a shift's time window into existing start/end time bounds (intersection)."""
+    if not shift_id:
+        return start_time, end_time
+    sw_start, sw_end = _resolve_shift_window(shift_id)
+    if sw_start:
+        start_time = max(start_time, sw_start) if start_time else sw_start
+    if sw_end:
+        end_time = min(end_time, sw_end) if end_time else sw_end
+    return start_time, end_time
+
+
+def _attach_shift_names(items) -> None:
+    """In-place: ensure every item carrying a shift_id also has a human-readable
+    shiftName. Resolves exam_shifts in ONE query for the whole page, so detection
+    cards (grid + list) reliably show the shift even when the camera_report row's
+    shift_id was NULL but the filename embedded it."""
+    needing = [it.get("shift_id") for it in items if it.get("shift_id") and not it.get("shiftName")]
+    if not needing:
+        return
+    name_map = _shift_names_for_ids(needing)
+    if not name_map:
+        return
+    for it in items:
+        sid = it.get("shift_id")
+        if not sid or it.get("shiftName"):
+            continue
+        try:
+            nm = name_map.get(int(sid))
+        except (TypeError, ValueError):
+            nm = None
+        if nm:
+            it["shiftName"] = nm
+            it["shift_name"] = nm
+
+
 def _enrich_detection_item_from_report(item: dict) -> dict:
     uid = item.get("uid")
     if not uid:
@@ -367,7 +437,13 @@ def _basic_detection_meta(filename: str) -> dict:
     if exam_match:
         exam_id = int(exam_match.group(1))
 
-    return {"date": date_iso, "time": time_str, "exam_id": exam_id}
+    shift_id = None
+    shift_match = re.search(r'_shift(\d+)', stem, flags=re.IGNORECASE)
+    if shift_match:
+        _sid = int(shift_match.group(1))
+        shift_id = _sid if _sid > 0 else None
+
+    return {"date": date_iso, "time": time_str, "exam_id": exam_id, "shift_id": shift_id}
 
 
 def _basic_detection_matches(
@@ -1172,6 +1248,19 @@ def parse_detection_filename(
     if exam_match:
         exam_id = int(exam_match.group(1))
 
+    # Extract shift_id embedded in the filename as _shift{id}_ (added by the
+    # detection workers). This is the execution's shift and is the authoritative
+    # source — the camera-metadata shift_id is often NULL (RTSP / all-shifts HLS).
+    # A "0" placeholder (tampering / env unset) is treated as absent.
+    filename_shift_id = None
+    shift_match = re.search(r'_shift(\d+)', stem, flags=re.IGNORECASE)
+    if shift_match:
+        try:
+            _sid = int(shift_match.group(1))
+            filename_shift_id = _sid if _sid > 0 else None
+        except ValueError:
+            filename_shift_id = None
+
     # The uid is typically the the last segment of the stem
     uid = stem.split("_")[-1]
 
@@ -1262,7 +1351,9 @@ def parse_detection_filename(
     city = cam_meta.get("city") or ""
     state = cam_meta.get("state") or ""
     tc_code = cam_meta.get("tc_code")
-    shift_id = cam_meta.get("shift_id")
+    # Prefer the shift embedded in the filename (the execution's shift); fall back
+    # to the camera's assigned shift from metadata when the filename has none.
+    shift_id = filename_shift_id or cam_meta.get("shift_id")
     category = cam_meta.get("camera_category") or cam_meta.get("classification") or ""
     cctv_url = cam_meta.get("cctv_url") or ""
 
@@ -1343,12 +1434,16 @@ def list_detections(
     start_time: Optional[str] = None,
     end_time: Optional[str] = None,
     exam_id: Optional[str] = None,
+    shift_id: Optional[str] = None,
     page: int = 1,
     limit: int = 50,
 ):
     selected_types = set(type.split(',')) if type else set()
     check_types = selected_types if selected_types else set(DETECTION_FOLDERS.keys())
     needs_search = bool(search)
+    # Filter by shift = filter by that shift's time window (robust on historical
+    # data that lacks a reliable shift tag). Fold it into start/end time bounds.
+    start_time, end_time = _apply_shift_window(shift_id, start_time, end_time)
     has_extra_filters = bool(exam_id or start_time or end_time)
 
     # Take stable references to avoid races with the background watcher.
@@ -1529,6 +1624,10 @@ def list_detections(
         if meta.get("tcCode"):
             item["tcCode"] = meta.get("tcCode")
             item["tc_code"] = meta.get("tcCode")
+
+    # Resolve shift names for the page (covers filename-derived shift_ids whose
+    # camera_report row had a NULL shift_id) so the cards always show the shift.
+    _attach_shift_names(paginated)
 
     return {
         "success": True,
@@ -1743,10 +1842,15 @@ def list_client_detections(
     end_time: Optional[str] = None,
     search: Optional[str] = None,
     exam_id: Optional[int] = None,
+    shift_id: Optional[int] = None,
     user_role: Optional[str] = None,
     user_company: Optional[str] = None,
 ):
     all_counts = {k: 0 for k in DETECTION_FOLDERS}
+
+    # Shift filter = that shift's time window folded into start/end (robust on
+    # historical rows whose stored shift_id is NULL).
+    start_time, end_time = _apply_shift_window(shift_id, start_time, end_time)
 
     conn = _get_connection()
     try:
@@ -1894,9 +1998,11 @@ def list_client_detections(
                     "state":       row.get("state"),
                     "tcCode":      row.get("tc_code"),
                     "tc_code":     row.get("tc_code"),
-                    "shift_id":    row.get("shift_id"),
-                    "shiftName":   shift_name_map.get(row.get("shift_id")),
-                    "shift_name":  shift_name_map.get(row.get("shift_id")),
+                    # DB row shift_id wins; fall back to the shift parsed from the
+                    # filename (set by parse_detection_filename) when the row is NULL.
+                    "shift_id":    row.get("shift_id") or item.get("shift_id"),
+                    "shiftName":   shift_name_map.get(row.get("shift_id")) or item.get("shiftName"),
+                    "shift_name":  shift_name_map.get(row.get("shift_id")) or item.get("shift_name"),
                     "category":    row.get("camera_category", ""),
                     "exam_id":     row.get("exam_id"),
                     "uid":         row.get("unique_id"),
@@ -1905,6 +2011,8 @@ def list_client_detections(
                     "updated_at":  _epoch_ms(row.get("updated_at")),
                 })
                 rows.append(item)
+
+            _attach_shift_names(rows)
 
     finally:
         conn.close()

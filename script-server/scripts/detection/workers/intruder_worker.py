@@ -24,6 +24,10 @@ if DETECTION_ROOT not in sys.path:
 # Import core detection module
 import Intruder_det as intruder_core
 
+# ================= GPU MEMORY GUARD =================
+from workers.gpu_memory_guard import apply_gpu_memory_limit
+apply_gpu_memory_limit()  # FIXED: cap per-process VRAM before any CUDA alloc
+
 # ================= GRACEFUL STOP FLAG =================
 _STOP_EVENT = threading.Event()
 
@@ -51,8 +55,8 @@ os.makedirs(RTSP_SAVE_FOLDER, exist_ok=True)
 os.makedirs(HLS_SAVE_FOLDER,  exist_ok=True)
 
 # GPU Queue Config
-GPU_BATCH_SIZE      = 64
-GPU_QUEUE_SIZE      = 128
+GPU_BATCH_SIZE      = 16  # FIXED: was 64, reduces VRAM per worker
+GPU_QUEUE_SIZE      = 32   # FIXED: was 128, reduces frame buffer VRAM
 BATCH_WAIT_TIMEOUT  = 0.2
 THREAD_DELAY        = 0.1
 HLS_SAMPLE_EVERY    = 5
@@ -107,6 +111,11 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=60):
                 item.pop('frame',None)
             del batch
             continue
+        finally:
+            inference_items = []
+
+        for item in batch:
+            item.pop('frame', None)
 
         # Process results
         for item, (annotated_frame, detected, person_count) in zip(batch, batch_results):
@@ -114,36 +123,40 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=60):
 
             if not detected:
                 state["consec_violations"] = 0
+                del annotated_frame
                 continue
 
             # CONF=0.30 is low — require 2 consecutive frames to confirm before saving
             state["consec_violations"] = state.get("consec_violations", 0) + 1
             if state["consec_violations"] < CONSEC_THRESHOLD:
+                del annotated_frame
                 continue
 
             now = time.time()
             if now - state.get("last_save", 0) < cooldown_time:
+                del annotated_frame
                 continue
 
             state["last_save"] = now
             state["consec_violations"] = 0
             ts = time.strftime("%Y%m%d_%H%M%S")
             uid = str(uuid.uuid4())
-            
+
             dev_id = item.get("device_id") or item.get("camera_id")
             ch_no = item.get("ch_no")
             exam_id = item.get("exam_id") or "0"
+            shift_id = item.get("shift_id") or os.environ.get("SHIFT_ID", "0")
             script_name = item.get("script_name", "intruder")
-            
+
             if item.get("source_type") == "HLS":
-                fname = f"{script_name}_ch{ch_no}_exam{exam_id}_{ts}_{uid}.jpg"
+                fname = f"{script_name}_ch{ch_no}_exam{exam_id}_shift{shift_id}_{ts}_{uid}.jpg"
             else:
-                fname = f"{script_name}_{dev_id}_{ch_no}_exam{exam_id}_{ts}_{uid}.jpg"
-            
+                fname = f"{script_name}_{dev_id}_{ch_no}_exam{exam_id}_shift{shift_id}_{ts}_{uid}.jpg"
+
             path = os.path.join(save_folder, fname)
             cv2.imwrite(path, annotated_frame)
             logger.warning(f"[Intruder] 🚨 SAVED persons={person_count} → {path}")
-            
+
             # Report to database
             if item.get("source_type") == "HLS":
                 try:
@@ -166,11 +179,16 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=60):
                     )
                 except Exception as e:
                     logger.error(f"[Intruder] RTSP DB Reporting Error: {e}")
-            
+
             del annotated_frame
-            if 'frame' in item: del item['frame']
 
         del batch
+        # Periodically flush CUDA cache to avoid memory fragmentation
+        log_counter += 1
+        if log_counter % 50 == 0:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            logger.debug(f"[Worker] GPU batch #{log_counter} processed")
 
     logger.info("🔴 [Intruder] GPU worker stopped")
 
@@ -219,6 +237,7 @@ def intruder_worker(frame_queue):
                     "camera_no":    camera_no,
                     "ch_no":        camera_no,
                     "exam_id":      exam_id,
+                    "shift_id":     os.environ.get("SHIFT_ID", "0"),
                     "script_name":  "intruder",
                     "source_type":  "RTSP",
                     "state":        camera_states[cam_key],
@@ -244,6 +263,7 @@ def _hls_camera_thread(cfg, stop_event):
     script_name = cfg.get('script_code', 'intruder')
     ch_no       = cfg.get('ch_no') or cfg.get('camera_no') or camera_id
     exam_id     = cfg.get('exam_id', '0')
+    shift_id    = cfg.get('shift_id', '0')
     initial_url = cfg.get('cctv_url') or cfg.get('stream_url') or cfg.get('url', '')
 
     hls = extract_hls_streaming_url(initial_url)
@@ -275,6 +295,7 @@ def _hls_camera_thread(cfg, stop_event):
                 "camera_id":   camera_id,
                 "ch_no":       ch_no,
                 "exam_id":     exam_id,
+                "shift_id":    shift_id,
                 "script_name": script_name,
                 "source_type": "HLS",
                 "state":       state,
@@ -314,7 +335,7 @@ def intruder_worker_hls(camera_configs, stop_event=None):
     )
     gpu_t.start()
 
-    with ThreadPoolExecutor(max_workers=64) as executor:
+    with ThreadPoolExecutor(max_workers=16) as executor:  # FIXED: was 64, reduces concurrent HLS stream threads
         for cfg in valid_configs:
             executor.submit(_hls_camera_thread, cfg, stop_event)
             time.sleep(THREAD_DELAY)

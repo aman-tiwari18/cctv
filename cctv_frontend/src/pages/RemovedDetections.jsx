@@ -38,7 +38,7 @@ import {
   FlipCameraAndroid,
   SecurityUpdateWarning,
   Warning,
-  GridView, LocationCity, Close, Memory, ArrowBack,
+  GridView, LocationCity, Close, Memory, ArrowBack, Event,
 } from '@mui/icons-material';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { API_BASE_1 } from '../constants/data';
@@ -60,6 +60,14 @@ const TYPE_META = {
   inversion: { label: 'Camera Inversion', color: '#7a86b4', bg: '#eceef5' },
   tamper: { label: 'Camera Tampering', color: '#00c8d4', bg: '#e0f8fa' },
 };
+
+const getDetectionShiftName = (item = {}) => (
+  item.shiftName
+  || item.shift_name
+  || item.shift?.shift_name
+  || item.shift?.name
+  || (item.shift_id ? `Shift #${item.shift_id}` : '-')
+);
 
 const TYPE_ICONS = {
   proximity: WarningAmber,
@@ -238,6 +246,11 @@ function DetectionCard({ item, onClick }) {
           <Typography sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
             {city}
           </Typography>
+
+          <Event sx={{ fontSize: 14, color: '#777' }} />
+          <Typography noWrap title={getDetectionShiftName(item)} sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
+            Shift: {getDetectionShiftName(item)}
+          </Typography>
         </Box>
 
         {item.confidence != null && (
@@ -307,6 +320,9 @@ function Lightbox({ item, onClose }) {
             </Typography>
           )}
           {item.tcCode && <Typography variant="body2" color="#94a3b8">TC: {item.tcCode}</Typography>}
+          {(item.shiftName || item.shift_name || item.shift_id) && (
+            <Typography variant="body2" color="#94a3b8">Shift: {getDetectionShiftName(item)}</Typography>
+          )}
         </Box>
       </DialogContent>
     </Dialog>
@@ -470,6 +486,11 @@ function ListViewPanel({ data, selectedIndex, onSelect }) {
                       <Typography sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
                         {item.city || '-'}
                       </Typography>
+
+                      <Event sx={{ fontSize: 14, color: '#777' }} />
+                      <Typography noWrap title={getDetectionShiftName(item)} sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
+                        Shift: {getDetectionShiftName(item)}
+                      </Typography>
                       <Box
                         sx={{
                           display: 'flex',
@@ -477,6 +498,7 @@ function ListViewPanel({ data, selectedIndex, onSelect }) {
                           justifyContent: 'start',
                           gap: 2,
                           mt: 0.5,
+                          gridColumn: '1 / -1',
                         }}
                       >
                         <Typography

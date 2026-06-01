@@ -12,6 +12,10 @@ import signal
 from datetime import datetime
 import cv2
 import torch
+
+# ================= GPU MEMORY GUARD =================
+from workers.gpu_memory_guard import apply_gpu_memory_limit
+apply_gpu_memory_limit()  # FIXED: cap per-process VRAM before any CUDA alloc
 from concurrent.futures import ThreadPoolExecutor
 from torchvision import models, transforms
 from PIL import Image
@@ -50,8 +54,8 @@ os.makedirs(RTSP_SAVE_FOLDER, exist_ok=True)
 os.makedirs(HLS_SAVE_FOLDER,  exist_ok=True)
 
 # GPU Queue Config
-GPU_BATCH_SIZE      = 32 # Reduced because we double frames for rotation
-GPU_QUEUE_SIZE      = 64
+GPU_BATCH_SIZE      = 8  # FIXED: was 32, reduced further (doubles for rotation) to save VRAM
+GPU_QUEUE_SIZE      = 16  # FIXED: was 64, reduces frame buffer VRAM
 BATCH_WAIT_TIMEOUT  = 0.2
 THREAD_DELAY        = 0.1
 HLS_SAMPLE_EVERY    = 10
@@ -200,12 +204,13 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=240):
                 
                 ch_no = item.get("ch_no") or "0"
                 exam_id = item.get("exam_id", "0")
+                shift_id = item.get("shift_id") or os.environ.get("SHIFT_ID", "0")
                 script_name = "inversion"
                 
                 if item.get("source_type") == "HLS":
-                    fname = f"{script_name}_ch{ch_no}_exam{exam_id}_{ts}_{uid}.jpg"
+                    fname = f"{script_name}_ch{ch_no}_exam{exam_id}_shift{shift_id}_{ts}_{uid}.jpg"
                 else:
-                    fname = f"{script_name}_{cam_id}_{ch_no}_exam{exam_id}_{ts}_{uid}.jpg"
+                    fname = f"{script_name}_{cam_id}_{ch_no}_exam{exam_id}_shift{shift_id}_{ts}_{uid}.jpg"
                 
                 path = os.path.join(save_folder, fname)
                 cv2.imwrite(path, corrected)
@@ -285,6 +290,7 @@ def camera_inversion_worker(frame_queue):
                     "device_id":    device_id,
                     "ch_no":        camera_no,
                     "exam_id":      exam_id,
+                    "shift_id":     os.environ.get("SHIFT_ID", "0"),
                     "source_type":  "RTSP",
                 }, timeout=0.1)
             except queue.Full:
@@ -358,7 +364,7 @@ def camera_inversion_worker_hls(camera_configs, stop_event=None):
     )
     gpu_t.start()
 
-    with ThreadPoolExecutor(max_workers=64) as executor:
+    with ThreadPoolExecutor(max_workers=16) as executor:  # FIXED: was 64, reduces concurrent HLS stream threads
         for cfg in camera_configs:
             executor.submit(_hls_camera_thread, cfg, stop_event)
             time.sleep(THREAD_DELAY)

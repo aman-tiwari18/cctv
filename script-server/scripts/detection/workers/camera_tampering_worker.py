@@ -127,11 +127,12 @@ def _process_packet(item, save_folder):
             uid = str(uuid.uuid4())
             script_name = "tampering"
             exam_id = "0"  # Tampering doesn't have exam_id in packet
+            shift_id = os.environ.get("SHIFT_ID", "0")
             
             if source_type == "HLS":
-                fname = f"{script_name}_ch{camera_no}_exam{exam_id}_{ts}_{uid}.jpg"
+                fname = f"{script_name}_ch{camera_no}_exam{exam_id}_shift{shift_id}_{ts}_{uid}.jpg"
             else:
-                fname = f"{script_name}_{device_id}_{camera_no}_exam{exam_id}_{ts}_{uid}.jpg"
+                fname = f"{script_name}_{device_id}_{camera_no}_exam{exam_id}_shift{shift_id}_{ts}_{uid}.jpg"
             
             path = os.path.join(save_folder, fname)
             cv2.imwrite(path, frame)
@@ -234,7 +235,7 @@ def camera_tampering_worker_hls(camera_configs, stop_event=None):
     t = threading.Thread(target=_cpu_worker, args=(stop_event, q, HLS_SAVE_FOLDER), daemon=True)
     t.start()
 
-    with ThreadPoolExecutor(max_workers=64) as executor:
+    with ThreadPoolExecutor(max_workers=16) as executor:  # FIXED: was 64, reduces concurrent HLS stream threads
         for cfg in camera_configs:
             executor.submit(_hls_camera_thread, cfg, stop_event, q)
             time.sleep(THREAD_DELAY)

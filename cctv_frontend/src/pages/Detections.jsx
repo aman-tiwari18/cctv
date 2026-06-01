@@ -913,6 +913,8 @@ export default function Detections() {
   const debouncedSearch = useDebounce(search, 500); // 500ms debounce
   const [exams, setExams] = useState([]);
   const [examFilter, setExamFilter] = useState('');
+  const [examShifts, setExamShifts] = useState([]);
+  const [shiftFilter, setShiftFilter] = useState('');
   const [dateFilter, setDateFilter] = useState(todayDate);
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
@@ -980,16 +982,30 @@ export default function Detections() {
     loadExams();
   }, [loadExams]);
 
+  // Populate the dependent Shift filter from the selected exam. The exam list
+  // (examsAPI.getAll) already embeds each exam's `examShifts`, so no extra call.
+  useEffect(() => {
+    if (!examFilter) {
+      setExamShifts([]);
+      setShiftFilter('');
+      return;
+    }
+    const exam = exams.find((e) => String(e.id) === String(examFilter));
+    setExamShifts(Array.isArray(exam?.examShifts) ? exam.examShifts : []);
+    setShiftFilter('');
+  }, [examFilter, exams]);
+
   const buildDetectionParams = useCallback((pg = 1, rpp = rowsPerPage) => {
     const params = new URLSearchParams({ page: pg, limit: rpp });
     if (typeFilter.length > 0) params.append('type', typeFilter.join(','));
     if (dateFilter) params.append('date', parseDateForQuery(dateFilter));
     if (debouncedSearch.trim()) params.append('search', debouncedSearch.trim()); // Use debounced search
     if (examFilter) params.append('exam_id', examFilter);
+    if (shiftFilter) params.append('shift_id', shiftFilter);
     if (appliedStartTime) params.append('start_time', appliedStartTime);
     if (appliedEndTime) params.append('end_time', appliedEndTime);
     return params;
-  }, [typeFilter, dateFilter, debouncedSearch, examFilter, appliedStartTime, appliedEndTime, rowsPerPage]);
+  }, [typeFilter, dateFilter, debouncedSearch, examFilter, shiftFilter, appliedStartTime, appliedEndTime, rowsPerPage]);
 
   // Optimized fetch with abort controller and request deduplication
   const fetchDetections = useCallback(async (pg = 1, rpp = rowsPerPage) => {
@@ -1193,7 +1209,7 @@ export default function Detections() {
         clearTimeout(fetchTimeoutRef.current);
       }
     };
-  }, [typeFilter, dateFilter, examFilter, appliedStartTime, appliedEndTime, debouncedSearch, fetchDetections]);
+  }, [typeFilter, dateFilter, examFilter, shiftFilter, appliedStartTime, appliedEndTime, debouncedSearch, fetchDetections]);
 
   // Broadcast push events to other users via socket
   useEffect(() => {
@@ -1388,6 +1404,7 @@ export default function Detections() {
       if (dateFilter) params.date = parseDateForQuery(dateFilter);
       if (search.trim()) params.search = search.trim();
       if (examFilter) params.exam_id = examFilter;
+      if (shiftFilter) params.shift_id = shiftFilter;
       if (allShifts) params.all_shifts = 'true';
       if (appliedStartTime) params.start_time = appliedStartTime;
       if (appliedEndTime) params.end_time = appliedEndTime;
@@ -1411,7 +1428,7 @@ export default function Detections() {
       console.error('Download report failed:', error);
       setReportValidationError('Failed to download report. Please try again.');
     }
-  }, [typeFilter, dateFilter, search, examFilter, appliedStartTime, appliedEndTime]);
+  }, [typeFilter, dateFilter, search, examFilter, shiftFilter, appliedStartTime, appliedEndTime]);
 
   useEffect(() => {
     setExportToExcel(() => exportToExcel);
@@ -1469,6 +1486,31 @@ export default function Detections() {
               {exams.map((exam) => (
                 <MenuItem key={exam.id} value={exam.id}>
                   {exam.exam_name}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        )}
+        {/* Shift filter — dependent on the selected exam. Only shown once an
+            exam is chosen and that exam has shifts. Styling matches the Exam filter. */}
+        {user?.role !== 'OPERATOR' && examFilter && examShifts.length > 0 && (
+          <FormControl size="small" sx={{ minWidth: 130 }}>
+            <InputLabel sx={{ fontSize: 14 }}>Shift</InputLabel>
+            <Select
+              value={shiftFilter}
+              label="Shift"
+              onChange={(e) => setShiftFilter(e.target.value)}
+              sx={{
+                borderRadius: '8px', bgcolor: '#f8fafc', height: 36, fontSize: 14,
+                '& fieldset': { border: 'none' },
+              }}
+            >
+              <MenuItem value="">
+                <em>All Shifts</em>
+              </MenuItem>
+              {examShifts.map((sh) => (
+                <MenuItem key={sh.id} value={sh.id}>
+                  {sh.shift_name || `Shift #${sh.id}`}
                 </MenuItem>
               ))}
             </Select>
@@ -1629,10 +1671,10 @@ export default function Detections() {
           />
 
           <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center', flexShrink: 0 }}>
-            {(typeFilter.length > 0 || dateFilter !== todayDate || search || startTime || endTime) && (
+            {(typeFilter.length > 0 || dateFilter !== todayDate || search || startTime || endTime || shiftFilter) && (
               <Button
                 size="small"
-                onClick={() => { setTypeFilter([]); setDateFilter(todayDate); setSearch(''); setStartTime(''); setEndTime(''); setAppliedStartTime(''); setAppliedEndTime(''); }}
+                onClick={() => { setTypeFilter([]); setDateFilter(todayDate); setSearch(''); setStartTime(''); setEndTime(''); setAppliedStartTime(''); setAppliedEndTime(''); setShiftFilter(''); }}
                 sx={{ height: 36, borderRadius: '8px', fontSize: 13, textTransform: 'none', color: '#64748b', flexShrink: 0, minWidth: 56 }}
               >
                 Clear

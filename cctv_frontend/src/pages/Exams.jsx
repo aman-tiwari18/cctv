@@ -160,9 +160,11 @@ const Exams = () => {
         skip_days: exam.skip_days || [],
         skip_dates: exam.skip_dates || [],
         shifts: exam.examShifts?.map(s => ({
+          id: s.id,                         // keep id so the backend updates in place
           shift_name: s.shift_name,
           start_time: s.start_time?.substring(0, 5) || '',
           end_time: s.end_time?.substring(0, 5) || '',
+          _existing: true,                  // marks a saved shift (timing locked)
         })) || [],
       });
     } else {
@@ -273,6 +275,16 @@ const Exams = () => {
   };
 
   const removeShift = (index) => {
+    const shift = formData.shifts[index];
+    // Removing a saved shift cascades — the backend deletes every script already
+    // scheduled for it. Make the user confirm.
+    if (shift?._existing) {
+      const ok = window.confirm(
+        `Remove "${shift.shift_name}"?\n\nThis will permanently delete ALL scripts scheduled for this shift ` +
+        `(across every date) and its execution history. This cannot be undone.`
+      );
+      if (!ok) return;
+    }
     const newShifts = formData.shifts.filter((_, i) => i !== index);
     setFormData({ ...formData, shifts: newShifts });
   };
@@ -721,12 +733,17 @@ const Exams = () => {
 
             <Grid item xs={12}>
               <Typography sx={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', mb: 0, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-                Link Type
+                Link Type{editingExam ? ' (locked)' : ''}
               </Typography>
               <RadioGroup row name="link_type" value={formData.link_type} onChange={handleChange}>
-                <FormControlLabel value="RTSP" control={<Radio size="small" sx={{ '&.Mui-checked': { color: '#3c81f6' } }} />} label={<Typography sx={{ fontSize: 13, fontWeight: 600, color: '#475569' }}>RTSP</Typography>} />
-                <FormControlLabel value="HLS" control={<Radio size="small" sx={{ '&.Mui-checked': { color: '#3c81f6' } }} />} label={<Typography sx={{ fontSize: 13, fontWeight: 600, color: '#475569' }}>HLS</Typography>} />
+                <FormControlLabel value="RTSP" disabled={!!editingExam} control={<Radio size="small" sx={{ '&.Mui-checked': { color: '#3c81f6' } }} />} label={<Typography sx={{ fontSize: 13, fontWeight: 600, color: '#475569' }}>RTSP</Typography>} />
+                <FormControlLabel value="HLS" disabled={!!editingExam} control={<Radio size="small" sx={{ '&.Mui-checked': { color: '#3c81f6' } }} />} label={<Typography sx={{ fontSize: 13, fontWeight: 600, color: '#475569' }}>HLS</Typography>} />
               </RadioGroup>
+              {editingExam && (
+                <Typography sx={{ fontSize: 11, color: '#94a3b8', mt: -0.5 }}>
+                  Link type can't be changed after an exam is created.
+                </Typography>
+              )}
             </Grid>
 
             <Grid item xs={12}>
@@ -999,7 +1016,7 @@ const Exams = () => {
               </Box>
               <Box sx={{ width: 130 }}>
                 <Typography sx={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', mb: 0.5, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-                  Start
+                  Start{shift._existing ? ' 🔒' : ''}
                 </Typography>
                 <TextField
                   type="time"
@@ -1007,12 +1024,14 @@ const Exams = () => {
                   onChange={(e) => handleShiftChange(index, 'start_time', e.target.value)}
                   size="small"
                   fullWidth
-                  InputProps={{ sx: { borderRadius: 2, bgcolor: '#ffffff', fontSize: '0.8rem', '& fieldset': { border: 'none' } } }}
+                  disabled={!!shift._existing}
+                  title={shift._existing ? "Saved shift timing can't be changed — remove the shift and add a new one to re-time it." : undefined}
+                  InputProps={{ sx: { borderRadius: 2, bgcolor: shift._existing ? '#f1f5f9' : '#ffffff', fontSize: '0.8rem', '& fieldset': { border: 'none' } } }}
                 />
               </Box>
               <Box sx={{ width: 130 }}>
                 <Typography sx={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', mb: 0.5, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-                  End
+                  End{shift._existing ? ' 🔒' : ''}
                 </Typography>
                 <TextField
                   type="time"
@@ -1020,7 +1039,9 @@ const Exams = () => {
                   onChange={(e) => handleShiftChange(index, 'end_time', e.target.value)}
                   size="small"
                   fullWidth
-                  InputProps={{ sx: { borderRadius: 2, fontSize: '0.8rem', bgcolor: '#ffffff', '& fieldset': { border: 'none' } } }}
+                  disabled={!!shift._existing}
+                  title={shift._existing ? "Saved shift timing can't be changed — remove the shift and add a new one to re-time it." : undefined}
+                  InputProps={{ sx: { borderRadius: 2, fontSize: '0.8rem', bgcolor: shift._existing ? '#f1f5f9' : '#ffffff', '& fieldset': { border: 'none' } } }}
                 />
               </Box>
               <IconButton
