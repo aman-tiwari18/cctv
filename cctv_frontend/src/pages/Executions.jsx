@@ -329,7 +329,7 @@ const Executions = () => {
       />
 
       {/* ════ RIGHT PANEL ════ */}
-      <Box sx={{ flex: 1, p: 3.5, overflowY: 'auto' }}>
+      <Box sx={{ flex: 1, p: { xs: 1.5, sm: 2.5, md: 3.5 }, overflowY: 'auto', minWidth: 0 }}>
         {!selectedExamId ? (
           /* Empty state */
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 'calc(100vh - 200px)', textAlign: 'center', px: 4 }}>
@@ -344,10 +344,10 @@ const Executions = () => {
         ) : (
           <>
             {/* ── Title row ── */}
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3.5 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3.5, flexWrap: 'wrap', gap: 2 }}>
               <Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5 }}>
-                  <Typography variant="h6" sx={{ fontWeight: 600, color: '#0f172a', fontSize: '1.5rem' }}>
+                  <Typography variant="h6" sx={{ fontWeight: 600, color: '#0f172a', fontSize: { xs: '1.15rem', sm: '1.5rem' } }}>
                     {selectedExam ? `${selectedExam.exam_name} (${selectedExam.exam_body})` : 'Exam'}
                   </Typography>
                   {selectedExam && selectedExam.is_active === false && (
@@ -369,7 +369,7 @@ const Executions = () => {
               </Box>
 
               {/* Far-right: Search + Date + Status filters */}
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexShrink: 0 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexShrink: 0, flexWrap: 'wrap', width: { xs: '100%', md: 'auto' } }}>
                 {/* Search */}
                 <TextField
                   size="small"
@@ -392,11 +392,11 @@ const Executions = () => {
                       '& input': { color: '#334155', '&::placeholder': { color: '#94a3b8', opacity: 1 } }
                     }
                   }}
-                  sx={{ minWidth: 260, maxWidth: 300 }}
+                  sx={{ flex: { xs: '1 1 100%', sm: '0 0 auto' }, minWidth: { xs: '100%', sm: 260 }, maxWidth: { xs: 'none', sm: 300 } }}
                 />
 
                 {availableDates.length > 0 && (
-                  <FormControl size="small" sx={{ minWidth: 165 }}>
+                  <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 165 }, flex: { xs: '1 1 100%', sm: '0 0 auto' } }}>
                     <InputLabel id="exec-date-label">Execution Date</InputLabel>
                     <Select
                       labelId="exec-date-label"
@@ -412,7 +412,7 @@ const Executions = () => {
                   </FormControl>
                 )}
 
-                <FormControl size="small" sx={{ minWidth: 140 }}>
+                <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 140 }, flex: { xs: '1 1 100%', sm: '0 0 auto' } }}>
                   <InputLabel id="exec-status-label">Status</InputLabel>
                   <Select
                     labelId="exec-status-label"

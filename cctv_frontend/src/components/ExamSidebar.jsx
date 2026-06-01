@@ -44,7 +44,7 @@ const ExamSidebar = ({
   return (
     <Box
       sx={{
-        width: open ? 280 : 56,
+        width: open ? { xs: 200, sm: 280 } : 56,
         flexShrink: 0,
         borderRight: '1px solid #e8ecf1',
         bgcolor: '#fff',

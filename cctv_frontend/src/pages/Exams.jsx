@@ -438,7 +438,7 @@ const Exams = () => {
 
   return (
     <Box>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3} flexWrap="wrap" gap={2}>
         <Box>
           <Typography variant="body1" color="text.secondary">
             Manage exam configurations, date ranges, shifts, and monitoring settings
@@ -450,6 +450,7 @@ const Exams = () => {
           onClick={() => handleOpenDialog()}
           disableElevation
           sx={{
+            flexShrink: 0,
             height: 34,
             borderRadius: '8px',
             fontSize: 13,

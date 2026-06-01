@@ -198,7 +198,7 @@ const ClientCameras = () => {
 
   return (
     <Box sx={{ display: 'flex', minHeight: 'calc(100vh - 120px)', bgcolor: '#f8fafc', borderRadius: 2, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
-      <Box sx={{ width: camSidebarOpen ? 260 : 52, flexShrink: 0, borderRight: '1px solid #e8ecf1', bgcolor: '#fff', display: 'flex', flexDirection: 'column', overflow: 'hidden', transition: 'width 0.22s cubic-bezier(0.4,0,0.2,1)' }}>
+      <Box sx={{ width: camSidebarOpen ? { xs: 190, sm: 260 } : 52, flexShrink: 0, borderRight: '1px solid #e8ecf1', bgcolor: '#fff', display: 'flex', flexDirection: 'column', overflow: 'hidden', transition: 'width 0.22s cubic-bezier(0.4,0,0.2,1)' }}>
         <Box sx={{ px: camSidebarOpen ? 2.5 : 1, pt: 2.5, pb: 1.5, display: 'flex', alignItems: 'center', justifyContent: camSidebarOpen ? 'space-between' : 'center' }}>
           {camSidebarOpen && (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -239,7 +239,7 @@ const ClientCameras = () => {
         </Box>
       </Box>
 
-      <Box sx={{ flex: 1, p: 3, overflowY: 'auto', minWidth: 0 }}>
+      <Box sx={{ flex: 1, p: { xs: 1.5, sm: 3 }, overflowY: 'auto', minWidth: 0 }}>
         {!selectedCamExamId ? (
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', textAlign: 'center' }}>
             <Box sx={{ width: 96, height: 96, borderRadius: '50%', bgcolor: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 3 }}>
@@ -253,7 +253,7 @@ const ClientCameras = () => {
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2, flexWrap: 'wrap', gap: 2 }}>
               <Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5 }}>
-                  <Typography variant="h6" sx={{ fontWeight: 600, color: '#0f172a', fontSize: '1.5rem' }}>
+                  <Typography variant="h6" sx={{ fontWeight: 600, color: '#0f172a', fontSize: { xs: '1.15rem', sm: '1.5rem' } }}>
                     {selectedCamExamData ? `${selectedCamExamData.exam_name} (${selectedCamExamData.exam_body})` : 'Cameras'}
                   </Typography>
                   {selectedCamExamData && <Chip label={camExamLinkType || selectedCamExamData.link_type} size="small" sx={{ fontWeight: 700, fontSize: '0.7rem', height: 20, borderRadius: '6px', bgcolor: isHLS ? '#3b82f6' : '#a4b5fe', color: isHLS ? '#fff' : '#384b91' }} />}

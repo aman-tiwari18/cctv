@@ -19,6 +19,7 @@ import {
   Skeleton,
   InputAdornment,
   Grid, CardMedia, CardContent, Dialog, DialogContent, Checkbox,
+  useMediaQuery, useTheme,
 } from '@mui/material';
 import {
   Refresh,
@@ -364,10 +365,13 @@ function DetectionCard({ item, onClick, onRemove, onUndo, isRemoving, isPendingR
                 color: '#fff',
                 fontWeight: 900,
                 height: "40px",
-                width: "120px",
+                flex: 1,
+                minWidth: 0,
+                maxWidth: { xs: 'none', sm: 160 },
                 borderRadius: 3,
                 textTransform: 'none',
                 fontSize: 12,
+                whiteSpace: 'nowrap',
                 '&:hover': { bgcolor: '#dc2626' },
               }}
             >
@@ -709,12 +713,15 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, onUndo, removi
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      <Box sx={{ display: 'flex', gap: 2, height: 'calc(100vh - 310px)', minHeight: 500 }}>
+      <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2, height: { xs: 'auto', md: 'calc(100vh - 310px)' }, minHeight: { xs: 0, md: 500 } }}>
 
       <Box
         sx={{
-          width: 300, flexShrink: 0, overflowY: 'auto',
-          borderRight: '1px solid #e2e8f0', pr: 1,
+          width: { xs: '100%', md: 300 }, flexShrink: 0, overflowY: 'auto',
+          maxHeight: { xs: 280, md: 'none' },
+          borderRight: { xs: 'none', md: '1px solid #e2e8f0' },
+          borderBottom: { xs: '1px solid #e2e8f0', md: 'none' },
+          pr: 1,
           bgcolor: '#ffffff',
           scrollbarWidth: 'none',
           msOverflowStyle: 'none',
@@ -793,9 +800,10 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, onUndo, removi
               {(TYPE_META[item.type] || { label: item.type }).label}
             </Typography>
 
-            <Box sx={{ display: 'flex', gap: 2.5, flex: 1, minHeight: 0 }}>
+            <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2.5, flex: 1, minHeight: 0 }}>
               <Box sx={{
                 flex: 1, position: 'relative', borderRadius: 3, overflow: 'hidden',
+                minHeight: { xs: 240, md: 0 },
                 bgcolor: '#fff'
               }}>
                 <Box
@@ -808,7 +816,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, onUndo, removi
               </Box>
 
               <Box sx={{
-                width: 360, flexShrink: 0,
+                width: { xs: '100%', md: 360 }, flexShrink: 0,
                 bgcolor: '#fff', borderRadius: 3, p: 2.5,
                 display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
               }}>
@@ -1030,6 +1038,9 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, onUndo, removi
 const ClientDetections = () => {
   const { setUnfilteredCounts, typeFilter, setTypeFilter, setDownloadConsolidatedReport, setReportValidationError } = useDetectionCounts();
   const { user } = useAuth(); // Get user from context
+  const theme = useTheme();
+  // List view is keyboard-driven (↑↓ → ←) — irrelevant on touch, so force Grid below md.
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [searchParams] = useSearchParams();
 
   const [datePickerOpen, setDatePickerOpen] = useState(false);
@@ -1636,10 +1647,10 @@ const ClientDetections = () => {
             />
           );
         })}
-        <Box sx={{ ml: 'auto' }}>
+        <Box sx={{ ml: 'auto', display: { xs: 'none', md: 'block' } }}>
           <ToggleButtonGroup
-            value={view} 
-            exclusive 
+            value={view}
+            exclusive
             onChange={(_, v) => {
               if (v) {
                 setView(v);
@@ -1652,7 +1663,7 @@ const ClientDetections = () => {
                   setKeyboardHintShown(true);
                 }
               }
-            }} 
+            }}
             size="small"
             sx={{
               bgcolor: '#ffffff',
@@ -1695,10 +1706,10 @@ const ClientDetections = () => {
             Push selected detections from the admin page to populate this viewer
           </Typography>
         </Box>
-      ) : view === 'grid' ? (
+      ) : (view === 'grid' || isMobile) ? (
         <Grid container spacing={2}>
           {filteredImages.map((item, i) => (
-            <Grid item xs={12} sm={6} md={3} key={`${item.filename}-${i}`}>
+            <Grid item xs={12} sm={6} md={4} lg={3} key={`${item.filename}-${i}`}>
               <DetectionCard
                 item={item}
                 onClick={setSelected}

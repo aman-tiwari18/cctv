@@ -334,11 +334,14 @@ function ListViewPanel({ data, selectedIndex, onSelect }) {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      <Box sx={{ display: 'flex', gap: 2, height: 'calc(100vh - 310px)', minHeight: 500 }}>
+      <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2, height: { xs: 'auto', md: 'calc(100vh - 310px)' }, minHeight: { xs: 0, md: 500 } }}>
         <Box
           sx={{
-            width: 300, flexShrink: 0, overflowY: 'auto',
-            borderRight: '1px solid #e2e8f0', pr: 1,
+            width: { xs: '100%', md: 300 }, flexShrink: 0, overflowY: 'auto',
+            maxHeight: { xs: 280, md: 'none' },
+            borderRight: { xs: 'none', md: '1px solid #e2e8f0' },
+            borderBottom: { xs: '1px solid #e2e8f0', md: 'none' },
+            pr: 1,
             bgcolor: '#ffffff',
             scrollbarWidth: 'none',
             msOverflowStyle: 'none',
@@ -407,9 +410,10 @@ function ListViewPanel({ data, selectedIndex, onSelect }) {
                 {(TYPE_META[item.type] || { label: item.type }).label}
               </Typography>
 
-              <Box sx={{ display: 'flex', gap: 2.5, flex: 1, minHeight: 0 }}>
+              <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2.5, flex: 1, minHeight: 0 }}>
                 <Box sx={{
                   flex: 1, position: 'relative', borderRadius: 3, overflow: 'hidden',
+                  minHeight: { xs: 240, md: 0 },
                   bgcolor: '#fff'
                 }}>
                   <Box
@@ -422,7 +426,7 @@ function ListViewPanel({ data, selectedIndex, onSelect }) {
                 </Box>
 
                 <Box sx={{
-                  width: 360, flexShrink: 0,
+                  width: { xs: '100%', md: 360 }, flexShrink: 0,
                   bgcolor: '#fff', borderRadius: 3, p: 2.5,
                   display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
                 }}>
@@ -958,7 +962,7 @@ const RemovedDetections = () => {
       ) : view === 'grid' ? (
         <Grid container spacing={2}>
           {filteredImages.map((item, i) => (
-            <Grid item xs={12} sm={6} md={3} key={`${item.filename}-${i}`}>
+            <Grid item xs={12} sm={6} md={4} lg={3} key={`${item.filename}-${i}`}>
               <DetectionCard item={item} onClick={setSelected} />
             </Grid>
           ))}

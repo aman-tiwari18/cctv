@@ -334,7 +334,7 @@ const Analytics = () => {
         }}
       />
 
-      <Box sx={{ flex: 1, p: 3.5, overflowY: 'auto' }}>
+      <Box sx={{ flex: 1, p: { xs: 1.5, sm: 2.5, md: 3.5 }, overflowY: 'auto', minWidth: 0 }}>
         {error && (
           <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError('')}>
             {error}
@@ -389,7 +389,7 @@ const Analytics = () => {
 
               {/* LEFT: Exam title */}
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                <Typography variant="h6" sx={{ fontWeight: 700, color: '#0f172a', fontSize: '1.35rem' }}>
+                <Typography variant="h6" sx={{ fontWeight: 700, color: '#0f172a', fontSize: { xs: '1.15rem', sm: '1.35rem' } }}>
                   {selectedExam ? `${selectedExam.exam_name} (${selectedExam.exam_body})` : 'Exam'}
                 </Typography>
                 {selectedExam && selectedExam.is_active === false && (
@@ -398,7 +398,7 @@ const Analytics = () => {
               </Box>
 
               {/* RIGHT: Date range pill + iOS toggle + optional date range picker trigger */}
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexShrink: 0 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexShrink: 0, flexWrap: 'wrap', width: { xs: '100%', md: 'auto' } }}>
                 {/* Exam date range – always shown */}
                 {selectedExam && (examStartDate || examEndDate) && (
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.7, px: 1.5, py: 0.5, borderRadius: 2, bgcolor: '#f1f5f9' }}>
@@ -478,7 +478,7 @@ const Analytics = () => {
             </Box>
 
             {/* ── Date Range Picker Dialog ── */}
-            <Dialog open={showDateRangePicker} onClose={() => setShowDateRangePicker(false)} PaperProps={{ sx: { borderRadius: 4, p: 0, minWidth: 360 } }}>
+            <Dialog open={showDateRangePicker} onClose={() => setShowDateRangePicker(false)} PaperProps={{ sx: { borderRadius: 4, p: 0, minWidth: { xs: 0, sm: 360 }, width: { xs: '100%', sm: 'auto' }, m: { xs: 1, sm: 4 } } }}>
               <DialogContent sx={{ p: 3, pb: 2 }}>
                 {/* Start / Finish inputs */}
                 <Box sx={{ display: 'flex', gap: 2, mb: 2.5 }}>
@@ -685,7 +685,7 @@ const Analytics = () => {
                         '&:hover': { boxShadow: '0 4px 16px rgba(0,0,0,0.06)' },
                       }}
                     >
-                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1.5 }}>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                           <Box
                             sx={{

@@ -207,7 +207,7 @@ const Register = () => {
       <Paper
         elevation={0}
         sx={{
-          p: 5,
+          p: { xs: 3, sm: 5 },
           width: '100%',
           maxWidth: 500,
           borderRadius: 4,
