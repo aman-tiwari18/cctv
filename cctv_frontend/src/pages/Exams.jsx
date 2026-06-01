@@ -160,6 +160,7 @@ const Exams = () => {
         skip_days: exam.skip_days || [],
         skip_dates: exam.skip_dates || [],
         shifts: exam.examShifts?.map(s => ({
+          id: s.id,
           shift_name: s.shift_name,
           start_time: s.start_time?.substring(0, 5) || '',
           end_time: s.end_time?.substring(0, 5) || '',

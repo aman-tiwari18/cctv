@@ -173,22 +173,47 @@ exports.updateExam = async (req, res) => {
         // Update exam fields
         await exam.update(examFields, { transaction: t });
 
-        // If shifts are provided, replace all exam-level shifts
+        // Reconcile shifts in place so existing exam_shifts.id values are preserved.
+        // This keeps shift_script_assignments and script_executions linked to their shifts
+        // instead of cascade-deleting them whenever any exam field is updated.
         if (shifts !== undefined) {
-            // Delete old shifts
-            await ExamShift.destroy({
+            const existing = await ExamShift.findAll({
                 where: { exam_id: id },
                 transaction: t,
             });
+            const existingById = new Map(existing.map((s) => [s.id, s]));
 
-            if (shifts && shifts.length > 0) {
-                const shiftData = shifts.map((s) => ({
-                    exam_id: id,
-                    shift_name: s.shift_name,
-                    start_time: s.start_time,
-                    end_time: s.end_time,
-                }));
-                await ExamShift.bulkCreate(shiftData, { transaction: t });
+            for (const s of shifts || []) {
+                const match = s.id ? existingById.get(s.id) : null;
+                if (match) {
+                    await match.update(
+                        {
+                            shift_name: s.shift_name,
+                            start_time: s.start_time,
+                            end_time: s.end_time,
+                        },
+                        { transaction: t }
+                    );
+                    existingById.delete(s.id);
+                } else {
+                    await ExamShift.create(
+                        {
+                            exam_id: id,
+                            shift_name: s.shift_name,
+                            start_time: s.start_time,
+                            end_time: s.end_time,
+                        },
+                        { transaction: t }
+                    );
+                }
+            }
+
+            const removedIds = [...existingById.keys()];
+            if (removedIds.length > 0) {
+                await ExamShift.destroy({
+                    where: { id: removedIds },
+                    transaction: t,
+                });
             }
         }
     });
