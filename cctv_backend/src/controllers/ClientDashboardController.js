@@ -970,9 +970,13 @@ exports.getOverview = async (req, res) => {
         const activeExamIds = activeExams.map((e) => e.id);
 
         // Scripts/Analytics — honors exam_id + shift_indexes advanced filters.
+        // Counting rule mirrors DashboardController: total = pending + running +
+        // completed. FAILED and CANCELLED are excluded from every number, including
+        // the headline total. Response field stays `planned_today` for frontend
+        // back-compat; semantically it's now "active assignments in the filter range".
         let scriptsAgg = { planned_today: 0, running: 0, scheduled: 0, completed: 0 };
         if (activeExamIds.length > 0) {
-            let scriptsSql = `SELECT COUNT(*) AS planned_today,
+            let scriptsSql = `SELECT SUM(CASE WHEN ssa.status IN ('PENDING','RUNNING','COMPLETED') THEN 1 ELSE 0 END) AS planned_today,
                                     SUM(CASE WHEN ssa.status = 'RUNNING'   THEN 1 ELSE 0 END) AS running,
                                     SUM(CASE WHEN ssa.status = 'PENDING'   THEN 1 ELSE 0 END) AS scheduled,
                                     SUM(CASE WHEN ssa.status = 'COMPLETED' THEN 1 ELSE 0 END) AS completed
