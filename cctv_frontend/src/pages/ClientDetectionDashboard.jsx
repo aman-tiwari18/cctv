@@ -761,7 +761,7 @@ const ClientDetectionDashboard = () => {
                         position: 'relative',
                         width: 48,
                         height: 48,
-                        bgcolor: '#4B53C9',
+                        bgcolor: '#3c81f6',
                         border: 'none',
                         borderRadius: '10px',
                         display: 'flex',
@@ -769,7 +769,7 @@ const ClientDetectionDashboard = () => {
                         justifyContent: 'center',
                         cursor: 'pointer',
                         flexShrink: 0,
-                        '&:hover': { bgcolor: '#3F47B0' },
+                        '&:hover': { bgcolor: '#1e40af' },
                     }}
                     aria-label="Open filters"
                 >
@@ -783,7 +783,7 @@ const ClientDetectionDashboard = () => {
                             height: 18,
                             px: 0.5,
                             bgcolor: '#fff',
-                            border: '1.5px solid #4B53C9',
+                            border: '1.5px solid #3c81f6',
                             borderRadius: 999,
                             display: 'flex',
                             alignItems: 'center',
@@ -791,7 +791,7 @@ const ClientDetectionDashboard = () => {
                             fontFamily: 'Inter, sans-serif',
                             fontSize: '11px',
                             fontWeight: 700,
-                            color: '#4B53C9',
+                            color: '#3c81f6',
                             lineHeight: 1,
                         }}>
                             {activeFilters.length}
@@ -817,7 +817,7 @@ const ClientDetectionDashboard = () => {
                             type="button"
                             onClick={() => setDateChip(c.key)}
                             sx={{
-                                bgcolor: active ? '#4B53C9' : '#fff',
+                                bgcolor: active ? '#3c81f6' : '#fff',
                                 color: active ? '#fff' : '#191B23',
                                 border: active ? 'none' : '1px solid #E5E7EB',
                                 borderRadius: 999,
@@ -827,7 +827,7 @@ const ClientDetectionDashboard = () => {
                                 fontSize: { xs: '13px', sm: '14px' },
                                 fontWeight: 500,
                                 cursor: 'pointer',
-                                '&:hover': active ? { bgcolor: '#3F47B0' } : { borderColor: '#CBD5E1' },
+                                '&:hover': active ? { bgcolor: '#1e40af' } : { borderColor: '#CBD5E1' },
                             }}
                         >
                             {c.label}
@@ -853,16 +853,16 @@ const ClientDetectionDashboard = () => {
                             onDelete={() => removeFilter(f.key)}
                             deleteIcon={<CloseRoundedIcon sx={{ fontSize: 14 }} />}
                             sx={{
-                                bgcolor: '#E5E5FF',
-                                color: '#4B53C9',
+                                bgcolor: '#dbeafe',
+                                color: '#3c81f6',
                                 fontFamily: 'Inter, sans-serif',
                                 fontSize: { xs: '12px', sm: '13px' },
                                 fontWeight: 500,
                                 borderRadius: 999,
                                 height: 28,
                                 '& .MuiChip-deleteIcon': {
-                                    color: '#4B53C9',
-                                    '&:hover': { color: '#3F47B0' },
+                                    color: '#3c81f6',
+                                    '&:hover': { color: '#1e40af' },
                                 },
                             }}
                         />
@@ -874,7 +874,7 @@ const ClientDetectionDashboard = () => {
                         sx={{
                             border: 'none',
                             bgcolor: 'transparent',
-                            color: '#4B53C9',
+                            color: '#3c81f6',
                             fontFamily: 'Inter, sans-serif',
                             fontSize: { xs: '12px', sm: '13px' },
                             fontWeight: 500,

@@ -180,7 +180,7 @@ const CATEGORY_LABELS = {
 
 const CHIP_TONES = {
     amber:  { bg: '#FFEEE0', text: '#5C5F61' },
-    violet: { bg: '#E5E5FF', text: '#5C5F61' },
+    violet: { bg: '#dbeafe', text: '#5C5F61' },
 };
 
 const KPI_ICON_BG = 'rgba(0, 74, 198, 0.10)';
@@ -243,15 +243,39 @@ export const KpiCard = ({ title, value, icon, chips = [], loading }) => (
                 )}
             </Box>
 
-            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap rowGap={1}>
+            <Stack
+                direction="row"
+                spacing={{ xs: 1, sm: 0.75 }}
+                flexWrap={{ xs: 'wrap', sm: 'nowrap' }}
+                useFlexGap
+                rowGap={1}
+                sx={{ width: '100%' }}
+            >
                 {chips.map((chip) => {
                     const tone = CHIP_TONES[chip.tone] || CHIP_TONES.amber;
                     return (
                         <Chip
                             key={chip.label}
                             label={
-                                <Box sx={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', lineHeight: 1.2 }}>
-                                    <Box component="span" sx={{ fontWeight: 600 }}>
+                                <Box sx={{
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    justifyContent: 'center',
+                                    alignItems: 'center',
+                                    lineHeight: 1.2,
+                                    minWidth: 0,
+                                    width: '100%',
+                                }}>
+                                    <Box component="span" sx={{
+                                        fontWeight: 600,
+                                        // Backstop only — at any normal viewport the
+                                        // chip strip + tightened lg padding gives the
+                                        // full label room. This guards extreme zoom.
+                                        maxWidth: '100%',
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                        whiteSpace: 'nowrap',
+                                    }}>
                                         {chip.label}
                                     </Box>
                                     <Box component="span" sx={{ fontWeight: 700 }}>
@@ -263,20 +287,27 @@ export const KpiCard = ({ title, value, icon, chips = [], loading }) => (
                                 bgcolor: tone.bg,
                                 color: tone.text,
                                 borderRadius: '8px',
-                                // 4-step gradient so the pill sits balanced in every
-                                // KPI layout regime — peaks at md (widest cards),
-                                // pulls back at lg (narrower 4-up cards).
+                                // From sm+ each chip takes an equal share of the row
+                                // so 3-chip cards (TOTAL EXAMS, ANALYTICS) keep all
+                                // three on one line at every grid regime.
+                                flex: { xs: '0 0 auto', sm: 1 },
+                                minWidth: 0,
+                                maxWidth: '100%',
                                 height: { xs: 44, sm: 48, md: 51, lg: 48 },
                                 py: 0,
-                                px: { xs: 0.3, sm: 0.4, md: 0.5, lg: 0.35 },
+                                px: { xs: 0.3, sm: 0.25, md: 0.4, lg: 0.25 },
                                 boxShadow: '0 1px 2px 0 rgba(0,0,0,0.05)',
                                 fontFamily: 'Manrope, Inter, sans-serif',
                                 '& .MuiChip-label': {
-                                    px: { xs: 1, sm: 1.1, md: 1.2, lg: 1 },
-                                    fontSize:   { xs: '11px', sm: '12px', md: '12px', lg: '11.5px' },
+                                    px: { xs: 1, sm: 0.75, md: 1, lg: 0.75 },
+                                    width: '100%',
+                                    fontSize:   { xs: '11px', sm: '11.5px', md: '12px', lg: '11px' },
                                     fontWeight: 600,
-                                    lineHeight: { xs: '15px', sm: '17px', md: '17px', lg: '15px' },
-                                    letterSpacing: { xs: '0.5px', md: '1px' },
+                                    lineHeight: { xs: '15px', sm: '16px', md: '17px', lg: '15px' },
+                                    // Drop letter-spacing entirely on lg — 1px × 9 chars
+                                    // was 9px of waste per chip, which was tipping
+                                    // `Scheduled` past the row edge on a 4-up grid.
+                                    letterSpacing: { xs: '0.3px', md: '0.5px', lg: 0 },
                                     textTransform: 'capitalize',
                                 },
                             }}
@@ -469,7 +500,7 @@ export const DetectionDistributionCard = ({ distribution = [], loading }) => {
                         >
                             Export
                         </Button>
-                        <FormControl size="small" sx={{ minWidth: { xs: 140, sm: 180 } }}>
+                        <FormControl size="small" sx={{ minWidth: { xs: 130, sm: 150 } }}>
                             <Select
                                 value={category}
                                 onChange={(e) => setCategory(e.target.value)}
@@ -509,7 +540,7 @@ export const DetectionDistributionCard = ({ distribution = [], loading }) => {
                     </Box>
                 ) : (
                     <Grid container spacing={2} alignItems="flex-start">
-                        <Grid item xs={12} sm={7}>
+                        <Grid item xs={12} sm={7} md={6}>
                             <Box
                                 sx={{
                                     position: 'relative',
@@ -604,7 +635,7 @@ export const DetectionDistributionCard = ({ distribution = [], loading }) => {
                             </Box>
                         </Grid>
 
-                        <Grid item xs={12} sm={5}>
+                        <Grid item xs={12} sm={5} md={6}>
                             <Box sx={{ maxHeight: BOX_HEIGHT_SX, overflowY: 'auto', pr: 0.5, pt: 1 }}>
                                 <Stack spacing={1.5}>
                                     {donutData.map((slice) => {
@@ -616,36 +647,44 @@ export const DetectionDistributionCard = ({ distribution = [], loading }) => {
                                                 key={slice.key}
                                                 direction="row"
                                                 alignItems="center"
-                                                spacing={1.5}
+                                                spacing={1}
                                                 onMouseEnter={() => setActiveKey(slice.key)}
                                                 onMouseLeave={() => setActiveKey(null)}
                                                 onClick={isParentRow ? () => setCategory(slice.key) : undefined}
                                                 sx={{
                                                     cursor: isParentRow ? 'pointer' : 'default',
                                                     userSelect: 'none',
+                                                    width: '100%',
                                                 }}
                                             >
                                                 <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: slice.color, flexShrink: 0 }} />
                                                 <Typography sx={{
                                                     color: '#191B23',
                                                     fontFamily: 'Inter, sans-serif',
-                                                    fontSize: { xs: '13px', sm: '14px' },
+                                                    fontSize: { xs: '13px', lg: '14px' },
                                                     fontWeight: isActive ? 700 : 500,
-                                                    lineHeight: '20px',
+                                                    lineHeight: 1.35,
+                                                    flex: 1,
                                                     minWidth: 0,
-                                                    flexShrink: 1,
+                                                    // Single-line; ellipsis only kicks in at extreme
+                                                    // zoom/embedded widths — the Grid 6/6 md+ split
+                                                    // and 13px font ensure normal viewports fit.
+                                                    whiteSpace: 'nowrap',
                                                     overflow: 'hidden',
                                                     textOverflow: 'ellipsis',
-                                                    whiteSpace: 'nowrap',
                                                 }}>
                                                     {slice.label}
                                                 </Typography>
-                                                <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: { xs: '13px', sm: '14px' }, fontWeight: 500, lineHeight: '20px', flexShrink: 0 }}>
-                                                    {slice.count.toLocaleString()}
-                                                </Typography>
-                                                <Box sx={{ flexGrow: 1, minWidth: 4 }} />
-                                                <Typography sx={{ color: '#64748B', fontFamily: 'Inter, sans-serif', fontSize: { xs: '13px', sm: '14px' }, fontWeight: 500, lineHeight: '20px', whiteSpace: 'nowrap', flexShrink: 0 }}>
-                                                    ({pct.toFixed(0)}%)
+                                                <Typography sx={{
+                                                    color: '#64748B',
+                                                    fontFamily: 'Inter, sans-serif',
+                                                    fontSize: { xs: '13px', lg: '14px' },
+                                                    fontWeight: 500,
+                                                    lineHeight: 1.35,
+                                                    flexShrink: 0,
+                                                    whiteSpace: 'nowrap',
+                                                }}>
+                                                    {`${slice.count.toLocaleString()} (${pct.toFixed(0)}%)`}
                                                 </Typography>
                                             </Stack>
                                         );
@@ -742,8 +781,8 @@ const GpuPerformanceCard = () => {
                     </Typography>
                 </Box>
 
-                <Grid container spacing={2} alignItems="flex-start">
-                    <Grid item xs={12} md={7}>
+                <Grid container spacing={2} alignItems="stretch">
+                    <Grid item xs={12} md={7} sx={{ display: 'flex', flexDirection: 'column' }}>
                         <Box sx={{ position: 'relative', height: gaugeHeight }}>
                             <ResponsiveContainer
                                 width="100%"
@@ -805,11 +844,15 @@ const GpuPerformanceCard = () => {
                             </Box>
                         </Box>
 
+                        {/* Spacer pushes the Camera Capacity pill flush with the bottom
+                            of the left column so it aligns with the Memory Load Paper on the right. */}
+                        <Box sx={{ flexGrow: 1 }} />
                         <Box
                             sx={{
                                 mt: 1.5,
                                 mx: 'auto',
-                                maxWidth: { xs: '100%', sm: 240 },
+                                width: '100%',
+                                maxWidth: { xs: '100%', sm: 200 },
                                 bgcolor: '#fff',
                                 border: '1px solid #E5E7EB',
                                 borderRadius: '10px',
@@ -874,7 +917,9 @@ const GpuPerformanceCard = () => {
                                     flexDirection: 'column',
                                     alignItems: 'center',
                                     justifyContent: 'flex-end',
-                                    pb: '4px',
+                                    // pb scales with the gauge height so the text cluster
+                                    // keeps a consistent gap from the arc bottom.
+                                    pb: { xs: '4px', sm: '6px', md: '8px' },
                                     pointerEvents: 'none',
                                 }}>
                                     <Box component="svg" width={miniStarPx} height={miniStarPx} viewBox="0 0 20 19">
@@ -1083,7 +1128,7 @@ export const LiveExamsCard = ({ fetcher = dashboardAPI.getLiveExams }) => {
 
     // Match other dashboard accents
     const ACCENT_BLUE = '#2E68C9';
-    const HEADER_BG = '#efeffb';
+    const HEADER_BG = '#f8fafc';
     const HEADER_TEXT = '#5C5F61';
     const BODY_DARK = '#191B23';
     const BODY_MID = '#5C5F61';
@@ -1406,7 +1451,7 @@ export const AdvancedFiltersDialog = ({
                             minWidth: 18,
                             height: 18,
                             px: 0.5,
-                            bgcolor: '#4B53C9',
+                            bgcolor: '#3c81f6',
                             borderRadius: 999,
                             display: 'flex',
                             alignItems: 'center',
@@ -1504,14 +1549,14 @@ export const AdvancedFiltersDialog = ({
                                             flex: 1,
                                             py: 1.25,
                                             borderRadius: '10px',
-                                            bgcolor: active ? '#E5E5FF' : '#fff',
-                                            color: active ? '#4B53C9' : '#191B23',
-                                            border: `1px solid ${active ? '#4B53C9' : '#E5E7EB'}`,
+                                            bgcolor: active ? '#dbeafe' : '#fff',
+                                            color: active ? '#3c81f6' : '#191B23',
+                                            border: `1px solid ${active ? '#3c81f6' : '#E5E7EB'}`,
                                             fontFamily: 'Inter, sans-serif',
                                             fontSize: { xs: '13px', sm: '14px' },
                                             fontWeight: 500,
                                             cursor: 'pointer',
-                                            '&:hover': { borderColor: '#4B53C9' },
+                                            '&:hover': { borderColor: '#3c81f6' },
                                         }}
                                     >
                                         Shift {n}
@@ -1591,7 +1636,7 @@ export const AdvancedFiltersDialog = ({
                         disableElevation
                         onClick={handleApply}
                         sx={{
-                            bgcolor: '#4B53C9',
+                            bgcolor: '#3c81f6',
                             color: '#fff',
                             textTransform: 'none',
                             fontFamily: 'Inter, sans-serif',
@@ -1600,7 +1645,7 @@ export const AdvancedFiltersDialog = ({
                             borderRadius: '10px',
                             px: 3,
                             py: 1,
-                            '&:hover': { bgcolor: '#3F47B0' },
+                            '&:hover': { bgcolor: '#1e40af' },
                         }}
                     >
                         Apply filters
@@ -1991,7 +2036,7 @@ const Dashboard = () => {
                         position: 'relative',
                         width: 48,
                         height: 48,
-                        bgcolor: '#4B53C9',
+                        bgcolor: '#3c81f6',
                         border: 'none',
                         borderRadius: '10px',
                         display: 'flex',
@@ -1999,7 +2044,7 @@ const Dashboard = () => {
                         justifyContent: 'center',
                         cursor: 'pointer',
                         flexShrink: 0,
-                        '&:hover': { bgcolor: '#3F47B0' },
+                        '&:hover': { bgcolor: '#1e40af' },
                     }}
                     aria-label="Open filters"
                 >
@@ -2013,7 +2058,7 @@ const Dashboard = () => {
                             height: 18,
                             px: 0.5,
                             bgcolor: '#fff',
-                            border: '1.5px solid #4B53C9',
+                            border: '1.5px solid #3c81f6',
                             borderRadius: 999,
                             display: 'flex',
                             alignItems: 'center',
@@ -2021,7 +2066,7 @@ const Dashboard = () => {
                             fontFamily: 'Inter, sans-serif',
                             fontSize: '11px',
                             fontWeight: 700,
-                            color: '#4B53C9',
+                            color: '#3c81f6',
                             lineHeight: 1,
                         }}>
                             {activeFilters.length}
@@ -2047,7 +2092,7 @@ const Dashboard = () => {
                             type="button"
                             onClick={() => setDateChip(c.key)}
                             sx={{
-                                bgcolor: active ? '#4B53C9' : '#fff',
+                                bgcolor: active ? '#3c81f6' : '#fff',
                                 color: active ? '#fff' : '#191B23',
                                 border: active ? 'none' : '1px solid #E5E7EB',
                                 borderRadius: 999,
@@ -2057,7 +2102,7 @@ const Dashboard = () => {
                                 fontSize: { xs: '13px', sm: '14px' },
                                 fontWeight: 500,
                                 cursor: 'pointer',
-                                '&:hover': active ? { bgcolor: '#3F47B0' } : { borderColor: '#CBD5E1' },
+                                '&:hover': active ? { bgcolor: '#1e40af' } : { borderColor: '#CBD5E1' },
                             }}
                         >
                             {c.label}
@@ -2083,16 +2128,16 @@ const Dashboard = () => {
                             onDelete={() => removeFilter(f.key)}
                             deleteIcon={<CloseRoundedIcon sx={{ fontSize: 14 }} />}
                             sx={{
-                                bgcolor: '#E5E5FF',
-                                color: '#4B53C9',
+                                bgcolor: '#dbeafe',
+                                color: '#3c81f6',
                                 fontFamily: 'Inter, sans-serif',
                                 fontSize: { xs: '12px', sm: '13px' },
                                 fontWeight: 500,
                                 borderRadius: 999,
                                 height: 28,
                                 '& .MuiChip-deleteIcon': {
-                                    color: '#4B53C9',
-                                    '&:hover': { color: '#3F47B0' },
+                                    color: '#3c81f6',
+                                    '&:hover': { color: '#1e40af' },
                                 },
                             }}
                         />
@@ -2104,7 +2149,7 @@ const Dashboard = () => {
                         sx={{
                             border: 'none',
                             bgcolor: 'transparent',
-                            color: '#4B53C9',
+                            color: '#3c81f6',
                             fontFamily: 'Inter, sans-serif',
                             fontSize: { xs: '12px', sm: '13px' },
                             fontWeight: 500,
