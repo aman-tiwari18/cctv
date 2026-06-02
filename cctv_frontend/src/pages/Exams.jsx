@@ -77,25 +77,23 @@ const Exams = () => {
   const [newSkipDate, setNewSkipDate] = useState('');
   const [examCounts, setExamCounts] = useState({}); // Store script and detection counts
 
-  // Deep-link highlight (iteration 3): another page (e.g. Live Shifts → View
-  // Details) sends ?highlight=<exam_id>. We derive the highlight target inline
-  // from the URL on every render — no useState, no timeout, no race conditions.
-  // The matched card stays highlighted as long as ?highlight=ID is in the URL,
-  // mirroring how GitHub's `#L42` line anchor persists until you navigate away.
-  // useLocation + URLSearchParams reads the URL DIRECTLY, bypassing any potential
-  // useSearchParams quirk on first commit.
+  // Deep-link highlight: another page (e.g. Live Shifts → View Details) sends
+  // ?highlight=<exam_id>. Scroll the matched card into view, then briefly tint
+  // it for 2.5s so the user can locate where they jumped to — the same subtle
+  // anchor-flash pattern used by GitHub, Slack, Notion, etc.
   const location = useLocation();
   const highlightId = new URLSearchParams(location.search).get('highlight');
+  const [isFlashing, setIsFlashing] = useState(false);
   const cardRefs = useRef({});
 
-  // One-shot scroll-into-view when both the URL param and the exams list are
-  // ready. No state change here — the card highlight is purely derived from
-  // highlightId at render time.
   useEffect(() => {
     if (!highlightId || exams.length === 0) return;
     const node = cardRefs.current[String(highlightId)];
     if (!node) return;
     node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setIsFlashing(true);
+    const t = setTimeout(() => setIsFlashing(false), 2500);
+    return () => clearTimeout(t);
   }, [highlightId, exams, location.key]);
 
   useEffect(() => {
@@ -488,19 +486,6 @@ const Exams = () => {
         </Button>
       </Box>
 
-      {/* Iteration-3 diagnostic banner — visible whenever ?highlight= is in
-          the URL. Tells us at a glance whether the URL param is reaching the
-          component AND whether the matching exam exists in the list. Removed
-          once the highlight is confirmed working. */}
-      {highlightId && (
-        <Alert severity="info" sx={{ mb: 2 }}>
-          Showing highlight target: exam #{highlightId}
-          {exams.length > 0 && !exams.some((e) => String(e.id) === String(highlightId)) && (
-            <> — but no matching exam was found in the loaded list (it may be archived or filtered out).</>
-          )}
-        </Alert>
-      )}
-
       <Grid container spacing={3}>
         {exams.map((exam) => {
           const dateInfo = getExamDateInfo(exam);
@@ -513,9 +498,8 @@ const Exams = () => {
           const examEnd = exam.end_date ? new Date(exam.end_date) : null;
           const isLive = examStart && examEnd && now >= examStart && now <= examEnd;
 
-          // Iteration-3: derive the highlight inline — no state, no race.
-          // The matched card stays highlighted as long as ?highlight=ID is in the URL.
-          const isHighlighted = highlightId != null && String(exam.id) === String(highlightId);
+          // True only for the matched card AND only during the 2.5s flash window.
+          const isHighlighted = isFlashing && highlightId != null && String(exam.id) === String(highlightId);
 
           return (
             <Grid
@@ -541,23 +525,12 @@ const Exams = () => {
                   maxWidth: 530,
                   display: 'flex',
                   flexDirection: 'column',
-                  // Baseline outline so the highlight can transition cleanly to
-                  // a solid colored ring (animating from `none` doesn't work).
-                  outline: '0 solid transparent',
-                  outlineOffset: '6px',
-                  transition: 'background-color 0.5s ease-out, outline 0.5s ease-out, transform 0.5s ease-out, box-shadow 0.5s ease-out',
-                  // Conditional overrides go LAST so they win over the baseline
-                  // bgcolor / outline / boxShadow declared above. Iteration-3
-                  // bumps the contrast: darker blue body (#93c5fd), thicker
-                  // darker outline (4px #1e40af), bigger scale (1.04). The
-                  // card stays highlighted as long as ?highlight=ID is in URL.
+                  // Smooth fade in AND out — when isHighlighted clears at 2.5s
+                  // the card eases back to its baseline white.
+                  transition: 'background-color 0.6s ease-out, border-color 0.6s ease-out',
                   ...(isHighlighted && {
-                    bgcolor: '#93c5fd',
-                    outline: '4px solid #1e40af',
-                    transform: 'scale(1.04)',
-                    boxShadow: '0 12px 32px rgba(30, 64, 175, 0.35)',
-                    position: 'relative',
-                    zIndex: 1,
+                    bgcolor: '#dbeafe',
+                    borderColor: '#3c81f6',
                   }),
                 }}
               >
