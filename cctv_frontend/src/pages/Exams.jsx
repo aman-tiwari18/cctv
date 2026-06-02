@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Box,
   Button,
@@ -76,6 +76,24 @@ const Exams = () => {
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [newSkipDate, setNewSkipDate] = useState('');
   const [examCounts, setExamCounts] = useState({}); // Store script and detection counts
+
+  // Deep-link highlight: another page (e.g. Live Shifts → View Details) sends
+  // ?highlight=<exam_id>, we scroll the matching card into view and pulse a
+  // blue ring around it for ~2.4s so the user sees what they jumped to.
+  const [searchParams] = useSearchParams();
+  const highlightId = searchParams.get('highlight');
+  const [flashingId, setFlashingId] = useState(null);
+  const cardRefs = useRef({});
+
+  useEffect(() => {
+    if (!highlightId || exams.length === 0) return;
+    const node = cardRefs.current[String(highlightId)];
+    if (!node) return;
+    node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setFlashingId(String(highlightId));
+    const t = setTimeout(() => setFlashingId(null), 2400);
+    return () => clearTimeout(t);
+  }, [highlightId, exams]);
 
   useEffect(() => {
     loadExams();
@@ -480,7 +498,25 @@ const Exams = () => {
           const isLive = examStart && examEnd && now >= examStart && now <= examEnd;
 
           return (
-            <Grid item xs={12} sm={6} md={3} key={exam.id} >
+            <Grid
+              item
+              xs={12} sm={6} md={3}
+              key={exam.id}
+              ref={(el) => { if (el) cardRefs.current[String(exam.id)] = el; }}
+              sx={{
+                // Keep the scrolled-to card clear of any sticky header chrome.
+                scrollMarginTop: '88px',
+                borderRadius: 4,
+                ...(flashingId === String(exam.id) && {
+                  animation: 'examHighlightPulse 2.4s ease-out',
+                }),
+                '@keyframes examHighlightPulse': {
+                  '0%':   { boxShadow: '0 0 0 0 rgba(60, 129, 246, 0.55)' },
+                  '40%':  { boxShadow: '0 0 0 10px rgba(60, 129, 246, 0.25)' },
+                  '100%': { boxShadow: '0 0 0 0 rgba(60, 129, 246, 0.00)' },
+                },
+              }}
+            >
               <Box
                 sx={{
                   bgcolor: '#fff',

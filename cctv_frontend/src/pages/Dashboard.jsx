@@ -29,6 +29,7 @@ import {
     useMediaQuery,
     useTheme,
 } from '@mui/material';
+import { useNavigate } from 'react-router-dom';
 import { LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
@@ -261,7 +262,10 @@ export const KpiCard = ({ title, value, icon, chips = [], loading }) => (
                                     display: 'flex',
                                     flexDirection: 'column',
                                     justifyContent: 'center',
-                                    alignItems: 'center',
+                                    // Left-align both the label name and the value
+                                    // inside the chip so they read as a column the
+                                    // eye scans down, not a centered ribbon.
+                                    alignItems: 'flex-start',
                                     lineHeight: 1.2,
                                     minWidth: 0,
                                     width: '100%',
@@ -1096,6 +1100,7 @@ const formatShortDate = (raw) => {
 const formatHMM = (raw) => (typeof raw === 'string' ? raw.slice(0, 5) : '');
 
 export const LiveExamsCard = ({ fetcher = dashboardAPI.getLiveExams }) => {
+    const navigate = useNavigate();
     const [rows, setRows] = useState([]);
     const [total, setTotal] = useState(0);
     const [loading, setLoading] = useState(true);
@@ -1265,7 +1270,18 @@ export const LiveExamsCard = ({ fetcher = dashboardAPI.getLiveExams }) => {
                                         <TableCell sx={{ ...bodyCellSx, color: BODY_DARK, fontSize: { xs: '13px', sm: '14px' } }}>
                                             {Number(row.detections || 0).toLocaleString()}
                                         </TableCell>
-                                        <TableCell sx={{ ...bodyCellSx, width: 110, color: ACCENT_BLUE, fontWeight: 600, cursor: 'pointer', display: { xs: 'none', sm: 'table-cell' } }}>
+                                        <TableCell
+                                            onClick={() => navigate(`/exams?highlight=${row.exam_id}`)}
+                                            sx={{
+                                                ...bodyCellSx,
+                                                width: 110,
+                                                color: ACCENT_BLUE,
+                                                fontWeight: 600,
+                                                cursor: 'pointer',
+                                                display: { xs: 'none', sm: 'table-cell' },
+                                                '&:hover': { textDecoration: 'underline' },
+                                            }}
+                                        >
                                             View Details
                                         </TableCell>
                                     </TableRow>
