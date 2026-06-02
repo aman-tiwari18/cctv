@@ -506,15 +506,6 @@ const Exams = () => {
               sx={{
                 // Keep the scrolled-to card clear of any sticky header chrome.
                 scrollMarginTop: '88px',
-                borderRadius: 4,
-                ...(flashingId === String(exam.id) && {
-                  animation: 'examHighlightPulse 2.4s ease-out',
-                }),
-                '@keyframes examHighlightPulse': {
-                  '0%':   { boxShadow: '0 0 0 0 rgba(60, 129, 246, 0.55)' },
-                  '40%':  { boxShadow: '0 0 0 10px rgba(60, 129, 246, 0.25)' },
-                  '100%': { boxShadow: '0 0 0 0 rgba(60, 129, 246, 0.00)' },
-                },
               }}
             >
               <Box
@@ -529,7 +520,24 @@ const Exams = () => {
                   minHeight: 420,
                   maxWidth: 530,
                   display: 'flex',
-                  flexDirection: 'column'
+                  flexDirection: 'column',
+                  '@keyframes examHighlightPulse': {
+                    '0%':   { boxShadow: '0 0 0 0 rgba(60, 129, 246, 0.65)' },
+                    '20%':  { boxShadow: '0 0 0 12px rgba(60, 129, 246, 0)' },
+                    '33%':  { boxShadow: '0 0 0 0 rgba(60, 129, 246, 0.65)' },
+                    '53%':  { boxShadow: '0 0 0 12px rgba(60, 129, 246, 0)' },
+                    '66%':  { boxShadow: '0 0 0 0 rgba(60, 129, 246, 0.65)' },
+                    '86%':  { boxShadow: '0 0 0 12px rgba(60, 129, 246, 0)' },
+                    '100%': { boxShadow: '0 0 0 0 rgba(60, 129, 246, 0)' },
+                  },
+                  // Conditional overrides go LAST so they win over the baseline
+                  // `border` / `boxShadow` declared above. Three quick pulses
+                  // plus a temporary blue border so the card is unmistakable
+                  // when scrolled into view.
+                  ...(flashingId === String(exam.id) && {
+                    animation: 'examHighlightPulse 2.4s ease-out',
+                    border: '2px solid #3c81f6',
+                  }),
                 }}
               >
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
