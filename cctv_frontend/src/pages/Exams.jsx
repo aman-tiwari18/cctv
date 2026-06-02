@@ -77,26 +77,25 @@ const Exams = () => {
   const [newSkipDate, setNewSkipDate] = useState('');
   const [examCounts, setExamCounts] = useState({}); // Store script and detection counts
 
-  // Deep-link highlight: another page (e.g. Live Shifts → View Details) sends
-  // ?highlight=<exam_id>. We scroll the matching card into view and hold a
-  // solid bgcolor + outline + scale for 3s so the user can't miss what they
-  // jumped to (GitHub/Slack/Notion-style anchor highlight, not a brief pulse).
-  // location.key in the deps re-fires the highlight even when the URL is
-  // identical (clicking View Details twice for the same exam).
+  // Deep-link highlight (iteration 3): another page (e.g. Live Shifts → View
+  // Details) sends ?highlight=<exam_id>. We derive the highlight target inline
+  // from the URL on every render — no useState, no timeout, no race conditions.
+  // The matched card stays highlighted as long as ?highlight=ID is in the URL,
+  // mirroring how GitHub's `#L42` line anchor persists until you navigate away.
+  // useLocation + URLSearchParams reads the URL DIRECTLY, bypassing any potential
+  // useSearchParams quirk on first commit.
   const location = useLocation();
-  const [searchParams] = useSearchParams();
-  const highlightId = searchParams.get('highlight');
-  const [flashingId, setFlashingId] = useState(null);
+  const highlightId = new URLSearchParams(location.search).get('highlight');
   const cardRefs = useRef({});
 
+  // One-shot scroll-into-view when both the URL param and the exams list are
+  // ready. No state change here — the card highlight is purely derived from
+  // highlightId at render time.
   useEffect(() => {
     if (!highlightId || exams.length === 0) return;
     const node = cardRefs.current[String(highlightId)];
     if (!node) return;
     node.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    setFlashingId(String(highlightId));
-    const t = setTimeout(() => setFlashingId(null), 3000);
-    return () => clearTimeout(t);
   }, [highlightId, exams, location.key]);
 
   useEffect(() => {
@@ -489,6 +488,19 @@ const Exams = () => {
         </Button>
       </Box>
 
+      {/* Iteration-3 diagnostic banner — visible whenever ?highlight= is in
+          the URL. Tells us at a glance whether the URL param is reaching the
+          component AND whether the matching exam exists in the list. Removed
+          once the highlight is confirmed working. */}
+      {highlightId && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Showing highlight target: exam #{highlightId}
+          {exams.length > 0 && !exams.some((e) => String(e.id) === String(highlightId)) && (
+            <> — but no matching exam was found in the loaded list (it may be archived or filtered out).</>
+          )}
+        </Alert>
+      )}
+
       <Grid container spacing={3}>
         {exams.map((exam) => {
           const dateInfo = getExamDateInfo(exam);
@@ -500,6 +512,10 @@ const Exams = () => {
           const examStart = exam.start_date ? new Date(exam.start_date) : null;
           const examEnd = exam.end_date ? new Date(exam.end_date) : null;
           const isLive = examStart && examEnd && now >= examStart && now <= examEnd;
+
+          // Iteration-3: derive the highlight inline — no state, no race.
+          // The matched card stays highlighted as long as ?highlight=ID is in the URL.
+          const isHighlighted = highlightId != null && String(exam.id) === String(highlightId);
 
           return (
             <Grid
@@ -525,21 +541,21 @@ const Exams = () => {
                   maxWidth: 530,
                   display: 'flex',
                   flexDirection: 'column',
-                  // Baseline outline so the highlight can transition cleanly into a
-                  // solid blue ring (animating between `0 solid transparent` and
-                  // `3px solid #3c81f6` works; animating from `none` doesn't).
+                  // Baseline outline so the highlight can transition cleanly to
+                  // a solid colored ring (animating from `none` doesn't work).
                   outline: '0 solid transparent',
-                  outlineOffset: '4px',
-                  transition: 'background-color 0.4s ease-out, outline 0.4s ease-out, transform 0.4s ease-out, box-shadow 0.4s ease-out',
+                  outlineOffset: '6px',
+                  transition: 'background-color 0.5s ease-out, outline 0.5s ease-out, transform 0.5s ease-out, box-shadow 0.5s ease-out',
                   // Conditional overrides go LAST so they win over the baseline
-                  // bgcolor / outline / boxShadow declared above. Light-blue card
-                  // body + 3px blue ring + 2% scale-up = unmissable anchor cue
-                  // that holds for 3s, then smoothly fades back via transition.
-                  ...(flashingId === String(exam.id) && {
-                    bgcolor: '#dbeafe',
-                    outline: '3px solid #3c81f6',
-                    transform: 'scale(1.02)',
-                    boxShadow: '0 8px 24px rgba(60, 129, 246, 0.25)',
+                  // bgcolor / outline / boxShadow declared above. Iteration-3
+                  // bumps the contrast: darker blue body (#93c5fd), thicker
+                  // darker outline (4px #1e40af), bigger scale (1.04). The
+                  // card stays highlighted as long as ?highlight=ID is in URL.
+                  ...(isHighlighted && {
+                    bgcolor: '#93c5fd',
+                    outline: '4px solid #1e40af',
+                    transform: 'scale(1.04)',
+                    boxShadow: '0 12px 32px rgba(30, 64, 175, 0.35)',
                     position: 'relative',
                     zIndex: 1,
                   }),
