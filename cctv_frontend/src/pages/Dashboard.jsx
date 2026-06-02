@@ -29,7 +29,6 @@ import {
     useMediaQuery,
     useTheme,
 } from '@mui/material';
-import { useNavigate } from 'react-router-dom';
 import { LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
@@ -1100,7 +1099,6 @@ const formatShortDate = (raw) => {
 const formatHMM = (raw) => (typeof raw === 'string' ? raw.slice(0, 5) : '');
 
 export const LiveExamsCard = ({ fetcher = dashboardAPI.getLiveExams }) => {
-    const navigate = useNavigate();
     const [rows, setRows] = useState([]);
     const [total, setTotal] = useState(0);
     const [loading, setLoading] = useState(true);
@@ -1270,18 +1268,7 @@ export const LiveExamsCard = ({ fetcher = dashboardAPI.getLiveExams }) => {
                                         <TableCell sx={{ ...bodyCellSx, color: BODY_DARK, fontSize: { xs: '13px', sm: '14px' } }}>
                                             {Number(row.detections || 0).toLocaleString()}
                                         </TableCell>
-                                        <TableCell
-                                            onClick={() => navigate(`/exams?highlight=${row.exam_id}`)}
-                                            sx={{
-                                                ...bodyCellSx,
-                                                width: 110,
-                                                color: ACCENT_BLUE,
-                                                fontWeight: 600,
-                                                cursor: 'pointer',
-                                                display: { xs: 'none', sm: 'table-cell' },
-                                                '&:hover': { textDecoration: 'underline' },
-                                            }}
-                                        >
+                                        <TableCell sx={{ ...bodyCellSx, width: 110, color: ACCENT_BLUE, fontWeight: 600, cursor: 'pointer', display: { xs: 'none', sm: 'table-cell' } }}>
                                             View Details
                                         </TableCell>
                                     </TableRow>

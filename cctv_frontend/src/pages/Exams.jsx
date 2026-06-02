@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Button,
@@ -76,25 +76,6 @@ const Exams = () => {
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [newSkipDate, setNewSkipDate] = useState('');
   const [examCounts, setExamCounts] = useState({}); // Store script and detection counts
-
-  // Deep-link highlight: another page (e.g. Live Shifts → View Details) sends
-  // ?highlight=<exam_id>. Scroll the matched card into view, then briefly tint
-  // it for 2.5s so the user can locate where they jumped to — the same subtle
-  // anchor-flash pattern used by GitHub, Slack, Notion, etc.
-  const location = useLocation();
-  const highlightId = new URLSearchParams(location.search).get('highlight');
-  const [isFlashing, setIsFlashing] = useState(false);
-  const cardRefs = useRef({});
-
-  useEffect(() => {
-    if (!highlightId || exams.length === 0) return;
-    const node = cardRefs.current[String(highlightId)];
-    if (!node) return;
-    node.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    setIsFlashing(true);
-    const t = setTimeout(() => setIsFlashing(false), 2500);
-    return () => clearTimeout(t);
-  }, [highlightId, exams, location.key]);
 
   useEffect(() => {
     loadExams();
@@ -498,20 +479,8 @@ const Exams = () => {
           const examEnd = exam.end_date ? new Date(exam.end_date) : null;
           const isLive = examStart && examEnd && now >= examStart && now <= examEnd;
 
-          // True only for the matched card AND only during the 2.5s flash window.
-          const isHighlighted = isFlashing && highlightId != null && String(exam.id) === String(highlightId);
-
           return (
-            <Grid
-              item
-              xs={12} sm={6} md={3}
-              key={exam.id}
-              ref={(el) => { if (el) cardRefs.current[String(exam.id)] = el; }}
-              sx={{
-                // Keep the scrolled-to card clear of any sticky header chrome.
-                scrollMarginTop: '88px',
-              }}
-            >
+            <Grid item xs={12} sm={6} md={3} key={exam.id} >
               <Box
                 sx={{
                   bgcolor: '#fff',
@@ -524,14 +493,7 @@ const Exams = () => {
                   minHeight: 420,
                   maxWidth: 530,
                   display: 'flex',
-                  flexDirection: 'column',
-                  // Smooth fade in AND out — when isHighlighted clears at 2.5s
-                  // the card eases back to its baseline white.
-                  transition: 'background-color 0.6s ease-out, border-color 0.6s ease-out',
-                  ...(isHighlighted && {
-                    bgcolor: '#dbeafe',
-                    borderColor: '#3c81f6',
-                  }),
+                  flexDirection: 'column'
                 }}
               >
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
