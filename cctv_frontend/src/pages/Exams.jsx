@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import {
   Box,
   Button,
@@ -78,8 +78,12 @@ const Exams = () => {
   const [examCounts, setExamCounts] = useState({}); // Store script and detection counts
 
   // Deep-link highlight: another page (e.g. Live Shifts → View Details) sends
-  // ?highlight=<exam_id>, we scroll the matching card into view and pulse a
-  // blue ring around it for ~2.4s so the user sees what they jumped to.
+  // ?highlight=<exam_id>. We scroll the matching card into view and hold a
+  // solid bgcolor + outline + scale for 3s so the user can't miss what they
+  // jumped to (GitHub/Slack/Notion-style anchor highlight, not a brief pulse).
+  // location.key in the deps re-fires the highlight even when the URL is
+  // identical (clicking View Details twice for the same exam).
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const highlightId = searchParams.get('highlight');
   const [flashingId, setFlashingId] = useState(null);
@@ -91,9 +95,9 @@ const Exams = () => {
     if (!node) return;
     node.scrollIntoView({ behavior: 'smooth', block: 'center' });
     setFlashingId(String(highlightId));
-    const t = setTimeout(() => setFlashingId(null), 2400);
+    const t = setTimeout(() => setFlashingId(null), 3000);
     return () => clearTimeout(t);
-  }, [highlightId, exams]);
+  }, [highlightId, exams, location.key]);
 
   useEffect(() => {
     loadExams();
@@ -521,22 +525,23 @@ const Exams = () => {
                   maxWidth: 530,
                   display: 'flex',
                   flexDirection: 'column',
-                  '@keyframes examHighlightPulse': {
-                    '0%':   { boxShadow: '0 0 0 0 rgba(60, 129, 246, 0.65)' },
-                    '20%':  { boxShadow: '0 0 0 12px rgba(60, 129, 246, 0)' },
-                    '33%':  { boxShadow: '0 0 0 0 rgba(60, 129, 246, 0.65)' },
-                    '53%':  { boxShadow: '0 0 0 12px rgba(60, 129, 246, 0)' },
-                    '66%':  { boxShadow: '0 0 0 0 rgba(60, 129, 246, 0.65)' },
-                    '86%':  { boxShadow: '0 0 0 12px rgba(60, 129, 246, 0)' },
-                    '100%': { boxShadow: '0 0 0 0 rgba(60, 129, 246, 0)' },
-                  },
+                  // Baseline outline so the highlight can transition cleanly into a
+                  // solid blue ring (animating between `0 solid transparent` and
+                  // `3px solid #3c81f6` works; animating from `none` doesn't).
+                  outline: '0 solid transparent',
+                  outlineOffset: '4px',
+                  transition: 'background-color 0.4s ease-out, outline 0.4s ease-out, transform 0.4s ease-out, box-shadow 0.4s ease-out',
                   // Conditional overrides go LAST so they win over the baseline
-                  // `border` / `boxShadow` declared above. Three quick pulses
-                  // plus a temporary blue border so the card is unmistakable
-                  // when scrolled into view.
+                  // bgcolor / outline / boxShadow declared above. Light-blue card
+                  // body + 3px blue ring + 2% scale-up = unmissable anchor cue
+                  // that holds for 3s, then smoothly fades back via transition.
                   ...(flashingId === String(exam.id) && {
-                    animation: 'examHighlightPulse 2.4s ease-out',
-                    border: '2px solid #3c81f6',
+                    bgcolor: '#dbeafe',
+                    outline: '3px solid #3c81f6',
+                    transform: 'scale(1.02)',
+                    boxShadow: '0 8px 24px rgba(60, 129, 246, 0.25)',
+                    position: 'relative',
+                    zIndex: 1,
                   }),
                 }}
               >
