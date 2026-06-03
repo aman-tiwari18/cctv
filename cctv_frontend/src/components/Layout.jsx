@@ -236,7 +236,7 @@ function SidebarContent({ items, currentPath, onNavigate, user }) {
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
-          <Box component="img" src="/cctv-14.png" sx={{ height: 28, mr: 1 }} />
+          <Box component="img" src={`${import.meta.env.BASE_URL}cctv-14.png`} sx={{ height: 28, mr: 1 }} />
           <Typography variant="h6" fontWeight={700} color="#0f172a" noWrap>
             CCTV Monitor
           </Typography>
