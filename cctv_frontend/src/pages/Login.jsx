@@ -94,7 +94,8 @@ const Login = () => {
         alignItems: 'center',
         justifyContent: 'center',
         background: '#eef2fb',
-        px: 2
+        px: 2,
+        py: 4,
       }}
     >
       <Paper
@@ -107,16 +108,28 @@ const Login = () => {
           bgcolor: '#ffffff',
         }}
       >
-        <Box textAlign="center" mb={4}>
-          {/* inline-block wrapper shrinks to the subtitle width, so the logo (width:100%) matches it exactly */}
+        <Box textAlign="center" mb={{ xs: 3, sm: 4 }}>
+          {/* The subtitle (the only element with intrinsic width) sizes this inline-block wrapper.
+              The logo is a background image — it has no intrinsic width, so it fills 100% of the
+              wrapper, ending up exactly as wide as the subtitle text. aspectRatio keeps its shape. */}
           <Box sx={{ display: 'inline-block', maxWidth: '100%' }}>
             <Box
-              component="img"
-              src={`${import.meta.env.BASE_URL}logo-16.png`}
-              alt="CCTV Monitoring"
-              sx={{ width: '100%', display: 'block', mb: 1 }}
+              role="img"
+              aria-label="CCTV Monitoring"
+              sx={{
+                width: '100%',
+                aspectRatio: '6812 / 1250',
+                backgroundImage: `url(${import.meta.env.BASE_URL}logo-16.png)`,
+                backgroundSize: 'contain',
+                backgroundRepeat: 'no-repeat',
+                backgroundPosition: 'center',
+                mb: 1,
+              }}
             />
-            <Typography variant="body2" sx={{ color: '#6b7280', fontWeight: 500, whiteSpace: 'nowrap' }}>
+            <Typography
+              variant="body2"
+              sx={{ color: '#6b7280', fontWeight: 500, whiteSpace: { xs: 'normal', sm: 'nowrap' } }}
+            >
               Exam Monitoring & Management Platform
             </Typography>
           </Box>
