@@ -226,6 +226,7 @@ function SidebarContent({ items, currentPath, onNavigate, user }) {
       }}
     >
       <Toolbar
+        disableGutters
         sx={{
           height: APPBAR_HEIGHT,
           borderBottom: `1px solid ${sidebarPalette.border}`,
