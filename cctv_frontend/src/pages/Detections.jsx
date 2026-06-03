@@ -1479,10 +1479,11 @@ export default function Detections() {
         />
         {user?.role !== 'OPERATOR' && (
           <FormControl size="small" sx={{ width: { xs: (examFilter && examShifts.length > 0) ? 'calc(30% - 8px)' : 'calc(50% - 6px)', sm: 150 } }}>
-            <InputLabel sx={{ fontSize: 14 }}>Exam</InputLabel>
+            <InputLabel shrink sx={{ fontSize: 14 }}>Exam</InputLabel>
             <Select
               value={examFilter}
               label="Exam"
+              displayEmpty
               onChange={(e) => setExamFilter(e.target.value)}
               sx={{
                 borderRadius: '8px', bgcolor: '#f8fafc', height: 36, fontSize: 14,
@@ -1504,10 +1505,11 @@ export default function Detections() {
             exam is chosen and that exam has shifts. Styling matches the Exam filter. */}
         {user?.role !== 'OPERATOR' && examFilter && examShifts.length > 0 && (
           <FormControl size="small" sx={{ width: { xs: 'calc(30% - 8px)', sm: 130 } }}>
-            <InputLabel sx={{ fontSize: 14 }}>Shift</InputLabel>
+            <InputLabel shrink sx={{ fontSize: 14 }}>Shift</InputLabel>
             <Select
               value={shiftFilter}
               label="Shift"
+              displayEmpty
               onChange={(e) => setShiftFilter(e.target.value)}
               sx={{
                 borderRadius: '8px', bgcolor: '#f8fafc', height: 36, fontSize: 14,
