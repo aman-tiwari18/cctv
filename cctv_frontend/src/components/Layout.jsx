@@ -230,16 +230,19 @@ function SidebarContent({ items, currentPath, onNavigate, user }) {
           height: APPBAR_HEIGHT,
           borderBottom: `1px solid ${sidebarPalette.border}`,
           justifyContent: 'flex-start',
-          px: 2,
+          alignItems: 'flex-end',
+          pl: 2.5,
+          pr: 2,
+          pb: 1,
           flexShrink: 0,
         }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', overflow: 'hidden' }}>
+        <Box sx={{ display: 'flex', alignItems: 'flex-end', width: '100%', overflow: 'hidden' }}>
           <Box
             component="img"
             src={`${import.meta.env.BASE_URL}logo-16.png`}
             alt="CCTV Monitoring"
-            sx={{ height: 48, maxWidth: '100%', objectFit: 'contain', objectPosition: 'left center', display: 'block' }}
+            sx={{ height: 52, maxWidth: '100%', display: 'block' }}
           />
         </Box>
       </Toolbar>
