@@ -361,7 +361,7 @@ function DetectionCard({ item, onClick, onRemove, onUndo, isRemoving, isPendingR
               }}
               disabled={isRemoving}
               sx={{
-                bgcolor: '#ef4444',
+                bgcolor: '#c3282e',
                 color: '#fff',
                 fontWeight: 900,
                 height: "40px",
@@ -372,7 +372,7 @@ function DetectionCard({ item, onClick, onRemove, onUndo, isRemoving, isPendingR
                 textTransform: 'none',
                 fontSize: 12,
                 whiteSpace: 'nowrap',
-                '&:hover': { bgcolor: '#dc2626' },
+                '&:hover': { bgcolor: '#a51f24' },
               }}
             >
               {isRemoving ? 'Removing...' : 'Remove'}
