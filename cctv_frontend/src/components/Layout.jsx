@@ -234,12 +234,12 @@ function SidebarContent({ items, currentPath, onNavigate, user }) {
           flexShrink: 0,
         }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', overflow: 'hidden' }}>
           <Box
             component="img"
             src={`${import.meta.env.BASE_URL}logo-16.png`}
             alt="CCTV Monitoring"
-            sx={{ height: 32 }}
+            sx={{ height: 48, maxWidth: '100%', objectFit: 'contain', objectPosition: 'left center', display: 'block' }}
           />
         </Box>
       </Toolbar>

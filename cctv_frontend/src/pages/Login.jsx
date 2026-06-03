@@ -108,15 +108,18 @@ const Login = () => {
         }}
       >
         <Box textAlign="center" mb={4}>
-          <Box
-            component="img"
-            src={`${import.meta.env.BASE_URL}logo-16.png`}
-            alt="CCTV Monitoring"
-            sx={{ height: 44, mb: 1.5, mx: 'auto', display: 'block' }}
-          />
-          <Typography variant="body2" sx={{ color: '#6b7280', fontWeight: 500 }}>
-            Exam Monitoring & Management Platform
-          </Typography>
+          {/* inline-block wrapper shrinks to the subtitle width, so the logo (width:100%) matches it exactly */}
+          <Box sx={{ display: 'inline-block', maxWidth: '100%' }}>
+            <Box
+              component="img"
+              src={`${import.meta.env.BASE_URL}logo-16.png`}
+              alt="CCTV Monitoring"
+              sx={{ width: '100%', display: 'block', mb: 1 }}
+            />
+            <Typography variant="body2" sx={{ color: '#6b7280', fontWeight: 500, whiteSpace: 'nowrap' }}>
+              Exam Monitoring & Management Platform
+            </Typography>
+          </Box>
         </Box>
 
         {error && (
