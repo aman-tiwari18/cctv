@@ -1478,7 +1478,7 @@ export default function Detections() {
           sx={{ width: { xs: '100%', sm: 'auto' }, flex: { sm: 1 }, minWidth: { sm: 200 }, maxWidth: { sm: 400 } }}
         />
         {user?.role !== 'OPERATOR' && (
-          <FormControl size="small" sx={{ width: { xs: (examFilter && examShifts.length > 0) ? 'calc(33.333% - 8px)' : 'calc(50% - 6px)', sm: 150 } }}>
+          <FormControl size="small" sx={{ width: { xs: (examFilter && examShifts.length > 0) ? 'calc(30% - 8px)' : 'calc(50% - 6px)', sm: 150 } }}>
             <InputLabel sx={{ fontSize: 14 }}>Exam</InputLabel>
             <Select
               value={examFilter}
@@ -1503,7 +1503,7 @@ export default function Detections() {
         {/* Shift filter — dependent on the selected exam. Only shown once an
             exam is chosen and that exam has shifts. Styling matches the Exam filter. */}
         {user?.role !== 'OPERATOR' && examFilter && examShifts.length > 0 && (
-          <FormControl size="small" sx={{ width: { xs: 'calc(33.333% - 8px)', sm: 130 } }}>
+          <FormControl size="small" sx={{ width: { xs: 'calc(30% - 8px)', sm: 130 } }}>
             <InputLabel sx={{ fontSize: 14 }}>Shift</InputLabel>
             <Select
               value={shiftFilter}
@@ -1525,7 +1525,7 @@ export default function Detections() {
             </Select>
           </FormControl>
         )}
-        <Box sx={{ position: 'relative', width: { xs: (examFilter && examShifts.length > 0) ? 'calc(33.333% - 8px)' : 'calc(50% - 6px)', sm: 150 } }}>
+        <Box sx={{ position: 'relative', width: { xs: (examFilter && examShifts.length > 0) ? 'calc(40% - 8px)' : 'calc(50% - 6px)', sm: 150 } }}>
           <TextField
             type="date"
             size="small"
