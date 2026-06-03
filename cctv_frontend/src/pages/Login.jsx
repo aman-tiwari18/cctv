@@ -108,7 +108,7 @@ const Login = () => {
           bgcolor: 'white',
         }}
       >
-        <CameraIcon sx={{ fontSize: 28, color: '#3b82f6' }} />
+        <Box component="img" src="/logo cctv-14.png" sx={{ height: 28 }} />
       </Paper>
 
       <Paper
