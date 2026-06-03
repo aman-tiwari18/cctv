@@ -108,7 +108,7 @@ const Login = () => {
           bgcolor: 'white',
         }}
       >
-        <Box component="img" src="/logo cctv-14.png" sx={{ height: 28 }} />
+        <Box component="img" src="/cctv-14.png" sx={{ height: 28 }} />
       </Paper>
 
       <Paper
