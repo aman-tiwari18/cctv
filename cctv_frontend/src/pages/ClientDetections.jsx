@@ -964,7 +964,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, onUndo, removi
                         }}
                         disabled={isRemoving}
                         sx={{
-                          bgcolor: '#ef4444', color: '#fff', fontWeight: 900,
+                          bgcolor: '#c3282e', color: '#fff', fontWeight: 900,
                           height: "40px",
                           width: "160px",
                           borderRadius: 2, textTransform: 'none', fontSize: 14,
@@ -972,7 +972,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, onUndo, removi
                           justifyContent: 'space-between',
                           pl: 2,
                           pr: 0.5,
-                          '&:hover': { bgcolor: '#dc2626' },
+                          '&:hover': { bgcolor: '#a51f24' },
                         }}
                       >
                         <span>{isRemoving ? 'Removing...' : 'Remove'}</span>
