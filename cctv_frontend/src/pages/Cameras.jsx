@@ -125,6 +125,8 @@ const Cameras = () => {
 
   /* ── Sidebar ── */
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  // Collapse the exam rail by default on phones so the content panel keeps full width.
+  useEffect(() => { setSidebarOpen(!isSmDown); }, [isSmDown]);
   const [exams, setExams] = useState([]);
   const [viewingArchived, setViewingArchived] = useState(false);
   const [selectedExamId, setSelectedExamId] = useState(examIdParam || '');
@@ -428,7 +430,7 @@ const Cameras = () => {
               {/* ── Title row ── */}
               <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'stretch', md: 'flex-start' }, mb: 2, flexWrap: 'wrap', gap: 2 }}>
                 <Box>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5, flexWrap: 'wrap' }}>
                     <Typography variant="h6" sx={{ fontWeight: 600, color: '#0f172a', fontSize: { xs: '1.15rem', sm: '1.5rem' } }}>
                       {selectedExamData ? `${selectedExamData.exam_name} (${selectedExamData.exam_body})` : 'Cameras'}
                     </Typography>
