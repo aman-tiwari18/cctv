@@ -231,7 +231,7 @@ function SidebarContent({ items, currentPath, onNavigate, user }) {
           borderBottom: `1px solid ${sidebarPalette.border}`,
           justifyContent: 'flex-start',
           alignItems: 'flex-end',
-          pl: 2.5,
+          pl: 1,
           pr: 2,
           pb: 1,
           flexShrink: 0,
@@ -242,7 +242,7 @@ function SidebarContent({ items, currentPath, onNavigate, user }) {
             component="img"
             src={`${import.meta.env.BASE_URL}logo-16.png`}
             alt="CCTV Monitoring"
-            sx={{ width: '100%', height: 'auto', display: 'block' }}
+            sx={{ width: '85%', height: 'auto', display: 'block' }}
           />
         </Box>
       </Toolbar>
