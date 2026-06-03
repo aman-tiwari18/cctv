@@ -242,7 +242,7 @@ function SidebarContent({ items, currentPath, onNavigate, user }) {
             component="img"
             src={`${import.meta.env.BASE_URL}logo-16.png`}
             alt="CCTV Monitoring"
-            sx={{ height: 52, maxWidth: '100%', display: 'block' }}
+            sx={{ width: '100%', height: 'auto', display: 'block' }}
           />
         </Box>
       </Toolbar>
