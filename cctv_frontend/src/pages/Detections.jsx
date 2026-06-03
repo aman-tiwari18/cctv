@@ -1479,10 +1479,8 @@ export default function Detections() {
         />
         {user?.role !== 'OPERATOR' && (
           <FormControl size="small" sx={{ width: { xs: (examFilter && examShifts.length > 0) ? 'calc(30% - 8px)' : 'calc(50% - 6px)', sm: 150 } }}>
-            <InputLabel shrink sx={{ fontSize: 14 }}>Exam</InputLabel>
             <Select
               value={examFilter}
-              label="Exam"
               displayEmpty
               onChange={(e) => setExamFilter(e.target.value)}
               sx={{
@@ -1490,9 +1488,7 @@ export default function Detections() {
                 '& fieldset': { border: 'none' },
               }}
             >
-              <MenuItem value="">
-                <em>All Exams</em>
-              </MenuItem>
+              <MenuItem value="">All Exams</MenuItem>
               {exams.map((exam) => (
                 <MenuItem key={exam.id} value={exam.id}>
                   {exam.exam_name}
@@ -1505,10 +1501,8 @@ export default function Detections() {
             exam is chosen and that exam has shifts. Styling matches the Exam filter. */}
         {user?.role !== 'OPERATOR' && examFilter && examShifts.length > 0 && (
           <FormControl size="small" sx={{ width: { xs: 'calc(30% - 8px)', sm: 130 } }}>
-            <InputLabel shrink sx={{ fontSize: 14 }}>Shift</InputLabel>
             <Select
               value={shiftFilter}
-              label="Shift"
               displayEmpty
               onChange={(e) => setShiftFilter(e.target.value)}
               sx={{
@@ -1516,9 +1510,7 @@ export default function Detections() {
                 '& fieldset': { border: 'none' },
               }}
             >
-              <MenuItem value="">
-                <em>All Shifts</em>
-              </MenuItem>
+              <MenuItem value="">All Shifts</MenuItem>
               {examShifts.map((sh) => (
                 <MenuItem key={sh.id} value={sh.id}>
                   {sh.shift_name || `Shift #${sh.id}`}
