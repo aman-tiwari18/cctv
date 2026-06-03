@@ -13,7 +13,6 @@ import {
 } from '@mui/material';
 import { PersonOutline, LockOutlined, VisibilityOutlined, VisibilityOffOutlined } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
-import CameraIcon from '../components/CameraIcon';
 
 // Static objects defined outside component — never recreated on re-render
 const inputFieldSx = {
@@ -101,19 +100,6 @@ const Login = () => {
       <Paper
         elevation={0}
         sx={{
-          p: 1.5,
-          borderRadius: 3,
-          mb: 3,
-          display: 'inline-flex',
-          bgcolor: 'white',
-        }}
-      >
-        <Box component="img" src={`${import.meta.env.BASE_URL}cctv-14.png`} sx={{ height: 28 }} />
-      </Paper>
-
-      <Paper
-        elevation={0}
-        sx={{
           p: { xs: 3, sm: 5 },
           width: '100%',
           maxWidth: 450,
@@ -122,9 +108,12 @@ const Login = () => {
         }}
       >
         <Box textAlign="center" mb={4}>
-          <Typography variant="h5" sx={{ fontWeight: 800, color: '#111827', mb: 1, letterSpacing: '-0.5px' }}>
-            CCTV Monitoring System
-          </Typography>
+          <Box
+            component="img"
+            src={`${import.meta.env.BASE_URL}logo-16.png`}
+            alt="CCTV Monitoring"
+            sx={{ height: 44, mb: 1.5, mx: 'auto', display: 'block' }}
+          />
           <Typography variant="body2" sx={{ color: '#6b7280', fontWeight: 500 }}>
             Exam Monitoring & Management Platform
           </Typography>

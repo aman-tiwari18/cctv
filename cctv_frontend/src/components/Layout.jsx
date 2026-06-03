@@ -55,7 +55,6 @@ import { useDetectionCounts } from '../contexts/DetectionCountsContext';
 import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
 import { CustomSvgIcon } from './DetectionSvgIcon';
 import { ShiftSvgIcon } from './ShiftSvgIcon';
-import CameraIcon from './CameraIcon';
 import { dashboardAPI } from '../services/api';
 
 const DRAWER_WIDTH = 260;
@@ -236,10 +235,12 @@ function SidebarContent({ items, currentPath, onNavigate, user }) {
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
-          <Box component="img" src={`${import.meta.env.BASE_URL}cctv-14.png`} sx={{ height: 28, mr: 1 }} />
-          <Typography variant="h6" fontWeight={700} color="#0f172a" noWrap>
-            CCTV Monitor
-          </Typography>
+          <Box
+            component="img"
+            src={`${import.meta.env.BASE_URL}logo-16.png`}
+            alt="CCTV Monitoring"
+            sx={{ height: 32 }}
+          />
         </Box>
       </Toolbar>
 
