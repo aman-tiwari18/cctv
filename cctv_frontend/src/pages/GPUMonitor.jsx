@@ -42,6 +42,8 @@ import {
   Timeline,
   DeviceThermostat,
   KeyboardArrowRight,
+  Add,
+  Close,
 } from '@mui/icons-material';
 import {
   LineChart,
@@ -171,10 +173,21 @@ const seriesStats = (data, stepSec, idleThreshold = 5) => {
 const tickTime = (ms) =>
   new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-const UtilizationChart = ({ serverId, gpuId, rangeKey }) => {
+const COMPACT_LABEL_SX = { fontFamily: INTER, fontWeight: 700, fontSize: 11, letterSpacing: '0.5px', color: COLOR.faint, textTransform: 'uppercase', mb: 0.5 };
+
+const UtilizationChart = ({ serverId, gpuId, rangeKey, compact }) => {
   const query = `gpu_utilization_percent{server_id="${serverId}",gpu_id="${gpuId}"}`;
   const { data, error, loading, stepSec } = usePromTimeseries(query, rangeKey);
   const stats = useMemo(() => seriesStats(data, stepSec), [data, stepSec]);
+
+  if (compact) {
+    return (
+      <Box>
+        <Typography sx={COMPACT_LABEL_SX}>GPU Utilization</Typography>
+        <ChartBody data={data} loading={loading} error={error} color="#3b82f6" yDomain={[0, 100]} unit="%" compact />
+      </Box>
+    );
+  }
 
   return (
     <Card elevation={0} sx={{ ...CARD_SX, height: '100%' }}>
@@ -196,7 +209,7 @@ const UtilizationChart = ({ serverId, gpuId, rangeKey }) => {
   );
 };
 
-const MemoryChart = ({ serverId, gpuId, memoryTotalMb, memoryUsedMb, rangeKey }) => {
+const MemoryChart = ({ serverId, gpuId, memoryTotalMb, memoryUsedMb, rangeKey, compact }) => {
   const query = `gpu_memory_used_mb{server_id="${serverId}",gpu_id="${gpuId}"}`;
   const { data, error, loading, stepSec } = usePromTimeseries(query, rangeKey);
   const stats = useMemo(() => seriesStats(data, stepSec, 0), [data, stepSec]);
@@ -205,6 +218,15 @@ const MemoryChart = ({ serverId, gpuId, memoryTotalMb, memoryUsedMb, rangeKey })
     : '—';
   const peakGb = (stats.peak / 1024).toFixed(1) + 'GB';
   const avgGb  = (stats.avg / 1024).toFixed(1) + 'GB';
+
+  if (compact) {
+    return (
+      <Box>
+        <Typography sx={COMPACT_LABEL_SX}>Memory / VRAM Usage</Typography>
+        <ChartBody data={data} loading={loading} error={error} color="#10b981" filled yDomain={[0, memoryTotalMb || 'auto']} unit="MB" formatY={(v) => `${Math.round(v / 1024)}`} compact />
+      </Box>
+    );
+  }
 
   return (
     <Card elevation={0} sx={{ ...CARD_SX, height: '100%' }}>
@@ -239,24 +261,27 @@ const Stat = ({ label, value }) => (
   </Box>
 );
 
-const ChartBody = ({ data, loading, error, color, filled, yDomain, unit, formatY }) => {
+const ChartBody = ({ data, loading, error, color, filled, yDomain, unit, formatY, compact, height }) => {
+  const h = height || (compact ? 150 : 220);
   if (error) {
     return (
-      <Box sx={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
+      <Box sx={{ height: h, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
         <Typography variant="caption" color="error" sx={{ mb: 1 }}>
           Prometheus unavailable
         </Typography>
-        <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace', fontSize: 11 }}>
-          {error.slice(0, 100)}
-        </Typography>
+        {!compact && (
+          <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace', fontSize: 11 }}>
+            {error.slice(0, 100)}
+          </Typography>
+        )}
       </Box>
     );
   }
   if (loading && !data.length) {
-    return <Box sx={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><CircularProgress size={24} /></Box>;
+    return <Box sx={{ height: h, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><CircularProgress size={24} /></Box>;
   }
   if (!data.length) {
-    return <Box sx={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    return <Box sx={{ height: h, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <Typography variant="caption" color="text.secondary">No data in range</Typography>
     </Box>;
   }
@@ -265,17 +290,21 @@ const ChartBody = ({ data, loading, error, color, filled, yDomain, unit, formatY
   const SeriesComp = filled ? Area : Line;
 
   return (
-    <Box sx={{ height: 220 }}>
+    <Box sx={{ height: h }}>
       <ResponsiveContainer width="100%" height="100%">
         <ChartComp data={data} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
-          <XAxis dataKey="time" tickFormatter={tickTime} stroke="#94a3b8" fontSize={11} />
-          <YAxis
-            domain={yDomain}
-            tickFormatter={formatY}
-            stroke="#94a3b8"
-            fontSize={11}
-          />
+          {!compact && <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />}
+          {!compact && <XAxis dataKey="time" tickFormatter={tickTime} stroke="#94a3b8" fontSize={11} />}
+          {!compact && (
+            <YAxis
+              domain={yDomain}
+              tickFormatter={formatY}
+              stroke="#94a3b8"
+              fontSize={11}
+            />
+          )}
+          {compact && <XAxis dataKey="time" hide />}
+          {compact && <YAxis domain={yDomain} hide />}
           <ChartTooltip
             labelFormatter={(ms) => new Date(ms).toLocaleString()}
             formatter={(v) => [`${v}${unit === '%' ? '%' : ' ' + unit}`, '']}
@@ -313,7 +342,7 @@ const FilterSelect = ({ value, onChange, options }) => (
   </FormControl>
 );
 
-const ServerGpuSidebar = ({ servers, selectedKey, onSelect, expanded, onToggle }) => {
+const ServerGpuSidebar = ({ servers, selectedKey, onSelect, expanded, onToggle, compareMode = false, compareKeys = [], onAdd }) => {
   // Placeholder filters (visual only for now — wire to sort/filter later).
   const [sortBy, setSortBy] = useState('Utilization');
   const [nodeFilter, setNodeFilter] = useState('All Nodes');
@@ -358,36 +387,51 @@ const ServerGpuSidebar = ({ servers, selectedKey, onSelect, expanded, onToggle }
                 )}
                 {(server.data?.gpus || []).map((gpu) => {
                   const key = `${server.server_id}::${gpu.gpu_id}`;
-                  const selected = key === selectedKey;
+                  const inGrid = compareKeys.includes(key);
+                  const selected = compareMode ? inGrid : key === selectedKey;
+                  const showAdd = compareMode && !inGrid;
                   return (
-                    <Paper
-                      key={key}
-                      onClick={() => onSelect(key)}
-                      elevation={0}
-                      sx={{
-                        p: 1.25, ml: 1.5, mt: 0.5, cursor: 'pointer',
-                        border: selected ? `2px solid ${COLOR.accent}` : '1px solid #e2e8f0',
-                        borderRadius: 1.5,
-                        '&:hover': { borderColor: selected ? COLOR.accent : '#cbd5e1' },
-                      }}
-                    >
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Typography sx={{ fontFamily: INTER, fontWeight: 700, fontSize: 14, color: selected ? COLOR.accent : COLOR.title }}>GPU {gpu.gpu_id}</Typography>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                          <Typography sx={{ fontFamily: INTER, fontSize: 12, color: COLOR.muted }}>{gpu.temperature}°C</Typography>
-                          <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: tempColor(gpu.temperature) }} />
+                    <Box key={key} sx={{ display: 'flex', alignItems: 'stretch', gap: 0.75, ml: 1.5, mt: 0.5 }}>
+                      <Paper
+                        elevation={0}
+                        draggable={compareMode}
+                        onDragStart={compareMode ? (e) => { e.dataTransfer.setData('text/plain', key); e.dataTransfer.effectAllowed = 'copy'; } : undefined}
+                        onClick={() => (compareMode ? onAdd(key) : onSelect(key))}
+                        sx={{
+                          flex: 1, minWidth: 0, p: 1.25, cursor: compareMode ? 'grab' : 'pointer',
+                          border: selected ? `2px solid ${COLOR.accent}` : '1px solid #e2e8f0',
+                          borderRadius: 1.5,
+                          '&:hover': { borderColor: selected ? COLOR.accent : '#cbd5e1' },
+                        }}
+                      >
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Typography sx={{ fontFamily: INTER, fontWeight: 700, fontSize: 14, color: selected ? COLOR.accent : COLOR.title }}>GPU {gpu.gpu_id}</Typography>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                            <Typography sx={{ fontFamily: INTER, fontSize: 12, color: COLOR.muted }}>{gpu.temperature}°C</Typography>
+                            <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: tempColor(gpu.temperature) }} />
+                          </Box>
                         </Box>
-                      </Box>
-                      <Typography sx={{ fontFamily: INTER, fontSize: 12, color: COLOR.muted, display: 'block' }}>
-                        {gpu.name}
-                      </Typography>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 0.5 }}>
-                        <Typography sx={{ fontFamily: INTER, fontSize: 12, color: COLOR.muted }}>{gpu.utilization}% Util</Typography>
-                        <Typography sx={{ fontFamily: INTER, fontSize: 12, color: COLOR.muted }}>
-                          {gpu.memory_used > 1024 ? `${(gpu.memory_used / 1024).toFixed(0)}GB` : `${gpu.memory_used}MB`} Mem
+                        <Typography sx={{ fontFamily: INTER, fontSize: 12, color: COLOR.muted, display: 'block' }}>
+                          {gpu.name}
                         </Typography>
-                      </Box>
-                    </Paper>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 0.5 }}>
+                          <Typography sx={{ fontFamily: INTER, fontSize: 12, color: COLOR.muted }}>{gpu.utilization}% Util</Typography>
+                          <Typography sx={{ fontFamily: INTER, fontSize: 12, color: COLOR.muted }}>
+                            {gpu.memory_used > 1024 ? `${(gpu.memory_used / 1024).toFixed(0)}GB` : `${gpu.memory_used}MB`} Mem
+                          </Typography>
+                        </Box>
+                      </Paper>
+                      {showAdd && (
+                        <Tooltip title="Add to comparison">
+                          <IconButton
+                            onClick={(e) => { e.stopPropagation(); onAdd(key); }}
+                            sx={{ alignSelf: 'center', border: '1px solid #e2e8f0', borderRadius: 1.5, p: 0.75, color: COLOR.accent, '&:hover': { bgcolor: '#eff6ff', borderColor: COLOR.accent } }}
+                          >
+                            <Add sx={{ fontSize: 18 }} />
+                          </IconButton>
+                        </Tooltip>
+                      )}
+                    </Box>
                   );
                 })}
               </Collapse>
@@ -640,6 +684,76 @@ const GPUDetailPanel = ({ server, gpu, processes, rangeKey, onRangeChange, onRef
   );
 };
 
+// ── compare view: one GPU's comparison card (real compact charts) ───────────
+const CompareGpuCard = ({ server, gpu, rangeKey, onRemove }) => (
+  <Card elevation={0} sx={{ ...CARD_SX, height: '100%' }}>
+    <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', minWidth: 0 }}>
+          <Typography sx={{ fontFamily: INTER, fontWeight: 700, fontSize: { xs: '15px', sm: '17px' }, color: COLOR.title }} noWrap>
+            GPU {gpu.gpu_id} — {gpu.name}
+          </Typography>
+          <Chip
+            icon={server.status === 'online' ? <CheckCircle /> : <ErrorIcon />}
+            label={server.status.toUpperCase()}
+            size="small"
+            sx={{ bgcolor: server.status === 'online' ? '#ecfdf5' : '#fef2f2', color: server.status === 'online' ? '#059669' : '#dc2626', fontWeight: 600, '& .MuiChip-icon': { color: 'inherit' } }}
+          />
+        </Box>
+        <Tooltip title="Remove">
+          <IconButton size="small" onClick={onRemove}><Close sx={{ fontSize: 18, color: COLOR.faint }} /></IconButton>
+        </Tooltip>
+      </Box>
+      <Stack direction="row" spacing={4} sx={{ mt: 0.5 }}>
+        <Box>
+          <Typography sx={{ fontFamily: INTER, fontSize: 11, fontWeight: 600, letterSpacing: '0.5px', color: COLOR.faint, textTransform: 'uppercase' }}>Utilization</Typography>
+          <Typography sx={{ fontFamily: INTER, fontWeight: 700, fontSize: 20, color: COLOR.title }}>{gpu.utilization}%</Typography>
+        </Box>
+        <Box>
+          <Typography sx={{ fontFamily: INTER, fontSize: 11, fontWeight: 600, letterSpacing: '0.5px', color: COLOR.faint, textTransform: 'uppercase' }}>Memory</Typography>
+          <Typography sx={{ fontFamily: INTER, fontWeight: 700, fontSize: 20, color: COLOR.title }}>{(gpu.memory_used / 1024).toFixed(0)}GB</Typography>
+        </Box>
+      </Stack>
+      <Box sx={{ height: '2px', bgcolor: COLOR.accent, borderRadius: 1, mt: 1.5, mb: 2 }} />
+      <Stack spacing={2}>
+        <UtilizationChart compact serverId={server.server_id} gpuId={String(gpu.gpu_id)} rangeKey={rangeKey} />
+        <MemoryChart compact serverId={server.server_id} gpuId={String(gpu.gpu_id)} memoryTotalMb={gpu.memory_total} memoryUsedMb={gpu.memory_used} rangeKey={rangeKey} />
+      </Stack>
+    </CardContent>
+  </Card>
+);
+
+// ── compare view: empty dashed "add a GPU" slot + drop target ───────────────
+const AddGpuSlot = ({ onAdd }) => {
+  const [over, setOver] = useState(false);
+  return (
+    <Box
+      onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setOver(false);
+        const key = e.dataTransfer.getData('text/plain');
+        if (key) onAdd(key);
+      }}
+      sx={{
+        height: '100%', minHeight: 260, borderRadius: '8px',
+        border: `2px dashed ${over ? COLOR.accent : '#E5E7EB'}`,
+        bgcolor: over ? '#eff6ff' : 'transparent',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        textAlign: 'center', p: 3, transition: 'all 0.15s ease',
+      }}
+    >
+      <Typography sx={{ fontFamily: INTER, fontWeight: 700, fontSize: 15, color: COLOR.muted }}>
+        Click + or drag and drop to add a GPU for comparison
+      </Typography>
+      <Typography sx={{ fontFamily: INTER, fontSize: 13, color: COLOR.faint, mt: 0.5, maxWidth: 320 }}>
+        Drag a GPU from the sidebar list, or click its + button, to see side-by-side performance metrics.
+      </Typography>
+    </Box>
+  );
+};
+
 // ── stat cards (top row) — dashboard KPI-tile look ──────────────────────────
 // `chips`: array of { label, value, tone } → two-line tone chips (Servers/GPUs).
 // `subLabel`: plain gray caption under the value (Processes/Cameras).
@@ -688,7 +802,10 @@ const GPUMonitor = () => {
   const [selectedKey, setSelectedKey] = useState(null);
   const [expanded, setExpanded] = useState({});
   const [rangeKey, setRangeKey] = useState('1h');
-  const [viewMode, setViewMode] = useState('inspect'); // 'inspect' | 'compare' (compare = placeholder)
+  const [viewMode, setViewMode] = useState('inspect'); // 'inspect' | 'compare'
+  const [compareKeys, setCompareKeys] = useState([]);  // GPUs in the compare grid ("server::gpu")
+  const addCompare = useCallback((key) => setCompareKeys((prev) => (prev.includes(key) ? prev : [...prev, key])), []);
+  const removeCompare = useCallback((key) => setCompareKeys((prev) => prev.filter((k) => k !== key)), []);
 
   const fetchGPUStats = useCallback(async () => {
     try {
@@ -729,6 +846,17 @@ const GPUMonitor = () => {
     const processes = server?.data?.processes?.[gpuIdStr] || [];
     return { selectedServer: server, selectedGPU: gpu, selectedProcesses: processes };
   }, [selectedKey, clusterData]);
+
+  // Resolve each compare key → { key, server, gpu } (skip any that no longer exist)
+  const compareItems = useMemo(() => {
+    if (!clusterData?.servers) return [];
+    return compareKeys.map((key) => {
+      const [srvId, gpuIdStr] = key.split('::');
+      const server = clusterData.servers.find((s) => s.server_id === srvId);
+      const gpu = server?.data?.gpus?.find((g) => String(g.gpu_id) === gpuIdStr);
+      return server && gpu ? { key, server, gpu } : null;
+    }).filter(Boolean);
+  }, [compareKeys, clusterData]);
 
   // Cluster-wide live utilization for the header pill
   const clusterUtilPct = useMemo(() => {
@@ -837,7 +965,7 @@ const GPUMonitor = () => {
         <Typography sx={{ fontFamily: INTER, fontWeight: 700, fontSize: { xs: '17px', sm: '20px' }, color: COLOR.title }}>
           Server Details
         </Typography>
-        {/* Inspect / Compare — Compare is a non-functional placeholder for now */}
+        {/* Inspect / Compare */}
         <Box sx={{ display: 'flex', bgcolor: '#fff', border: '1px solid #E5E7EB', borderRadius: '10px', p: '3px' }}>
           {['inspect', 'compare'].map((m) => {
             const active = viewMode === m;
@@ -846,7 +974,11 @@ const GPUMonitor = () => {
                 key={m}
                 component="button"
                 type="button"
-                onClick={() => setViewMode(m)}
+                onClick={() => {
+                  setViewMode(m);
+                  // Seed the compare grid with the GPU you were inspecting.
+                  if (m === 'compare' && compareKeys.length === 0 && selectedKey) setCompareKeys([selectedKey]);
+                }}
                 sx={{
                   border: 'none', cursor: 'pointer', borderRadius: '8px',
                   px: 2, py: 0.5, fontFamily: INTER, fontSize: '13px', fontWeight: 600, textTransform: 'capitalize',
@@ -861,11 +993,6 @@ const GPUMonitor = () => {
           })}
         </Box>
       </Box>
-      {viewMode === 'compare' && (
-        <Alert severity="info" sx={{ mb: 2, borderRadius: '8px' }}>
-          Compare view is coming soon.
-        </Alert>
-      )}
       <Grid container spacing={2}>
         <Grid item xs={12} md={3}>
           <ServerGpuSidebar
@@ -874,17 +1001,43 @@ const GPUMonitor = () => {
             onSelect={setSelectedKey}
             expanded={expanded}
             onToggle={(srvId) => setExpanded((prev) => ({ ...prev, [srvId]: prev[srvId] === false }))}
+            compareMode={viewMode === 'compare'}
+            compareKeys={compareKeys}
+            onAdd={addCompare}
           />
         </Grid>
         <Grid item xs={12} md={9}>
-          <GPUDetailPanel
-            server={selectedServer}
-            gpu={selectedGPU}
-            processes={selectedProcesses || []}
-            rangeKey={rangeKey}
-            onRangeChange={setRangeKey}
-            onRefresh={fetchGPUStats}
-          />
+          {viewMode === 'inspect' ? (
+            <GPUDetailPanel
+              server={selectedServer}
+              gpu={selectedGPU}
+              processes={selectedProcesses || []}
+              rangeKey={rangeKey}
+              onRangeChange={setRangeKey}
+              onRefresh={fetchGPUStats}
+            />
+          ) : (
+            /* Compare grid — also a drop target so a GPU can be dropped anywhere */
+            <Box
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                const key = e.dataTransfer.getData('text/plain');
+                if (key) addCompare(key);
+              }}
+            >
+              <Grid container spacing={2}>
+                {compareItems.map(({ key, server, gpu }) => (
+                  <Grid item xs={12} md={6} key={key}>
+                    <CompareGpuCard server={server} gpu={gpu} rangeKey={rangeKey} onRemove={() => removeCompare(key)} />
+                  </Grid>
+                ))}
+                <Grid item xs={12} md={6}>
+                  <AddGpuSlot onAdd={addCompare} />
+                </Grid>
+              </Grid>
+            </Box>
+          )}
         </Grid>
       </Grid>
     </Box>
