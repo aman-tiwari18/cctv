@@ -21,6 +21,8 @@ import {
   Tooltip,
   IconButton,
   Button,
+  useMediaQuery,
+  useTheme,
 } from '@mui/material';
 import {
   Search,
@@ -90,8 +92,12 @@ const parseDDMMYYYYToISO = (value) => {
 };
 
 const ClientCameras = () => {
+  const theme = useTheme();
+  const isSmDown = useMediaQuery(theme.breakpoints.down('sm'));
   const [searchParams] = useSearchParams();
   const [camSidebarOpen, setCamSidebarOpen] = useState(true);
+  // Collapse the exam rail by default on phones so the content keeps full width.
+  useEffect(() => { setCamSidebarOpen(!isSmDown); }, [isSmDown]);
   const [camExams, setCamExams] = useState([]);
   const [selectedCamExamId, setSelectedCamExamId] = useState(searchParams.get('exam') || '');
   const [cameras, setCameras] = useState([]);
@@ -250,9 +256,9 @@ const ClientCameras = () => {
           </Box>
         ) : (
           <>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2, flexWrap: 'wrap', gap: 2 }}>
+            <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'stretch', md: 'flex-start' }, mb: 2, flexWrap: 'wrap', gap: 2 }}>
               <Box>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5, flexWrap: 'wrap' }}>
                   <Typography variant="h6" sx={{ fontWeight: 600, color: '#0f172a', fontSize: { xs: '1.15rem', sm: '1.5rem' } }}>
                     {selectedCamExamData ? `${selectedCamExamData.exam_name} (${selectedCamExamData.exam_body})` : 'Cameras'}
                   </Typography>
@@ -261,18 +267,18 @@ const ClientCameras = () => {
                 <Typography sx={{ fontSize: '0.9rem', color: '#64748b' }}>{camTotal} camera{camTotal !== 1 ? 's' : ''} • {isHLS ? 'HLS streams' : 'RTSP streams'}</Typography>
               </Box>
 
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap', flexShrink: 0 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap', flexShrink: 0, width: { xs: '100%', md: 'auto' } }}>
                 <Tooltip title="Download HLS Template">
                   <Button variant="outlined" size="small" startIcon={<Download />}
                     onClick={() => handleDownloadTemplate('hls')}
-                    sx={{ height: 40, borderColor: '#3b82f6', color: '#3b82f6', '&:hover': { bgcolor: '#eff6ff' }, textTransform: 'none', fontWeight: 600 }}>
+                    sx={{ flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' }, height: 40, borderColor: '#3b82f6', color: '#3b82f6', '&:hover': { bgcolor: '#eff6ff' }, textTransform: 'none', fontWeight: 600 }}>
                     HLS Template
                   </Button>
                 </Tooltip>
                 <Tooltip title="Download RTSP Template">
                   <Button variant="outlined" size="small" startIcon={<Download />}
                     onClick={() => handleDownloadTemplate('rtsp')}
-                    sx={{ height: 40, borderColor: '#6366f1', color: '#6366f1', '&:hover': { bgcolor: '#eef2ff' }, textTransform: 'none', fontWeight: 600 }}>
+                    sx={{ flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' }, height: 40, borderColor: '#6366f1', color: '#6366f1', '&:hover': { bgcolor: '#eef2ff' }, textTransform: 'none', fontWeight: 600 }}>
                     RTSP Template
                   </Button>
                 </Tooltip>
@@ -280,17 +286,17 @@ const ClientCameras = () => {
                 <TextField
                   size="small" placeholder="Search center, state..." value={camSearchQuery} onChange={(e) => setCamSearchQuery(e.target.value)}
                   InputProps={{ startAdornment: <InputAdornment position="start"><Search sx={{ fontSize: 18, color: '#94a3b8' }} /></InputAdornment>, endAdornment: camSearchQuery !== camDebouncedSearch ? <InputAdornment position="end"><CircularProgress size={16} sx={{ color: '#94a3b8' }} /></InputAdornment> : null, sx: { borderRadius: '8px', bgcolor: '#f8fafc', height: 40, fontSize: 14, '& fieldset': { border: '1px solid #e2e8f0' } } }}
-                  sx={{ minWidth: 240 }}
+                  sx={{ flex: { xs: '1 1 100%', sm: '0 0 auto' }, minWidth: { sm: 240 } }}
                 />
                 {isHLS && (
                   <>
-                    <FormControl size="small" sx={{ minWidth: 130 }}>
+                    <FormControl size="small" sx={{ flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' }, minWidth: { sm: 130 } }}>
                       <Select value={camFilterShiftId} onChange={(e) => { setCamFilterShiftId(e.target.value); setCamPage(0); }} displayEmpty sx={{ borderRadius: 2, fontSize: '0.85rem', bgcolor: '#f1f5f9', height: 40, '& fieldset': { border: '1px solid #e2e8f0' } }} renderValue={(v) => v ? camShifts.find(s => s.id === v)?.shift_name || v : 'All shifts'}>
                         <MenuItem value="">All shifts</MenuItem>
                         {camShifts.map(s => <MenuItem key={s.id} value={s.id}>{s.shift_name}</MenuItem>)}
                       </Select>
                     </FormControl>
-                    <Box sx={{ position: 'relative', minWidth: 150 }}>
+                    <Box sx={{ position: 'relative', flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' }, minWidth: { sm: 150 } }}>
                       <TextField type="date" size="small" value={camFilterExamDate ? camFilterExamDate.split('-').reverse().join('-') : ''} onChange={(e) => { const val = e.target.value; if (val) { const [y, m, d] = val.split('-'); setCamFilterExamDate(`${d}-${m}-${y}`); } else setCamFilterExamDate(''); setCamPage(0); }} InputProps={{ sx: { borderRadius: '8px', bgcolor: '#f1f5f9', height: 40, fontSize: 14, color: camFilterExamDate ? 'transparent' : '#94a3b8', paddingRight: '6px', '& fieldset': { border: '1px solid #e2e8f0' } } }} sx={{ width: '100%' }} />
                       {camFilterExamDate && <Box sx={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', fontSize: 14, color: '#334155', pointerEvents: 'none' }}>{camFilterExamDate}</Box>}
                     </Box>
@@ -300,13 +306,13 @@ const ClientCameras = () => {
             </Box>
 
             {cameras.length > 0 && cameras.some(cam => cam.status !== null && cam.status !== undefined) && (
-              <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap', justifyContent: 'end' }}>
+              <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap', justifyContent: { xs: 'flex-start', sm: 'flex-end' } }}>
                 <Button
                   variant="outlined"
                   size="small"
                   onClick={() => handleDownloadAccessibility('accessible')}
                   startIcon={<Download sx={{ fontSize: 16 }} />}
-                  sx={{ height: 32, px: 2, borderRadius: 2, borderColor: '#3b82f6', color: '#3b82f6', textTransform: 'none', '&:hover': { bgcolor: '#eff6ff' } }}
+                  sx={{ flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' }, height: 32, px: 2, borderRadius: 2, borderColor: '#3b82f6', color: '#3b82f6', textTransform: 'none', '&:hover': { bgcolor: '#eff6ff' } }}
                 >
                   <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, mr: 1 }}>Accessible</Typography>
                   <Typography sx={{ fontSize: '0.75rem', fontWeight: 700 }}>{camStatusCounts.accessible}</Typography>
@@ -317,14 +323,14 @@ const ClientCameras = () => {
                   size="small"
                   onClick={() => handleDownloadAccessibility('not_accessible')}
                   startIcon={<Download sx={{ fontSize: 16 }} />}
-                  sx={{ height: 32, px: 2, borderRadius: 2, borderColor: '#333', color: '#333', textTransform: 'none', '&:hover': { bgcolor: '#f3f4f6' } }}
+                  sx={{ flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' }, height: 32, px: 2, borderRadius: 2, borderColor: '#333', color: '#333', textTransform: 'none', '&:hover': { bgcolor: '#f3f4f6' } }}
                 >
                   <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, mr: 1 }}>Not Accessible</Typography>
                   <Typography sx={{ fontSize: '0.75rem', fontWeight: 700 }}>{camStatusCounts.notAccessible}</Typography>
                 </Button>
 
                 {camStatusCounts.unknown > 0 && (
-                  <Box sx={{ height: 32, px: 2, display: 'flex', alignItems: 'center', gap: 1, borderRadius: 2, border: '1px solid #e5e7eb', bgcolor: '#f9fafb' }}>
+                  <Box sx={{ flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' }, height: 32, px: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, borderRadius: 2, border: '1px solid #e5e7eb', bgcolor: '#f9fafb' }}>
                     <Typography sx={{ fontSize: '0.75rem', color: '#4b5563', fontWeight: 600 }}>Unknown</Typography>
                     <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, color: '#6b7280' }}>{camStatusCounts.unknown}</Typography>
                   </Box>
@@ -336,7 +342,7 @@ const ClientCameras = () => {
               <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}><CircularProgress /></Box>
             ) : sortedCameras.length > 0 ? (
               <>
-                <TableContainer component={Paper} sx={{ borderRadius: 2.5, border: '1px solid #e8ecf1', boxShadow: 'none' }}>
+                <TableContainer component={Paper} sx={{ borderRadius: 2.5, border: '1px solid #e8ecf1', boxShadow: 'none', maxWidth: '100%', overflowX: 'auto' }}>
                   <Table size="small">
                     <TableHead sx={{ bgcolor: '#f8fafc' }}>
                       <TableRow>
@@ -418,7 +424,12 @@ const ClientCameras = () => {
                     </TableBody>
                   </Table>
                 </TableContainer>
-                <TablePagination component="div" count={camTotal} page={camPage} onPageChange={(e, newPage) => setCamPage(newPage)} rowsPerPage={camRowsPerPage} onRowsPerPageChange={(e) => { setCamRowsPerPage(parseInt(e.target.value, 10)); setCamPage(0); }} rowsPerPageOptions={[10, 25, 50, 100, 200]} />
+                <TablePagination component="div" count={camTotal} page={camPage} onPageChange={(e, newPage) => setCamPage(newPage)} rowsPerPage={camRowsPerPage} onRowsPerPageChange={(e) => { setCamRowsPerPage(parseInt(e.target.value, 10)); setCamPage(0); }} rowsPerPageOptions={[10, 25, 50, 100, 200]}
+                  sx={{
+                    '.MuiTablePagination-toolbar': { pl: { xs: 0, sm: 2 }, flexWrap: 'wrap' },
+                    '.MuiTablePagination-selectLabel': { display: { xs: 'none', sm: 'block' } },
+                  }}
+                />
               </>
             ) : (
               <Box sx={{ textAlign: 'center', py: 8, bgcolor: '#fff', borderRadius: 3, border: '1px solid #e8ecf1' }}><Typography sx={{ fontSize: '0.95rem', color: '#64748b' }}>No cameras found for this exam.</Typography></Box>
