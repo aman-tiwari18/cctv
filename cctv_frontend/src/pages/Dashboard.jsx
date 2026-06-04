@@ -29,6 +29,8 @@ import {
     useMediaQuery,
     useTheme,
 } from '@mui/material';
+import { useNavigate } from 'react-router-dom';
+import * as XLSX from 'xlsx';
 import { LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
@@ -261,7 +263,10 @@ export const KpiCard = ({ title, value, icon, chips = [], loading }) => (
                                     display: 'flex',
                                     flexDirection: 'column',
                                     justifyContent: 'center',
-                                    alignItems: 'center',
+                                    // Left-align both the label name and the value
+                                    // inside the chip so they read as a column the
+                                    // eye scans down, not a centered ribbon.
+                                    alignItems: 'flex-start',
                                     lineHeight: 1.2,
                                     minWidth: 0,
                                     width: '100%',
@@ -470,6 +475,38 @@ export const DetectionDistributionCard = ({ distribution = [], loading }) => {
     const donutTotal = donutData.reduce((a, d) => a + d.count, 0);
     const activeIdx = donutData.findIndex((d) => d.key === activeKey);
 
+    // Export the FULL breakdown (every parent × sub-detection) regardless of
+    // which Select filter is currently on screen — users want the data, not
+    // the current view. Parents with no sub-detections still get one row so
+    // the category is visible in the sheet.
+    const handleExport = () => {
+        const rows = [];
+        const total = tree.grandTotal;
+        tree.parents.forEach((p) => {
+            if (p.subs.length === 0) {
+                rows.push({
+                    'Category':       p.label,
+                    'Detection Type': '—',
+                    'Count':          p.count,
+                    '% of Total':     total > 0 ? ((p.count / total) * 100).toFixed(2) : '0.00',
+                });
+                return;
+            }
+            p.subs.forEach((s) => {
+                rows.push({
+                    'Category':       p.label,
+                    'Detection Type': s.label,
+                    'Count':          s.count,
+                    '% of Total':     total > 0 ? ((s.count / total) * 100).toFixed(2) : '0.00',
+                });
+            });
+        });
+        const ws = XLSX.utils.json_to_sheet(rows);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Detection Distribution');
+        XLSX.writeFile(wb, `detection_distribution_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
+    };
+
     return (
         <Card sx={{ height: '100%', bgcolor: '#fff', borderRadius: '8px', boxShadow: '0 2px 4px 0 rgba(0,0,0,0.05)' }}>
             <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
@@ -481,6 +518,7 @@ export const DetectionDistributionCard = ({ distribution = [], loading }) => {
                         <Button
                             variant="outlined"
                             size="small"
+                            onClick={handleExport}
                             startIcon={<FileDownloadOutlinedIcon sx={{ fontSize: 18 }} />}
                             sx={{
                                 textTransform: 'none',
@@ -1096,11 +1134,42 @@ const formatShortDate = (raw) => {
 const formatHMM = (raw) => (typeof raw === 'string' ? raw.slice(0, 5) : '');
 
 export const LiveExamsCard = ({ fetcher = dashboardAPI.getLiveExams }) => {
+    const navigate = useNavigate();
     const [rows, setRows] = useState([]);
     const [total, setTotal] = useState(0);
     const [loading, setLoading] = useState(true);
     const [page, setPage] = useState(0);          // 0-indexed for MUI TablePagination
     const [rowsPerPage, setRowsPerPage] = useState(10);
+    const [exporting, setExporting] = useState(false);
+
+    // Build a workbook from the FULL filter context (not just the current page)
+    // and trigger a browser download. Uses whichever `fetcher` is wired by the
+    // parent, so admin gets admin-scope rows and client gets company-scoped rows.
+    const handleExport = async () => {
+        setExporting(true);
+        try {
+            const res = await fetcher({ page: 1, limit: 10000 });
+            const allRows = res?.data?.data?.rows || [];
+            const out = allRows.map((row) => ({
+                'Exam':        row.exam_name,
+                'Date':        row.date ? formatShortDate(row.date) : '',
+                'Shift':       `Shift ${row.shift_index || 1}`,
+                'Shift Start': formatHMM(row.shift_start),
+                'Shift End':   formatHMM(row.shift_end),
+                'Cameras':     Number(row.cameras || 0),
+                'Scripts':     Number(row.scripts || 0),
+                'Detections':  Number(row.detections || 0),
+            }));
+            const ws = XLSX.utils.json_to_sheet(out);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Live Shifts');
+            XLSX.writeFile(wb, `live_shifts_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
+        } catch (err) {
+            console.error('[LiveExamsCard.handleExport]', err);
+        } finally {
+            setExporting(false);
+        }
+    };
 
     useEffect(() => {
         let cancelled = false;
@@ -1172,7 +1241,11 @@ export const LiveExamsCard = ({ fetcher = dashboardAPI.getLiveExams }) => {
                     <Button
                         variant="outlined"
                         size="small"
-                        startIcon={<FileDownloadOutlinedIcon sx={{ fontSize: 18 }} />}
+                        onClick={handleExport}
+                        disabled={exporting}
+                        startIcon={exporting
+                            ? <CircularProgress size={14} />
+                            : <FileDownloadOutlinedIcon sx={{ fontSize: 18 }} />}
                         sx={{
                             textTransform: 'none',
                             fontFamily: 'Inter, sans-serif',
@@ -1265,7 +1338,18 @@ export const LiveExamsCard = ({ fetcher = dashboardAPI.getLiveExams }) => {
                                         <TableCell sx={{ ...bodyCellSx, color: BODY_DARK, fontSize: { xs: '13px', sm: '14px' } }}>
                                             {Number(row.detections || 0).toLocaleString()}
                                         </TableCell>
-                                        <TableCell sx={{ ...bodyCellSx, width: 110, color: ACCENT_BLUE, fontWeight: 600, cursor: 'pointer', display: { xs: 'none', sm: 'table-cell' } }}>
+                                        <TableCell
+                                            onClick={() => navigate(`/exams?highlight=${row.exam_id}`)}
+                                            sx={{
+                                                ...bodyCellSx,
+                                                width: 110,
+                                                color: ACCENT_BLUE,
+                                                fontWeight: 600,
+                                                cursor: 'pointer',
+                                                display: { xs: 'none', sm: 'table-cell' },
+                                                '&:hover': { textDecoration: 'underline' },
+                                            }}
+                                        >
                                             View Details
                                         </TableCell>
                                     </TableRow>
