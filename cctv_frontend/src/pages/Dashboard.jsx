@@ -540,7 +540,7 @@ export const DetectionDistributionCard = ({ distribution = [], loading }) => {
                     </Box>
                 ) : (
                     <Grid container spacing={2} alignItems="flex-start">
-                        <Grid item xs={12} sm={7} md={6}>
+                        <Grid item xs={12} lg={6}>
                             <Box
                                 sx={{
                                     position: 'relative',
@@ -635,7 +635,7 @@ export const DetectionDistributionCard = ({ distribution = [], loading }) => {
                             </Box>
                         </Grid>
 
-                        <Grid item xs={12} sm={5} md={6}>
+                        <Grid item xs={12} lg={6}>
                             <Box sx={{ maxHeight: BOX_HEIGHT_SX, overflowY: 'auto', pr: 0.5, pt: 1 }}>
                                 <Stack spacing={1.5}>
                                     {donutData.map((slice) => {
@@ -782,7 +782,7 @@ const GpuPerformanceCard = () => {
                 </Box>
 
                 <Grid container spacing={2} alignItems="stretch">
-                    <Grid item xs={12} md={7} sx={{ display: 'flex', flexDirection: 'column' }}>
+                    <Grid item xs={12} lg={7} sx={{ display: 'flex', flexDirection: 'column' }}>
                         <Box sx={{ position: 'relative', height: gaugeHeight }}>
                             <ResponsiveContainer
                                 width="100%"
@@ -884,7 +884,7 @@ const GpuPerformanceCard = () => {
                         </Box>
                     </Grid>
 
-                    <Grid item xs={12} md={5}>
+                    <Grid item xs={12} lg={5}>
                         <Stack spacing={1.75}>
                             <Box sx={{ position: 'relative', height: miniHeight }}>
                                 <ResponsiveContainer
