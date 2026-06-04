@@ -1987,8 +1987,8 @@ const Dashboard = () => {
                     onClick={() => setFilterMenuOpen(true)}
                     sx={{
                         position: 'relative',
-                        width: 48,
-                        height: 48,
+                        width: { xs: 40, sm: 48 },
+                        height: { xs: 40, sm: 48 },
                         bgcolor: '#3c81f6',
                         border: 'none',
                         borderRadius: '10px',
@@ -2088,6 +2088,8 @@ const Dashboard = () => {
                                 fontWeight: 500,
                                 borderRadius: 999,
                                 height: 28,
+                                maxWidth: { xs: 200, sm: 'none' },
+                                '& .MuiChip-label': { overflow: 'hidden', textOverflow: 'ellipsis' },
                                 '& .MuiChip-deleteIcon': {
                                     color: '#3c81f6',
                                     '&:hover': { color: '#1e40af' },
