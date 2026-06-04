@@ -178,17 +178,16 @@ function DetectionCard({ item, onClick, onRemove, onUndo, isRemoving, isPendingR
     >
       <Box sx={{ position: 'relative', bgcolor: '#0f172a' }}>
         {imgError ? (
-          <Box sx={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#1e293b' }}>
+          <Box sx={{ height: { xs: 200, md: 220 }, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#1e293b' }}>
             <CameraAlt sx={{ fontSize: 48, color: '#475569' }} />
           </Box>
         ) : (
           <CardMedia
             component="img"
-            height={220}
             image={item.image_url}
             alt={item.camera_id}
             onError={() => setImgError(true)}
-            sx={{ objectFit: 'cover', filter: isPendingRemoval ? 'grayscale(0.4) brightness(0.85)' : 'none', transition: 'filter 0.2s ease' }}
+            sx={{ height: { xs: 200, md: 220 }, objectFit: 'cover', filter: isPendingRemoval ? 'grayscale(0.4) brightness(0.85)' : 'none', transition: 'filter 0.2s ease' }}
           />
         )}
         {/* When pending removal, overlay a trash glyph on the image — matches
@@ -241,7 +240,7 @@ function DetectionCard({ item, onClick, onRemove, onUndo, isRemoving, isPendingR
           />
         )}
       </Box>
-      <CardContent sx={{ p: 1, pb: '10px !important', mx: 2 }}>
+      <CardContent sx={{ p: 1, pb: '10px !important', mx: { xs: 1.5, sm: 2 } }}>
         <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5, gap: 1 }}>
           <Typography
             variant="h6"
@@ -324,7 +323,7 @@ function DetectionCard({ item, onClick, onRemove, onUndo, isRemoving, isPendingR
         )}
       </CardContent>
 
-      <Box sx={{ mx: 2, mb: 4, mt: 1 }}>
+      <Box sx={{ mx: { xs: 1.5, sm: 2 }, mb: { xs: 2, sm: 3 }, mt: 1 }}>
         {isPendingRemoval ? (
           // 15s undo affordance — replaces the Remove button. The image above
           // stays visible (dimmed) so the user has visual continuity.
@@ -361,7 +360,7 @@ function DetectionCard({ item, onClick, onRemove, onUndo, isRemoving, isPendingR
               }}
               disabled={isRemoving}
               sx={{
-                bgcolor: '#ef4444',
+                bgcolor: '#c3282e',
                 color: '#fff',
                 fontWeight: 900,
                 height: "40px",
@@ -372,7 +371,7 @@ function DetectionCard({ item, onClick, onRemove, onUndo, isRemoving, isPendingR
                 textTransform: 'none',
                 fontSize: 12,
                 whiteSpace: 'nowrap',
-                '&:hover': { bgcolor: '#dc2626' },
+                '&:hover': { bgcolor: '#a51f24' },
               }}
             >
               {isRemoving ? 'Removing...' : 'Remove'}
@@ -385,23 +384,33 @@ function DetectionCard({ item, onClick, onRemove, onUndo, isRemoving, isPendingR
 }
 
 function Lightbox({ item, onClose }) {
+  const theme = useTheme();
+  const isSmDown = useMediaQuery(theme.breakpoints.down('sm'));
   if (!item) return null;
   const meta = TYPE_META[item.type] || {};
   const invigilatorEventLabel = item.type === 'invigilator'
     ? (item.issueLabel || (item.issueType ? String(item.issueType).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : ''))
     : '';
   return (
-    <Dialog open onClose={onClose} maxWidth="lg" fullWidth>
-      <DialogContent sx={{ p: 0, bgcolor: '#0f172a', position: 'relative' }}>
-        <IconButton onClick={onClose} sx={{ position: 'absolute', top: 8, right: 8, zIndex: 10, color: '#fff', bgcolor: 'rgba(0,0,0,0.5)' }}>
-          <Close />
+    <Dialog open onClose={onClose} maxWidth="lg" fullWidth fullScreen={isSmDown}>
+      <DialogContent sx={{ p: 0, bgcolor: '#0f172a', position: 'relative', display: 'flex', flexDirection: 'column', maxHeight: { xs: '100dvh', sm: '90vh' } }}>
+        <IconButton
+          onClick={onClose}
+          sx={{
+            position: 'absolute', top: 8, right: 8, zIndex: 10, color: '#fff', bgcolor: 'rgba(0,0,0,0.5)',
+            width: { xs: 44, sm: 40 }, height: { xs: 44, sm: 40 },
+            '&:hover': { bgcolor: 'rgba(0,0,0,0.7)' },
+          }}
+        >
+          <Close sx={{ fontSize: { xs: 26, sm: 24 } }} />
         </IconButton>
-        <img
+        <Box
+          component="img"
           src={item.image_url}
           alt={item.camera_id}
-          style={{ width: '100%', maxHeight: '80vh', objectFit: 'contain', display: 'block' }}
+          sx={{ width: '100%', maxHeight: { xs: '70vh', sm: '80vh' }, objectFit: 'contain', display: 'block', flexShrink: 0 }}
         />
-        <Box sx={{ p: 2, color: '#fff' }}>
+        <Box sx={{ p: { xs: 1.5, sm: 2 }, color: '#fff', overflowY: 'auto' }}>
           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
             <Chip label={meta.label} size="small" sx={{ bgcolor: meta.color, color: '#fff', fontWeight: 700 }} />
             {invigilatorEventLabel && (
@@ -717,7 +726,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, onUndo, removi
 
       <Box
         sx={{
-          width: { xs: '100%', md: 300 }, flexShrink: 0, overflowY: 'auto',
+          width: { xs: '100%', md: '30%', lg: 300 }, flexShrink: 0, overflowY: 'auto',
           maxHeight: { xs: 280, md: 'none' },
           borderRight: { xs: 'none', md: '1px solid #e2e8f0' },
           borderBottom: { xs: '1px solid #e2e8f0', md: 'none' },
@@ -816,8 +825,8 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, onUndo, removi
               </Box>
 
               <Box sx={{
-                width: { xs: '100%', md: 360 }, flexShrink: 0,
-                bgcolor: '#fff', borderRadius: 3, p: 2.5,
+                width: { xs: '100%', md: '36%', lg: 360, xl: 400 }, flexShrink: 0,
+                bgcolor: '#fff', borderRadius: 3, p: { xs: 1.5, sm: 2.5 },
                 display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
               }}>
                 <CardContent sx={{ p: 1, pb: '10px !important', mx: 2 }}>
@@ -964,7 +973,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, onUndo, removi
                         }}
                         disabled={isRemoving}
                         sx={{
-                          bgcolor: '#ef4444', color: '#fff', fontWeight: 900,
+                          bgcolor: '#c3282e', color: '#fff', fontWeight: 900,
                           height: "40px",
                           width: "160px",
                           borderRadius: 2, textTransform: 'none', fontSize: 14,
@@ -972,7 +981,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, onUndo, removi
                           justifyContent: 'space-between',
                           pl: 2,
                           pr: 0.5,
-                          '&:hover': { bgcolor: '#dc2626' },
+                          '&:hover': { bgcolor: '#a51f24' },
                         }}
                       >
                         <span>{isRemoving ? 'Removing...' : 'Remove'}</span>
@@ -1460,18 +1469,17 @@ const ClientDetections = () => {
               '& input': { color: '#334155', '&::placeholder': { color: '#94a3b8', opacity: 1 } }
             }
           }}
-          sx={{ minWidth: 200, maxWidth: 400, flex: 1 }}
+          sx={{ width: { xs: '100%', sm: 'auto' }, flex: { sm: 1 }, minWidth: { sm: 200 }, maxWidth: { sm: 400 } }}
         />
         {/* Exam Filter */}
-        <FormControl size="small" sx={{ minWidth: 160 }}>
-          <InputLabel sx={{ fontSize: 13 }}>Exam</InputLabel>
+        <FormControl size="small" sx={{ width: { xs: (examFilter && examShifts.length > 0) ? 'calc(30% - 8px)' : 'calc(50% - 6px)', sm: 160 } }}>
           <Select
             value={examFilter}
-            label="Exam"
+            displayEmpty
             onChange={(e) => { setExamFilter(e.target.value); setPage(1); }}
             sx={{ borderRadius: '8px', bgcolor: '#f8fafc', height: 36, fontSize: 14, '& fieldset': { border: 'none' } }}
           >
-            <MenuItem value=""><em>All Exams</em></MenuItem>
+            <MenuItem value="">All Exams</MenuItem>
             {exams.map((exam) => (
               <MenuItem key={exam.id} value={exam.id}>{exam.exam_name}</MenuItem>
             ))}
@@ -1479,22 +1487,21 @@ const ClientDetections = () => {
         </FormControl>
         {/* Shift Filter — dependent on the selected exam */}
         {examFilter && examShifts.length > 0 && (
-          <FormControl size="small" sx={{ minWidth: 130 }}>
-            <InputLabel sx={{ fontSize: 13 }}>Shift</InputLabel>
+          <FormControl size="small" sx={{ width: { xs: 'calc(30% - 8px)', sm: 130 } }}>
             <Select
               value={shiftFilter}
-              label="Shift"
+              displayEmpty
               onChange={(e) => { setShiftFilter(e.target.value); setPage(1); }}
               sx={{ borderRadius: '8px', bgcolor: '#f8fafc', height: 36, fontSize: 14, '& fieldset': { border: 'none' } }}
             >
-              <MenuItem value=""><em>All Shifts</em></MenuItem>
+              <MenuItem value="">All Shifts</MenuItem>
               {examShifts.map((sh) => (
                 <MenuItem key={sh.id} value={sh.id}>{sh.shift_name || `Shift #${sh.id}`}</MenuItem>
               ))}
             </Select>
           </FormControl>
         )}
-        <Box sx={{ position: 'relative', minWidth: 100, maxWidth: 150 }}>
+        <Box sx={{ position: 'relative', width: { xs: (examFilter && examShifts.length > 0) ? 'calc(40% - 8px)' : 'calc(50% - 6px)', sm: 150 } }}>
           <TextField
             type="date"
             size="small"
@@ -1572,7 +1579,7 @@ const ClientDetections = () => {
               }
             }
           }}
-          sx={{ width: 180 }}
+          sx={{ width: { xs: 'calc(50% - 6px)', sm: 170 } }}
         />
 
         {/* End Time */}
@@ -1604,10 +1611,18 @@ const ClientDetections = () => {
               }
             }
           }}
-          sx={{ width: 180 }}
+          sx={{ width: { xs: 'calc(50% - 6px)', sm: 170 } }}
         />
 
-        <Box sx={{ ml: 'auto', display: 'flex', gap: 1.5, alignItems: 'center' }}>
+        <Box sx={{
+          ml: { xs: 0, md: 'auto' },
+          width: { xs: '100%', md: 'auto' },
+          display: 'flex',
+          gap: { xs: 1, sm: 1.5 },
+          alignItems: 'center',
+          justifyContent: { xs: 'space-between', md: 'flex-end' },
+          flexWrap: 'wrap',
+        }}>
           <TablePagination
             component="div"
             count={total}
@@ -1629,38 +1644,41 @@ const ClientDetections = () => {
               overflow: 'hidden',
               minHeight: 36,
               height: 36,
-              '.MuiTablePagination-toolbar': { minHeight: '36px !important', height: '36px !important', px: 1 },
+              flexShrink: 0,
+              '.MuiTablePagination-toolbar': { minHeight: '36px !important', height: '36px !important', px: { xs: 0, sm: 1 } },
               '.MuiTablePagination-selectLabel, .MuiTablePagination-select, .MuiTablePagination-displayedRows': { m: 0, fontSize: 13, color: '#334155' },
-              '.MuiTablePagination-actions': { color: '#64748b' },
+              '.MuiTablePagination-actions': { color: '#64748b', ml: { xs: 0.5, sm: 2 } },
+              '.MuiTablePagination-selectLabel': { display: { xs: 'none', sm: 'block' } },
+              '.MuiTablePagination-input': { display: { xs: 'none', sm: 'inline-flex' } },
               borderBottom: 'none'
             }}
           />
 
+          <Box sx={{ display: 'flex', gap: { xs: 1, sm: 1.5 }, alignItems: 'center', flexShrink: 0 }}>
+            {(typeFilter.length > 0 || dateFilter !== todayDate || search || sourceFilter || startTime || endTime || shiftFilter) && (
+              <Button
+                size="small"
+                onClick={() => { setTypeFilter([]); setDateFilter(todayDate); setSearch(''); setSourceFilter(''); setStartTime(''); setEndTime(''); setAppliedStartTime(''); setAppliedEndTime(''); setShiftFilter(''); }}
+                sx={{ height: 36, borderRadius: '8px', fontSize: 13, textTransform: 'none', color: '#64748b', flexShrink: 0, minWidth: { xs: 48, sm: 56 }, px: { xs: 1, sm: 1.5 } }}
+              >
+                Clear
+              </Button>
+            )}
 
-          {(typeFilter.length > 0 || dateFilter !== todayDate || search || sourceFilter || startTime || endTime || shiftFilter) && (
             <Button
-              size="small"
-              onClick={() => { setTypeFilter([]); setDateFilter(todayDate); setSearch(''); setSourceFilter(''); setStartTime(''); setEndTime(''); setAppliedStartTime(''); setAppliedEndTime(''); setShiftFilter(''); }}
-              sx={{ height: 36, borderRadius: '8px', fontSize: 13, textTransform: 'none', color: '#64748b' }}
+              variant="contained"
+              onClick={() => { setAppliedStartTime(startTime); setAppliedEndTime(endTime); }}
+              disableElevation
+              sx={{
+                bgcolor: '#3c81f6',
+                height: 36, borderRadius: '8px', fontSize: 13, fontWeight: 600, textTransform: 'none',
+                px: { xs: 1.5, sm: 2.5 }, minWidth: { xs: 80, sm: 96 }, flexShrink: 0,
+                '&:hover': { bgcolor: '#1e40af' }
+              }}
             >
-              Clear
+              Search
             </Button>
-          )}
-
-
-          <Button
-            variant="contained"
-            // startIcon={<FilterList sx={{ fontSize: 16 }} />}
-            onClick={() => { setAppliedStartTime(startTime); setAppliedEndTime(endTime); }}
-            disableElevation
-            sx={{
-              bgcolor: '#3c81f6',
-              height: 36, borderRadius: '8px', fontSize: 13, fontWeight: 600, textTransform: 'none', px: 2.5,
-              '&:hover': { bgcolor: '#1e40af' }
-            }}
-          >
-            Search
-          </Button>
+          </Box>
         </Box>
       </Box>
 

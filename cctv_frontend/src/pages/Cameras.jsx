@@ -6,6 +6,7 @@ import {
   DialogContent, DialogActions, TextField, MenuItem, Chip,
   CircularProgress, Alert, Tooltip, Divider, Stack, TablePagination,
   FormControl, InputLabel, Select, InputAdornment, TableSortLabel,
+  useMediaQuery, useTheme,
 } from '@mui/material';
 import {
   Add, Edit, Delete, Upload, CloudUpload, Download,
@@ -117,11 +118,15 @@ const RTSP_EMPTY = {
 
 // ─────────────────────────────────────────────────────────────
 const Cameras = () => {
+  const theme = useTheme();
+  const isSmDown = useMediaQuery(theme.breakpoints.down('sm'));
   const [searchParams] = useSearchParams();
   const examIdParam = searchParams.get('exam');
 
   /* ── Sidebar ── */
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  // Collapse the exam rail by default on phones so the content panel keeps full width.
+  useEffect(() => { setSidebarOpen(!isSmDown); }, [isSmDown]);
   const [exams, setExams] = useState([]);
   const [viewingArchived, setViewingArchived] = useState(false);
   const [selectedExamId, setSelectedExamId] = useState(examIdParam || '');
@@ -423,9 +428,9 @@ const Cameras = () => {
           ) : (
             <>
               {/* ── Title row ── */}
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2, flexWrap: 'wrap', gap: 2 }}>
+              <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'stretch', md: 'flex-start' }, mb: 2, flexWrap: 'wrap', gap: 2 }}>
                 <Box>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5, flexWrap: 'wrap' }}>
                     <Typography variant="h6" sx={{ fontWeight: 600, color: '#0f172a', fontSize: { xs: '1.15rem', sm: '1.5rem' } }}>
                       {selectedExamData ? `${selectedExamData.exam_name} (${selectedExamData.exam_body})` : 'Cameras'}
                     </Typography>
@@ -508,13 +513,13 @@ const Cameras = () => {
                         '& input': { color: '#334155', '&::placeholder': { color: '#94a3b8', opacity: 1 } }
                       }
                     }}
-                    sx={{ flex: { xs: '1 1 100%', sm: '0 0 auto' }, minWidth: { xs: '100%', sm: 260 }, maxWidth: { xs: 'none', sm: 300 } }}
+                    sx={{ flex: { xs: '1 1 100%', sm: '0 0 auto' }, minWidth: { xs: '100%', sm: 260 }, maxWidth: { xs: '100%', sm: 300 } }}
                   />
 
                   {/* HLS filters */}
                   {isHLS && (
                     <>
-                      <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 140 }, flex: { xs: '1 1 100%', sm: '0 0 auto' } }}>
+                      <FormControl size="small" sx={{ minWidth: { xs: 0, sm: 140 }, flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' } }}>
                         <InputLabel id="cam-shift-label">Shift</InputLabel>
                         <Select
                           labelId="cam-shift-label"
@@ -534,7 +539,7 @@ const Cameras = () => {
                       </FormControl>
 
                       {/* Native date input — same style as Detections.jsx */}
-                      <Box sx={{ position: 'relative', minWidth: { xs: '100%', sm: 150 }, flex: { xs: '1 1 100%', sm: '0 0 auto' } }}>
+                      <Box sx={{ position: 'relative', minWidth: { xs: 0, sm: 150 }, flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' } }}>
                         <TextField
                           type="date"
                           size="small"
@@ -583,21 +588,21 @@ const Cameras = () => {
                   <Tooltip title="Download HLS Template">
                     <Button variant="outlined" size="small" startIcon={<Download />}
                       onClick={() => handleDownloadTemplate('hls')}
-                      sx={{ borderColor: 'primary.main', color: 'primary.main', '&:hover': { bgcolor: '#ecfeff' }, textTransform: 'none', fontWeight: 600 }}>
+                      sx={{ flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' }, borderColor: 'primary.main', color: 'primary.main', '&:hover': { bgcolor: '#ecfeff' }, textTransform: 'none', fontWeight: 600 }}>
                       HLS
                     </Button>
                   </Tooltip>
                   <Tooltip title="Download RTSP Template">
                     <Button variant="outlined" size="small" startIcon={<Download />}
                       onClick={() => handleDownloadTemplate('rtsp')}
-                      sx={{ borderColor: 'buttonrtsp.bg', color: 'buttonrtsp.text', '&:hover': { bgcolor: '#f5f3ff' }, textTransform: 'none', fontWeight: 600 }}>
+                      sx={{ flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' }, borderColor: 'buttonrtsp.bg', color: 'buttonrtsp.text', '&:hover': { bgcolor: '#f5f3ff' }, textTransform: 'none', fontWeight: 600 }}>
                       RTSP
                     </Button>
                   </Tooltip>
 
                   <Button variant="outlined" startIcon={<CloudUpload />}
                     onClick={() => { setOpenUpload(true); setUploadError(''); setUploadFile(null); setUploadShiftId(''); setUploadDate(''); }}
-                    sx={{ textTransform: 'none', fontWeight: 600 }}>
+                    sx={{ flex: { xs: '1 1 100%', sm: '0 0 auto' }, textTransform: 'none', fontWeight: 600 }}>
                     Upload Excel
                   </Button>
 
@@ -605,9 +610,10 @@ const Cameras = () => {
               </Box>
 
               {cameras.length > 0 && cameras.some(cam => cam.status !== null && cam.status !== undefined) && (
-                <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap', justifyContent: 'end' }}>
+                <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap', justifyContent: { xs: 'flex-start', sm: 'flex-end' } }}>
 
                   <Box sx={{
+                    flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' },
                     height: 30,
                     px: 1,
                     display: 'flex',
@@ -633,10 +639,12 @@ const Cameras = () => {
                   </Box>
 
                   <Box sx={{
+                    flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' },
                     height: 30,
                     px: 1,
                     display: 'flex',
                     alignItems: 'center',
+                    justifyContent: 'center',
                     gap: 1,
                     borderRadius: 2,
                     border: '1px solid #333',
@@ -659,10 +667,12 @@ const Cameras = () => {
                   {/* Unknown */}
                   {statusCounts.unknown > 0 && (
                     <Box sx={{
+                      flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' },
                       px: 2,
                       height: 30,
                       display: 'flex',
                       alignItems: 'center',
+                      justifyContent: 'center',
                       gap: 1.1,
                       borderRadius: 2,
                       border: '1px solid #e5e7eb',
@@ -713,7 +723,7 @@ const Cameras = () => {
                 <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}><CircularProgress /></Box>
               ) : cameras.length > 0 ? (
                 <>
-                  <TableContainer component={Paper} sx={{ borderRadius: 2.5, border: '1px solid #e8ecf1', boxShadow: 'none' }}>
+                  <TableContainer component={Paper} sx={{ borderRadius: 2.5, border: '1px solid #e8ecf1', boxShadow: 'none', maxWidth: '100%', overflowX: 'auto' }}>
                     <Table size="small">
                       <TableHead sx={{ bgcolor: '#f8fafc' }}>
                         <TableRow>
@@ -1007,6 +1017,10 @@ const Cameras = () => {
                     rowsPerPage={rowsPerPage}
                     onRowsPerPageChange={(e) => { setRowsPerPage(parseInt(e.target.value, 10)); setPage(0); }}
                     rowsPerPageOptions={[10, 25, 50, 100, 200, 500]}
+                    sx={{
+                      '.MuiTablePagination-toolbar': { pl: { xs: 0, sm: 2 }, flexWrap: 'wrap' },
+                      '.MuiTablePagination-selectLabel': { display: { xs: 'none', sm: 'block' } },
+                    }}
                   />
                 </>
               ) : (
@@ -1024,7 +1038,7 @@ const Cameras = () => {
         {/* ── Upload Dialog ── */}
         <Dialog open={openUpload} onClose={handleCloseUploadDialog} maxWidth="sm" fullWidth
           PaperProps={{ sx: { overflow: 'visible', minHeight: 380 } }}
-          sx={{ '& .MuiDialog-container': { alignItems: 'flex-start', pt: 10 } }}>
+          sx={{ '& .MuiDialog-container': { alignItems: 'flex-start', pt: { xs: 2, sm: 10 } } }}>
           <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <CloudUpload /> Upload Camera Links Excel
           </DialogTitle>
@@ -1047,7 +1061,7 @@ const Cameras = () => {
               <input type="file" hidden accept=".xlsx,.xls" onChange={(e) => { setUploadFile(e.target.files[0]); setUploadError(''); }} />
             </Button>
             {isHLS && (
-              <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mt: 1 }}>
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2, mt: 1 }}>
                 <TextField select fullWidth label="Shift (optional)" value={uploadShiftId}
                   onChange={(e) => setUploadShiftId(e.target.value)} size="medium"
                   InputLabelProps={{ shrink: true }}
@@ -1103,6 +1117,7 @@ const Cameras = () => {
           onClose={() => setPreviewCamera(null)}
           maxWidth="md"
           fullWidth
+          fullScreen={isSmDown}
         >
           <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1, pr: 6 }}>
             <VisibilityIcon fontSize="small" />
@@ -1162,7 +1177,7 @@ const Cameras = () => {
                     onError={() => setPreviewError(true)}
                     sx={{
                       maxWidth: '100%',
-                      maxHeight: '70vh',
+                      maxHeight: { xs: '60vh', sm: '70vh' },
                       borderRadius: 1.5,
                       boxShadow: '0 2px 12px rgba(15,23,42,0.12)',
                       bgcolor: '#000',
@@ -1172,10 +1187,10 @@ const Cameras = () => {
               )
             )}
           </DialogContent>
-          <DialogActions sx={{ flexWrap: 'wrap', gap: 1, justifyContent: 'space-between', px: 2, py: 1.5 }}>
+          <DialogActions sx={{ flexDirection: { xs: 'column-reverse', sm: 'row' }, flexWrap: 'wrap', gap: 1, justifyContent: 'space-between', alignItems: { xs: 'stretch', sm: 'center' }, px: 2, py: 1.5 }}>
             {/* Operator-only inline verify control */}
             {isVerifier ? (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', flex: 1, minWidth: 280 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', flex: 1, minWidth: { xs: '100%', sm: 280 } }}>
                 <FormControl size="small" sx={{ minWidth: 200 }}>
                   <InputLabel id="verify-classification-label">Classification</InputLabel>
                   <Select
