@@ -213,7 +213,7 @@ const ClientCameras = () => {
             </Box>
           )}
           <Tooltip title={camSidebarOpen ? 'Collapse' : 'Expand'} placement="right">
-            <IconButton size="small" onClick={(e) => { setCamSidebarOpen(!camSidebarOpen); e.currentTarget.blur(); }} sx={{ color: '#fff', bgcolor: '#3b82f6', '&:hover': { bgcolor: '#2563eb' }, borderRadius: 2, width: 32, height: 32 }}>
+            <IconButton size="small" disableRipple onClick={(e) => { setCamSidebarOpen(!camSidebarOpen); e.currentTarget.blur(); }} sx={{ color: '#fff', bgcolor: '#3b82f6', '&:hover': { bgcolor: '#2563eb' }, borderRadius: 2, width: 32, height: 32 }}>
               {camSidebarOpen ? <KeyboardArrowLeft sx={{ fontSize: 20 }} /> : <KeyboardArrowRight sx={{ fontSize: 20 }} />}
             </IconButton>
           </Tooltip>

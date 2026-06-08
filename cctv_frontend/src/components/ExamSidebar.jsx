@@ -84,15 +84,20 @@ const ExamSidebar = ({
         <Tooltip title={open ? 'Collapse sidebar' : 'Expand sidebar'} placement="right">
           <IconButton
             size="small"
-            // .blur() releases keyboard focus right after toggling so the
-            // button doesn't get "stuck" in MUI's .Mui-focusVisible state,
-            // which otherwise compounds with :hover and looks like the
-            // button stayed dark after the click.
+            // .blur() releases focus so MUI's .Mui-focusVisible doesn't linger.
+            // disableRipple kills the ripple animation that can leave a brief
+            // dark residue independent of focus/hover. Together they prevent
+            // the "stuck darker color sometimes" the user was seeing.
+            disableRipple
             onClick={(e) => { onToggle(); e.currentTarget.blur(); }}
             sx={{
               color: '#fff',
-              bgcolor: 'primary.main',
-              '&:hover': { bgcolor: 'primary.dark' },
+              // Matches the ClientCameras toggle (#3b82f6 base, #2563eb hover).
+              // Was bgcolor: 'primary.main' / hover 'primary.dark' (#1e40af),
+              // which produced a much darker navy on hover than the rest of
+              // the app — the user saw it as a wrong/jarring transition.
+              bgcolor: '#3b82f6',
+              '&:hover': { bgcolor: '#2563eb' },
               borderRadius: 2,
               width: 32,
               height: 32,
