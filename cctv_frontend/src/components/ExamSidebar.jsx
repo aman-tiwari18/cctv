@@ -92,12 +92,14 @@ const ExamSidebar = ({
             onClick={(e) => { onToggle(); e.currentTarget.blur(); }}
             sx={{
               color: '#fff',
-              // Matches the ClientCameras toggle (#3b82f6 base, #2563eb hover).
-              // Was bgcolor: 'primary.main' / hover 'primary.dark' (#1e40af),
-              // which produced a much darker navy on hover than the rest of
-              // the app — the user saw it as a wrong/jarring transition.
               bgcolor: '#3b82f6',
-              '&:hover': { bgcolor: '#2563eb' },
+              // `:active` (mouse-down) gives a brief darker press feedback;
+              // `:hover` is forced to the base color so the button can't get
+              // "stuck dark" when the cursor lingers over it after the click
+              // (the button doesn't move on toggle, so the cursor stays
+              // hovering and would otherwise keep applying the dark hover).
+              '&:hover':  { bgcolor: '#3b82f6' },
+              '&:active': { bgcolor: '#2563eb' },
               borderRadius: 2,
               width: 32,
               height: 32,
