@@ -213,7 +213,7 @@ const ClientCameras = () => {
             </Box>
           )}
           <Tooltip title={camSidebarOpen ? 'Collapse' : 'Expand'} placement="right">
-            <IconButton size="small" onClick={() => setCamSidebarOpen(!camSidebarOpen)} sx={{ color: '#fff', bgcolor: '#3b82f6', '&:hover': { bgcolor: '#2563eb' }, borderRadius: 2, width: 32, height: 32 }}>
+            <IconButton size="small" onClick={(e) => { setCamSidebarOpen(!camSidebarOpen); e.currentTarget.blur(); }} sx={{ color: '#fff', bgcolor: '#3b82f6', '&:hover': { bgcolor: '#2563eb' }, borderRadius: 2, width: 32, height: 32 }}>
               {camSidebarOpen ? <KeyboardArrowLeft sx={{ fontSize: 20 }} /> : <KeyboardArrowRight sx={{ fontSize: 20 }} />}
             </IconButton>
           </Tooltip>
@@ -233,8 +233,8 @@ const ClientCameras = () => {
                       <ChevronRight sx={{ fontSize: 20, color: active ? '#3b82f6' : '#94a3b8', flexShrink: 0 }} />
                     </>
                   ) : (
-                    <Box sx={{ width: 34, height: 34, borderRadius: 2, bgcolor: active ? '#2563eb' : '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', border: active ? 'none' : '1px solid #e2e8f0' }}>
-                      <Typography sx={{ fontSize: '0.9rem', fontWeight: 700, color: active ? '#fff' : '#64748b', textTransform: 'uppercase' }}>{exam.exam_name.charAt(0)}</Typography>
+                    <Box sx={{ width: 34, height: 34, borderRadius: 2, bgcolor: active ? '#dbeafe' : '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #e2e8f0' }}>
+                      <Typography sx={{ fontSize: '0.9rem', fontWeight: 700, color: active ? '#3c81f6' : '#64748b', textTransform: 'uppercase' }}>{exam.exam_name.charAt(0)}</Typography>
                     </Box>
                   )}
                 </Box>

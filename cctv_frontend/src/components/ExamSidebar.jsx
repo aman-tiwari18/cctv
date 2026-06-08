@@ -84,7 +84,11 @@ const ExamSidebar = ({
         <Tooltip title={open ? 'Collapse sidebar' : 'Expand sidebar'} placement="right">
           <IconButton
             size="small"
-            onClick={onToggle}
+            // .blur() releases keyboard focus right after toggling so the
+            // button doesn't get "stuck" in MUI's .Mui-focusVisible state,
+            // which otherwise compounds with :hover and looks like the
+            // button stayed dark after the click.
+            onClick={(e) => { onToggle(); e.currentTarget.blur(); }}
             sx={{
               color: '#fff',
               bgcolor: 'primary.main',
