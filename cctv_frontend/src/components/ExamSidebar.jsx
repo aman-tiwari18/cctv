@@ -158,10 +158,10 @@ const ExamSidebar = ({
                   </>
                 ) : (
                   /* Collapsed: show first letter of exam name in a styled box.
-                     Selected uses the light primary tint + primary text so it
-                     matches the main-nav "current page" treatment (e.g. the
-                     Cameras item in the left rail), instead of the heavy dark
-                     #2563eb fill which read as darker than the app's brand. */
+                     Selected uses a very light blue tint + primary-blue letter
+                     to mirror the main left-nav "current page" treatment
+                     (e.g. the Cameras item). The old `#2563eb` fill +
+                     white text read as darker than the app's brand color. */
                   <Box
                     sx={{
                       width: 34,
@@ -172,7 +172,7 @@ const ExamSidebar = ({
                       alignItems: 'center',
                       justifyContent: 'center',
                       transition: 'background 0.15s',
-                      border: active ? '1px solid #3c81f6' : '1px solid #e2e8f0',
+                      border: '1px solid #e2e8f0',
                     }}
                   >
                     <Typography
