@@ -157,25 +157,29 @@ const ExamSidebar = ({
                     />
                   </>
                 ) : (
-                  /* Collapsed: show first letter of exam name in a styled box */
+                  /* Collapsed: show first letter of exam name in a styled box.
+                     Selected uses the light primary tint + primary text so it
+                     matches the main-nav "current page" treatment (e.g. the
+                     Cameras item in the left rail), instead of the heavy dark
+                     #2563eb fill which read as darker than the app's brand. */
                   <Box
                     sx={{
                       width: 34,
                       height: 34,
                       borderRadius: 2,
-                      bgcolor: active ? '#2563eb' : '#f1f5f9',
+                      bgcolor: active ? '#dbeafe' : '#f1f5f9',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
                       transition: 'background 0.15s',
-                      border: active ? 'none' : '1px solid #e2e8f0',
+                      border: active ? '1px solid #3c81f6' : '1px solid #e2e8f0',
                     }}
                   >
                     <Typography
                       sx={{
                         fontSize: '0.9rem',
                         fontWeight: 700,
-                        color: active ? '#fff' : '#64748b',
+                        color: active ? '#3c81f6' : '#64748b',
                         textTransform: 'uppercase',
                       }}
                     >
