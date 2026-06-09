@@ -48,6 +48,7 @@ import {
   Warning,
   Close as CloseIcon,
   GridView, LocationCity, Close, Memory, DeleteOutline, Undo as UndoIcon,
+  Person,
 } from '@mui/icons-material';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -151,7 +152,17 @@ const getDetectionShiftName = (item = {}) => (
   || (item.shift_id ? `Shift #${item.shift_id}` : '-')
 );
 
+const getDetectionPushedBy = (item = {}) => (
+  item.pushedByName
+  || item.pushed_by_name
+  || (item.pushedBy ?? item.pushed_by ? `User #${item.pushedBy ?? item.pushed_by}` : null)
+);
+
+// "Pushed by" is internal info — only ADMIN/OPERATOR see it, never the client (VIEWER).
+const canViewPushedBy = (role) => role === 'ADMIN' || role === 'OPERATOR';
+
 function DetectionCard({ item, onClick, onRemove, onUndo, isRemoving, isPendingRemoval }) {
+  const { user } = useAuth();
   const meta = TYPE_META[item.type] || { label: item.type, color: '#94a3b8', bg: '#f1f5f9' };
   const [imgError, setImgError] = useState(false);
   const cameraName = item.cameraName || item.camera_name || item.camera_id || '-';
@@ -160,6 +171,7 @@ function DetectionCard({ item, onClick, onRemove, onUndo, isRemoving, isPendingR
   const examDate = item.examDate || (item.date ? item.date.split('-').reverse().join('-') : '-');
   const tcCode = getDetectionTcCode(item);
   const shiftName = getDetectionShiftName(item);
+  const pushedBy = canViewPushedBy(user?.role) ? getDetectionPushedBy(item) : null;
   const invigilatorEventLabel = item.type === 'invigilator'
     ? (item.issueLabel || (item.issueType ? String(item.issueType).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : ''))
     : '';
@@ -300,6 +312,15 @@ function DetectionCard({ item, onClick, onRemove, onUndo, isRemoving, isPendingR
           <Typography noWrap title={shiftName} sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
             Shift: {shiftName}
           </Typography>
+
+          {pushedBy && (
+            <>
+              <Person sx={{ fontSize: 14, color: '#777' }} />
+              <Typography noWrap title={pushedBy} sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
+                Pushed by: {pushedBy}
+              </Typography>
+            </>
+          )}
         </Box>
 
         {item.confidence != null && (
@@ -385,9 +406,11 @@ function DetectionCard({ item, onClick, onRemove, onUndo, isRemoving, isPendingR
 
 function Lightbox({ item, onClose }) {
   const theme = useTheme();
+  const { user } = useAuth();
   const isSmDown = useMediaQuery(theme.breakpoints.down('sm'));
   if (!item) return null;
   const meta = TYPE_META[item.type] || {};
+  const pushedBy = canViewPushedBy(user?.role) ? getDetectionPushedBy(item) : null;
   const invigilatorEventLabel = item.type === 'invigilator'
     ? (item.issueLabel || (item.issueType ? String(item.issueType).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : ''))
     : '';
@@ -431,6 +454,9 @@ function Lightbox({ item, onClose }) {
           {item.tcCode && <Typography variant="body2" color="#94a3b8">TC: {item.tcCode}</Typography>}
           {(item.shiftName || item.shift_name || item.shift_id) && (
             <Typography variant="body2" color="#94a3b8">Shift: {getDetectionShiftName(item)}</Typography>
+          )}
+          {pushedBy && (
+            <Typography variant="body2" color="#94a3b8">Pushed by: {pushedBy}</Typography>
           )}
         </Box>
       </DialogContent>
@@ -697,10 +723,12 @@ const buildImageKey = (item) => `${item.source}|${item.type}|${item.relativePath
 // }
 
 function ListViewPanel({ data, selectedIndex, onSelect, onRemove, onUndo, removingId, pendingRemovals }) {
+  const { user } = useAuth();
   const item = data[selectedIndex];
   const itemRefs = useRef([]); // ✅ ref array for each list item
   const tcCode = item ? getDetectionTcCode(item) : '-';
   const shiftName = item ? getDetectionShiftName(item) : '-';
+  const pushedBy = item && canViewPushedBy(user?.role) ? getDetectionPushedBy(item) : null;
   const isPendingRemoval = item ? pendingRemovals.has(item.uid) : false;
   const isRemoving = item ? removingId === item.uid : false;
 
@@ -882,6 +910,15 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, onUndo, removi
                     <Typography noWrap title={shiftName} sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
                       Shift: {shiftName}
                     </Typography>
+
+                    {pushedBy && (
+                      <>
+                        <Person sx={{ fontSize: 14, color: '#777' }} />
+                        <Typography noWrap title={pushedBy} sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
+                          Pushed by: {pushedBy}
+                        </Typography>
+                      </>
+                    )}
                     <Box
                       sx={{
                         display: 'flex',
