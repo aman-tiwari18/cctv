@@ -492,24 +492,24 @@ const Exams = () => {
           const isLive = examStart && examEnd && now >= examStart && now <= examEnd;
 
           return (
-            <Grid item xs={12} sm={6} md={3} key={exam.id} >
+            <Grid item xs={12} sm={6} md={6} lg={4} key={exam.id} >
               <Box
                 sx={{
                   bgcolor: '#fff',
                   border: '1px solid #f8fafc',
                   boxShadow: '0 4px 12px rgba(0, 0, 0, 0.03)',
                   borderRadius: 4,
-                  p: 3,
+                  p: { xs: 2.5, sm: 3 },
                   py: 3.5,
                   height: '100%',
-                  minHeight: 420,
+                  minHeight: { xs: 'auto', md: 380 },
                   maxWidth: 530,
                   display: 'flex',
                   flexDirection: 'column'
                 }}
               >
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
-                  <Typography sx={{ fontWeight: 600, fontSize: '1.5rem', color: '#0f172a', lineHeight: 1.25, pr: 1, flex: 1 }}>
+                  <Typography sx={{ fontWeight: 600, fontSize: { xs: '1.25rem', sm: '1.5rem' }, color: '#0f172a', lineHeight: 1.25, pr: 1, flex: 1 }}>
                     {exam.exam_name}
                   </Typography>
                   <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
@@ -610,8 +610,8 @@ const Exams = () => {
 
                 <Box sx={{ flex: 1 }} />
 
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 2, pt: 2 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1, mt: 2, pt: 2 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
                     <Box
                       onClick={() => navigate(`/cameras?exam=${exam.id}`)}
                       sx={{ display: 'flex', alignItems: 'center', gap: 0.8, cursor: 'pointer', '&:hover': { opacity: 0.75, color: '#3c81f6' } }}
