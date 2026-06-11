@@ -268,25 +268,10 @@ const ClientCameras = () => {
               </Box>
 
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap', flexShrink: 0, width: { xs: '100%', md: 'auto' } }}>
-                <Tooltip title="Download HLS Template">
-                  <Button variant="outlined" size="small" startIcon={<Download />}
-                    onClick={() => handleDownloadTemplate('hls')}
-                    sx={{ flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' }, height: 40, borderColor: '#3b82f6', color: '#3b82f6', '&:hover': { bgcolor: '#eff6ff' }, textTransform: 'none', fontWeight: 600 }}>
-                    HLS Template
-                  </Button>
-                </Tooltip>
-                <Tooltip title="Download RTSP Template">
-                  <Button variant="outlined" size="small" startIcon={<Download />}
-                    onClick={() => handleDownloadTemplate('rtsp')}
-                    sx={{ flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' }, height: 40, borderColor: '#6366f1', color: '#6366f1', '&:hover': { bgcolor: '#eef2ff' }, textTransform: 'none', fontWeight: 600 }}>
-                    RTSP Template
-                  </Button>
-                </Tooltip>
-
                 <TextField
                   size="small" placeholder="Search center, state..." value={camSearchQuery} onChange={(e) => setCamSearchQuery(e.target.value)}
                   InputProps={{ startAdornment: <InputAdornment position="start"><Search sx={{ fontSize: 18, color: '#94a3b8' }} /></InputAdornment>, endAdornment: camSearchQuery !== camDebouncedSearch ? <InputAdornment position="end"><CircularProgress size={16} sx={{ color: '#94a3b8' }} /></InputAdornment> : null, sx: { borderRadius: '8px', bgcolor: '#f8fafc', height: 40, fontSize: 14, '& fieldset': { border: '1px solid #e2e8f0' } } }}
-                  sx={{ flex: { xs: '1 1 100%', sm: '0 0 auto' }, minWidth: { sm: 240 } }}
+                  sx={{ flex: { xs: '1 1 100%', sm: '0 0 auto' }, minWidth: { xs: '100%', sm: 260 }, maxWidth: { xs: '100%', sm: 300 } }}
                 />
                 {isHLS && (
                   <>
@@ -302,6 +287,21 @@ const ClientCameras = () => {
                     </Box>
                   </>
                 )}
+
+                <Tooltip title="Download HLS Template">
+                  <Button variant="outlined" size="small" startIcon={<Download />}
+                    onClick={() => handleDownloadTemplate('hls')}
+                    sx={{ flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' }, height: 40, borderColor: '#3b82f6', color: '#3b82f6', '&:hover': { bgcolor: '#eff6ff' }, textTransform: 'none', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                    HLS
+                  </Button>
+                </Tooltip>
+                <Tooltip title="Download RTSP Template">
+                  <Button variant="outlined" size="small" startIcon={<Download />}
+                    onClick={() => handleDownloadTemplate('rtsp')}
+                    sx={{ flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' }, height: 40, borderColor: '#6366f1', color: '#6366f1', '&:hover': { bgcolor: '#eef2ff' }, textTransform: 'none', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                    RTSP
+                  </Button>
+                </Tooltip>
               </Box>
             </Box>
 
@@ -312,9 +312,9 @@ const ClientCameras = () => {
                   size="small"
                   onClick={() => handleDownloadAccessibility('accessible')}
                   startIcon={<Download sx={{ fontSize: 16 }} />}
-                  sx={{ flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' }, height: 32, px: 2, borderRadius: 2, borderColor: '#3b82f6', color: '#3b82f6', textTransform: 'none', '&:hover': { bgcolor: '#eff6ff' } }}
+                  sx={{ flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' }, height: 32, px: 2, borderRadius: 2, borderColor: '#3b82f6', color: '#3b82f6', textTransform: 'none', whiteSpace: 'nowrap', '&:hover': { bgcolor: '#eff6ff' } }}
                 >
-                  <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, mr: 1 }}>Accessible</Typography>
+                  <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, mr: 1, whiteSpace: 'nowrap' }}>Accessible</Typography>
                   <Typography sx={{ fontSize: '0.75rem', fontWeight: 700 }}>{camStatusCounts.accessible}</Typography>
                 </Button>
 
@@ -323,15 +323,15 @@ const ClientCameras = () => {
                   size="small"
                   onClick={() => handleDownloadAccessibility('not_accessible')}
                   startIcon={<Download sx={{ fontSize: 16 }} />}
-                  sx={{ flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' }, height: 32, px: 2, borderRadius: 2, borderColor: '#333', color: '#333', textTransform: 'none', '&:hover': { bgcolor: '#f3f4f6' } }}
+                  sx={{ flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' }, height: 32, px: 2, borderRadius: 2, borderColor: '#333', color: '#333', textTransform: 'none', whiteSpace: 'nowrap', '&:hover': { bgcolor: '#f3f4f6' } }}
                 >
-                  <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, mr: 1 }}>Not Accessible</Typography>
+                  <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, mr: 1, whiteSpace: 'nowrap' }}>Not Accessible</Typography>
                   <Typography sx={{ fontSize: '0.75rem', fontWeight: 700 }}>{camStatusCounts.notAccessible}</Typography>
                 </Button>
 
                 {camStatusCounts.unknown > 0 && (
-                  <Box sx={{ flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' }, height: 32, px: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, borderRadius: 2, border: '1px solid #e5e7eb', bgcolor: '#f9fafb' }}>
-                    <Typography sx={{ fontSize: '0.75rem', color: '#4b5563', fontWeight: 600 }}>Unknown</Typography>
+                  <Box sx={{ flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' }, height: 32, px: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, borderRadius: 2, border: '1px solid #e5e7eb', bgcolor: '#f9fafb', whiteSpace: 'nowrap' }}>
+                    <Typography sx={{ fontSize: '0.75rem', color: '#4b5563', fontWeight: 600, whiteSpace: 'nowrap' }}>Unknown</Typography>
                     <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, color: '#6b7280' }}>{camStatusCounts.unknown}</Typography>
                   </Box>
                 )}
