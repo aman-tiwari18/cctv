@@ -197,7 +197,7 @@ const Executions = () => {
   /* Vision RUNNING assignments older than 2h are displayed as COMPLETED */
   const isStaleVisionRunning = (ex) => {
     if (ex.status !== 'RUNNING') return false;
-    if (ex.script?.script_id !== 'vision') return false;
+    if (!['vision', 'vision_neet'].includes(ex.script?.script_id)) return false;
     if (!ex.started_at) return false;
     return (Date.now() - new Date(ex.started_at).getTime()) > 2 * 60 * 60 * 1000;
   };

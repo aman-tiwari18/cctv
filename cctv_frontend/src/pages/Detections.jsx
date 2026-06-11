@@ -1281,6 +1281,7 @@ export default function Detections() {
       await pushQueue.add(async () => {
         return await axios.post(`${API_BASE_1}/client-detections/copy`, {
           items: items.map(({ source, type, relativePath, uid }) => ({ source, type, relativePath, uid })),
+          pushedBy: user?.id ?? null,
         });
       });
 

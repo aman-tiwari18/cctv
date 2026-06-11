@@ -234,6 +234,45 @@ def _shift_names_for_ids(shift_ids) -> dict:
             conn.close()
 
 
+def _user_names_for_ids(user_ids) -> dict:
+    """Resolve a set of user ids to display names in one query.
+
+    Returns {id: full_name or username}. Used to show "Pushed by" on client
+    detections without a per-row DB lookup."""
+    ids = []
+    for user_id in user_ids:
+        if user_id in (None, ""):
+            continue
+        try:
+            ids.append(int(user_id))
+        except (TypeError, ValueError):
+            continue
+
+    ids = sorted(set(ids))
+    if not ids:
+        return {}
+
+    conn = None
+    try:
+        conn = _get_connection()
+        with conn.cursor() as cur:
+            fmt = ",".join(["%s"] * len(ids))
+            cur.execute(
+                f"SELECT id, full_name, username FROM users WHERE id IN ({fmt})",
+                tuple(ids),
+            )
+            return {
+                row.get("id"): (row.get("full_name") or row.get("username"))
+                for row in cur.fetchall()
+            }
+    except Exception as e:
+        logger.error(f"User name lookup failed: {e}")
+        return {}
+    finally:
+        if conn:
+            conn.close()
+
+
 @lru_cache(maxsize=2048)
 def _resolve_shift_window(shift_id):
     """Return (start_hm, end_hm) as 'HH:MM' for an exam_shifts row, or (None,None).
@@ -325,7 +364,7 @@ def _enrich_detection_item_from_report(item: dict) -> dict:
                 cur.execute(
                     f"""
                     SELECT cr.shift_id, cr.tc_code, cr.gpu_id, cr.pushed_to_client,
-                           es.shift_name
+                           cr.pushed_by, es.shift_name
                     FROM {table} AS cr
                     LEFT JOIN exam_shifts AS es ON es.id = cr.shift_id
                     WHERE cr.unique_id = %s
@@ -349,6 +388,9 @@ def _enrich_detection_item_from_report(item: dict) -> dict:
                     item["gpu_id"] = row.get("gpu_id")
                 if row.get("pushed_to_client") is not None:
                     item["pushed_to_client"] = row.get("pushed_to_client")
+                if row.get("pushed_by") is not None:
+                    item["pushedBy"] = row.get("pushed_by")
+                    item["pushed_by"] = row.get("pushed_by")
                 break
     except Exception as e:
         logger.error(f"Detection report metadata lookup failed: {e}")
@@ -1675,12 +1717,16 @@ class ClientDetectionCopyItem(BaseModel):
 
 class ClientDetectionCopyRequest(BaseModel):
     items: list[ClientDetectionCopyItem]
+    # User id of the operator pushing these detections to the client.
+    pushedBy: Optional[int] = None
 
 
 @app.post("/client-detections/copy")
 async def copy_client_detections(payload: ClientDetectionCopyRequest):
     copied = []
     failed = []
+    pushed_by = payload.pushedBy
+    pushed_by_name = _user_names_for_ids([pushed_by]).get(pushed_by) if pushed_by else None
 
     conn = _get_connection()
     try:
@@ -1722,10 +1768,11 @@ async def copy_client_detections(payload: ClientDetectionCopyRequest):
                         f"""
                         UPDATE {table_name}
                         SET pushed_to_client = 1,
+                            pushed_by = %s,
                             unique_id = COALESCE(NULLIF(unique_id, ''), %s)
                         WHERE id = %s
                         """,
-                        (item_uid, row.get("id")),
+                        (pushed_by, item_uid, row.get("id")),
                     )
                     if not row.get("unique_id"):
                         row["unique_id"] = item_uid
@@ -1762,6 +1809,9 @@ async def copy_client_detections(payload: ClientDetectionCopyRequest):
                         "uid": row.get("unique_id"),
                         "updatedAt": pushed_at_ms,
                         "updated_at": pushed_at_ms,
+                        "pushedBy": pushed_by,
+                        "pushed_by": pushed_by,
+                        "pushedByName": pushed_by_name,
                     })
                     copied.append(copied_item)
                     
@@ -1784,7 +1834,8 @@ async def copy_client_detections(payload: ClientDetectionCopyRequest):
                 # This notifies all connected users that this detection has been pushed
                 await sio.emit("detection:pushed", {
                     "uid": item.get("uid"),
-                    "pushedBy": None,  # Can be enhanced to include user ID if available
+                    "pushedBy": pushed_by,
+                    "pushedByName": pushed_by_name,
                     "pushedAt": item.get("updatedAt")
                 })
             
@@ -1925,6 +1976,7 @@ def list_client_detections(
 
             db_rows.sort(key=lambda x: str(x.get("created_at", "")), reverse=True)
             shift_name_map = _shift_names_for_ids(row.get("shift_id") for row in db_rows)
+            user_name_map = _user_names_for_ids(row.get("pushed_by") for row in db_rows)
 
             # ── Light pass: cheap filtering without calling parse_detection_filename ──
             # Date/time filtering uses the LRU-cached _basic_detection_meta (regex only,
@@ -2006,6 +2058,9 @@ def list_client_detections(
                     "category":    row.get("camera_category", ""),
                     "exam_id":     row.get("exam_id"),
                     "uid":         row.get("unique_id"),
+                    "pushedBy":    row.get("pushed_by"),
+                    "pushed_by":   row.get("pushed_by"),
+                    "pushedByName": user_name_map.get(row.get("pushed_by")),
                     "_mtime":      _epoch_ms(row.get("created_at")) or 0,
                     "updatedAt":   _epoch_ms(row.get("updated_at")),
                     "updated_at":  _epoch_ms(row.get("updated_at")),
