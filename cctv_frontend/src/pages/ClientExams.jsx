@@ -184,7 +184,7 @@ const ClientExams = () => {
     <Box>
       <Grid container spacing={3}>
         {exams.map((exam) => (
-          <Grid item xs={12} sm={6} md={6} lg={4} key={exam.id}>
+          <Grid item xs={12} sm={6} md={4} lg={3} key={exam.id}>
             <ViewOnlyExamCard exam={exam} examCounts={examCounts} navigate={navigate} />
           </Grid>
         ))}
