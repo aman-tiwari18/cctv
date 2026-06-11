@@ -113,6 +113,24 @@ const ClientCameras = () => {
   const [camFilterShiftId, setCamFilterShiftId] = useState('');
   const [camFilterExamDate, setCamFilterExamDate] = useState('');
 
+  // Update the default page size only when the viewport crosses the sm
+  // boundary (mobile <-> desktop), so it stays responsive to resizing while a
+  // manual page-size choice still sticks as long as you don't cross over.
+  useEffect(() => {
+    const sm = theme.breakpoints.values.sm;
+    let wasMobile = window.innerWidth < sm;
+    const onResize = () => {
+      const isMobile = window.innerWidth < sm;
+      if (isMobile !== wasMobile) {
+        wasMobile = isMobile;
+        setCamRowsPerPage(isMobile ? 15 : 50);
+        setCamPage(0);
+      }
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [theme]);
+
   const loadCamExams = useCallback(async () => {
     try {
       const res = await examsAPI.getAll({ is_active: true });

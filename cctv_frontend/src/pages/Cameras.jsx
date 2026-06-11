@@ -150,10 +150,28 @@ const Cameras = () => {
 
   const [page, setPage] = useState(0);
   // Default to 15 rows on mobile (<sm), 50 on larger screens. Read the real
-  // viewport width once at mount (reliable in this client-only app, unlike
+  // viewport width at mount (reliable in this client-only app, unlike
   // useMediaQuery's first-render value).
   const [rowsPerPage, setRowsPerPage] = useState(() => (window.innerWidth < theme.breakpoints.values.sm ? 15 : 50));
   const [totalCount, setTotalCount] = useState(0);
+
+  // Update the default page size only when the viewport crosses the sm
+  // boundary (mobile <-> desktop), so it stays responsive to resizing while a
+  // manual page-size choice still sticks as long as you don't cross over.
+  useEffect(() => {
+    const sm = theme.breakpoints.values.sm;
+    let wasMobile = window.innerWidth < sm;
+    const onResize = () => {
+      const isMobile = window.innerWidth < sm;
+      if (isMobile !== wasMobile) {
+        wasMobile = isMobile;
+        setRowsPerPage(isMobile ? 15 : 50);
+        setPage(0);
+      }
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [theme]);
 
 
   const [openDialog, setOpenDialog] = useState(false);
