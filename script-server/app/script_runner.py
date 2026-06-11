@@ -157,6 +157,10 @@ class ScriptRunner:
                 full_script_path = self.scripts_dir / "detection/vision_classification_rtsp.py"
             else:
                 full_script_path = self.scripts_dir / "detection/vision_classification.py"
+        elif script_code == "vision_neet":
+            # NEET scene classification + OCR — DB-driven, shared vLLM backend.
+            # Handles HLS/RTSP internally via the assignment payload's link_type.
+            full_script_path = self.scripts_dir / "detection/vision_classification_neet.py"
         elif script_code in pipeline_codes:
             full_script_path = self.scripts_dir / "detection/pipeline/master_pipeline.py"
         else:

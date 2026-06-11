@@ -81,6 +81,13 @@ module.exports = {
         default_frequency: 60,
         default_duration: 30,
     },
+    vision_neet: {
+        name: 'NEET Scene Classification + OCR',
+        description: 'NEET exam-center scene classification with OCR text-overlay verification (TC code + camera name). Stores the classification and generates the NEET report.',
+        script_path: 'scripts/detection/vision_classification_neet.py',
+        default_frequency: 60,
+        default_duration: 30,
+    },
     inversion: {
         name: 'Camera Inversion Detection',
         description: 'Detects rotated or inverted HLS camera feeds.',
