@@ -39,7 +39,7 @@ const ViewOnlyExamCard = ({ exam, examCounts, navigate }) => {
       sx={{
         bgcolor: '#fff', border: '1px solid #f8fafc',
         boxShadow: '0 4px 12px rgba(0,0,0,0.03)', borderRadius: 4,
-        p: { xs: 2.5, sm: 3 }, py: 3.5, height: '100%', minHeight: { xs: 'auto', md: 340 }, maxWidth: 530,
+        p: { xs: 2.5, sm: 3 }, py: 3.5, height: { xs: 'auto', sm: '100%' }, minHeight: { xs: 'auto', md: 340 }, maxWidth: 530,
         display: 'flex', flexDirection: 'column',
       }}
     >
@@ -110,7 +110,7 @@ const ViewOnlyExamCard = ({ exam, examCounts, navigate }) => {
         </Box>
       )}
 
-      <Box sx={{ flex: 1 }} />
+      <Box sx={{ flex: 1, display: { xs: 'none', sm: 'block' } }} />
 
       {/* Bottom row: only camera + detection icons */}
       <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 3, rowGap: 1, pt: 2, mt: 2 }}>

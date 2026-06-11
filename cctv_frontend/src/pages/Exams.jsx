@@ -501,7 +501,7 @@ const Exams = () => {
                   borderRadius: 4,
                   p: { xs: 2.5, sm: 3 },
                   py: 3.5,
-                  height: '100%',
+                  height: { xs: 'auto', sm: '100%' },
                   minHeight: { xs: 'auto', md: 380 },
                   maxWidth: 530,
                   display: 'flex',
@@ -608,7 +608,7 @@ const Exams = () => {
                   </Box>
                 )}
 
-                <Box sx={{ flex: 1 }} />
+                <Box sx={{ flex: 1, display: { xs: 'none', sm: 'block' } }} />
 
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1, mt: 2, pt: 2 }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1.5 }}>
