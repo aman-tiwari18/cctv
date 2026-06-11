@@ -509,7 +509,7 @@ const Exams = () => {
                 }}
               >
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
-                  <Typography sx={{ fontWeight: 600, fontSize: { xs: '1.25rem', sm: '1.5rem' }, color: '#0f172a', lineHeight: 1.25, pr: 1, flex: 1 }}>
+                  <Typography sx={{ fontWeight: 600, fontSize: { xs: '1.2rem', sm: '1.35rem' }, color: '#0f172a', lineHeight: 1.25, pr: 1, flex: 1 }}>
                     {exam.exam_name}
                   </Typography>
                   <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
@@ -548,11 +548,11 @@ const Exams = () => {
                     <Typography sx={{ fontSize: '1.1rem', fontWeight: 800, color: '#94a3b8' }}>Archived</Typography>
                   </Box>
                 ) : (
-                  <Box sx={{ bgcolor: '#f1f5f9', borderRadius: 3, p: 2, mb: 2.5 }}>
+                  <Box sx={{ bgcolor: '#f1f5f9', borderRadius: 3, p: { xs: 2, sm: 1.75 }, mb: 2.5 }}>
                     {exam.start_date && exam.end_date && (
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.2 }}>
-                        <CalendarTodayOutlined sx={{ fontSize: 18, color: '#676e80', flexShrink: 0 }} />
-                        <Typography sx={{ fontSize: '0.97rem', fontWeight: 600, color: '#676e80' }}>
+                        <CalendarTodayOutlined sx={{ fontSize: 16, color: '#676e80', flexShrink: 0 }} />
+                        <Typography sx={{ fontSize: { xs: '0.95rem', sm: '0.84rem' }, fontWeight: 600, color: '#676e80' }}>
                           {formatDateV1(exam.start_date)} - {formatDateV1(exam.end_date)}
                         </Typography>
                       </Box>
@@ -560,11 +560,11 @@ const Exams = () => {
                     {/* Stats row */}
                     {dateInfo && (
                       <>
-                        <Box sx={{ display: 'flex', gap: 2.5, mb: 0.9 }}>
-                          <Typography sx={{ fontSize: '0.72rem', fontWeight: 500, color: '#94a3b8' }}>
+                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, mb: 0.9 }}>
+                          <Typography sx={{ fontSize: '0.72rem', fontWeight: 500, color: '#94a3b8', whiteSpace: 'nowrap' }}>
                             Total Days-{dateInfo.totalDays}
                           </Typography>
-                          <Typography sx={{ fontSize: '0.72rem', fontWeight: 500, color: '#94a3b8' }}>
+                          <Typography sx={{ fontSize: '0.72rem', fontWeight: 500, color: '#94a3b8', whiteSpace: 'nowrap' }}>
                             Skipped Days-{dateInfo.skippedDays}
                           </Typography>
                         </Box>
@@ -611,12 +611,12 @@ const Exams = () => {
                 <Box sx={{ flex: 1 }} />
 
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1, mt: 2, pt: 2 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1.5 }}>
                     <Box
                       onClick={() => navigate(`/cameras?exam=${exam.id}`)}
                       sx={{ display: 'flex', alignItems: 'center', gap: 0.8, cursor: 'pointer', '&:hover': { opacity: 0.75, color: '#3c81f6' } }}
                     >
-                      <CameraAltIcon sx={{ fontSize: 20, color: '#8b929cff' }} />
+                      <CameraAltIcon sx={{ fontSize: 18, color: '#8b929cff' }} />
                       <Typography sx={{ fontSize: '0.8rem', fontWeight: 500, color: '#475569', '&:hover': { color: '#3c81f6' } }}>
                         {String(exam.camera_count || 0).padStart(2, '0')}
                       </Typography>
@@ -626,7 +626,7 @@ const Exams = () => {
                       onClick={() => navigate(`/analytics?exam=${exam.id}`)}
                       sx={{ display: 'flex', alignItems: 'center', gap: 0.8, cursor: 'pointer', '&:hover': { opacity: 0.75, color: '#3c81f6' } }}
                     >
-                      <Analytics sx={{ fontSize: 20, color: '#8b929cff' }} />
+                      <Analytics sx={{ fontSize: 18, color: '#8b929cff' }} />
 
 
                       <Typography sx={{ fontSize: '0.8rem', fontWeight: 600, color: '#333', '&:hover': { color: '#3c81f6' } }}>
@@ -637,7 +637,7 @@ const Exams = () => {
                       onClick={() => navigate(`/detections?exam_id=${exam.id}`)}
                       sx={{ display: 'flex', alignItems: 'center', gap: 0.8, cursor: 'pointer', '&:hover': { opacity: 0.75, color: '#3c81f6' } }}
                     >
-                      <ReportProblemIcon sx={{ fontSize: 20, color: '#8b929cff' }} />
+                      <ReportProblemIcon sx={{ fontSize: 18, color: '#8b929cff' }} />
 
 
                       <Typography sx={{ fontSize: '0.8rem', fontWeight: 600, color: '#333', '&:hover': { color: '#3c81f6' } }}>
