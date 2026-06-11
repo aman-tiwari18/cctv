@@ -790,7 +790,7 @@ const Analytics = () => {
                                     bgcolor: chipColor.bg,
                                     color: '#777',
                                     height: 'auto',
-                                    minWidth: 180,
+                                    minWidth: { xs: 140, sm: 180 },
                                     py: 0.8,
                                     alignItems : 'start',
                                     display : 'flex',
