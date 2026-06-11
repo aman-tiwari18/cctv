@@ -15,6 +15,7 @@ import {
   KeyboardArrowRight,
 } from '@mui/icons-material';
 import { ExamsSvgIcon } from './ExamsSvgIcon';
+import { useMobileNavOpen } from '../contexts/MobileNavContext';
 
 // Height of the fixed top app bar (mirrors APPBAR_HEIGHT in Layout.jsx). The
 // mobile overlay drawer + backdrop are offset by this so the header stays clear.
@@ -61,6 +62,13 @@ const ExamSidebar = ({
   // Overlay state for the mobile Drawer — independent of the `open` prop so the
   // drawer never auto-opens over content when the parent defaults `open` to true.
   const [mobileOpen, setMobileOpen] = React.useState(false);
+
+  // When the main (hamburger) nav opens, contract this overlay so the two
+  // drawers never stack on top of each other.
+  const mainNavOpen = useMobileNavOpen();
+  React.useEffect(() => {
+    if (mainNavOpen) setMobileOpen(false);
+  }, [mainNavOpen]);
 
   // Expand/collapse: on mobile drive the overlay, on desktop bubble to parent.
   const handleToggle = () => {

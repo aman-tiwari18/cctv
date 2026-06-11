@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
+import { MobileNavProvider } from '../contexts/MobileNavContext';
 import {
   Box,
   Drawer,
@@ -770,7 +771,9 @@ function LayoutInner() {
           overflowX: 'hidden',
         }}
       >
-        <Outlet />
+        <MobileNavProvider value={mobileOpen}>
+          <Outlet />
+        </MobileNavProvider>
       </Box>
 
       {/* Report Validation Snackbar - positioned below the button */}
