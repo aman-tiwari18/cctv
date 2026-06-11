@@ -149,7 +149,10 @@ const Cameras = () => {
 
 
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(isSmDown ? 15 : 50);
+  // Default to 15 rows on mobile (<sm), 50 on larger screens. Read the real
+  // viewport width once at mount (reliable in this client-only app, unlike
+  // useMediaQuery's first-render value).
+  const [rowsPerPage, setRowsPerPage] = useState(() => (window.innerWidth < theme.breakpoints.values.sm ? 15 : 50));
   const [totalCount, setTotalCount] = useState(0);
 
 

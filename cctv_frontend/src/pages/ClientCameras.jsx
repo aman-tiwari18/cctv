@@ -106,7 +106,9 @@ const ClientCameras = () => {
   const [camOrderBy, setCamOrderBy] = useState('');
   const [camOrder, setCamOrder] = useState('asc');
   const [camPage, setCamPage] = useState(0);
-  const [camRowsPerPage, setCamRowsPerPage] = useState(isSmDown ? 15 : 50);
+  // Default to 15 rows on mobile (<sm), 50 on larger screens. Read the real
+  // viewport width once at mount (reliable, unlike useMediaQuery's first value).
+  const [camRowsPerPage, setCamRowsPerPage] = useState(() => (window.innerWidth < theme.breakpoints.values.sm ? 15 : 50));
   const [camTotal, setCamTotal] = useState(0);
   const [camFilterShiftId, setCamFilterShiftId] = useState('');
   const [camFilterExamDate, setCamFilterExamDate] = useState('');
