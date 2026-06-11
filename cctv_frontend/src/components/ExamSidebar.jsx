@@ -311,11 +311,22 @@ const ExamSidebar = ({
         variant="temporary"
         open={mobileOpen}
         onClose={() => setMobileOpen(false)}
-        ModalProps={{ keepMounted: true }}
+        // keepMounted: stay in DOM for perf. disableEnforceFocus: don't trap
+        // focus, so the top app-bar buttons (menu, profile) stay interactive.
+        ModalProps={{ keepMounted: true, disableEnforceFocus: true }}
         sx={{
           display: { xs: 'block', md: 'none' },
-          '& .MuiDrawer-paper': { top: `${APP_BAR_HEIGHT}px`, height: `calc(100% - ${APP_BAR_HEIGHT}px)` },
-          '& .MuiBackdrop-root': { top: `${APP_BAR_HEIGHT}px` },
+          // The Modal root spans the full viewport and would otherwise swallow
+          // clicks over the (un-dimmed) top app bar. Make the root transparent to
+          // pointer events and re-enable them only on the paper + backdrop, so the
+          // top bar's hamburger and profile icon remain clickable while open.
+          pointerEvents: 'none',
+          '& .MuiDrawer-paper': {
+            top: `${APP_BAR_HEIGHT}px`,
+            height: `calc(100% - ${APP_BAR_HEIGHT}px)`,
+            pointerEvents: 'auto',
+          },
+          '& .MuiBackdrop-root': { top: `${APP_BAR_HEIGHT}px`, pointerEvents: 'auto' },
         }}
         PaperProps={{ sx: { width: 280, bgcolor: '#fff' } }}
       >
