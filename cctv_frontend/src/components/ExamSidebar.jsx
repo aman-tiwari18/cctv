@@ -16,6 +16,10 @@ import {
 } from '@mui/icons-material';
 import { ExamsSvgIcon } from './ExamsSvgIcon';
 
+// Height of the fixed top app bar (mirrors APPBAR_HEIGHT in Layout.jsx). The
+// mobile overlay drawer + backdrop are offset by this so the header stays clear.
+const APP_BAR_HEIGHT = 64;
+
 /**
  * Reusable collapsible exam sidebar component.
  *
@@ -299,13 +303,20 @@ const ExamSidebar = ({
         {collapsedContent}
       </Box>
 
-      {/* ── Mobile (< md): expanded panel as an overlay drawer with backdrop ── */}
+      {/* ── Mobile (< md): expanded panel as an overlay drawer with backdrop ──
+           Offset below the fixed top app bar (APPBAR_HEIGHT = 64 in Layout.jsx)
+           so the header — hamburger, page title, profile — stays visible and is
+           not covered or dimmed by the overlay. */}
       <Drawer
         variant="temporary"
         open={mobileOpen}
         onClose={() => setMobileOpen(false)}
         ModalProps={{ keepMounted: true }}
-        sx={{ display: { xs: 'block', md: 'none' } }}
+        sx={{
+          display: { xs: 'block', md: 'none' },
+          '& .MuiDrawer-paper': { top: `${APP_BAR_HEIGHT}px`, height: `calc(100% - ${APP_BAR_HEIGHT}px)` },
+          '& .MuiBackdrop-root': { top: `${APP_BAR_HEIGHT}px` },
+        }}
         PaperProps={{ sx: { width: 280, bgcolor: '#fff' } }}
       >
         <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
