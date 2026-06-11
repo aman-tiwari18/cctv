@@ -106,7 +106,7 @@ const ClientCameras = () => {
   const [camOrderBy, setCamOrderBy] = useState('');
   const [camOrder, setCamOrder] = useState('asc');
   const [camPage, setCamPage] = useState(0);
-  const [camRowsPerPage, setCamRowsPerPage] = useState(50);
+  const [camRowsPerPage, setCamRowsPerPage] = useState(isSmDown ? 15 : 50);
   const [camTotal, setCamTotal] = useState(0);
   const [camFilterShiftId, setCamFilterShiftId] = useState('');
   const [camFilterExamDate, setCamFilterExamDate] = useState('');
@@ -388,7 +388,7 @@ const ClientCameras = () => {
                     </TableBody>
                   </Table>
                 </TableContainer>
-                <TablePagination component="div" count={camTotal} page={camPage} onPageChange={(e, newPage) => setCamPage(newPage)} rowsPerPage={camRowsPerPage} onRowsPerPageChange={(e) => { setCamRowsPerPage(parseInt(e.target.value, 10)); setCamPage(0); }} rowsPerPageOptions={[10, 25, 50, 100, 200]}
+                <TablePagination component="div" count={camTotal} page={camPage} onPageChange={(e, newPage) => setCamPage(newPage)} rowsPerPage={camRowsPerPage} onRowsPerPageChange={(e) => { setCamRowsPerPage(parseInt(e.target.value, 10)); setCamPage(0); }} rowsPerPageOptions={[15, 25, 50, 100, 200]}
                   sx={{
                     '.MuiTablePagination-toolbar': { pl: { xs: 0, sm: 2 }, flexWrap: 'wrap' },
                     '.MuiTablePagination-selectLabel': { display: { xs: 'none', sm: 'block' } },

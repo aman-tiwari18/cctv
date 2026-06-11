@@ -149,7 +149,7 @@ const Cameras = () => {
 
 
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(50);
+  const [rowsPerPage, setRowsPerPage] = useState(isSmDown ? 15 : 50);
   const [totalCount, setTotalCount] = useState(0);
 
 
@@ -1016,7 +1016,7 @@ const Cameras = () => {
                     onPageChange={(e, newPage) => setPage(newPage)}
                     rowsPerPage={rowsPerPage}
                     onRowsPerPageChange={(e) => { setRowsPerPage(parseInt(e.target.value, 10)); setPage(0); }}
-                    rowsPerPageOptions={[10, 25, 50, 100, 200, 500]}
+                    rowsPerPageOptions={[15, 25, 50, 100, 200, 500]}
                     sx={{
                       '.MuiTablePagination-toolbar': { pl: { xs: 0, sm: 2 }, flexWrap: 'wrap' },
                       '.MuiTablePagination-selectLabel': { display: { xs: 'none', sm: 'block' } },
