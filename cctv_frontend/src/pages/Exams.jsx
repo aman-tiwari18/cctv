@@ -586,7 +586,7 @@ const Exams = () => {
                 )}
 
                 {exam.examShifts?.length > 0 && (
-                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1, mb: 2 }}>
                     {exam.examShifts.map((shift) => (
                       <Chip
                         key={shift.id}
