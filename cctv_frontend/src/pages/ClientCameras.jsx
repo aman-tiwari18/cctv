@@ -26,14 +26,11 @@ import {
 } from '@mui/material';
 import {
   Search,
-  KeyboardArrowLeft,
-  KeyboardArrowRight,
-  ChevronRight,
   Download,
 } from '@mui/icons-material';
 import { useSearchParams } from 'react-router-dom';
 import { examsAPI, camerasAPI, clientDashboardAPI } from '../services/api';
-import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
+import ExamSidebar from '../components/ExamSidebar';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 
 const formatDateDDMMYYYY = (dateStr) => {
@@ -204,46 +201,13 @@ const ClientCameras = () => {
 
   return (
     <Box sx={{ display: 'flex', minHeight: 'calc(100vh - 120px)', bgcolor: '#f8fafc', borderRadius: 2, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
-      <Box sx={{ width: camSidebarOpen ? { xs: 190, sm: 260 } : 52, flexShrink: 0, borderRight: '1px solid #e8ecf1', bgcolor: '#fff', display: 'flex', flexDirection: 'column', overflow: 'hidden', transition: 'width 0.22s cubic-bezier(0.4,0,0.2,1)' }}>
-        <Box sx={{ px: camSidebarOpen ? 2.5 : 1, pt: 2.5, pb: 1.5, display: 'flex', alignItems: 'center', justifyContent: camSidebarOpen ? 'space-between' : 'center' }}>
-          {camSidebarOpen && (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <ExamsSvgIcon sx={{ fontSize: 17, color: '#64748b' }} />
-              <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#334155' }}>Available Exams</Typography>
-            </Box>
-          )}
-          <Tooltip title={camSidebarOpen ? 'Collapse' : 'Expand'} placement="right">
-            <IconButton size="small" disableRipple onClick={(e) => { setCamSidebarOpen(!camSidebarOpen); e.currentTarget.blur(); }} sx={{ color: '#fff', bgcolor: '#3b82f6', '&:hover': { bgcolor: '#3b82f6' }, '&:active': { bgcolor: '#2563eb' }, borderRadius: 2, width: 32, height: 32 }}>
-              {camSidebarOpen ? <KeyboardArrowLeft sx={{ fontSize: 20 }} /> : <KeyboardArrowRight sx={{ fontSize: 20 }} />}
-            </IconButton>
-          </Tooltip>
-        </Box>
-
-        <Box sx={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', scrollbarWidth: 'none', '&::-webkit-scrollbar': { display: 'none' } }}>
-          {camExams.map((exam) => {
-            const active = String(exam.id) === String(selectedCamExamId);
-            return (
-              <Tooltip key={exam.id} title={!camSidebarOpen ? `${exam.exam_name} (${exam.exam_body})` : ''} placement="right">
-                <Box onClick={() => setSelectedCamExamId(String(exam.id))} sx={{ display: 'flex', alignItems: 'center', justifyContent: camSidebarOpen ? 'space-between' : 'center', px: camSidebarOpen ? 2.5 : 0, py: 1.8, cursor: 'pointer', borderLeft: active ? '3px solid #3b82f6' : '3px solid transparent', bgcolor: active ? '#f0f6ff' : 'transparent', transition: 'all 0.15s ease', '&:hover': { bgcolor: active ? '#f0f6ff' : '#f8fafc' } }}>
-                  {camSidebarOpen ? (
-                    <>
-                      <Typography sx={{ fontSize: '0.88rem', fontWeight: active ? 600 : 400, color: active ? '#3b82f6' : '#334155', lineHeight: 1.4, pr: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {exam.exam_name} ({exam.exam_body})
-                      </Typography>
-                      <ChevronRight sx={{ fontSize: 20, color: active ? '#3b82f6' : '#94a3b8', flexShrink: 0 }} />
-                    </>
-                  ) : (
-                    <Box sx={{ width: 34, height: 34, borderRadius: 2, bgcolor: active ? '#dbeafe' : '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #e2e8f0' }}>
-                      <Typography sx={{ fontSize: '0.9rem', fontWeight: 700, color: active ? '#3c81f6' : '#64748b', textTransform: 'uppercase' }}>{exam.exam_name.charAt(0)}</Typography>
-                    </Box>
-                  )}
-                </Box>
-              </Tooltip>
-            );
-          })}
-          {camExams.length === 0 && camSidebarOpen && <Typography sx={{ px: 2.5, py: 2, fontSize: '0.82rem', color: '#94a3b8' }}>No exams found.</Typography>}
-        </Box>
-      </Box>
+      <ExamSidebar
+        open={camSidebarOpen}
+        onToggle={() => setCamSidebarOpen(!camSidebarOpen)}
+        exams={camExams}
+        selectedExamId={selectedCamExamId}
+        onSelectExam={(id) => setSelectedCamExamId(id)}
+      />
 
       <Box sx={{ flex: 1, p: { xs: 1.5, sm: 3 }, overflowY: 'auto', minWidth: 0 }}>
         {!selectedCamExamId ? (
