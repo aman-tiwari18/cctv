@@ -43,8 +43,8 @@ const ViewOnlyExamCard = ({ exam, examCounts, navigate }) => {
         display: 'flex', flexDirection: 'column',
       }}
     >
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1, mb: 1 }}>
-        <Typography title={exam.exam_name} sx={{ fontWeight: 600, fontSize: { xs: '1.2rem', sm: '1.35rem' }, color: '#0f172a', lineHeight: 1.25, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'flex-start', gap: 1, mb: 1 }}>
+        <Typography title={exam.exam_name} sx={{ fontWeight: 600, fontSize: { xs: '1.15rem', sm: '1.3rem' }, color: '#0f172a', lineHeight: 1.25, flex: '1 1 auto', minWidth: 0, wordBreak: 'break-word' }}>
           {exam.exam_name}
         </Typography>
         <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', flexShrink: 0 }}>
