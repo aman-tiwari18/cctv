@@ -134,7 +134,7 @@ const ExamScheduleCalendar = ({ exam, iconSx }) => {
           {days.map((day, i) => {
             const kind = classify(day);
             const styles = {
-              active: { bgcolor: '#eff6ff', color: '#2563eb', fontWeight: 700, textDecoration: 'none' },
+              active: { bgcolor: '#2563eb', color: '#fff', fontWeight: 700, textDecoration: 'none' },
               skipped: { bgcolor: '#fef2f2', color: '#ef4444', fontWeight: 600, textDecoration: 'line-through' },
               out: { bgcolor: 'transparent', color: '#cbd5e1', fontWeight: 400, textDecoration: 'none' },
               blank: {},
