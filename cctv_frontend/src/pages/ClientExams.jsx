@@ -11,6 +11,16 @@ import ExamScheduleCalendar from '../components/ExamScheduleCalendar';
 const formatDateV1 = (date) =>
   new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
+// today, or the exam's last date — whichever is earlier → "DD-MM-YYYY"
+const examDefaultDate = (exam) => {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  let d = today;
+  const end = exam?.end_date ? new Date(exam.end_date) : null;
+  if (end && !isNaN(end)) { end.setHours(0, 0, 0, 0); if (end < today) d = end; }
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()}`;
+};
+
 const ViewOnlyExamCard = ({ exam, examCounts, navigate }) => {
   const isHLS = exam.link_type === 'HLS';
   const now = new Date();
@@ -124,7 +134,7 @@ const ViewOnlyExamCard = ({ exam, examCounts, navigate }) => {
           </Typography>
         </Box>
         <Box
-          onClick={() => navigate(`/detections?exam_id=${exam.id}`)}
+          onClick={() => navigate(`/detections?exam_id=${exam.id}&date=${examDefaultDate(exam)}`)}
           sx={{ display: 'flex', alignItems: 'center', gap: 0.8, cursor: 'pointer', '&:hover': { opacity: 0.75, color: '#3c81f6' } }}
         >
           <ReportProblemIcon sx={{ fontSize: 18, color: '#8b929cff' }} />

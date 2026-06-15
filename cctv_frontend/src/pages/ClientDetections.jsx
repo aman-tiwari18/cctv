@@ -1184,10 +1184,12 @@ const ClientDetections = () => {
     fetchExams();
   }, []);
 
-  // Read exam_id from URL params on mount
+  // Read exam_id (and optional date, e.g. opened from an exam card) on mount
   useEffect(() => {
     const examId = searchParams.get('exam_id');
     if (examId) setExamFilter(examId);
+    const dp = searchParams.get('date');
+    if (dp && /^\d{2}-\d{2}-\d{4}$/.test(dp)) setDateFilter(dp);
   }, [searchParams]);
 
   // Populate the dependent Shift filter from the selected exam — the exam list
