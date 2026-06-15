@@ -397,6 +397,7 @@ const TodaysScriptDistributionCard = () => {
 const ClientDetectionDashboard = () => {
     const [overview, setOverview] = useState(null);
     const [overviewLoading, setOverviewLoading] = useState(true);
+    const [initializing, setInitializing] = useState(true);  // until the initial range is decided
     const [showGpuWarning, setShowGpuWarning] = useState(true);
     const [searchKeyword, setSearchKeyword] = useState('');
     const [dateChip, setDateChip] = useState('today');
@@ -540,11 +541,13 @@ const ClientDetectionDashboard = () => {
                     return;
                 }
                 setOverview(data);
+                setInitializing(false);
             })
             .catch((err) => {
                 if (cancelled) return;
                 console.error('[ClientDetectionDashboard.getOverview]', err);
                 setOverview(null);
+                setInitializing(false);
             })
             .finally(() => {
                 if (!cancelled && !didAutoSwitch) setOverviewLoading(false);
@@ -775,7 +778,7 @@ const ClientDetectionDashboard = () => {
                 sx={{ mb: activeFilters.length ? 1 : 2.5 }}
             >
                 {dateChips.map((c) => {
-                    const active = c.key === dateChip;
+                    const active = !initializing && c.key === dateChip;
                     return (
                         <Box
                             key={c.key}
