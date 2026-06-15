@@ -1879,11 +1879,23 @@ const Dashboard = () => {
 
     useEffect(() => {
         let cancelled = false;
+        let didAutoSwitch = false;
         setOverviewLoading(true);
         dashboardAPI
             .getOverview(apiParams)
             .then((res) => {
-                if (!cancelled) setOverview(res?.data?.data || null);
+                if (cancelled) return;
+                const data = res?.data?.data || null;
+                // Default-on-open: if Today has 0 exams, switch to Last month WITHOUT
+                // painting the empty Today view — keep the loading skeleton through the
+                // switch so there's no visible flash.
+                if (!autoSwitchedRef.current && dateChip === 'today' && (data?.total_exams?.total || 0) === 0) {
+                    autoSwitchedRef.current = true;
+                    didAutoSwitch = true;
+                    setDateChip('last_month');   // new apiParams → effect refetches; loading stays true
+                    return;
+                }
+                setOverview(data);
             })
             .catch((err) => {
                 if (cancelled) return;
@@ -1891,7 +1903,7 @@ const Dashboard = () => {
                 setOverview(null);
             })
             .finally(() => {
-                if (!cancelled) setOverviewLoading(false);
+                if (!cancelled && !didAutoSwitch) setOverviewLoading(false);
             });
         return () => {
             cancelled = true;
@@ -1903,16 +1915,6 @@ const Dashboard = () => {
     const scripts      = overview?.scripts       || { planned_today: 0, running: 0, scheduled: 0, completed: 0 };
     const detections   = overview?.detections    || { today: 0, pushed_to_client: 0, false_detection: 0 };
     const distribution = overview?.detection_distribution || [];
-
-    // On open, if Today has no exams, default the view to Last month (once).
-    useEffect(() => {
-        if (autoSwitchedRef.current) return;
-        if (dateChip !== 'today' || overviewLoading || !overview) return;
-        if ((overview.total_exams?.total || 0) === 0) {
-            autoSwitchedRef.current = true;
-            setDateChip('last_month');
-        }
-    }, [overview, overviewLoading, dateChip]);
 
     const dateChips = [
         { key: 'today',      label: 'Today' },
