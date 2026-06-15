@@ -2270,29 +2270,57 @@ def _ensure_vllm_running():
     except:
         pass
 
-    logger.info("Starting temporary vLLM server process. Please wait (~20 seconds)...")
+    logger.info("Starting temporary vLLM server process. Please wait (~60-180 seconds)...")
     _vllm_script = os.getenv("VLLM_START_SCRIPT", os.path.join(PROJECT_ROOT, "start_vllm.sh"))
     logger.info(f"Using vLLM start script: {_vllm_script}")
+
+    # Log vLLM output to a file for debugging instead of /dev/null
+    _vllm_log_path = os.path.join(LOG_DIR, f"vllm_startup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+    os.makedirs(LOG_DIR, exist_ok=True)
+    _vllm_log_file = open(_vllm_log_path, "w")
+    logger.info(f"vLLM startup log → {_vllm_log_path}")
+
     proc = subprocess.Popen(
         ["/bin/bash", _vllm_script],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=_vllm_log_file,
+        stderr=subprocess.STDOUT,
         preexec_fn=os.setsid
     )
     _VLLM_PROC = proc
-    for _ in range(300):
+
+    # Poll for up to 90 iterations × 2s = 3 minutes max.
+    # The 30B MoE model on H200 typically loads in 30-90 seconds.
+    # If it hasn't started by 3 minutes, it's deadlocked (RPC timeout,
+    # CUDA driver contention, etc.) — kill it and abort.
+    _MAX_STARTUP_POLLS = 90
+    for i in range(_MAX_STARTUP_POLLS):
         try:
             if requests.get("http://localhost:8001/health", timeout=2).status_code == 200:
-                logger.info("Temporary vLLM server successfully started!")
+                logger.info(f"Temporary vLLM server successfully started! (took ~{i*2}s)")
+                _vllm_log_file.close()
                 return proc
         except:
             pass
         time.sleep(2)
         if proc.poll() is not None:
-            logger.error("vLLM server crashed during startup.")
-            return proc
-    logger.error("vLLM server timed out during startup.")
-    return proc
+            logger.error(f"vLLM server crashed during startup (exit code {proc.returncode}).")
+            logger.error(f"Check vLLM log at: {_vllm_log_path}")
+            _vllm_log_file.close()
+            # Fatal: vLLM crashed, no point proceeding with classification
+            _shutdown_vllm("startup crash")
+            sys.exit(1)
+
+    # vLLM timed out — still running but not serving. This usually means
+    # the RPC handshake between vLLM API server and EngineCore is deadlocked
+    # (common when multiple vLLM instances compete for CUDA driver init).
+    logger.error(
+        f"vLLM server failed to start within {_MAX_STARTUP_POLLS * 2}s. "
+        f"Killing zombie vLLM process and aborting classification."
+    )
+    logger.error(f"Check vLLM log at: {_vllm_log_path}")
+    _vllm_log_file.close()
+    _shutdown_vllm("startup timeout")
+    sys.exit(1)
 
 if __name__ == "__main__":
     signal.signal(signal.SIGTERM, _handle_shutdown_signal)
