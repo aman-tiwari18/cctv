@@ -406,6 +406,7 @@ const ClientDetectionDashboard = () => {
     const [selectedShifts, setSelectedShifts] = useState([]);
     const [examsList, setExamsList] = useState([]);
     const searchInputRef = useRef(null);
+    const autoSwitchedRef = useRef(false);  // one-time: Today→Last month when Today has 0 exams
 
     // Fetch the company-scoped exam list once on mount.
     useEffect(() => {
@@ -546,6 +547,16 @@ const ClientDetectionDashboard = () => {
     const scripts      = overview?.scripts       || { planned_today: 0, running: 0, scheduled: 0, completed: 0 };
     const detections   = overview?.detections    || { today: 0, pushed_to_client: 0, false_detection: 0, removed_from_client: 0 };
     const distribution = overview?.detection_distribution || [];
+
+    // On open, if Today has no exams, default the view to Last month (once).
+    useEffect(() => {
+        if (autoSwitchedRef.current) return;
+        if (dateChip !== 'today' || overviewLoading || !overview) return;
+        if ((overview.total_exams?.total || 0) === 0) {
+            autoSwitchedRef.current = true;
+            setDateChip('last_month');
+        }
+    }, [overview, overviewLoading, dateChip]);
 
     const dateChips = [
         { key: 'today',      label: 'Today' },
