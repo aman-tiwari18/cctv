@@ -1,4 +1,3 @@
-//admin and client fixed
 /**
  * ReportController.js
  * Generates and streams a detection report as an Excel (.xlsx) file.
@@ -107,12 +106,6 @@ function determineShiftId(dateTimeStr, shifts) {
     return closest.id;
 }
 
-
-
-
-
-
-
 // ─── Controller ───────────────────────────────────────────────────────────────
 
 exports.downloadReport = async (req, res) => {
@@ -181,27 +174,6 @@ exports.downloadReport = async (req, res) => {
         const searchDate = `${d}/${m}/${y}`; // 16/04/2026
 
         // ── 4. Fetch All Detections for exam + date ───────────────────────────
-        // const detections = isRTSP ? await query(
-        //     `SELECT id, shift_id, city, center_name, camera_id, camera_name, camera_no,
-        //             '' as camera_category, tc_code, device_id, state, camera_status,
-        //             events, rejected_events, date_time, imageurl, detection_type,
-        //             unique_id
-        //      FROM camera_report_rtsp
-        //      WHERE exam_id = ? AND date_time LIKE CONCAT(?, '%')
-        //      ORDER BY shift_id ASC`,
-        //     [examId, searchDate]
-        // ) : await query(
-        //     `SELECT id, shift_id, city, center_name, camera_id, camera_name,
-        //             camera_category, tc_code, ch_code, state, camera_status,
-        //             events, rejected_events, date_time, imageurl, detection_type,
-        //             unique_id, created_at
-        //      FROM camera_report_hls
-        //      WHERE exam_id = ? AND date_time LIKE CONCAT(?, '%')
-        //      ORDER BY shift_id ASC, created_at ASC`,
-        //     [examId, searchDate]
-        // );
-
-
         const detections = isRTSP ? await query(
             `SELECT id, shift_id, city, center_name, camera_id, camera_name, camera_no,
                     '' as camera_category, tc_code, device_id, state, camera_status,
@@ -221,37 +193,6 @@ exports.downloadReport = async (req, res) => {
             ORDER BY shift_id ASC, created_at ASC`,
             [examId, searchDate]
         );
-
-        // // ── 5. Aggregate detections: aggregated[shiftId][key] ───────────────
-        // const aggregated = {};
-        // const shiftsWithData = new Set(); // To track which shifts exist in reports table
-
-        // detections.forEach(d => {
-        //     const sid = d.shift_id;
-        //     shiftsWithData.add(sid);
-
-        //     // RTSP key: device_id_camera_no | HLS key: ch_code
-        //     const key = isRTSP ? `${d.device_id}_${d.camera_no}` : d.ch_code;
-
-        //     if (!aggregated[sid]) aggregated[sid] = {};
-        //     if (!aggregated[sid][key]) {
-        //         aggregated[sid][key] = {
-        //             events: 0,
-        //             rejected: 0,
-        //             status: (d.camera_status || 'Online'),
-        //             details: {
-        //                 city: d.city,
-        //                 center: d.center_name,
-        //                 cam_id: key,
-        //                 camera_name: d.camera_name,
-        //                 cam_type: d.camera_category,
-        //                 tc_code: d.tc_code,
-        //             }
-        //         };
-        //     }
-        //     aggregated[sid][key].events += (Number(d.events) || 0);
-        //     aggregated[sid][key].rejected += (Number(d.rejected_events) || 0);
-        // });
 
         // ── 5. Aggregate detections: aggregated[shiftId][key] ───────────────
         const aggregated = {};
@@ -282,17 +223,7 @@ exports.downloadReport = async (req, res) => {
                 };
             }
 
-            //purana
-            // if (Number(d.pushed_to_client) === 1) {
-            //     if (Number(d.remove_from_client) === 1) {
-            //         aggregated[sid][key].rejected += 1;
-            //     } else {
-            //         aggregated[sid][key].events += 1;
-            //     }
-            // }
-
-
-            //naya
+            
             if (Number(d.pushed_to_client) === 1) {
                 if (Number(d.remove_from_client) === 1) {
                     aggregated[sid][key].rejected += 1;
@@ -309,15 +240,6 @@ exports.downloadReport = async (req, res) => {
         // ── 6. Build Workbook ─────────────────────────────────────────────────
         const wb = XLSX.utils.book_new();
 
-        //purna
-        // const SHIFT_HEADERS = [
-        //     'City', 'Center', 'Cam ID', 'Camera Name',
-        //     'Cam Type', 'TC Code', 'Events (Excluding Rejected)', 'Rejected Events', 'Camera Status'
-        // ];
-        // const SHIFT_WIDTHS = [15, 30, 15, 35, 15, 12, 28, 16, 15];
-
-
-        //naya
         const SHIFT_HEADERS = [
             'City', 'Center', 'Cam ID', 'Camera Name',
             'Cam Type', 'TC Code', 'Events (Excluding Rejected)', 'Rejected Events', 'False Positive', 'Camera Status'
@@ -425,16 +347,6 @@ exports.downloadReport = async (req, res) => {
         });
 
         // ── 8. Detections List Sheet ──────────────────────────────────────────
-
-        //purana
-        // const DET_HEADERS = [
-        //     'Shift', 'Device ID', 'Camera No', 'Cam ID', 'Camera Name',
-        //     'Center Name', 'City', 'Detection Type', 'Detection Time', 'Image URL', 'View'
-        // ];
-        // const DET_WIDTHS = [10, 15, 12, 15, 35, 30, 15, 20, 22, 70, 8];
-
-
-        //naya
         const DET_HEADERS = [
             'Shift', 'Device ID', 'Camera No', 'Cam ID', 'Camera Name',
             'Center Name', 'City', 'Detection Type', 'Detection Time',
@@ -442,38 +354,23 @@ exports.downloadReport = async (req, res) => {
         ];
         const DET_WIDTHS = [10, 15, 12, 15, 35, 30, 15, 20, 22, 10, 70, 8];
 
-
-
-        //purana
-        // const detSheetData = detections.map(d => ({
-        //     'Shift': (shiftMap[d.shift_id] || {}).label || (d.shift_id ? `Shift ${d.shift_id}` : ''),
-        //     'Device ID': d.device_id || '',
-        //     'Camera No': d.camera_no || '',
-        //     'Cam ID': isRTSP ? `${d.device_id}_${d.camera_no}` : formatHlsCamId(d.camera_name, d.ch_code),
-        //     'Camera Name': d.camera_name || '',
-        //     'Center Name': d.center_name || '',
-        //     'City': d.city || '',
-        //     'Detection Type': d.detection_type || '',
-        //     'Detection Time': d.date_time || '',
-        //     'Image URL': d.imageurl || '',
-        //     'View': d.imageurl ? 'View' : '',
-        // }));
-
-        //naya 
-        const detSheetData = detections.map(d => ({
-            'Shift': (shiftMap[d.shift_id] || {}).label || (d.shift_id ? `Shift ${d.shift_id}` : ''),
-            'Device ID': d.device_id || '',
-            'Camera No': d.camera_no || '',
-            'Cam ID': isRTSP ? `${d.device_id}_${d.camera_no}` : formatHlsCamId(d.camera_name, d.ch_code),
-            'Camera Name': d.camera_name || '',
-            'Center Name': d.center_name || '',
-            'City': d.city || '',
-            'Detection Type': d.detection_type || '',
-            'Detection Time': d.date_time || '',
-            'Rejected': Number(d.remove_from_client) === 1 ? 1 : 0,  // ✅ add karo
-            'Image URL': d.imageurl || '',
-            'View': d.imageurl ? 'View' : '',
-        }));       
+        const detSheetData = detections.map(d => {
+            const resolvedSid = (d.shift_id != null) ? d.shift_id : determineShiftId(d.date_time, shifts);
+            return {
+                'Shift': (shiftMap[resolvedSid] || {}).label || `Shift ${resolvedSid}`,
+                'Device ID': d.device_id || '',
+                'Camera No': d.camera_no || '',
+                'Cam ID': isRTSP ? `${d.device_id}_${d.camera_no}` : formatHlsCamId(d.camera_name, d.ch_code),
+                'Camera Name': d.camera_name || '',
+                'Center Name': d.center_name || '',
+                'City': d.city || '',
+                'Detection Type': d.detection_type || '',
+                'Detection Time': d.date_time || '',
+                'Rejected': Number(d.remove_from_client) === 1 ? 1 : 0,
+                'Image URL': d.imageurl || '',
+                'View': d.imageurl ? 'View' : '',
+            };
+        });
 
         const detWs = makeSheet(DET_HEADERS, detSheetData, DET_WIDTHS);
 
@@ -516,7 +413,10 @@ exports.downloadReport = async (req, res) => {
             // In analysis, we show stats for every scheduled shift
             // Show all master cameras for the exam in every shift (RTSP parity)
             const shiftCams = masterCameras;
-            const shiftDets = detections.filter(d => d.shift_id === shiftId);
+            const shiftDets = detections.filter(d => {
+                const resolvedSid = (d.shift_id != null) ? d.shift_id : determineShiftId(d.date_time, shifts);
+                return resolvedSid === shiftId;
+            });
 
             const total = shiftCams.length;
             // Camera is online if: classification IS NOT NULL AND status = 'Accessible' (case-insensitive)
@@ -701,43 +601,6 @@ exports.downloadClientReport = async (req, res) => {
             [examId, searchDate]
         );
 
-        // ── 5. Aggregate detections per (shift, camera) ──────────────────────
-        // Counts detection ROWS (not the stored events field). Per the client
-        // semantics: each pushed detection is "one event" from the viewer's
-        // perspective. We split that count into:
-        //   - events    : remove_from_client = 0 (still active on client)
-        //   - rejected  : remove_from_client = 1 (admin pulled it back)
-
-
-        
-        // const aggregated = {};
-        // detections.forEach(d => {
-        //     const sid = d.shift_id;
-        //     const key = isRTSP ? `${d.device_id}_${d.camera_no}` : d.ch_code;
-        //     if (!aggregated[sid]) aggregated[sid] = {};
-        //     if (!aggregated[sid][key]) {
-        //         aggregated[sid][key] = {
-        //             events: 0,
-        //             rejected: 0,
-        //             status: (d.camera_status || 'Online'),
-        //             details: {
-        //                 city: d.city,
-        //                 center: d.center_name,
-        //                 cam_id: key,
-        //                 camera_name: d.camera_name,
-        //                 cam_type: d.camera_category,
-        //                 tc_code: d.tc_code,
-        //             }
-        //         };
-        //     }
-        //     if (Number(d.remove_from_client) === 1) {
-        //         aggregated[sid][key].rejected += 1;
-        //     } else {
-        //         aggregated[sid][key].events += 1;
-        //     }
-        // });
-
-
 
         // ── 5. Aggregate detections per (shift, camera) ──────────────────────
         const aggregated = {};
@@ -871,20 +734,23 @@ exports.downloadClientReport = async (req, res) => {
         ];
         const DET_WIDTHS = [10, 15, 12, 15, 35, 30, 15, 20, 22, 10, 70, 8];
 
-        const detSheetData = detections.map(d => ({
-            'Shift': (shiftMap[d.shift_id] || {}).label || (d.shift_id ? `Shift ${d.shift_id}` : ''),
-            'Device ID': d.device_id || '',
-            'Camera No': d.camera_no || '',
-            'Cam ID': isRTSP ? `${d.device_id}_${d.camera_no}` : formatHlsCamId(d.camera_name, d.ch_code),
-            'Camera Name': d.camera_name || '',
-            'Center Name': d.center_name || '',
-            'City': d.city || '',
-            'Detection Type': d.detection_type || '',
-            'Detection Time': d.date_time || '',
-            'Rejected': Number(d.remove_from_client) === 1 ? 1 : 0,
-            'Image URL': d.imageurl || '',
-            'View': d.imageurl ? 'View' : '',
-        }));
+        const detSheetData = detections.map(d => {
+            const resolvedSid = (d.shift_id != null) ? d.shift_id : determineShiftId(d.date_time, shifts);
+            return {
+                'Shift': (shiftMap[resolvedSid] || {}).label || `Shift ${resolvedSid}`,
+                'Device ID': d.device_id || '',
+                'Camera No': d.camera_no || '',
+                'Cam ID': isRTSP ? `${d.device_id}_${d.camera_no}` : formatHlsCamId(d.camera_name, d.ch_code),
+                'Camera Name': d.camera_name || '',
+                'Center Name': d.center_name || '',
+                'City': d.city || '',
+                'Detection Type': d.detection_type || '',
+                'Detection Time': d.date_time || '',
+                'Rejected': Number(d.remove_from_client) === 1 ? 1 : 0,
+                'Image URL': d.imageurl || '',
+                'View': d.imageurl ? 'View' : '',
+            };
+        });
 
         const detWs = makeSheet(DET_HEADERS, detSheetData, DET_WIDTHS);
 
@@ -922,7 +788,10 @@ exports.downloadClientReport = async (req, res) => {
             }
 
             const shiftCams = masterCameras;
-            const shiftDets = detections.filter(d => d.shift_id === shiftId);
+            const shiftDets = detections.filter(d => {
+                const resolvedSid = (d.shift_id != null) ? d.shift_id : determineShiftId(d.date_time, shifts);
+                return resolvedSid === shiftId;
+            });
 
             const total = shiftCams.length;
             const online = shiftCams.filter(c => {
@@ -987,8 +856,6 @@ exports.downloadClientReport = async (req, res) => {
         return res.status(500).json({ success: false, message: 'Internal Server Error while generating client report.' });
     }
 };
-
-
 
 
 
