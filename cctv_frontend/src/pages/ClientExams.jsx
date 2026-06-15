@@ -2,10 +2,10 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Box, Grid, Typography, CircularProgress, Chip } from '@mui/material';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import ReportProblemIcon from '@mui/icons-material/ReportProblem';
-import { CalendarTodayOutlined } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { examsAPI } from '../services/api';
 import { ShiftSvgIcon } from '../components/ShiftSvgIcon';
+import ExamScheduleCalendar from '../components/ExamScheduleCalendar';
 
 
 const formatDateV1 = (date) =>
@@ -70,8 +70,8 @@ const ViewOnlyExamCard = ({ exam, examCounts, navigate }) => {
 
       <Box sx={{ bgcolor: '#f1f5f9', borderRadius: 3, p: { xs: 2, sm: 1.75 }, mb: 2.5 }}>
         {exam.start_date && exam.end_date && (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.2 }}>
-            <CalendarTodayOutlined sx={{ fontSize: 16, color: '#676e80', flexShrink: 0 }} />
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 1.2 }}>
+            <ExamScheduleCalendar exam={exam} />
             <Typography sx={{ fontSize: { xs: '0.95rem', sm: '0.84rem' }, fontWeight: 600, color: '#676e80' }}>
               {formatDateV1(exam.start_date)} - {formatDateV1(exam.end_date)}
             </Typography>
