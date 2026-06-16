@@ -158,10 +158,16 @@ const ExamSidebar = ({
     <Box
       sx={{
         flex: 1,
+        minHeight: 0,
         overflowY: 'auto',
         overflowX: 'hidden',
-        scrollbarWidth: 'none',
-        '&::-webkit-scrollbar': { display: 'none' },
+        // Slim, on-brand scrollbar (distinct from the page) so the list reads as
+        // its own independently-scrolling region.
+        scrollbarWidth: 'thin',
+        scrollbarColor: '#cbd5e1 transparent',
+        '&::-webkit-scrollbar': { width: '6px' },
+        '&::-webkit-scrollbar-thumb': { backgroundColor: '#cbd5e1', borderRadius: '3px' },
+        '&::-webkit-scrollbar-track': { backgroundColor: 'transparent' },
       }}
     >
       {visibleExams.map((exam) => {

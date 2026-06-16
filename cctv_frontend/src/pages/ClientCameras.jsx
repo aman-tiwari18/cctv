@@ -221,7 +221,7 @@ const ClientCameras = () => {
   };
 
   return (
-    <Box sx={{ display: 'flex', minHeight: 'calc(100vh - 120px)', bgcolor: '#f8fafc', borderRadius: 2, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
+    <Box sx={{ display: 'flex', height: 'calc(100vh - 120px)', bgcolor: '#f8fafc', borderRadius: 2, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
       <ExamSidebar
         open={camSidebarOpen}
         onToggle={() => setCamSidebarOpen(!camSidebarOpen)}

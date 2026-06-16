@@ -312,7 +312,7 @@ const Executions = () => {
   };
 
   return (
-    <Box sx={{ display: 'flex', minHeight: 'calc(100vh - 120px)', bgcolor: '#f8fafc' }}>
+    <Box sx={{ display: 'flex', height: 'calc(100vh - 120px)', overflow: 'hidden', bgcolor: '#f8fafc' }}>
 
       {/* ════ EXAM SIDEBAR ════ */}
       <ExamSidebar
