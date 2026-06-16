@@ -510,11 +510,11 @@ export const DetectionDistributionCard = ({ distribution = [], loading }) => {
     return (
         <Card sx={{ height: '100%', bgcolor: '#fff', borderRadius: '8px', boxShadow: '0 2px 4px 0 rgba(0,0,0,0.05)' }}>
             <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
-                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" useFlexGap flexWrap="wrap" sx={{ mb: 2, gap: 1 }}>
                     <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: { xs: '17px', sm: '20px' }, fontWeight: 700, lineHeight: '24px' }}>
                         Detection Distribution
                     </Typography>
-                    <Stack direction="row" alignItems="center" spacing={1}>
+                    <Stack direction="row" alignItems="center" spacing={1} useFlexGap flexWrap="wrap" sx={{ flexShrink: 0 }}>
                         <Button
                             variant="outlined"
                             size="small"
