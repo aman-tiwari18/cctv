@@ -115,7 +115,7 @@ const Analytics = () => {
 
   const loadExams = async () => {
     try {
-      const response = await examsAPI.getAll({ is_active: !viewingArchived });
+      const response = await examsAPI.getAll({ is_active: true });
       const examList = Array.isArray(response?.data?.data) ? response.data.data : [];
       setExams(examList);
       if (examId && examList.length > 0 && !viewingArchived) {

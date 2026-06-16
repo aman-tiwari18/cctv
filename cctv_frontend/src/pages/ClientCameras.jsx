@@ -93,6 +93,7 @@ const ClientCameras = () => {
   const isSmDown = useMediaQuery(theme.breakpoints.down('sm'));
   const [searchParams] = useSearchParams();
   const [camSidebarOpen, setCamSidebarOpen] = useState(true);
+  const [camViewingArchived, setCamViewingArchived] = useState(false);
   // Collapse the exam rail by default on phones so the content keeps full width.
   useEffect(() => { setCamSidebarOpen(!isSmDown); }, [isSmDown]);
   const [camExams, setCamExams] = useState([]);
@@ -227,6 +228,8 @@ const ClientCameras = () => {
         exams={camExams}
         selectedExamId={selectedCamExamId}
         onSelectExam={(id) => setSelectedCamExamId(id)}
+        viewingArchived={camViewingArchived}
+        onToggleArchived={() => { setCamViewingArchived((v) => !v); setSelectedCamExamId(''); }}
       />
 
       <Box sx={{ flex: 1, p: { xs: 1.5, sm: 3 }, overflowY: 'auto', minWidth: 0 }}>

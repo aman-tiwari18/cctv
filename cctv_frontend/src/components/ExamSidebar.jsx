@@ -57,6 +57,16 @@ const ExamSidebar = ({
   const displayTitle = title || (viewingArchived ? 'Archived Exams' : 'Available Exams');
   const IconComponent = icon || ExamsSvgIcon;
 
+  // Available vs Archived is date-driven: an exam whose end date is before today
+  // is "completed" → shown under Archived; everything else stays under Available.
+  const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
+  const isCompleted = (e) => {
+    if (!e?.end_date) return false;
+    const end = new Date(e.end_date);
+    return !Number.isNaN(end.getTime()) && end < startOfToday;
+  };
+  const visibleExams = exams.filter((e) => (viewingArchived ? isCompleted(e) : !isCompleted(e)));
+
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   // Overlay state for the mobile Drawer — independent of the `open` prop so the
@@ -154,7 +164,7 @@ const ExamSidebar = ({
         '&::-webkit-scrollbar': { display: 'none' },
       }}
     >
-      {exams.map((exam) => {
+      {visibleExams.map((exam) => {
         const active = String(exam.id) === String(selectedExamId);
         return (
           <Tooltip
@@ -230,9 +240,9 @@ const ExamSidebar = ({
           </Tooltip>
         );
       })}
-      {exams.length === 0 && expanded && (
+      {visibleExams.length === 0 && expanded && (
         <Typography sx={{ px: 2.5, py: 2, fontSize: '0.82rem', color: '#94a3b8' }}>
-          No exams found.
+          {viewingArchived ? 'No archived exams.' : 'No available exams.'}
         </Typography>
       )}
     </Box>

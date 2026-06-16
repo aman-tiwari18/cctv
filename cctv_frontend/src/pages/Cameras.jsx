@@ -204,7 +204,7 @@ const Cameras = () => {
 
   const loadExams = async () => {
     try {
-      const res = await examsAPI.getAll({ is_active: !viewingArchived });
+      const res = await examsAPI.getAll({ is_active: true });
       const list = Array.isArray(res?.data?.data) ? res.data.data : [];
       setExams(list);
     } catch (e) { console.error(e); }
