@@ -274,7 +274,7 @@ const ExamSidebar = ({
             '&:hover': { bgcolor: '#f1f5f9', borderColor: '#94a3b8' },
           }}
         >
-          {viewingArchived ? 'View Active Exams' : 'View Archived Exams'}
+          {viewingArchived ? 'View Available Exams' : 'View Archived Exams'}
         </Button>
       </Box>
     ) : null;
