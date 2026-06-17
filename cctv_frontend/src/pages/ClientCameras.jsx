@@ -26,14 +26,11 @@ import {
 } from '@mui/material';
 import {
   Search,
-  KeyboardArrowLeft,
-  KeyboardArrowRight,
-  ChevronRight,
   Download,
 } from '@mui/icons-material';
 import { useSearchParams } from 'react-router-dom';
 import { examsAPI, camerasAPI, clientDashboardAPI } from '../services/api';
-import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
+import ExamSidebar from '../components/ExamSidebar';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 
 const formatDateDDMMYYYY = (dateStr) => {
@@ -96,6 +93,7 @@ const ClientCameras = () => {
   const isSmDown = useMediaQuery(theme.breakpoints.down('sm'));
   const [searchParams] = useSearchParams();
   const [camSidebarOpen, setCamSidebarOpen] = useState(true);
+  const [camViewingArchived, setCamViewingArchived] = useState(false);
   // Collapse the exam rail by default on phones so the content keeps full width.
   useEffect(() => { setCamSidebarOpen(!isSmDown); }, [isSmDown]);
   const [camExams, setCamExams] = useState([]);
@@ -109,10 +107,30 @@ const ClientCameras = () => {
   const [camOrderBy, setCamOrderBy] = useState('');
   const [camOrder, setCamOrder] = useState('asc');
   const [camPage, setCamPage] = useState(0);
-  const [camRowsPerPage, setCamRowsPerPage] = useState(50);
+  // Default to 15 rows on mobile (<sm), 50 on larger screens. Read the real
+  // viewport width once at mount (reliable, unlike useMediaQuery's first value).
+  const [camRowsPerPage, setCamRowsPerPage] = useState(() => (window.innerWidth < theme.breakpoints.values.sm ? 15 : 50));
   const [camTotal, setCamTotal] = useState(0);
   const [camFilterShiftId, setCamFilterShiftId] = useState('');
   const [camFilterExamDate, setCamFilterExamDate] = useState('');
+
+  // Update the default page size only when the viewport crosses the sm
+  // boundary (mobile <-> desktop), so it stays responsive to resizing while a
+  // manual page-size choice still sticks as long as you don't cross over.
+  useEffect(() => {
+    const sm = theme.breakpoints.values.sm;
+    let wasMobile = window.innerWidth < sm;
+    const onResize = () => {
+      const isMobile = window.innerWidth < sm;
+      if (isMobile !== wasMobile) {
+        wasMobile = isMobile;
+        setCamRowsPerPage(isMobile ? 15 : 50);
+        setCamPage(0);
+      }
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [theme]);
 
   const loadCamExams = useCallback(async () => {
     try {
@@ -203,47 +221,16 @@ const ClientCameras = () => {
   };
 
   return (
-    <Box sx={{ display: 'flex', minHeight: 'calc(100vh - 120px)', bgcolor: '#f8fafc', borderRadius: 2, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
-      <Box sx={{ width: camSidebarOpen ? { xs: 190, sm: 260 } : 52, flexShrink: 0, borderRight: '1px solid #e8ecf1', bgcolor: '#fff', display: 'flex', flexDirection: 'column', overflow: 'hidden', transition: 'width 0.22s cubic-bezier(0.4,0,0.2,1)' }}>
-        <Box sx={{ px: camSidebarOpen ? 2.5 : 1, pt: 2.5, pb: 1.5, display: 'flex', alignItems: 'center', justifyContent: camSidebarOpen ? 'space-between' : 'center' }}>
-          {camSidebarOpen && (
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <ExamsSvgIcon sx={{ fontSize: 17, color: '#64748b' }} />
-              <Typography sx={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#334155' }}>Available Exams</Typography>
-            </Box>
-          )}
-          <Tooltip title={camSidebarOpen ? 'Collapse' : 'Expand'} placement="right">
-            <IconButton size="small" onClick={() => setCamSidebarOpen(!camSidebarOpen)} sx={{ color: '#fff', bgcolor: '#3b82f6', '&:hover': { bgcolor: '#2563eb' }, borderRadius: 2, width: 32, height: 32 }}>
-              {camSidebarOpen ? <KeyboardArrowLeft sx={{ fontSize: 20 }} /> : <KeyboardArrowRight sx={{ fontSize: 20 }} />}
-            </IconButton>
-          </Tooltip>
-        </Box>
-
-        <Box sx={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', scrollbarWidth: 'none', '&::-webkit-scrollbar': { display: 'none' } }}>
-          {camExams.map((exam) => {
-            const active = String(exam.id) === String(selectedCamExamId);
-            return (
-              <Tooltip key={exam.id} title={!camSidebarOpen ? `${exam.exam_name} (${exam.exam_body})` : ''} placement="right">
-                <Box onClick={() => setSelectedCamExamId(String(exam.id))} sx={{ display: 'flex', alignItems: 'center', justifyContent: camSidebarOpen ? 'space-between' : 'center', px: camSidebarOpen ? 2.5 : 0, py: 1.8, cursor: 'pointer', borderLeft: active ? '3px solid #3b82f6' : '3px solid transparent', bgcolor: active ? '#f0f6ff' : 'transparent', transition: 'all 0.15s ease', '&:hover': { bgcolor: active ? '#f0f6ff' : '#f8fafc' } }}>
-                  {camSidebarOpen ? (
-                    <>
-                      <Typography sx={{ fontSize: '0.88rem', fontWeight: active ? 600 : 400, color: active ? '#3b82f6' : '#334155', lineHeight: 1.4, pr: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {exam.exam_name} ({exam.exam_body})
-                      </Typography>
-                      <ChevronRight sx={{ fontSize: 20, color: active ? '#3b82f6' : '#94a3b8', flexShrink: 0 }} />
-                    </>
-                  ) : (
-                    <Box sx={{ width: 34, height: 34, borderRadius: 2, bgcolor: active ? '#2563eb' : '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', border: active ? 'none' : '1px solid #e2e8f0' }}>
-                      <Typography sx={{ fontSize: '0.9rem', fontWeight: 700, color: active ? '#fff' : '#64748b', textTransform: 'uppercase' }}>{exam.exam_name.charAt(0)}</Typography>
-                    </Box>
-                  )}
-                </Box>
-              </Tooltip>
-            );
-          })}
-          {camExams.length === 0 && camSidebarOpen && <Typography sx={{ px: 2.5, py: 2, fontSize: '0.82rem', color: '#94a3b8' }}>No exams found.</Typography>}
-        </Box>
-      </Box>
+    <Box sx={{ display: 'flex', height: 'calc(100vh - 120px)', bgcolor: '#f8fafc', borderRadius: 2, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
+      <ExamSidebar
+        open={camSidebarOpen}
+        onToggle={() => setCamSidebarOpen(!camSidebarOpen)}
+        exams={camExams}
+        selectedExamId={selectedCamExamId}
+        onSelectExam={(id) => setSelectedCamExamId(id)}
+        viewingArchived={camViewingArchived}
+        onToggleArchived={() => { setCamViewingArchived((v) => !v); setSelectedCamExamId(''); }}
+      />
 
       <Box sx={{ flex: 1, p: { xs: 1.5, sm: 3 }, overflowY: 'auto', minWidth: 0 }}>
         {!selectedCamExamId ? (
@@ -268,25 +255,10 @@ const ClientCameras = () => {
               </Box>
 
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap', flexShrink: 0, width: { xs: '100%', md: 'auto' } }}>
-                <Tooltip title="Download HLS Template">
-                  <Button variant="outlined" size="small" startIcon={<Download />}
-                    onClick={() => handleDownloadTemplate('hls')}
-                    sx={{ flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' }, height: 40, borderColor: '#3b82f6', color: '#3b82f6', '&:hover': { bgcolor: '#eff6ff' }, textTransform: 'none', fontWeight: 600 }}>
-                    HLS Template
-                  </Button>
-                </Tooltip>
-                <Tooltip title="Download RTSP Template">
-                  <Button variant="outlined" size="small" startIcon={<Download />}
-                    onClick={() => handleDownloadTemplate('rtsp')}
-                    sx={{ flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' }, height: 40, borderColor: '#6366f1', color: '#6366f1', '&:hover': { bgcolor: '#eef2ff' }, textTransform: 'none', fontWeight: 600 }}>
-                    RTSP Template
-                  </Button>
-                </Tooltip>
-
                 <TextField
                   size="small" placeholder="Search center, state..." value={camSearchQuery} onChange={(e) => setCamSearchQuery(e.target.value)}
                   InputProps={{ startAdornment: <InputAdornment position="start"><Search sx={{ fontSize: 18, color: '#94a3b8' }} /></InputAdornment>, endAdornment: camSearchQuery !== camDebouncedSearch ? <InputAdornment position="end"><CircularProgress size={16} sx={{ color: '#94a3b8' }} /></InputAdornment> : null, sx: { borderRadius: '8px', bgcolor: '#f8fafc', height: 40, fontSize: 14, '& fieldset': { border: '1px solid #e2e8f0' } } }}
-                  sx={{ flex: { xs: '1 1 100%', sm: '0 0 auto' }, minWidth: { sm: 240 } }}
+                  sx={{ flex: { xs: '1 1 100%', sm: '0 0 auto' }, minWidth: { xs: '100%', sm: 260 }, maxWidth: { xs: '100%', sm: 300 } }}
                 />
                 {isHLS && (
                   <>
@@ -302,6 +274,21 @@ const ClientCameras = () => {
                     </Box>
                   </>
                 )}
+
+                <Tooltip title="Download HLS Template">
+                  <Button variant="outlined" size="small" startIcon={<Download />}
+                    onClick={() => handleDownloadTemplate('hls')}
+                    sx={{ flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' }, height: 40, borderColor: '#3b82f6', color: '#3b82f6', '&:hover': { bgcolor: '#eff6ff' }, textTransform: 'none', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                    HLS
+                  </Button>
+                </Tooltip>
+                <Tooltip title="Download RTSP Template">
+                  <Button variant="outlined" size="small" startIcon={<Download />}
+                    onClick={() => handleDownloadTemplate('rtsp')}
+                    sx={{ flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' }, height: 40, borderColor: '#6366f1', color: '#6366f1', '&:hover': { bgcolor: '#eef2ff' }, textTransform: 'none', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                    RTSP
+                  </Button>
+                </Tooltip>
               </Box>
             </Box>
 
@@ -312,9 +299,9 @@ const ClientCameras = () => {
                   size="small"
                   onClick={() => handleDownloadAccessibility('accessible')}
                   startIcon={<Download sx={{ fontSize: 16 }} />}
-                  sx={{ flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' }, height: 32, px: 2, borderRadius: 2, borderColor: '#3b82f6', color: '#3b82f6', textTransform: 'none', '&:hover': { bgcolor: '#eff6ff' } }}
+                  sx={{ flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' }, height: 32, px: 2, borderRadius: 2, borderColor: '#3b82f6', color: '#3b82f6', textTransform: 'none', whiteSpace: 'nowrap', '&:hover': { bgcolor: '#eff6ff' } }}
                 >
-                  <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, mr: 1 }}>Accessible</Typography>
+                  <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, mr: 1, whiteSpace: 'nowrap' }}>Accessible</Typography>
                   <Typography sx={{ fontSize: '0.75rem', fontWeight: 700 }}>{camStatusCounts.accessible}</Typography>
                 </Button>
 
@@ -323,15 +310,15 @@ const ClientCameras = () => {
                   size="small"
                   onClick={() => handleDownloadAccessibility('not_accessible')}
                   startIcon={<Download sx={{ fontSize: 16 }} />}
-                  sx={{ flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' }, height: 32, px: 2, borderRadius: 2, borderColor: '#333', color: '#333', textTransform: 'none', '&:hover': { bgcolor: '#f3f4f6' } }}
+                  sx={{ flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' }, height: 32, px: 2, borderRadius: 2, borderColor: '#333', color: '#333', textTransform: 'none', whiteSpace: 'nowrap', '&:hover': { bgcolor: '#f3f4f6' } }}
                 >
-                  <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, mr: 1 }}>Not Accessible</Typography>
+                  <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, mr: 1, whiteSpace: 'nowrap' }}>Not Accessible</Typography>
                   <Typography sx={{ fontSize: '0.75rem', fontWeight: 700 }}>{camStatusCounts.notAccessible}</Typography>
                 </Button>
 
                 {camStatusCounts.unknown > 0 && (
-                  <Box sx={{ flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' }, height: 32, px: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, borderRadius: 2, border: '1px solid #e5e7eb', bgcolor: '#f9fafb' }}>
-                    <Typography sx={{ fontSize: '0.75rem', color: '#4b5563', fontWeight: 600 }}>Unknown</Typography>
+                  <Box sx={{ flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' }, height: 32, px: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, borderRadius: 2, border: '1px solid #e5e7eb', bgcolor: '#f9fafb', whiteSpace: 'nowrap' }}>
+                    <Typography sx={{ fontSize: '0.75rem', color: '#4b5563', fontWeight: 600, whiteSpace: 'nowrap' }}>Unknown</Typography>
                     <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, color: '#6b7280' }}>{camStatusCounts.unknown}</Typography>
                   </Box>
                 )}
@@ -424,7 +411,7 @@ const ClientCameras = () => {
                     </TableBody>
                   </Table>
                 </TableContainer>
-                <TablePagination component="div" count={camTotal} page={camPage} onPageChange={(e, newPage) => setCamPage(newPage)} rowsPerPage={camRowsPerPage} onRowsPerPageChange={(e) => { setCamRowsPerPage(parseInt(e.target.value, 10)); setCamPage(0); }} rowsPerPageOptions={[10, 25, 50, 100, 200]}
+                <TablePagination component="div" count={camTotal} page={camPage} onPageChange={(e, newPage) => setCamPage(newPage)} rowsPerPage={camRowsPerPage} onRowsPerPageChange={(e) => { setCamRowsPerPage(parseInt(e.target.value, 10)); setCamPage(0); }} rowsPerPageOptions={[15, 25, 50, 100, 200]}
                   sx={{
                     '.MuiTablePagination-toolbar': { pl: { xs: 0, sm: 2 }, flexWrap: 'wrap' },
                     '.MuiTablePagination-selectLabel': { display: { xs: 'none', sm: 'block' } },

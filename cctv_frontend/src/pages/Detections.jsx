@@ -991,6 +991,12 @@ export default function Detections() {
     loadExams();
   }, [loadExams]);
 
+  // Seed the date filter from a `date` query param (e.g. opened from an exam card).
+  useEffect(() => {
+    const dp = searchParams.get('date');
+    if (dp && /^\d{2}-\d{2}-\d{4}$/.test(dp)) setDateFilter(dp);
+  }, [searchParams]);
+
   // Populate the dependent Shift filter from the selected exam. The exam list
   // (examsAPI.getAll) already embeds each exam's `examShifts`, so no extra call.
   useEffect(() => {

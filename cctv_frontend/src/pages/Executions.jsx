@@ -96,7 +96,7 @@ const Executions = () => {
 
   const loadExams = async () => {
     try {
-      const res = await examsAPI.getAll({ is_active: !viewingArchived });
+      const res = await examsAPI.getAll({ is_active: true });
       const list = Array.isArray(res?.data?.data) ? res.data.data : [];
       setExams(list);
       if (urlExamId && list.length > 0 && !viewingArchived) setSelectedExamId(urlExamId);
@@ -312,7 +312,7 @@ const Executions = () => {
   };
 
   return (
-    <Box sx={{ display: 'flex', minHeight: 'calc(100vh - 120px)', bgcolor: '#f8fafc' }}>
+    <Box sx={{ display: 'flex', height: 'calc(100vh - 120px)', overflow: 'hidden', bgcolor: '#f8fafc' }}>
 
       {/* ════ EXAM SIDEBAR ════ */}
       <ExamSidebar

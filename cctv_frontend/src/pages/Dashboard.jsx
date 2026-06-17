@@ -510,11 +510,11 @@ export const DetectionDistributionCard = ({ distribution = [], loading }) => {
     return (
         <Card sx={{ height: '100%', bgcolor: '#fff', borderRadius: '8px', boxShadow: '0 2px 4px 0 rgba(0,0,0,0.05)' }}>
             <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
-                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" useFlexGap flexWrap="wrap" sx={{ mb: 2, gap: 1 }}>
                     <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: { xs: '17px', sm: '20px' }, fontWeight: 700, lineHeight: '24px' }}>
                         Detection Distribution
                     </Typography>
-                    <Stack direction="row" alignItems="center" spacing={1}>
+                    <Stack direction="row" alignItems="center" spacing={1} useFlexGap flexWrap="wrap" sx={{ flexShrink: 0 }}>
                         <Button
                             variant="outlined"
                             size="small"
@@ -1747,6 +1747,7 @@ export const AdvancedFiltersDialog = ({
 const Dashboard = () => {
     const [overview, setOverview] = useState(null);
     const [overviewLoading, setOverviewLoading] = useState(true);
+    const [initializing, setInitializing] = useState(true);  // until the initial range is decided
     const [showGpuWarning, setShowGpuWarning] = useState(true);
     const [searchKeyword, setSearchKeyword] = useState('');
     const [dateChip, setDateChip] = useState('today');
@@ -1756,6 +1757,7 @@ const Dashboard = () => {
     const [selectedShifts, setSelectedShifts] = useState([]);
     const [examsList, setExamsList] = useState([]);
     const searchInputRef = useRef(null);
+    const autoSwitchedRef = useRef(false);  // one-time: Today→Last month when Today has 0 exams
 
     // Fetch all exams once on mount so we can label active chips + power autocomplete.
     useEffect(() => {
@@ -1878,19 +1880,33 @@ const Dashboard = () => {
 
     useEffect(() => {
         let cancelled = false;
+        let didAutoSwitch = false;
         setOverviewLoading(true);
         dashboardAPI
             .getOverview(apiParams)
             .then((res) => {
-                if (!cancelled) setOverview(res?.data?.data || null);
+                if (cancelled) return;
+                const data = res?.data?.data || null;
+                // Default-on-open: if Today has 0 exams, switch to Last month WITHOUT
+                // painting the empty Today view — keep the loading skeleton through the
+                // switch so there's no visible flash.
+                if (!autoSwitchedRef.current && dateChip === 'today' && (data?.total_exams?.total || 0) === 0) {
+                    autoSwitchedRef.current = true;
+                    didAutoSwitch = true;
+                    setDateChip('last_month');   // new apiParams → effect refetches; loading stays true
+                    return;
+                }
+                setOverview(data);
+                setInitializing(false);
             })
             .catch((err) => {
                 if (cancelled) return;
                 console.error('[Dashboard.getOverview]', err);
                 setOverview(null);
+                setInitializing(false);
             })
             .finally(() => {
-                if (!cancelled) setOverviewLoading(false);
+                if (!cancelled && !didAutoSwitch) setOverviewLoading(false);
             });
         return () => {
             cancelled = true;
@@ -2121,7 +2137,7 @@ const Dashboard = () => {
                 sx={{ mb: activeFilters.length ? 1 : 2.5 }}
             >
                 {dateChips.map((c) => {
-                    const active = c.key === dateChip;
+                    const active = !initializing && c.key === dateChip;
                     return (
                         <Box
                             key={c.key}

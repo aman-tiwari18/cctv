@@ -149,8 +149,29 @@ const Cameras = () => {
 
 
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(50);
+  // Default to 15 rows on mobile (<sm), 50 on larger screens. Read the real
+  // viewport width at mount (reliable in this client-only app, unlike
+  // useMediaQuery's first-render value).
+  const [rowsPerPage, setRowsPerPage] = useState(() => (window.innerWidth < theme.breakpoints.values.sm ? 15 : 50));
   const [totalCount, setTotalCount] = useState(0);
+
+  // Update the default page size only when the viewport crosses the sm
+  // boundary (mobile <-> desktop), so it stays responsive to resizing while a
+  // manual page-size choice still sticks as long as you don't cross over.
+  useEffect(() => {
+    const sm = theme.breakpoints.values.sm;
+    let wasMobile = window.innerWidth < sm;
+    const onResize = () => {
+      const isMobile = window.innerWidth < sm;
+      if (isMobile !== wasMobile) {
+        wasMobile = isMobile;
+        setRowsPerPage(isMobile ? 15 : 50);
+        setPage(0);
+      }
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [theme]);
 
 
   const [openDialog, setOpenDialog] = useState(false);
@@ -183,7 +204,7 @@ const Cameras = () => {
 
   const loadExams = async () => {
     try {
-      const res = await examsAPI.getAll({ is_active: !viewingArchived });
+      const res = await examsAPI.getAll({ is_active: true });
       const list = Array.isArray(res?.data?.data) ? res.data.data : [];
       setExams(list);
     } catch (e) { console.error(e); }
@@ -395,7 +416,7 @@ const Cameras = () => {
 
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
-      <Box sx={{ display: 'flex', minHeight: 'calc(100vh - 120px)', bgcolor: '#f8fafc' }}>
+      <Box sx={{ display: 'flex', height: 'calc(100vh - 120px)', overflow: 'hidden', bgcolor: '#f8fafc' }}>
 
         {/* ════ EXAM SIDEBAR ════ */}
         <ExamSidebar
@@ -1016,7 +1037,7 @@ const Cameras = () => {
                     onPageChange={(e, newPage) => setPage(newPage)}
                     rowsPerPage={rowsPerPage}
                     onRowsPerPageChange={(e) => { setRowsPerPage(parseInt(e.target.value, 10)); setPage(0); }}
-                    rowsPerPageOptions={[10, 25, 50, 100, 200, 500]}
+                    rowsPerPageOptions={[15, 25, 50, 100, 200, 500]}
                     sx={{
                       '.MuiTablePagination-toolbar': { pl: { xs: 0, sm: 2 }, flexWrap: 'wrap' },
                       '.MuiTablePagination-selectLabel': { display: { xs: 'none', sm: 'block' } },
