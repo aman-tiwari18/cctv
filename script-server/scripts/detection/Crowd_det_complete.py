@@ -115,11 +115,18 @@ def detect_crowd_in_frame(frame, device_id="unknown", camera_no="unknown", scrip
 
     return frame, crowd_detected, person_count
 
-def detect_crowd_batch(items):
-    """Run true batch inference."""
-    model = get_yolo_model()
-    frames = [item['frame'].copy() for item in items]
-    results = model(frames, conf=CONF_THRESHOLD, verbose=False)
+def detect_crowd_batch(items, results=None):
+    """Run true batch inference.
+
+    UNIFIED-DETECTOR SUPPORT: if `results` is provided (a list of YOLO Results, one
+    per item, produced by a SHARED single inference pass), the model is NOT run here —
+    we just apply the crowd rule over the supplied boxes. When `results` is None this
+    behaves exactly as before (runs its own model), so existing callers are unchanged.
+    """
+    if results is None:
+        model = get_yolo_model()
+        frames = [item['frame'].copy() for item in items]
+        results = model(frames, conf=CONF_THRESHOLD, verbose=False)
 
     outputs = []
     for item, result in zip(items, results):
