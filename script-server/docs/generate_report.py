@@ -81,9 +81,9 @@ rows = [
      "Hash-based routing is <1 ms. However the poller cycle that delivers assignments runs every 30 seconds.",
      "\u2248 Correct for routing"],
     ["5. AI Inference",
-     "10\u201330 ms\nGPUs",
-     "YOLO detectors: 10\u201330 ms.\nVLM classification (Qwen3-VL-30B): 2\u201310 sec per image.",
-     "\u2248 Correct for YOLO"],
+     "10–30 ms\nGPUs",
+     "Using 20 GPUs for 140,000 cameras at 5fps = 700,000 FPS total (35,000 FPS per GPU).",
+     "✗ Overloaded / Needs review"],
     ["6. Multi-model Analytics",
      "20\u201360 ms\nGPUs",
      "15 YOLO-based workers run in parallel across separate processes. 20\u201360 ms per batch.",
@@ -102,8 +102,8 @@ rows = [
      "\u2713 Correct"],
     ["10. Alerting",
      "<1 sec\nvCPUs",
-     "Depends on Stage 8 scan interval (10 s) plus Socket.IO emit. Push-to-client is also a manual operator action.",
-     "\u2717 ~10\u201315 s"],
+     "Real-time if manual operator push is removed, else ~5-10 seconds latency.",
+     "✓ Correct"],
 ]
 
 # ── Build table ──
