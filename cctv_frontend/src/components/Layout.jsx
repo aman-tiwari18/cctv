@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
+import { MobileNavProvider } from '../contexts/MobileNavContext';
 import {
   Box,
   Drawer,
@@ -55,7 +56,6 @@ import { useDetectionCounts } from '../contexts/DetectionCountsContext';
 import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
 import { CustomSvgIcon } from './DetectionSvgIcon';
 import { ShiftSvgIcon } from './ShiftSvgIcon';
-import CameraIcon from './CameraIcon';
 import { dashboardAPI } from '../services/api';
 
 const DRAWER_WIDTH = 260;
@@ -227,19 +227,25 @@ function SidebarContent({ items, currentPath, onNavigate, user }) {
       }}
     >
       <Toolbar
+        disableGutters
         sx={{
           height: APPBAR_HEIGHT,
           borderBottom: `1px solid ${sidebarPalette.border}`,
           justifyContent: 'flex-start',
-          px: 2,
+          alignItems: 'flex-end',
+          pl: 1,
+          pr: 2,
+          pb: 1,
           flexShrink: 0,
         }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
-          <CameraIcon sx={{ mr: 1, color: '#2563eb' }} />
-          <Typography variant="h6" fontWeight={700} color="#0f172a" noWrap>
-            CCTV Monitor
-          </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'flex-end', width: '100%', overflow: 'hidden' }}>
+          <Box
+            component="img"
+            src={`${import.meta.env.BASE_URL}logo-16.png`}
+            alt="CCTV Monitoring"
+            sx={{ width: '85%', height: 'auto', display: 'block' }}
+          />
         </Box>
       </Toolbar>
 
@@ -765,7 +771,9 @@ function LayoutInner() {
           overflowX: 'hidden',
         }}
       >
-        <Outlet />
+        <MobileNavProvider value={mobileOpen}>
+          <Outlet />
+        </MobileNavProvider>
       </Box>
 
       {/* Report Validation Snackbar - positioned below the button */}

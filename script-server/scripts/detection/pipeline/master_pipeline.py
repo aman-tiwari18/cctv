@@ -17,6 +17,7 @@ FIXED:
 - Added frame validation before queuing
 """
 
+
 import multiprocessing as mp
 import os
 import sys
@@ -161,6 +162,42 @@ from utils.camera_loader import load_all_pending_cameras, load_cameras_for_execu
 QUEUE_SIZE     = 5
 STOP           = False
 MAX_CONCURRENT = 24  # FIXED: Reduced from 64 to 24 to prevent ffmpeg/system overload
+
+# UNIFIED DETECTOR (Scaling Path A): run ONE shared YOLO pass per frame and dispatch the
+# boxes to each camera's enabled analytics, instead of one model-per-analytic worker.
+# Removes the ~10x redundant inference. Default OFF for safe rollout of untested code —
+# set UNIFIED_DETECTOR=1 per-worker to enable after validating it matches the legacy path.
+UNIFIED_DETECTOR = os.environ.get("UNIFIED_DETECTOR", "0") == "1"
+
+# NVDEC hardware decode via GStreamer (Scaling Path A). Default OFF until the worker's
+# OpenCV build is confirmed to have GStreamer + nvv4l2decoder (set USE_NVDEC=1 to enable).
+# Falls back to the FFMPEG path automatically if the GStreamer pipeline fails to open.
+USE_NVDEC = os.environ.get("USE_NVDEC", "0") == "1"
+# Overridable pipeline (use {url}/{latency}); default is H.264. For H.265 swap
+# rtph264depay/h264parse -> rtph265depay/h265parse.
+GST_PIPELINE_TEMPLATE = os.environ.get(
+    "GST_PIPELINE_TEMPLATE",
+    'rtspsrc location="{url}" protocols=tcp latency={latency} ! '
+    'rtph264depay ! h264parse ! nvv4l2decoder ! '
+    'nvvidconv ! video/x-raw,format=BGRx ! '
+    'videoconvert ! video/x-raw,format=BGR ! '
+    'appsink drop=true max-buffers=1 sync=false'
+)
+
+# Sampling rate per camera. Default 5 fps = current behavior (0.2s). Scaling Path A
+# lowers this to ~3 fps via SAMPLE_FPS=3 (cooldowns are 60-360s so 3 fps is plenty).
+SAMPLE_FPS      = float(os.environ.get("SAMPLE_FPS", "5"))
+_FRAME_INTERVAL = (1.0 / SAMPLE_FPS) if SAMPLE_FPS > 0 else 0.2
+
+# ROUND-ROBIN (Scaling Path A): cover more cameras than the live pool by rotating a bounded
+# pool of capture slots. Default OFF — the proven continuous-producer model stays default
+# until DSS StartVideo throughput is measured. Requires UNIFIED_DETECTOR=1.
+ROUND_ROBIN          = os.environ.get("ROUND_ROBIN", "0") == "1"
+RR_POOL_SIZE         = int(os.environ.get("RR_POOL_SIZE", "800"))    # concurrent live slots
+RR_BURST_FRAMES      = int(os.environ.get("RR_BURST_FRAMES", "2"))   # frames grabbed per visit
+# Cache the per-camera StartVideo (RTSP URL + stream token) for this many seconds to avoid a
+# DSS API call on every revisit. 0 = disabled (must measure the DSS URL/token TTL first).
+STARTVIDEO_CACHE_TTL = float(os.environ.get("STARTVIDEO_CACHE_TTL", "0"))
 _ACTIVE_CHILD_PROCESSES = set()
 _ACTIVE_CHILD_LOCK = threading.Lock()
 
@@ -794,15 +831,27 @@ def open_video_capture(stream_url, timeout_ms=10000):
     To prevent OpenCV from misrouting %24/%26 URLs to CAP_IMAGES backend, we explicitly
     specify CAP_FFMPEG backend (which handles encoded URLs correctly).
     """
+    # NVDEC path (Scaling Path A): hardware-decode on the GPU via GStreamer.
+    if USE_NVDEC and str(stream_url).startswith("rtsp"):
+        try:
+            pipeline = GST_PIPELINE_TEMPLATE.format(url=stream_url, latency=200)
+            gcap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+            if gcap.isOpened():
+                return gcap
+            gcap.release()
+            logger.warning(f"NVDEC/GStreamer open failed → FFMPEG fallback for {stream_url[:50]}...")
+        except Exception as e:
+            logger.warning(f"NVDEC/GStreamer error ({e}) → FFMPEG fallback")
+
     # CRITICAL: Use CAP_FFMPEG explicitly to prevent CAP_IMAGES misrouting
     # Keep URL encoded - DSS servers require %24 for $ and %26 for &
     cap = cv2.VideoCapture(stream_url, cv2.CAP_FFMPEG)
-    
+
     # TCP transport for RTSP (prevents UDP packet loss behind NAT/firewall)
     if stream_url.startswith("rtsp"):
         cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, timeout_ms)
         cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, min(timeout_ms, 5000))
-    
+
     return cap
 
 
@@ -826,7 +875,7 @@ def read_frame_from_capture(cap, label):
 # ============================================================
 # RTSP PRODUCER — FIXED: No HLS fallback, OpenCV capture, proper token handling
 # ============================================================
-def rtsp_producer(cam_configs, queues, pre_fetched_token=None):
+def rtsp_producer(cam_configs, queues, pre_fetched_token=None, enabled_scripts=None):
     """
     Reads frames from a DSS/RTSP camera and puts packets into worker queues.
     
@@ -846,6 +895,7 @@ def rtsp_producer(cam_configs, queues, pre_fetched_token=None):
     camera_no     = first.get("ch_no")     or first.get("camera_no", "1")
     camera_id_pk  = first.get("camera_id_pk", "")
     exam_id       = first.get("exam_id", "0")
+    shift_id      = first.get("shift_id") or os.environ.get("SHIFT_ID", "0")
     server        = first.get("server_ip") or first.get("cctv_url", "")
     
     if "://" in str(server):
@@ -981,8 +1031,22 @@ def rtsp_producer(cam_configs, queues, pre_fetched_token=None):
                 
                 fail_count = 0
                 frame_snapshot = frame.copy()  # Avoid issues if OpenCV reuses buffers
-                packet = (frame_snapshot, device_id, camera_no, camera_id_pk, exam_id)
-                
+                if enabled_scripts is not None:
+                    # UNIFIED path: one queue, dict packet carrying the camera's analytics.
+                    packet = {
+                        "frame":          frame_snapshot,
+                        "device_id":      device_id,
+                        "ch_no":          camera_no,
+                        "camera_no":      camera_no,
+                        "camera_id_pk":   camera_id_pk,
+                        "exam_id":        exam_id,
+                        "shift_id":       shift_id,
+                        "enabled_scripts": enabled_scripts,
+                    }
+                else:
+                    # Legacy path: per-script queues, tuple packet.
+                    packet = (frame_snapshot, device_id, camera_no, camera_id_pk, exam_id)
+
                 for q in queues:
                     try:
                         q.put(packet, timeout=0.1)
@@ -991,8 +1055,9 @@ def rtsp_producer(cam_configs, queues, pre_fetched_token=None):
                         pass
                 del frame_snapshot  # Free memory immediately after queuing
                 
-                # FIXED: 5 FPS instead of 25 FPS (0.2s sleep) to prevent GPU queue overflow
-                time.sleep(0.2)
+                # Sampling rate (Scaling Path A): SAMPLE_FPS, default 3 fps. Cooldowns are
+                # 60-360s so higher fps adds no reportable value, only GPU/decode load.
+                time.sleep(_FRAME_INTERVAL)
 
             cap.release()
             
@@ -1056,31 +1121,47 @@ def run_rtsp_pipeline(camera_group, max_concurrent=MAX_CONCURRENT):
 
     # 3. Start worker processes and create shared queues
     worker_processes = []
-    script_queues = {}
+    script_queues = {}      # legacy: per-script queue
+    unified_queue  = None   # unified: single shared queue feeding the unified worker
 
-    for script in unique_scripts:
-        module_name, fn_name = get_worker_info(script, mode="rtsp")
-        if not module_name:
-            logger.error(f"Could not find worker info for {script}")
-            continue
-        
-        q = mp.Queue(maxsize=QUEUE_SIZE * 2)
-        script_queues[script] = q
-        
+    if UNIFIED_DETECTOR:
+        # Scaling Path A: ONE shared YOLO worker for ALL analytics.
+        unified_queue = mp.Queue(maxsize=QUEUE_SIZE * 4)
         p = mp.Process(
             target=_worker_process_entry,
-            args=(module_name, fn_name, q),
-            name=f"Worker-{script}",
+            args=("unified_detector", "unified_worker", unified_queue),
+            name="Worker-unified",
             daemon=True
         )
         p.start()
         _register_child_process(p)
         worker_processes.append(p)
-        logger.info(f"Started shared worker for: {script} (pid={p.pid})")
+        logger.info(f"Started UNIFIED detector worker (pid={p.pid}) for analytics: {sorted(unique_scripts)}")
+    else:
+        # Legacy: one model-per-analytic worker.
+        for script in unique_scripts:
+            module_name, fn_name = get_worker_info(script, mode="rtsp")
+            if not module_name:
+                logger.error(f"Could not find worker info for {script}")
+                continue
 
-    if not script_queues:
-        logger.error("No workers could be started — aborting RTSP pipeline. Check worker imports.")
-        return
+            q = mp.Queue(maxsize=QUEUE_SIZE * 2)
+            script_queues[script] = q
+
+            p = mp.Process(
+                target=_worker_process_entry,
+                args=(module_name, fn_name, q),
+                name=f"Worker-{script}",
+                daemon=True
+            )
+            p.start()
+            _register_child_process(p)
+            worker_processes.append(p)
+            logger.info(f"Started shared worker for: {script} (pid={p.pid})")
+
+        if not script_queues:
+            logger.error("No workers could be started — aborting RTSP pipeline. Check worker imports.")
+            return
 
     # 4. Group cameras by label for producers
     grouped = {}
@@ -1090,7 +1171,13 @@ def run_rtsp_pipeline(camera_group, max_concurrent=MAX_CONCURRENT):
 
     logger.info(f"Launching producers for {len(grouped)} camera groups (max_concurrent={max_concurrent})")
 
-    # 5. Start producers with semaphore-controlled concurrency
+    # 5a. ROUND-ROBIN mode (Scaling Path A): rotate all cameras over a bounded pool.
+    rr_mode = ROUND_ROBIN and UNIFIED_DETECTOR and unified_queue is not None
+    if rr_mode:
+        logger.info(f"ROUND-ROBIN: {len(grouped)} cameras over pool of {RR_POOL_SIZE} slots")
+        _run_round_robin(grouped, server_tokens_map, unified_queue)
+
+    # 5b. Continuous-producer mode (default): one persistent producer per camera.
     sem = threading.Semaphore(max_concurrent)
     active_producers = []
 
@@ -1106,20 +1193,30 @@ def run_rtsp_pipeline(camera_group, max_concurrent=MAX_CONCURRENT):
                 from urllib.parse import urlparse
                 server = urlparse(str(server)).netloc
             pre_token = server_tokens_map.get(server) if server else None
-            
-            producer_queues = []
-            for cfg in configs:
-                script = cfg.get("script_code")
-                if script in script_queues:
-                    producer_queues.append(script_queues[script])
 
-            if not producer_queues:
-                logger.warning(f"No matching script queue for camera {label} — skipping")
-                return
+            if UNIFIED_DETECTOR:
+                # One queue; tell the producer which analytics this camera runs.
+                enabled_scripts = sorted({cfg.get("script_code") for cfg in configs if cfg.get("script_code")})
+                if not enabled_scripts:
+                    logger.warning(f"No script_code for camera {label} — skipping")
+                    return
+                producer_queues = [unified_queue]
+                producer_args = (configs, producer_queues, pre_token, enabled_scripts)
+            else:
+                producer_queues = []
+                for cfg in configs:
+                    script = cfg.get("script_code")
+                    if script in script_queues:
+                        producer_queues.append(script_queues[script])
+
+                if not producer_queues:
+                    logger.warning(f"No matching script queue for camera {label} — skipping")
+                    return
+                producer_args = (configs, producer_queues, pre_token)
 
             proc = mp.Process(
-                target=rtsp_producer, 
-                args=(configs, producer_queues, pre_token),
+                target=rtsp_producer,
+                args=producer_args,
                 name=f"Producer-{label}",
                 daemon=True
             )
@@ -1134,7 +1231,7 @@ def run_rtsp_pipeline(camera_group, max_concurrent=MAX_CONCURRENT):
 
     threads = []
     for label, configs in grouped.items():
-        if STOP:
+        if STOP or rr_mode:   # rr_mode already drove all cameras above; skip continuous producers
             break
         t = threading.Thread(target=start_producer, args=(label, configs), daemon=True)
         t.start()
@@ -1146,11 +1243,18 @@ def run_rtsp_pipeline(camera_group, max_concurrent=MAX_CONCURRENT):
 
     # 6. Clean up workers
     logger.info("All producers finished. Stopping workers...")
-    for script, q in script_queues.items():
-        try:
-            q.put(None)
-        except Exception:
-            pass
+    if UNIFIED_DETECTOR:
+        if unified_queue is not None:
+            try:
+                unified_queue.put(None)
+            except Exception:
+                pass
+    else:
+        for script, q in script_queues.items():
+            try:
+                q.put(None)
+            except Exception:
+                pass
 
     for p in worker_processes:
         if p.is_alive():
@@ -1160,6 +1264,132 @@ def run_rtsp_pipeline(camera_group, max_concurrent=MAX_CONCURRENT):
                 p.terminate()
                 p.join(timeout=2)
         _unregister_child_process(p)
+
+
+# ============================================================
+# StartVideo cache + ROUND-ROBIN driver (Scaling Path A)
+# ============================================================
+_startvideo_cache = {}            # label -> (urls, stream_token, ts)
+_startvideo_cache_lock = threading.Lock()
+
+
+def get_rtsp_cached(label, device_id, camera_no, token, server):
+    """get_rtsp_from_dss with an optional in-process TTL cache to avoid a DSS call
+    on every round-robin revisit. TTL=0 disables caching (always fetch fresh)."""
+    if STARTVIDEO_CACHE_TTL > 0:
+        with _startvideo_cache_lock:
+            hit = _startvideo_cache.get(label)
+        if hit and (time.time() - hit[2]) < STARTVIDEO_CACHE_TTL:
+            return hit[0], hit[1]
+    result = get_rtsp_from_dss(device_id, camera_no, token, server)
+    if result and STARTVIDEO_CACHE_TTL > 0:
+        urls, stream_token = result
+        with _startvideo_cache_lock:
+            _startvideo_cache[label] = (urls, stream_token, time.time())
+    return result
+
+
+def _rr_resolve(first):
+    server = first.get("server_ip") or first.get("cctv_url", "")
+    if "://" in str(server):
+        from urllib.parse import urlparse
+        server = urlparse(str(server)).netloc
+    return server
+
+
+def _rr_capture_once(label, configs, enabled_scripts, server_tokens_map, unified_queue):
+    """One round-robin visit: connect, grab a short burst, push packets, disconnect."""
+    first      = configs[0]
+    device_id  = first.get("camera_id") or first.get("device_id", "")
+    camera_no  = first.get("ch_no") or first.get("camera_no", "1")
+    cam_pk     = first.get("camera_id_pk", "")
+    exam_id    = first.get("exam_id", "0")
+    shift_id   = first.get("shift_id") or os.environ.get("SHIFT_ID", "0")
+    direct_url = first.get("cctv_url") or first.get("stream_url", "")
+    server     = _rr_resolve(first)
+    use_dss    = bool(server and not str(direct_url).startswith("rtsp://"))
+
+    stream_urls = []
+    if use_dss:
+        token = server_tokens_map.get(server) or get_server_token(server)
+        if not token:
+            return
+        result = get_rtsp_cached(label, device_id, camera_no, token, server)
+        if not result:
+            return
+        urls, stream_token = result
+        stream_urls = [add_token_to_url(u, stream_token) for u in order_urls(urls)]
+    elif direct_url:
+        stream_urls = [direct_url]
+
+    for stream_url in stream_urls:
+        if is_private_ip_url(stream_url):
+            continue
+        cap = open_video_capture(stream_url)
+        if not cap.isOpened():
+            cap.release()
+            continue
+        grabbed = 0
+        for _ in range(RR_BURST_FRAMES):
+            frame, ok = read_frame_from_capture(cap, label)
+            if not ok:
+                break
+            packet = {
+                "frame":           frame.copy(),
+                "device_id":       device_id,
+                "ch_no":           camera_no,
+                "camera_no":       camera_no,
+                "camera_id_pk":    cam_pk,
+                "exam_id":         exam_id,
+                "shift_id":        shift_id,
+                "enabled_scripts": enabled_scripts,
+            }
+            try:
+                unified_queue.put(packet, timeout=0.1)
+            except queue_module.Full:
+                pass
+            grabbed += 1
+        cap.release()
+        if grabbed:
+            return  # success on this URL; done for this visit
+
+
+def _run_round_robin(grouped, server_tokens_map, unified_queue):
+    """Bounded pool of capture slots; cameras rotate through a shared queue (fair, no starvation)."""
+    import collections
+    work = collections.deque(
+        (label, configs, sorted({c.get("script_code") for c in configs if c.get("script_code")}))
+        for label, configs in grouped.items()
+    )
+    work_lock = threading.Lock()
+
+    def slot_loop():
+        while not STOP:
+            with work_lock:
+                if not work:
+                    return
+                item = work[0]
+                work.rotate(-1)   # move head to tail → fair rotation
+            label, configs, enabled = item
+            if not enabled:
+                continue
+            try:
+                _rr_capture_once(label, configs, enabled, server_tokens_map, unified_queue)
+            except Exception as e:
+                logger.error(f"[RR] capture error {label}: {e}")
+
+    n_slots = min(RR_POOL_SIZE, max(1, len(work)))
+    logger.info(f"[RR] starting {n_slots} capture slots for {len(work)} cameras")
+    slots = [threading.Thread(target=slot_loop, daemon=True, name=f"RR-slot-{i}") for i in range(n_slots)]
+    for t in slots:
+        t.start()
+    # Run until STOP; rotation continues for the whole shift.
+    while not STOP and any(t.is_alive() for t in slots):
+        for t in slots:
+            t.join(timeout=1.0)
+        with work_lock:
+            if not work:
+                break
 
 
 # ============================================================

@@ -13,7 +13,6 @@ import {
 } from '@mui/material';
 import { PersonOutline, LockOutlined, VisibilityOutlined, VisibilityOffOutlined } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
-import CameraIcon from '../components/CameraIcon';
 
 // Static objects defined outside component — never recreated on re-render
 const inputFieldSx = {
@@ -95,22 +94,10 @@ const Login = () => {
         alignItems: 'center',
         justifyContent: 'center',
         background: '#eef2fb',
-        px: 2
+        px: 2,
+        py: 4,
       }}
     >
-      <Paper
-        elevation={0}
-        sx={{
-          p: 1.5,
-          borderRadius: 3,
-          mb: 3,
-          display: 'inline-flex',
-          bgcolor: 'white',
-        }}
-      >
-        <CameraIcon sx={{ fontSize: 28, color: '#3b82f6' }} />
-      </Paper>
-
       <Paper
         elevation={0}
         sx={{
@@ -121,13 +108,31 @@ const Login = () => {
           bgcolor: '#ffffff',
         }}
       >
-        <Box textAlign="center" mb={4}>
-          <Typography variant="h5" sx={{ fontWeight: 800, color: '#111827', mb: 1, letterSpacing: '-0.5px' }}>
-            CCTV Monitoring System
-          </Typography>
-          <Typography variant="body2" sx={{ color: '#6b7280', fontWeight: 500 }}>
-            Exam Monitoring & Management Platform
-          </Typography>
+        <Box textAlign="center" mb={{ xs: 3, sm: 4 }}>
+          {/* The subtitle (the only element with intrinsic width) sizes this inline-block wrapper.
+              The logo is a background image — it has no intrinsic width, so it fills 100% of the
+              wrapper, ending up exactly as wide as the subtitle text. aspectRatio keeps its shape. */}
+          <Box sx={{ display: 'inline-block', maxWidth: '100%' }}>
+            <Box
+              role="img"
+              aria-label="CCTV Monitoring"
+              sx={{
+                width: '100%',
+                aspectRatio: '6812 / 1250',
+                backgroundImage: `url(${import.meta.env.BASE_URL}logo-16.png)`,
+                backgroundSize: 'contain',
+                backgroundRepeat: 'no-repeat',
+                backgroundPosition: 'center',
+                mb: 1,
+              }}
+            />
+            <Typography
+              variant="body2"
+              sx={{ color: '#6b7280', fontWeight: 500, whiteSpace: { xs: 'normal', sm: 'nowrap' } }}
+            >
+              Exam Monitoring & Management Platform
+            </Typography>
+          </Box>
         </Box>
 
         {error && (

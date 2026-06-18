@@ -229,17 +229,16 @@ function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onS
       <Box sx={{ position: 'relative', bgcolor: '#0f172a' }}>
 
         {imgError ? (
-          <Box sx={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#1e293b' }}>
+          <Box sx={{ height: { xs: 200, md: 220 }, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#1e293b' }}>
             <CameraAlt sx={{ fontSize: 48, color: '#475569' }} />
           </Box>
         ) : (
           <CardMedia
             component="img"
-            height={220}
             image={`${IMG_BASE}${item.image_url}`}
             alt={item.camera_id}
             onError={() => setImgError(true)}
-            sx={{ objectFit: 'cover' }}
+            sx={{ height: { xs: 200, md: 220 }, objectFit: 'cover' }}
           />
         )}
         <NewBadge
@@ -274,7 +273,7 @@ function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onS
           />
         )}
       </Box>
-      <CardContent sx={{ p: 1, pb: '10px !important', mx: 2 }}>
+      <CardContent sx={{ p: 1, pb: '10px !important', mx: { xs: 1.5, sm: 2 } }}>
         <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5, gap: 1 }}>
           <Typography
             variant="h6"
@@ -357,7 +356,7 @@ function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onS
         )}
       </CardContent>
 
-      <Box sx={{ mx: 2, mb: 4, mt: 1 }}>
+      <Box sx={{ mx: { xs: 1.5, sm: 2 }, mb: { xs: 2, sm: 3 }, mt: 1 }}>
         <Box sx={{ display: 'flex', justifyContent: 'end', gap: 1.5, }}>
           {!isPushed && (
             <Button
@@ -416,23 +415,33 @@ function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onS
 }
 
 function Lightbox({ item, onClose }) {
+  const theme = useTheme();
+  const isSmDown = useMediaQuery(theme.breakpoints.down('sm'));
   if (!item) return null;
   const meta = TYPE_META[item.type] || {};
   const invigilatorEventLabel = item.type === 'invigilator'
     ? (item.issueLabel || (item.issueType ? String(item.issueType).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : ''))
     : '';
   return (
-    <Dialog open onClose={onClose} maxWidth="lg" fullWidth>
-      <DialogContent sx={{ p: 0, bgcolor: '#0f172a', position: 'relative' }}>
-        <IconButton onClick={onClose} sx={{ position: 'absolute', top: 8, right: 8, zIndex: 10, color: '#fff', bgcolor: 'rgba(0,0,0,0.5)' }}>
-          <Close />
+    <Dialog open onClose={onClose} maxWidth="lg" fullWidth fullScreen={isSmDown}>
+      <DialogContent sx={{ p: 0, bgcolor: '#0f172a', position: 'relative', display: 'flex', flexDirection: 'column', maxHeight: { xs: '100dvh', sm: '90vh' } }}>
+        <IconButton
+          onClick={onClose}
+          sx={{
+            position: 'absolute', top: 8, right: 8, zIndex: 10, color: '#fff', bgcolor: 'rgba(0,0,0,0.5)',
+            width: { xs: 44, sm: 40 }, height: { xs: 44, sm: 40 },
+            '&:hover': { bgcolor: 'rgba(0,0,0,0.7)' },
+          }}
+        >
+          <Close sx={{ fontSize: { xs: 26, sm: 24 } }} />
         </IconButton>
-        <img
+        <Box
+          component="img"
           src={`${IMG_BASE}${item.image_url}`}
           alt={item.camera_id}
-          style={{ width: '100%', maxHeight: '80vh', objectFit: 'contain', display: 'block' }}
+          sx={{ width: '100%', maxHeight: { xs: '70vh', sm: '80vh' }, objectFit: 'contain', display: 'block', flexShrink: 0 }}
         />
-        <Box sx={{ p: 2, color: '#fff' }}>
+        <Box sx={{ p: { xs: 1.5, sm: 2 }, color: '#fff', overflowY: 'auto' }}>
           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
             <Chip label={meta.label} size="small" sx={{ bgcolor: meta.color, color: '#fff', fontWeight: 700 }} />
             {invigilatorEventLabel && (
@@ -553,7 +562,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2, height: { xs: 'auto', md: 'calc(100vh - 310px)' }, minHeight: { xs: 0, md: 500 } }}>
         <Box sx={{
-        width: { xs: '100%', md: 300 }, flexShrink: 0, overflowY: 'auto',
+        width: { xs: '100%', md: '30%', lg: 300 }, flexShrink: 0, overflowY: 'auto',
         maxHeight: { xs: 280, md: 'none' },
         borderRight: { xs: 'none', md: '1px solid #e2e8f0' },
         borderBottom: { xs: '1px solid #e2e8f0', md: 'none' },
@@ -656,8 +665,8 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
               </Box>
 
               <Box sx={{
-                width: { xs: '100%', md: 360 }, flexShrink: 0,
-                bgcolor: '#fff', borderRadius: 3, p: 2.5,
+                width: { xs: '100%', md: '36%', lg: 360, xl: 400 }, flexShrink: 0,
+                bgcolor: '#fff', borderRadius: 3, p: { xs: 1.5, sm: 2.5 },
                 display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
               }}>
                 <CardContent sx={{ p: 1, pb: '10px !important' }}>
@@ -779,9 +788,9 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
                         onClick={handleSkip}
                         sx={{
                           borderColor: '#c3c5d8', color: '#475569', fontWeight: 900,
-                          width: "100px",
-                          height: "40px",
-                          borderRadius: 2, textTransform: 'none', fontSize: 14,
+                          width: { xs: '100%', md: '100px' },
+                          height: { xs: 36, sm: 40 },
+                          borderRadius: 2, textTransform: 'none', fontSize: { xs: 12, sm: 14 },
                           display: 'flex',
                           justifyContent: 'space-between',
                           pl: 1,
@@ -814,9 +823,9 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
                       disabled={copyingToClient || isPushed}
                       sx={{
                         bgcolor: isPushed ? '#94a3b8' : '#3c81f6', color: '#fff', fontWeight: 900,
-                        height: "40px",
-                        width: "180px",
-                        borderRadius: 2, textTransform: 'none', fontSize: 14,
+                        height: { xs: 36, sm: 40 },
+                        width: { xs: '100%', md: '180px' },
+                        borderRadius: 2, textTransform: 'none', fontSize: { xs: 12, sm: 14 },
                         display: 'flex',
                         justifyContent: 'space-between',
                         pl: 2,
@@ -981,6 +990,12 @@ export default function Detections() {
   useEffect(() => {
     loadExams();
   }, [loadExams]);
+
+  // Seed the date filter from a `date` query param (e.g. opened from an exam card).
+  useEffect(() => {
+    const dp = searchParams.get('date');
+    if (dp && /^\d{2}-\d{2}-\d{4}$/.test(dp)) setDateFilter(dp);
+  }, [searchParams]);
 
   // Populate the dependent Shift filter from the selected exam. The exam list
   // (examsAPI.getAll) already embeds each exam's `examShifts`, so no extra call.
@@ -1272,6 +1287,7 @@ export default function Detections() {
       await pushQueue.add(async () => {
         return await axios.post(`${API_BASE_1}/client-detections/copy`, {
           items: items.map(({ source, type, relativePath, uid }) => ({ source, type, relativePath, uid })),
+          pushedBy: user?.id ?? null,
         });
       });
 
@@ -1466,23 +1482,20 @@ export default function Detections() {
               '& input': { color: '#334155', '&::placeholder': { color: '#94a3b8', opacity: 1 } }
             }
           }}
-          sx={{ minWidth: 200, maxWidth: 400, flex: 1 }}
+          sx={{ width: { xs: '100%', sm: 'auto' }, flex: { sm: 1 }, minWidth: { sm: 200 }, maxWidth: { sm: 400 } }}
         />
         {user?.role !== 'OPERATOR' && (
-          <FormControl size="small" sx={{ minWidth: 150 }}>
-            <InputLabel sx={{ fontSize: 14 }}>Exam</InputLabel>
+          <FormControl size="small" sx={{ width: { xs: (examFilter && examShifts.length > 0) ? 'calc(30% - 8px)' : 'calc(50% - 6px)', sm: 150 } }}>
             <Select
               value={examFilter}
-              label="Exam"
+              displayEmpty
               onChange={(e) => setExamFilter(e.target.value)}
               sx={{
                 borderRadius: '8px', bgcolor: '#f8fafc', height: 36, fontSize: 14,
                 '& fieldset': { border: 'none' },
               }}
             >
-              <MenuItem value="">
-                <em>All Exams</em>
-              </MenuItem>
+              <MenuItem value="">All Exams</MenuItem>
               {exams.map((exam) => (
                 <MenuItem key={exam.id} value={exam.id}>
                   {exam.exam_name}
@@ -1494,20 +1507,17 @@ export default function Detections() {
         {/* Shift filter — dependent on the selected exam. Only shown once an
             exam is chosen and that exam has shifts. Styling matches the Exam filter. */}
         {user?.role !== 'OPERATOR' && examFilter && examShifts.length > 0 && (
-          <FormControl size="small" sx={{ minWidth: 130 }}>
-            <InputLabel sx={{ fontSize: 14 }}>Shift</InputLabel>
+          <FormControl size="small" sx={{ width: { xs: 'calc(30% - 8px)', sm: 130 } }}>
             <Select
               value={shiftFilter}
-              label="Shift"
+              displayEmpty
               onChange={(e) => setShiftFilter(e.target.value)}
               sx={{
                 borderRadius: '8px', bgcolor: '#f8fafc', height: 36, fontSize: 14,
                 '& fieldset': { border: 'none' },
               }}
             >
-              <MenuItem value="">
-                <em>All Shifts</em>
-              </MenuItem>
+              <MenuItem value="">All Shifts</MenuItem>
               {examShifts.map((sh) => (
                 <MenuItem key={sh.id} value={sh.id}>
                   {sh.shift_name || `Shift #${sh.id}`}
@@ -1516,7 +1526,7 @@ export default function Detections() {
             </Select>
           </FormControl>
         )}
-        <Box sx={{ position: 'relative', minWidth: 100, maxWidth: 150 }}>
+        <Box sx={{ position: 'relative', width: { xs: (examFilter && examShifts.length > 0) ? 'calc(40% - 8px)' : 'calc(50% - 6px)', sm: 150 } }}>
           <TextField
             type="date"
             size="small"
@@ -1632,7 +1642,7 @@ export default function Detections() {
           ml: { xs: 0, md: 'auto' },
           width: { xs: '100%', md: 'auto' },
           display: 'flex',
-          gap: 1.5,
+          gap: { xs: 1, sm: 1.5 },
           alignItems: 'center',
           justifyContent: { xs: 'space-between', md: 'flex-end' },
           flexWrap: 'wrap',
@@ -1670,12 +1680,12 @@ export default function Detections() {
             }}
           />
 
-          <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center', flexShrink: 0 }}>
+          <Box sx={{ display: 'flex', gap: { xs: 1, sm: 1.5 }, alignItems: 'center', flexShrink: 0 }}>
             {(typeFilter.length > 0 || dateFilter !== todayDate || search || startTime || endTime || shiftFilter) && (
               <Button
                 size="small"
                 onClick={() => { setTypeFilter([]); setDateFilter(todayDate); setSearch(''); setStartTime(''); setEndTime(''); setAppliedStartTime(''); setAppliedEndTime(''); setShiftFilter(''); }}
-                sx={{ height: 36, borderRadius: '8px', fontSize: 13, textTransform: 'none', color: '#64748b', flexShrink: 0, minWidth: 56 }}
+                sx={{ height: 36, borderRadius: '8px', fontSize: 13, textTransform: 'none', color: '#64748b', flexShrink: 0, minWidth: { xs: 48, sm: 56 }, px: { xs: 1, sm: 1.5 } }}
               >
                 Clear
               </Button>
@@ -1687,8 +1697,9 @@ export default function Detections() {
               disableElevation
               sx={{
                 bgcolor: '#3c81f6',
-                height: 36, borderRadius: '8px', fontSize: 13, fontWeight: 600, textTransform: 'none', px: 2.5,
-                flexShrink: 0, minWidth: 96,
+                height: 36, borderRadius: '8px', fontSize: 13, fontWeight: 600, textTransform: 'none',
+                px: { xs: 1.5, sm: 2.5 },
+                flexShrink: 0, minWidth: { xs: 80, sm: 96 },
                 '&:hover': { bgcolor: '#1e40af' }
               }}
             >
@@ -1719,8 +1730,8 @@ export default function Detections() {
           );
         })}
         <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 2 }}>
-          <Typography sx={{ fontSize: 13, fontWeight: 500, color: '#64748b' }}>
-            pushed images {clientTotal} / skipped images {Math.max(0, total - clientTotal)}
+          <Typography sx={{ fontSize: { xs: 11, sm: 13 }, fontWeight: 500, color: '#64748b', whiteSpace: 'nowrap' }}>
+            Pushed {clientTotal} · Skipped {Math.max(0, total - clientTotal)}
           </Typography>
           <ToggleButtonGroup
             value={view} 

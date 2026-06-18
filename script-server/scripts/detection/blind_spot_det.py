@@ -102,10 +102,11 @@ detectors = {}
 _state_lock = threading.Lock()
 
 # ================= CORE LOGIC ============
-def detect_blind_spot_batch(items):
-    model = get_yolo_model()
-    frames = [item['frame'].copy() for item in items]
-    results = model(frames, conf=CONF_THRESHOLD, verbose=False)
+def detect_blind_spot_batch(items, results=None):
+    if results is None:
+        model = get_yolo_model()
+        frames = [item['frame'].copy() for item in items]
+        results = model(frames, conf=CONF_THRESHOLD, verbose=False)
 
     outputs = []
     for item, result in zip(items, results):

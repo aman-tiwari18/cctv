@@ -397,6 +397,7 @@ const TodaysScriptDistributionCard = () => {
 const ClientDetectionDashboard = () => {
     const [overview, setOverview] = useState(null);
     const [overviewLoading, setOverviewLoading] = useState(true);
+    const [initializing, setInitializing] = useState(true);  // until the initial range is decided
     const [showGpuWarning, setShowGpuWarning] = useState(true);
     const [searchKeyword, setSearchKeyword] = useState('');
     const [dateChip, setDateChip] = useState('today');
@@ -406,6 +407,7 @@ const ClientDetectionDashboard = () => {
     const [selectedShifts, setSelectedShifts] = useState([]);
     const [examsList, setExamsList] = useState([]);
     const searchInputRef = useRef(null);
+    const autoSwitchedRef = useRef(false);  // one-time: Today→Last month when Today has 0 exams
 
     // Fetch the company-scoped exam list once on mount.
     useEffect(() => {
@@ -522,19 +524,33 @@ const ClientDetectionDashboard = () => {
 
     useEffect(() => {
         let cancelled = false;
+        let didAutoSwitch = false;
         setOverviewLoading(true);
         clientDashboardAPI
             .getOverview(apiParams)
             .then((res) => {
-                if (!cancelled) setOverview(res?.data?.data || null);
+                if (cancelled) return;
+                const data = res?.data?.data || null;
+                // Default-on-open: if Today has 0 exams, switch to Last month WITHOUT
+                // painting the empty Today view — keep the loading skeleton through the
+                // switch so there's no visible flash.
+                if (!autoSwitchedRef.current && dateChip === 'today' && (data?.total_exams?.total || 0) === 0) {
+                    autoSwitchedRef.current = true;
+                    didAutoSwitch = true;
+                    setDateChip('last_month');   // new apiParams → effect refetches; loading stays true
+                    return;
+                }
+                setOverview(data);
+                setInitializing(false);
             })
             .catch((err) => {
                 if (cancelled) return;
                 console.error('[ClientDetectionDashboard.getOverview]', err);
                 setOverview(null);
+                setInitializing(false);
             })
             .finally(() => {
-                if (!cancelled) setOverviewLoading(false);
+                if (!cancelled && !didAutoSwitch) setOverviewLoading(false);
             });
         return () => {
             cancelled = true;
@@ -544,7 +560,7 @@ const ClientDetectionDashboard = () => {
     const totalExams   = overview?.total_exams   || { total: 0, ongoing: 0, completed: 0, scheduled: 0 };
     const cameras      = overview?.cameras       || { total: 0, accessible: 0, inaccessible: 0 };
     const scripts      = overview?.scripts       || { planned_today: 0, running: 0, scheduled: 0, completed: 0 };
-    const detections   = overview?.detections    || { today: 0, pushed_to_client: 0, false_detection: 0 };
+    const detections   = overview?.detections    || { today: 0, pushed_to_client: 0, false_detection: 0, removed_from_client: 0 };
     const distribution = overview?.detection_distribution || [];
 
     const dateChips = [
@@ -762,7 +778,7 @@ const ClientDetectionDashboard = () => {
                 sx={{ mb: activeFilters.length ? 1 : 2.5 }}
             >
                 {dateChips.map((c) => {
-                    const active = c.key === dateChip;
+                    const active = !initializing && c.key === dateChip;
                     return (
                         <Box
                             key={c.key}
@@ -896,11 +912,13 @@ const ClientDetectionDashboard = () => {
                 <Grid item xs={12} sm={6} lg={3}>
                     <KpiCard
                         title="TOTAL DETECTIONS"
-                        value={detections.today}
+                        // Viewer-relevant headline: count of detections actually pushed to
+                        // the client. Admin card stays on the raw `today` total.
+                        value={detections.pushed_to_client}
                         icon={<CustomSvgIcon />}
                         chips={[
-                            { label: 'Pushed',          value: detections.pushed_to_client, tone: 'amber' },
-                            { label: 'False Detection', value: detections.false_detection,  tone: 'violet' },
+                            { label: 'Removed', value: detections.removed_from_client, tone: 'amber' },
+                            { label: 'Total',   value: detections.pushed_to_client,    tone: 'violet' },
                         ]}
                         loading={overviewLoading}
                     />

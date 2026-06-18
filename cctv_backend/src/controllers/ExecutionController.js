@@ -354,7 +354,7 @@ exports.updateStatus = async (req, res) => {
     if (result_data) {
         const mergedResultData = { ...result_data };
 
-        if (status === "COMPLETED" && assignment.script?.script_id === "vision") {
+        if (status === "COMPLETED" && ["vision", "vision_neet"].includes(assignment.script?.script_id)) {
             const updatedClassifications = await persistVisionClassifications(assignment, mergedResultData);
             mergedResultData.persisted_classification_updates = updatedClassifications;
         }

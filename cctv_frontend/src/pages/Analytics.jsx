@@ -115,7 +115,7 @@ const Analytics = () => {
 
   const loadExams = async () => {
     try {
-      const response = await examsAPI.getAll({ is_active: !viewingArchived });
+      const response = await examsAPI.getAll({ is_active: true });
       const examList = Array.isArray(response?.data?.data) ? response.data.data : [];
       setExams(examList);
       if (examId && examList.length > 0 && !viewingArchived) {
@@ -318,7 +318,7 @@ const Analytics = () => {
   }, [dateOptions, selectedExamId, shifts.length]);
 
   return (
-    <Box sx={{ display: 'flex', minHeight: 'calc(100vh - 120px)', bgcolor: '#f8fafc' }}>
+    <Box sx={{ display: 'flex', height: 'calc(100vh - 120px)', overflow: 'hidden', bgcolor: '#f8fafc' }}>
 
       {/* ════ EXAM SIDEBAR ════ */}
       <ExamSidebar
@@ -790,7 +790,7 @@ const Analytics = () => {
                                     bgcolor: chipColor.bg,
                                     color: '#777',
                                     height: 'auto',
-                                    minWidth: 180,
+                                    minWidth: { xs: 140, sm: 180 },
                                     py: 0.8,
                                     alignItems : 'start',
                                     display : 'flex',

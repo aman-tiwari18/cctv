@@ -157,6 +157,10 @@ class ScriptRunner:
                 full_script_path = self.scripts_dir / "detection/vision_classification_rtsp.py"
             else:
                 full_script_path = self.scripts_dir / "detection/vision_classification.py"
+        elif script_code == "vision_neet":
+            # NEET scene classification + OCR — DB-driven, shared vLLM backend.
+            # Handles HLS/RTSP internally via the assignment payload's link_type.
+            full_script_path = self.scripts_dir / "detection/vision_classification_neet.py"
         elif script_code in pipeline_codes:
             full_script_path = self.scripts_dir / "detection/pipeline/master_pipeline.py"
         else:
@@ -369,8 +373,9 @@ class ScriptRunner:
             log_manager.write_log(execution_id, f"Script FAILED (exit code {process.returncode})", "ERROR")
             raise Exception(f"Script exited with code {process.returncode}: {stderr_result}")
 
-    # Maps script_code values that are handled by vision_classification.py
-    VISION_CODES = {"vision"}
+    # Script codes that are classification/vision passes (one-shot per worker
+    # over its camera shard; must NOT auto-restart). Includes NEET classification.
+    VISION_CODES = {"vision", "vision_neet"}
     # Maps script_code → analytics arg for master_pipeline.py (when key differs from script_code)
     ANALYTICS_ARG_OVERRIDES = {
         "tampering": "tamper",  # HLS_WORKER_MAP uses key "tamper"

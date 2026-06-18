@@ -373,9 +373,14 @@ exports.getOverview = async (req, res) => {
 
         // Scripts/Analytics — counts assignments across the filter range, scoped to
         // the post-filter activeExamIds + optional shift filter.
+        // Counting rule: total = pending + running + completed. FAILED and CANCELLED
+        // assignments are excluded from every number, including the headline total.
+        // The response field is named `planned_today` for frontend back-compat; it
+        // semantically means "active assignments in the filter range" now, not
+        // "assignments planned for today".
         let scriptsAgg = { planned_today: 0, running: 0, scheduled: 0, completed: 0 };
         if (activeExamIds.length > 0) {
-            let scriptsSql = `SELECT COUNT(*) AS planned_today,
+            let scriptsSql = `SELECT SUM(CASE WHEN ssa.status IN ('PENDING','RUNNING','COMPLETED') THEN 1 ELSE 0 END) AS planned_today,
                                     SUM(CASE WHEN ssa.status = 'RUNNING'   THEN 1 ELSE 0 END) AS running,
                                     SUM(CASE WHEN ssa.status = 'PENDING'   THEN 1 ELSE 0 END) AS scheduled,
                                     SUM(CASE WHEN ssa.status = 'COMPLETED' THEN 1 ELSE 0 END) AS completed

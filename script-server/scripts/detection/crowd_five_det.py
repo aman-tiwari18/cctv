@@ -280,15 +280,16 @@ def detect_crowd_five_in_frame(frame, device_id="unknown", camera_no="unknown", 
 # =====================================================
 # BATCH DETECTION — called by worker
 # =====================================================
-def detect_crowd_five_batch(items):
+def detect_crowd_five_batch(items, results=None):
     """Run true batch inference applying G2–G6 per frame.
 
     Returns list of (annotated_frame, violation_detected, effective_count, telemetry) tuples.
     G1, G7 (deque smoothing), G8 (CONSEC), G9 (cooldown) live in the worker.
     """
-    model = get_yolo_model()
-    frames = [item['frame'].copy() for item in items]
-    results = model(frames, conf=CONF_THRESHOLD, verbose=False)
+    if results is None:
+        model = get_yolo_model()
+        frames = [item['frame'].copy() for item in items]
+        results = model(frames, conf=CONF_THRESHOLD, verbose=False)
 
     outputs = []
     for item, result in zip(items, results):
