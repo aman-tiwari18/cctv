@@ -1,6 +1,7 @@
 import cv2
 import time
 import os
+_DET_GPU_ID = int(os.environ["WORKER_INDEX"]) if os.environ.get("WORKER_INDEX", "").strip().isdigit() else int("".join(c for c in os.environ.get("WORKER_ID", "main").split("-")[-1] if c.isdigit()) or "0")
 import logging
 import sys
 import threading
@@ -258,7 +259,7 @@ def detect_crowd_five_in_frame(frame, device_id="unknown", camera_no="unknown", 
         if violation_detected and time_elapsed >= COOLDOWN_TIME:
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             uid = str(uuid.uuid4())
-            fname = f"{script_name}_{device_id}_{camera_no}_{ts}_{uid}.jpg"
+            fname = f"{script_name}_{device_id}_{camera_no}_gpu{_DET_GPU_ID}_{ts}_{uid}.jpg"
             filename = os.path.join(SAVE_FOLDER, fname)
             cv2.imwrite(filename, frame)
             try:

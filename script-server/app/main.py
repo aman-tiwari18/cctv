@@ -384,7 +384,9 @@ def _enrich_detection_item_from_report(item: dict) -> dict:
                 if row.get("shift_name"):
                     item["shiftName"] = row.get("shift_name")
                     item["shift_name"] = row.get("shift_name")
-                if row.get("gpu_id") is not None:
+                # Filename gpu_id is primary; only fall back to DB value when the
+                # filename had none (older files saved before gpu_id was embedded).
+                if row.get("gpu_id") is not None and item.get("gpu_id") is None:
                     item["gpu_id"] = row.get("gpu_id")
                 if row.get("pushed_to_client") is not None:
                     item["pushed_to_client"] = row.get("pushed_to_client")
@@ -652,7 +654,13 @@ async def detection_watch_loop():
                                 True, origin,
                             )
                             payload = await asyncio.to_thread(_enrich_detection_item_from_report, payload)
-                            await sio.emit("detection:new", payload)
+                            # Role-based routing: 'all' room = admin/client (everything);
+                            # gpu:{id} room = operators assigned to that gpu. Disjoint rooms,
+                            # so no double-delivery. Missing gpu_id (old files) → admin/client only.
+                            await sio.emit("detection:new", payload, room="all")
+                            gid = payload.get("gpu_id")
+                            if gid is not None:
+                                await sio.emit("detection:new", payload, room=f"gpu:{gid}")
                             emitted += 1
                         except Exception as exc:
                             logger.error(f"Failed to emit live detection {type_key} {tagged_path}: {exc}")
@@ -695,7 +703,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"Scripts directory: {SCRIPTS_DIR}")
     logger.info(f"HTTP server port: {HTTP_PORT}")
     
-    # Start poller
+    # Start poller (launches this worker's assigned detection executions)
     await poller_service.start()
 
     global known_detection_files, known_detection_by_date
@@ -1303,6 +1311,14 @@ def parse_detection_filename(
         except ValueError:
             filename_shift_id = None
 
+    # Extract gpu_id (= WORKER_INDEX) embedded by detection workers as _gpu{N}_.
+    # This is the PRIMARY operator-sharding key. Older files have no _gpu token
+    # (gpu_id stays None → falls back to DB enrichment, then admin/client-only).
+    gpu_id_fn = None
+    gpu_match = re.search(r'_gpu(\d+)', stem, flags=re.IGNORECASE)
+    if gpu_match:
+        gpu_id_fn = int(gpu_match.group(1))
+
     # The uid is typically the the last segment of the stem
     uid = stem.split("_")[-1]
 
@@ -1463,6 +1479,7 @@ def parse_detection_filename(
         "image_url":   image_url,
         "exam_id":     exam_id,
         "uid":         uid,
+        "gpu_id":      gpu_id_fn,
     }
 
 
@@ -2145,10 +2162,54 @@ async def remove_client_detection(payload: ClientDetectionRemoveRequest):
         conn.close()
 
 
+# ============================================================
+# Operator sharding: operators see only detections from their assigned gpu_ids.
+# admin / client roles (and unauthenticated) see ALL detections.
+# ============================================================
+
+def get_operator_gpu_ids(user_id) -> list:
+    """Return the list of gpu_ids assigned to an operator (empty if none)."""
+    try:
+        conn = _get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT gpu_id FROM users WHERE id = %s", (int(user_id),))
+                rows = cur.fetchall()
+                if rows and rows[0].get("gpu_id") is not None:
+                    return [int(rows[0]["gpu_id"])]
+                return []
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.error(f"[operator_shard] lookup failed for user {user_id}: {e}")
+        return []
+
+
 @sio.event
 async def connect(sid, environ, auth):
-    logger.info(f"Socket.IO client connected: {sid}")
-    await sio.emit("detections:connected", {"success": True}, to=sid)
+    """Role-based rooms:
+       - operator  → join only gpu:{id} rooms for their assigned gpu_ids
+       - admin/client/unauthenticated → join the 'all' room (every detection)
+    """
+    auth = auth or {}
+    role = str(auth.get("role") or "").strip().lower()
+    user_id = auth.get("user_id")
+
+    joined = []
+    if role == "operator" and user_id not in (None, "", 0, "0"):
+        gpu_ids = await asyncio.to_thread(get_operator_gpu_ids, user_id)
+        for g in gpu_ids:
+            await sio.enter_room(sid, f"gpu:{g}")
+            joined.append(f"gpu:{g}")
+        if not joined:
+            logger.warning(f"Operator user_id={user_id} has no gpu assignment — will receive no live detections")
+    else:
+        # admin / client / unauthenticated → see everything
+        await sio.enter_room(sid, "all")
+        joined.append("all")
+
+    logger.info(f"Socket.IO connected sid={sid} role={role or 'none'} rooms={joined}")
+    await sio.emit("detections:connected", {"success": True, "role": role, "rooms": joined}, to=sid)
 
 
 @sio.event

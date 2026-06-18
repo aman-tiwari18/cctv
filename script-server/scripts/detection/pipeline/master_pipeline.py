@@ -1041,6 +1041,7 @@ def rtsp_producer(cam_configs, queues, pre_fetched_token=None, enabled_scripts=N
                         "camera_id_pk":   camera_id_pk,
                         "exam_id":        exam_id,
                         "shift_id":       shift_id,
+                        "source_type":    "RTSP",   # rtsp_producer only feeds RTSP cameras
                         "enabled_scripts": enabled_scripts,
                     }
                 else:

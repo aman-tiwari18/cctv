@@ -32,6 +32,7 @@ INTEGRATION (not wired yet — flip after evaluators exist for all needed script
 """
 
 import os
+_DET_GPU_ID = int(os.environ["WORKER_INDEX"]) if os.environ.get("WORKER_INDEX", "").strip().isdigit() else int("".join(c for c in os.environ.get("WORKER_ID", "main").split("-")[-1] if c.isdigit()) or "0")
 import sys
 import time
 import uuid
@@ -118,19 +119,33 @@ def class_from_result(result, class_ids, conf=CONF_THRESHOLD):
 # ============================================================
 # Reporting helper (shared by all evaluators)
 # ============================================================
-def _save_and_report(frame, *, folder, script_name, device_id, ch_no,
-                     exam_id, shift_id):
-    save_folder = os.path.join(RESULTS_ROOT, folder)
-    os.makedirs(save_folder, exist_ok=True)
+def _save_and_report(frame, *, folder, script_name, device_id, camera_no,
+                     exam_id, shift_id, source_type="RTSP"):
+    """Save the annotated detection and report it, using the schema-correct identifier:
+       - RTSP: device_id + camera_no  (filename `{dev}_{camera_no}`, report_to_db_rtsp)
+       - HLS : ch_code (= camera_no)  (filename `ch{ch_code}`,        report_to_db_hls)
+    Matches the convention used by the per-script workers."""
     ts = time.strftime("%Y%m%d_%H%M%S")
     uid = str(uuid.uuid4())
-    fname = f"{script_name}_{device_id}_{ch_no}_exam{exam_id}_shift{shift_id}_{ts}_{uid}.jpg"
+
+    if str(source_type).upper() == "HLS":
+        save_folder = os.path.join(RESULTS_ROOT, "tcs_detections", folder)
+        fname = f"{script_name}_ch{camera_no}_exam{exam_id}_shift{shift_id}_gpu{_DET_GPU_ID}_{ts}_{uid}.jpg"
+    else:
+        save_folder = os.path.join(RESULTS_ROOT, folder)
+        fname = f"{script_name}_{device_id}_{camera_no}_exam{exam_id}_shift{shift_id}_gpu{_DET_GPU_ID}_{ts}_{uid}.jpg"
+
+    os.makedirs(save_folder, exist_ok=True)
     path = os.path.join(save_folder, fname)
     cv2.imwrite(path, frame)
     try:
-        from utils.db_client import report_to_db_rtsp
-        report_to_db_rtsp(device_id=str(device_id), camera_no=str(ch_no),
-                          image_name=fname, folder=folder)
+        if str(source_type).upper() == "HLS":
+            from utils.db_client import report_to_db_hls
+            report_to_db_hls(ch_code=str(camera_no), image_name=fname, folder=folder)
+        else:
+            from utils.db_client import report_to_db_rtsp
+            report_to_db_rtsp(device_id=str(device_id), camera_no=str(camera_no),
+                              image_name=fname, folder=folder)
     except Exception as e:
         logger.error(f"[Unified] DB report error ({script_name}): {e}")
     logger.warning(f"[Unified] 🚨 {script_name} saved → {path}")
@@ -201,8 +216,9 @@ def _make_evaluator(module_name, fn_name, folder, script_code):
             return
         _save_and_report(
             annotated, folder=folder, script_name=script_code,
-            device_id=item["device_id"], ch_no=item["ch_no"],
+            device_id=item["device_id"], camera_no=item["camera_no"],
             exam_id=item.get("exam_id", "0"), shift_id=item.get("shift_id", "0"),
+            source_type=item.get("source_type", "RTSP"),
         )
 
     return _eval
@@ -270,14 +286,18 @@ def unified_worker(frame_queue):
         # ---- dispatch boxes to each camera's enabled analytics ----
         for pkt, result in zip(batch, results):
             dev = pkt.get("device_id", "unknown")
-            ch = pkt.get("ch_no") or pkt.get("camera_no") or "1"
+            # RTSP: camera_no is the camera number; HLS: it's the ch_code.
+            cam_no = pkt.get("camera_no") or pkt.get("ch_no") or "1"
+            src    = pkt.get("source_type", "RTSP")
             item = {
-                "frame":     pkt["frame"],
-                "ch_no":     ch,
-                "device_id": dev,
-                "camera_id": dev,
-                "exam_id":   pkt.get("exam_id", "0"),
-                "shift_id":  pkt.get("shift_id", "0"),
+                "frame":       pkt["frame"],
+                "camera_no":   cam_no,
+                "ch_no":       cam_no,   # kept for detect_*_batch compatibility
+                "device_id":   dev,
+                "camera_id":   dev,
+                "exam_id":     pkt.get("exam_id", "0"),
+                "shift_id":    pkt.get("shift_id", "0"),
+                "source_type": src,
             }
             for script in pkt.get("enabled_scripts", []):
                 fn = EVALUATORS.get(script)

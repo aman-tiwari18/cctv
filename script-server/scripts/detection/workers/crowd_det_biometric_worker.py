@@ -7,6 +7,7 @@ Specifically for Biometric area crowd detection.
 import queue
 import time
 import os
+_DET_GPU_ID = int(os.environ["WORKER_INDEX"]) if os.environ.get("WORKER_INDEX", "").strip().isdigit() else int("".join(c for c in os.environ.get("WORKER_ID", "main").split("-")[-1] if c.isdigit()) or "0")
 import logging
 import threading
 import signal
@@ -133,9 +134,9 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=120):
             script_name = item.get("script_name", "crowd_biometric")
             
             if item.get("source_type") == "HLS":
-                fname = f"{script_name}_ch{ch_no}_exam{exam_id}_shift{shift_id}_{ts}_{uid}.jpg"
+                fname = f"{script_name}_ch{ch_no}_exam{exam_id}_shift{shift_id}_gpu{_DET_GPU_ID}_{ts}_{uid}.jpg"
             else:
-                fname = f"{script_name}_{dev_id}_{ch_no}_exam{exam_id}_shift{shift_id}_{ts}_{uid}.jpg"
+                fname = f"{script_name}_{dev_id}_{ch_no}_exam{exam_id}_shift{shift_id}_gpu{_DET_GPU_ID}_{ts}_{uid}.jpg"
             
             path = os.path.join(save_folder, fname)
             cv2.imwrite(path, annotated_frame)
