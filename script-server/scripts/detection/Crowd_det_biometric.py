@@ -110,11 +110,12 @@ def detect_crowd_biometric_in_frame(frame, device_id="unknown", camera_no="unkno
 
     return frame, crowd_detected, person_count
 
-def detect_crowd_biometric_batch(items):
+def detect_crowd_biometric_batch(items, results=None):
     """Run true batch inference for biometric area crowd detection."""
-    model = get_yolo_model()
-    frames = [item['frame'].copy() for item in items]
-    results = model(frames, conf=CONF_THRESHOLD, verbose=False)
+    if results is None:
+        model = get_yolo_model()
+        frames = [item['frame'].copy() for item in items]
+        results = model(frames, conf=CONF_THRESHOLD, verbose=False)
 
     outputs = []
     for item, result in zip(items, results):

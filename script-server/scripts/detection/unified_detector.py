@@ -35,6 +35,7 @@ import os
 import sys
 import time
 import uuid
+import importlib
 import queue as queue_module
 import logging
 import threading
@@ -156,28 +157,61 @@ def _passed_gate(state, script, now):
     return True
 
 
-def eval_crowd(result, item, state):
-    """Reuses Crowd_det_complete.detect_crowd_batch with the SHARED result (no re-inference)."""
-    import Crowd_det_complete as crowd_core
-    outputs = crowd_core.detect_crowd_batch([item], results=[result])
-    annotated, detected, person_count = outputs[0]
-    if not detected:
-        state["consec"] = 0
-        return
-    if not _passed_gate(state, "crowd", time.time()):
-        return
-    _save_and_report(annotated, folder="crowd_detection", script_name="crowd",
-                     device_id=item["device_id"], ch_no=item["ch_no"],
-                     exam_id=item.get("exam_id", "0"), shift_id=item.get("shift_id", "0"))
+# script_code -> (module, batch_fn, report_folder)
+# Each batch_fn has been refactored to accept `results=` so it reuses the SHARED
+# inference instead of re-running yolov10m. `report_folder` matches the basename of
+# each script's existing SAVE_FOLDER (so DB/image reporting is unchanged).
+ANALYTIC_SPEC = {
+    "crowd":          ("Crowd_det_complete",  "detect_crowd_batch",           "crowd_detection"),
+    "crowd_zero":     ("crowd_zero_det",      "detect_crowd_zero_batch",      "zero_person_detection"),
+    "crowd_five":     ("crowd_five_det",      "detect_crowd_five_batch",      "crowd_detection_threshold"),
+    "proximity":      ("close_proximity",     "detect_proximity_batch",       "proximity_detection"),
+    "intruder":       ("Intruder_det",        "detect_intruder_batch",        "intruder_detection"),
+    "entry_exit":     ("Entry_exit_det",      "detect_entry_exit_batch",      "entry_exit_detection"),
+    "server":         ("Server_room_det",     "detect_persons_batch",         "server_room_detection"),
+    "phone":          ("phone_det_complete",  "detect_phone_batch",           "phone_detection"),
+    "qp_box":         ("qp_box_det",          "detect_qp_box_batch",          "qp_box_missing"),
+    "strongroom":     ("StrongRoom_det",      "detect_strongroom_batch",      "strongroom_detection"),
+    "invigilator":    ("invigilator_tracking","detect_invigilator_batch",     "invigilator_detection"),
+    "blind_spot":     ("blind_spot_det",      "detect_blind_spot_batch",      "blind_spot_detection"),
+    "crowd_biometric":("Crowd_det_biometric", "detect_crowd_biometric_batch", "crowd_detection_biometric"),
+    # NOTE: 'tamper' and 'inversion' are classical-CV checks (no YOLO boxes) and stay
+    # as their own workers — they don't consume the shared detector output.
+}
 
 
-# Registry: script_code -> evaluator. Extend as each analytic is converted.
+def _make_evaluator(module_name, fn_name, folder, script_code):
+    """Build an evaluator that runs the script's rule over the SHARED result (no re-inference)."""
+    _cache = {}
+
+    def _eval(result, item, state):
+        fn = _cache.get("fn")
+        if fn is None:
+            mod = importlib.import_module(module_name)
+            fn = getattr(mod, fn_name)
+            _cache["fn"] = fn
+        # Reuse the script's own rule + annotation by passing the shared result.
+        outputs = fn([item], results=[result])
+        out = outputs[0]
+        annotated, detected = out[0], out[1]   # all return (annotated, detected, count[, ...])
+        if not detected:
+            state["consec"] = 0
+            return
+        if not _passed_gate(state, script_code, time.time()):
+            return
+        _save_and_report(
+            annotated, folder=folder, script_name=script_code,
+            device_id=item["device_id"], ch_no=item["ch_no"],
+            exam_id=item.get("exam_id", "0"), shift_id=item.get("shift_id", "0"),
+        )
+
+    return _eval
+
+
+# Registry: script_code -> evaluator (all analytics, driven by the shared inference).
 EVALUATORS = {
-    "crowd": eval_crowd,
-    # "proximity": eval_proximity,   # TODO: refactor close_proximity to accept shared result
-    # "intruder":  eval_intruder,
-    # "server":    eval_server,
-    # ... one per analytic; all read the same `result`.
+    code: _make_evaluator(mod, fn, folder, code)
+    for code, (mod, fn, folder) in ANALYTIC_SPEC.items()
 }
 
 
@@ -210,12 +244,13 @@ def unified_worker(frame_queue):
             break
         batch.append(pkt)
 
+        stop = False
         deadline = time.time() + BATCH_WAIT_TIMEOUT
         while len(batch) < GPU_BATCH_SIZE and time.time() < deadline:
             try:
                 nxt = frame_queue.get_nowait()
-                if nxt is None:
-                    frame_queue = _drain_sentinel(frame_queue)
+                if nxt is None:        # shutdown sentinel mid-batch: process what we have, then stop
+                    stop = True
                     break
                 batch.append(nxt)
             except queue_module.Empty:
@@ -256,9 +291,7 @@ def unified_worker(frame_queue):
         for p in batch:
             p.pop("frame", None)
 
+        if stop:
+            break
+
     logger.info("🔴 [Unified] worker stopped")
-
-
-def _drain_sentinel(q):
-    """Helper to keep the loop simple if a None sentinel is pulled mid-batch."""
-    return q
