@@ -358,7 +358,7 @@ const ServerGpuSidebar = ({ servers, selectedKey, onSelect, expanded, onToggle, 
   const [sortBy, setSortBy] = useState('Utilization');
   const [nodeFilter, setNodeFilter] = useState('All Nodes');
   return (
-    <Card elevation={0} sx={{ ...CARD_SX, height: { md: '100%' }, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <Card elevation={0} sx={{ ...CARD_SX, maxHeight: { md: 'calc(100vh - 180px)' }, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 }, display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1 }}>
         <Stack direction="row" spacing={1} sx={{ mb: 1.5, flexShrink: 0 }}>
           <FilterSelect value={sortBy} onChange={(e) => setSortBy(e.target.value)} options={['Utilization', 'Temperature', 'Memory']} />
@@ -596,7 +596,6 @@ const GPUDetailPanel = ({ server, gpu, processes, rangeKey, onRangeChange, onRef
             <Box sx={{ display: 'flex', gap: 1 }}>
               <Button
                 size="small"
-                startIcon={<Refresh sx={{ fontSize: 16 }} />}
                 onClick={onRefresh}
                 sx={{ textTransform: 'none', fontFamily: INTER, fontWeight: 600, fontSize: 13, color: COLOR.title, border: '1px solid #E5E7EB', borderRadius: '8px', px: 1.5, '&:hover': { borderColor: '#CBD5E1', bgcolor: '#f8fafc' } }}
               >
@@ -627,7 +626,7 @@ const GPUDetailPanel = ({ server, gpu, processes, rangeKey, onRangeChange, onRef
                     <TableCell sx={{ fontWeight: 700, fontSize: 11, color: COLOR.muted }}>USER</TableCell>
                     <TableCell sx={{ fontWeight: 700, fontSize: 11, color: COLOR.muted }} align="right">GPU MEM</TableCell>
                     <TableCell sx={{ fontWeight: 700, fontSize: 11, color: COLOR.muted }} align="right">CAMERAS</TableCell>
-                    <TableCell sx={{ fontWeight: 700, fontSize: 11, color: COLOR.muted, minWidth: 110 }}>GPU %</TableCell>
+                    <TableCell sx={{ fontWeight: 700, fontSize: 11, color: COLOR.muted, minWidth: 88 }}>GPU %</TableCell>
                     <TableCell sx={{ fontWeight: 700, fontSize: 11, color: COLOR.muted }}>RUNTIME</TableCell>
                     <TableCell sx={{ fontWeight: 700, fontSize: 11, color: COLOR.muted }}>STATE</TableCell>
                   </TableRow>
@@ -706,41 +705,28 @@ const GPUDetailPanel = ({ server, gpu, processes, rangeKey, onRangeChange, onRef
 
 // ── compare view: one GPU's comparison card (real compact charts) ───────────
 const CompareGpuCard = ({ server, gpu, rangeKey, onRemove }) => (
-  <Card elevation={0} sx={{ ...CARD_SX }}>
-    <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', minWidth: 0 }}>
-          <Typography sx={{ fontFamily: INTER, fontWeight: 700, fontSize: { xs: '15px', sm: '17px' }, color: COLOR.title }} noWrap>
-            GPU {gpu.gpu_id} — {gpu.name}
-          </Typography>
-          <Chip
-            icon={server.status === 'online' ? <CheckCircle /> : <ErrorIcon />}
-            label={server.status.toUpperCase()}
-            size="small"
-            sx={{ bgcolor: server.status === 'online' ? '#ecfdf5' : '#fef2f2', color: server.status === 'online' ? '#059669' : '#dc2626', fontWeight: 600, '& .MuiChip-icon': { color: 'inherit' } }}
-          />
-        </Box>
-        <Tooltip title="Remove">
-          <IconButton size="small" onClick={onRemove}><Close sx={{ fontSize: 18, color: COLOR.faint }} /></IconButton>
-        </Tooltip>
+  <Box>
+    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, mb: 1 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', minWidth: 0 }}>
+        <Typography sx={{ fontFamily: INTER, fontWeight: 700, fontSize: { xs: '15px', sm: '17px' }, color: COLOR.title }} noWrap>
+          GPU {gpu.gpu_id} — {gpu.name}
+        </Typography>
+        <Chip
+          icon={server.status === 'online' ? <CheckCircle /> : <ErrorIcon />}
+          label={server.status.toUpperCase()}
+          size="small"
+          sx={{ bgcolor: server.status === 'online' ? '#ecfdf5' : '#fef2f2', color: server.status === 'online' ? '#059669' : '#dc2626', fontWeight: 600, '& .MuiChip-icon': { color: 'inherit' } }}
+        />
       </Box>
-      <Stack direction="row" spacing={4} sx={{ mt: 0.5 }}>
-        <Box>
-          <Typography sx={{ fontFamily: INTER, fontSize: 11, fontWeight: 600, letterSpacing: '0.5px', color: COLOR.faint, textTransform: 'uppercase' }}>Utilization</Typography>
-          <Typography sx={{ fontFamily: INTER, fontWeight: 700, fontSize: 20, color: COLOR.title }}>{gpu.utilization}%</Typography>
-        </Box>
-        <Box>
-          <Typography sx={{ fontFamily: INTER, fontSize: 11, fontWeight: 600, letterSpacing: '0.5px', color: COLOR.faint, textTransform: 'uppercase' }}>Memory</Typography>
-          <Typography sx={{ fontFamily: INTER, fontWeight: 700, fontSize: 20, color: COLOR.title }}>{(gpu.memory_used / 1024).toFixed(0)}GB</Typography>
-        </Box>
-      </Stack>
-      <Box sx={{ height: '2px', bgcolor: COLOR.accent, borderRadius: 1, mt: 1.5, mb: 2 }} />
-      <Stack spacing={2}>
-        <UtilizationChart compact serverId={server.server_id} gpuId={String(gpu.gpu_id)} rangeKey={rangeKey} />
-        <MemoryChart compact serverId={server.server_id} gpuId={String(gpu.gpu_id)} memoryTotalMb={gpu.memory_total} memoryUsedMb={gpu.memory_used} rangeKey={rangeKey} />
-      </Stack>
-    </CardContent>
-  </Card>
+      <Tooltip title="Remove">
+        <IconButton size="small" onClick={onRemove}><Close sx={{ fontSize: 18, color: COLOR.faint }} /></IconButton>
+      </Tooltip>
+    </Box>
+    <Stack spacing={2}>
+      <UtilizationChart serverId={server.server_id} gpuId={String(gpu.gpu_id)} rangeKey={rangeKey} />
+      <MemoryChart serverId={server.server_id} gpuId={String(gpu.gpu_id)} memoryTotalMb={gpu.memory_total} memoryUsedMb={gpu.memory_used} rangeKey={rangeKey} />
+    </Stack>
+  </Box>
 );
 
 // ── compare view: empty dashed "add a GPU" slot + drop target ───────────────
@@ -779,20 +765,20 @@ const AddGpuSlot = ({ onAdd }) => {
 // `subLabel`: plain gray caption under the value (Processes/Cameras).
 const StatCard = ({ icon: Icon, label, value, chips, subLabel }) => (
   <Card elevation={0} sx={{ ...CARD_SX, height: '100%' }}>
-    <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
+    <CardContent sx={{ p: { xs: 1.5, sm: 2 } }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
         <Typography sx={{ color: COLOR.muted, fontFamily: INTER, fontWeight: 700, fontSize: '12px', letterSpacing: '1px', lineHeight: '16px', textTransform: 'uppercase' }}>
           {label}
         </Typography>
-        <Box sx={{ bgcolor: COLOR.iconBoxBg, borderRadius: '8px', width: { xs: 32, sm: 36, md: 40 }, height: { xs: 32, sm: 36, md: 40 }, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <Box sx={{ bgcolor: COLOR.iconBoxBg, borderRadius: '8px', width: { xs: 30, sm: 34, md: 36 }, height: { xs: 30, sm: 34, md: 36 }, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
           <Icon sx={{ fontSize: { xs: 16, sm: 18 }, color: COLOR.iconColor }} />
         </Box>
       </Box>
-      <Typography sx={{ color: COLOR.value, fontFamily: INTER, fontWeight: 700, fontSize: { xs: '28px', sm: '32px', md: '38px' }, lineHeight: { xs: '34px', sm: '38px', md: '44px' } }}>
+      <Typography sx={{ color: COLOR.value, fontFamily: INTER, fontWeight: 700, fontSize: { xs: '24px', sm: '28px', md: '32px' }, lineHeight: { xs: '30px', sm: '34px', md: '38px' } }}>
         {value}
       </Typography>
       {chips && chips.length > 0 && (
-        <Stack direction="row" spacing={1} sx={{ mt: 1.5, flexWrap: 'wrap' }} useFlexGap rowGap={1}>
+        <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: 'wrap' }} useFlexGap rowGap={1}>
           {chips.map((c) => {
             const tone = CHIP_TONES[c.tone] || CHIP_TONES.violet;
             return (
@@ -805,7 +791,7 @@ const StatCard = ({ icon: Icon, label, value, chips, subLabel }) => (
         </Stack>
       )}
       {subLabel && (
-        <Typography sx={{ mt: 1.5, color: COLOR.muted, fontFamily: INTER, fontSize: '12px', fontWeight: 500 }}>
+        <Typography sx={{ mt: 1, color: COLOR.muted, fontFamily: INTER, fontSize: '12px', fontWeight: 500 }}>
           {subLabel}
         </Typography>
       )}
@@ -915,9 +901,9 @@ const GPUMonitor = () => {
   }
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: { md: 'calc(100vh - 120px)' }, overflow: { md: 'hidden' } }}>
+    <Box>
       {/* Header */}
-      <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'flex-start', sm: 'flex-start' }, mb: 3, gap: 2, flexShrink: 0 }}>
+      <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'flex-start', sm: 'flex-start' }, mb: 3, gap: 2 }}>
         <Box>
           <Typography sx={{ fontFamily: INTER, fontWeight: 700, fontSize: { xs: '22px', sm: '26px' }, lineHeight: { xs: '28px', sm: '32px' }, color: COLOR.title, letterSpacing: '0.2px' }}>
             GPU Monitor
@@ -947,7 +933,7 @@ const GPUMonitor = () => {
       {error && <Alert severity="warning" sx={{ mb: 2 }}>{error}</Alert>}
 
       {/* Top stat cards */}
-      <Grid container spacing={{ xs: 1.5, sm: 2, lg: 2.5 }} sx={{ mb: 3, flexShrink: 0 }}>
+      <Grid container spacing={{ xs: 1.5, sm: 2, lg: 2.5 }} sx={{ mb: 3 }}>
         <Grid item xs={12} sm={6} lg={3}>
           <StatCard
             icon={Computer} label="Total Servers" value={clusterData?.total_servers || 0}
@@ -981,7 +967,7 @@ const GPUMonitor = () => {
       </Grid>
 
       {/* Server Details */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 1.5, flexShrink: 0 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 1.5 }}>
         <Typography sx={{ fontFamily: INTER, fontWeight: 700, fontSize: { xs: '17px', sm: '20px' }, color: COLOR.title }}>
           Server Details
         </Typography>
@@ -1013,8 +999,8 @@ const GPUMonitor = () => {
           })}
         </Box>
       </Box>
-      <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2, flex: { md: 1 }, minHeight: 0, overflow: { md: 'hidden' } }}>
-        <Box sx={{ width: { xs: '100%', md: 300 }, flexShrink: 0, height: { md: '100%' } }}>
+      <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2, alignItems: { md: 'flex-start' } }}>
+        <Box sx={{ width: { xs: '100%', md: 300 }, flexShrink: 0 }}>
           <ServerGpuSidebar
             servers={clusterData?.servers || []}
             selectedKey={selectedKey}
@@ -1026,13 +1012,7 @@ const GPUMonitor = () => {
             onAdd={addCompare}
           />
         </Box>
-        <Box sx={{
-          flex: 1, minWidth: 0, height: { md: '100%' }, overflowY: { md: 'auto' },
-          scrollbarWidth: 'thin', scrollbarColor: '#cbd5e1 transparent',
-          '&::-webkit-scrollbar': { width: '6px' },
-          '&::-webkit-scrollbar-thumb': { backgroundColor: '#cbd5e1', borderRadius: '3px' },
-          '&::-webkit-scrollbar-track': { backgroundColor: 'transparent' },
-        }}>
+        <Box sx={{ flex: 1, minWidth: 0 }}>
           {viewMode === 'inspect' ? (
             <GPUDetailPanel
               server={selectedServer}
