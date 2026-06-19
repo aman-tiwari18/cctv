@@ -358,7 +358,7 @@ const ServerGpuSidebar = ({ servers, selectedKey, onSelect, expanded, onToggle, 
   const [sortBy, setSortBy] = useState('Utilization');
   const [nodeFilter, setNodeFilter] = useState('All Nodes');
   return (
-    <Card elevation={0} sx={{ ...CARD_SX, height: { md: '100%' }, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <Card elevation={0} sx={{ ...CARD_SX, maxHeight: { md: 'calc(100vh - 140px)' }, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 }, display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1 }}>
         <Stack direction="row" spacing={1} sx={{ mb: 1.5, flexShrink: 0 }}>
           <FilterSelect value={sortBy} onChange={(e) => setSortBy(e.target.value)} options={['Utilization', 'Temperature', 'Memory']} />
@@ -1000,7 +1000,7 @@ const GPUMonitor = () => {
           })}
         </Box>
       </Box>
-      <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2, alignItems: { md: 'stretch' } }}>
+      <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2, alignItems: { md: 'flex-start' } }}>
         <Box sx={{ width: { xs: '100%', md: 300 }, flexShrink: 0 }}>
           <ServerGpuSidebar
             servers={clusterData?.servers || []}
