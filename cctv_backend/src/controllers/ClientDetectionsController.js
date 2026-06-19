@@ -84,9 +84,12 @@ function formatDetectedAt(dateStr, timeStr) {
  */
 function parseFilename(filename, typeKey) {
     const stem = (filename || '').replace(/\.[^.]+$/, '');
-    const out = { date: '', time: '', count: null, confidence: null, issueType: '', issueLabel: '' };
+    const out = { date: '', time: '', count: null, confidence: null, issueType: '', issueLabel: '', shiftId: null };
     const dt = /(\d{8})_(\d{6})/.exec(stem);
     if (dt) { out.date = dt[1]; out.time = dt[2]; }
+    // shift_id embedded by the detection workers as _shift{id}_ ; "0" = absent.
+    const sh = /_shift(\d+)/i.exec(stem);
+    if (sh) { const v = parseInt(sh[1], 10); out.shiftId = v > 0 ? v : null; }
     const conf = /conf([\d.]+)/.exec(stem);
     if (conf) out.confidence = parseFloat(conf[1]);
     const cnt = /(?:persons|violations)(\d+)/.exec(stem);
@@ -345,7 +348,7 @@ exports.getRemovedDetections = async (req, res) => {
                 tcCode: row.tc_code || '',
                 category: row.camera_category || '',
                 exam_id: row.exam_id,
-                shift_id: row.shift_id,
+                shift_id: row.shift_id || meta.shiftId || null,
                 uid: row.unique_id || null,
                 detected_at: detectedAt,
                 date: dateDisplay,
@@ -361,6 +364,27 @@ exports.getRemovedDetections = async (req, res) => {
                 remove_from_client: row.remove_from_client,
             };
         });
+
+        // Resolve shift names (exam_shifts) for the page in ONE query so the
+        // removed-detection cards (grid + list) show the shift, mirroring the
+        // script-server /detections + /client-detections endpoints.
+        const shiftIds = [...new Set(data.map(d => d.shift_id).filter(Boolean))];
+        if (shiftIds.length > 0) {
+            try {
+                const ph = shiftIds.map(() => '?').join(',');
+                const shiftRows = await query(
+                    `SELECT id, shift_name FROM exam_shifts WHERE id IN (${ph})`,
+                    shiftIds,
+                );
+                const nameMap = new Map(shiftRows.map(r => [r.id, r.shift_name]));
+                data.forEach(d => {
+                    const nm = d.shift_id ? nameMap.get(d.shift_id) : null;
+                    if (nm) { d.shiftName = nm; d.shift_name = nm; }
+                });
+            } catch (err) {
+                console.error('[getRemovedDetections] shift name resolve failed:', err.message);
+            }
+        }
 
         return res.json({
             success: true,

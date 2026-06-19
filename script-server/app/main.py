@@ -234,6 +234,115 @@ def _shift_names_for_ids(shift_ids) -> dict:
             conn.close()
 
 
+def _user_names_for_ids(user_ids) -> dict:
+    """Resolve a set of user ids to display names in one query.
+
+    Returns {id: full_name or username}. Used to show "Pushed by" on client
+    detections without a per-row DB lookup."""
+    ids = []
+    for user_id in user_ids:
+        if user_id in (None, ""):
+            continue
+        try:
+            ids.append(int(user_id))
+        except (TypeError, ValueError):
+            continue
+
+    ids = sorted(set(ids))
+    if not ids:
+        return {}
+
+    conn = None
+    try:
+        conn = _get_connection()
+        with conn.cursor() as cur:
+            fmt = ",".join(["%s"] * len(ids))
+            cur.execute(
+                f"SELECT id, full_name, username FROM users WHERE id IN ({fmt})",
+                tuple(ids),
+            )
+            return {
+                row.get("id"): (row.get("full_name") or row.get("username"))
+                for row in cur.fetchall()
+            }
+    except Exception as e:
+        logger.error(f"User name lookup failed: {e}")
+        return {}
+    finally:
+        if conn:
+            conn.close()
+
+
+@lru_cache(maxsize=2048)
+def _resolve_shift_window(shift_id):
+    """Return (start_hm, end_hm) as 'HH:MM' for an exam_shifts row, or (None,None).
+
+    Detections are filtered by shift via this TIME WINDOW rather than a stored
+    shift tag — every detection has a timestamp, but historical rows often lack a
+    reliable shift_id (NULL / per-execution value), so time is the robust key."""
+    if not shift_id:
+        return (None, None)
+    conn = None
+    try:
+        conn = _get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT start_time, end_time FROM exam_shifts WHERE id = %s LIMIT 1",
+                (int(shift_id),),
+            )
+            row = cur.fetchone()
+        if not row:
+            return (None, None)
+
+        def _hm(t):
+            s = str(t) if t is not None else ""
+            return s[:5] if len(s) >= 5 else None  # 'HH:MM:SS' -> 'HH:MM'
+
+        return (_hm(row.get("start_time")), _hm(row.get("end_time")))
+    except Exception as e:
+        logger.error(f"Shift window lookup failed for shift_id={shift_id}: {e}")
+        return (None, None)
+    finally:
+        if conn:
+            conn.close()
+
+
+def _apply_shift_window(shift_id, start_time, end_time):
+    """Fold a shift's time window into existing start/end time bounds (intersection)."""
+    if not shift_id:
+        return start_time, end_time
+    sw_start, sw_end = _resolve_shift_window(shift_id)
+    if sw_start:
+        start_time = max(start_time, sw_start) if start_time else sw_start
+    if sw_end:
+        end_time = min(end_time, sw_end) if end_time else sw_end
+    return start_time, end_time
+
+
+def _attach_shift_names(items) -> None:
+    """In-place: ensure every item carrying a shift_id also has a human-readable
+    shiftName. Resolves exam_shifts in ONE query for the whole page, so detection
+    cards (grid + list) reliably show the shift even when the camera_report row's
+    shift_id was NULL but the filename embedded it."""
+    needing = [it.get("shift_id") for it in items if it.get("shift_id") and not it.get("shiftName")]
+    if not needing:
+        return
+    name_map = _shift_names_for_ids(needing)
+    if not name_map:
+        return
+    for it in items:
+        sid = it.get("shift_id")
+        if not sid or it.get("shiftName"):
+            continue
+        try:
+            nm = name_map.get(int(sid))
+        except (TypeError, ValueError):
+            nm = None
+        if nm:
+            it["shiftName"] = nm
+            it["shift_name"] = nm
+
+
 def _enrich_detection_item_from_report(item: dict) -> dict:
     uid = item.get("uid")
     if not uid:
@@ -255,7 +364,7 @@ def _enrich_detection_item_from_report(item: dict) -> dict:
                 cur.execute(
                     f"""
                     SELECT cr.shift_id, cr.tc_code, cr.gpu_id, cr.pushed_to_client,
-                           es.shift_name
+                           cr.pushed_by, es.shift_name
                     FROM {table} AS cr
                     LEFT JOIN exam_shifts AS es ON es.id = cr.shift_id
                     WHERE cr.unique_id = %s
@@ -275,10 +384,15 @@ def _enrich_detection_item_from_report(item: dict) -> dict:
                 if row.get("shift_name"):
                     item["shiftName"] = row.get("shift_name")
                     item["shift_name"] = row.get("shift_name")
-                if row.get("gpu_id") is not None:
+                # Filename gpu_id is primary; only fall back to DB value when the
+                # filename had none (older files saved before gpu_id was embedded).
+                if row.get("gpu_id") is not None and item.get("gpu_id") is None:
                     item["gpu_id"] = row.get("gpu_id")
                 if row.get("pushed_to_client") is not None:
                     item["pushed_to_client"] = row.get("pushed_to_client")
+                if row.get("pushed_by") is not None:
+                    item["pushedBy"] = row.get("pushed_by")
+                    item["pushed_by"] = row.get("pushed_by")
                 break
     except Exception as e:
         logger.error(f"Detection report metadata lookup failed: {e}")
@@ -367,7 +481,13 @@ def _basic_detection_meta(filename: str) -> dict:
     if exam_match:
         exam_id = int(exam_match.group(1))
 
-    return {"date": date_iso, "time": time_str, "exam_id": exam_id}
+    shift_id = None
+    shift_match = re.search(r'_shift(\d+)', stem, flags=re.IGNORECASE)
+    if shift_match:
+        _sid = int(shift_match.group(1))
+        shift_id = _sid if _sid > 0 else None
+
+    return {"date": date_iso, "time": time_str, "exam_id": exam_id, "shift_id": shift_id}
 
 
 def _basic_detection_matches(
@@ -534,7 +654,13 @@ async def detection_watch_loop():
                                 True, origin,
                             )
                             payload = await asyncio.to_thread(_enrich_detection_item_from_report, payload)
-                            await sio.emit("detection:new", payload)
+                            # Role-based routing: 'all' room = admin/client (everything);
+                            # gpu:{id} room = operators assigned to that gpu. Disjoint rooms,
+                            # so no double-delivery. Missing gpu_id (old files) → admin/client only.
+                            await sio.emit("detection:new", payload, room="all")
+                            gid = payload.get("gpu_id")
+                            if gid is not None:
+                                await sio.emit("detection:new", payload, room=f"gpu:{gid}")
                             emitted += 1
                         except Exception as exc:
                             logger.error(f"Failed to emit live detection {type_key} {tagged_path}: {exc}")
@@ -577,7 +703,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"Scripts directory: {SCRIPTS_DIR}")
     logger.info(f"HTTP server port: {HTTP_PORT}")
     
-    # Start poller
+    # Start poller (launches this worker's assigned detection executions)
     await poller_service.start()
 
     global known_detection_files, known_detection_by_date
@@ -1172,6 +1298,27 @@ def parse_detection_filename(
     if exam_match:
         exam_id = int(exam_match.group(1))
 
+    # Extract shift_id embedded in the filename as _shift{id}_ (added by the
+    # detection workers). This is the execution's shift and is the authoritative
+    # source — the camera-metadata shift_id is often NULL (RTSP / all-shifts HLS).
+    # A "0" placeholder (tampering / env unset) is treated as absent.
+    filename_shift_id = None
+    shift_match = re.search(r'_shift(\d+)', stem, flags=re.IGNORECASE)
+    if shift_match:
+        try:
+            _sid = int(shift_match.group(1))
+            filename_shift_id = _sid if _sid > 0 else None
+        except ValueError:
+            filename_shift_id = None
+
+    # Extract gpu_id (= WORKER_INDEX) embedded by detection workers as _gpu{N}_.
+    # This is the PRIMARY operator-sharding key. Older files have no _gpu token
+    # (gpu_id stays None → falls back to DB enrichment, then admin/client-only).
+    gpu_id_fn = None
+    gpu_match = re.search(r'_gpu(\d+)', stem, flags=re.IGNORECASE)
+    if gpu_match:
+        gpu_id_fn = int(gpu_match.group(1))
+
     # The uid is typically the the last segment of the stem
     uid = stem.split("_")[-1]
 
@@ -1262,7 +1409,9 @@ def parse_detection_filename(
     city = cam_meta.get("city") or ""
     state = cam_meta.get("state") or ""
     tc_code = cam_meta.get("tc_code")
-    shift_id = cam_meta.get("shift_id")
+    # Prefer the shift embedded in the filename (the execution's shift); fall back
+    # to the camera's assigned shift from metadata when the filename has none.
+    shift_id = filename_shift_id or cam_meta.get("shift_id")
     category = cam_meta.get("camera_category") or cam_meta.get("classification") or ""
     cctv_url = cam_meta.get("cctv_url") or ""
 
@@ -1330,6 +1479,7 @@ def parse_detection_filename(
         "image_url":   image_url,
         "exam_id":     exam_id,
         "uid":         uid,
+        "gpu_id":      gpu_id_fn,
     }
 
 
@@ -1343,12 +1493,16 @@ def list_detections(
     start_time: Optional[str] = None,
     end_time: Optional[str] = None,
     exam_id: Optional[str] = None,
+    shift_id: Optional[str] = None,
     page: int = 1,
     limit: int = 50,
 ):
     selected_types = set(type.split(',')) if type else set()
     check_types = selected_types if selected_types else set(DETECTION_FOLDERS.keys())
     needs_search = bool(search)
+    # Filter by shift = filter by that shift's time window (robust on historical
+    # data that lacks a reliable shift tag). Fold it into start/end time bounds.
+    start_time, end_time = _apply_shift_window(shift_id, start_time, end_time)
     has_extra_filters = bool(exam_id or start_time or end_time)
 
     # Take stable references to avoid races with the background watcher.
@@ -1530,6 +1684,10 @@ def list_detections(
             item["tcCode"] = meta.get("tcCode")
             item["tc_code"] = meta.get("tcCode")
 
+    # Resolve shift names for the page (covers filename-derived shift_ids whose
+    # camera_report row had a NULL shift_id) so the cards always show the shift.
+    _attach_shift_names(paginated)
+
     return {
         "success": True,
         "total":   total,
@@ -1576,12 +1734,16 @@ class ClientDetectionCopyItem(BaseModel):
 
 class ClientDetectionCopyRequest(BaseModel):
     items: list[ClientDetectionCopyItem]
+    # User id of the operator pushing these detections to the client.
+    pushedBy: Optional[int] = None
 
 
 @app.post("/client-detections/copy")
 async def copy_client_detections(payload: ClientDetectionCopyRequest):
     copied = []
     failed = []
+    pushed_by = payload.pushedBy
+    pushed_by_name = _user_names_for_ids([pushed_by]).get(pushed_by) if pushed_by else None
 
     conn = _get_connection()
     try:
@@ -1623,10 +1785,11 @@ async def copy_client_detections(payload: ClientDetectionCopyRequest):
                         f"""
                         UPDATE {table_name}
                         SET pushed_to_client = 1,
+                            pushed_by = %s,
                             unique_id = COALESCE(NULLIF(unique_id, ''), %s)
                         WHERE id = %s
                         """,
-                        (item_uid, row.get("id")),
+                        (pushed_by, item_uid, row.get("id")),
                     )
                     if not row.get("unique_id"):
                         row["unique_id"] = item_uid
@@ -1663,6 +1826,9 @@ async def copy_client_detections(payload: ClientDetectionCopyRequest):
                         "uid": row.get("unique_id"),
                         "updatedAt": pushed_at_ms,
                         "updated_at": pushed_at_ms,
+                        "pushedBy": pushed_by,
+                        "pushed_by": pushed_by,
+                        "pushedByName": pushed_by_name,
                     })
                     copied.append(copied_item)
                     
@@ -1685,7 +1851,8 @@ async def copy_client_detections(payload: ClientDetectionCopyRequest):
                 # This notifies all connected users that this detection has been pushed
                 await sio.emit("detection:pushed", {
                     "uid": item.get("uid"),
-                    "pushedBy": None,  # Can be enhanced to include user ID if available
+                    "pushedBy": pushed_by,
+                    "pushedByName": pushed_by_name,
                     "pushedAt": item.get("updatedAt")
                 })
             
@@ -1743,10 +1910,15 @@ def list_client_detections(
     end_time: Optional[str] = None,
     search: Optional[str] = None,
     exam_id: Optional[int] = None,
+    shift_id: Optional[int] = None,
     user_role: Optional[str] = None,
     user_company: Optional[str] = None,
 ):
     all_counts = {k: 0 for k in DETECTION_FOLDERS}
+
+    # Shift filter = that shift's time window folded into start/end (robust on
+    # historical rows whose stored shift_id is NULL).
+    start_time, end_time = _apply_shift_window(shift_id, start_time, end_time)
 
     conn = _get_connection()
     try:
@@ -1821,6 +1993,7 @@ def list_client_detections(
 
             db_rows.sort(key=lambda x: str(x.get("created_at", "")), reverse=True)
             shift_name_map = _shift_names_for_ids(row.get("shift_id") for row in db_rows)
+            user_name_map = _user_names_for_ids(row.get("pushed_by") for row in db_rows)
 
             # ── Light pass: cheap filtering without calling parse_detection_filename ──
             # Date/time filtering uses the LRU-cached _basic_detection_meta (regex only,
@@ -1894,17 +2067,24 @@ def list_client_detections(
                     "state":       row.get("state"),
                     "tcCode":      row.get("tc_code"),
                     "tc_code":     row.get("tc_code"),
-                    "shift_id":    row.get("shift_id"),
-                    "shiftName":   shift_name_map.get(row.get("shift_id")),
-                    "shift_name":  shift_name_map.get(row.get("shift_id")),
+                    # DB row shift_id wins; fall back to the shift parsed from the
+                    # filename (set by parse_detection_filename) when the row is NULL.
+                    "shift_id":    row.get("shift_id") or item.get("shift_id"),
+                    "shiftName":   shift_name_map.get(row.get("shift_id")) or item.get("shiftName"),
+                    "shift_name":  shift_name_map.get(row.get("shift_id")) or item.get("shift_name"),
                     "category":    row.get("camera_category", ""),
                     "exam_id":     row.get("exam_id"),
                     "uid":         row.get("unique_id"),
+                    "pushedBy":    row.get("pushed_by"),
+                    "pushed_by":   row.get("pushed_by"),
+                    "pushedByName": user_name_map.get(row.get("pushed_by")),
                     "_mtime":      _epoch_ms(row.get("created_at")) or 0,
                     "updatedAt":   _epoch_ms(row.get("updated_at")),
                     "updated_at":  _epoch_ms(row.get("updated_at")),
                 })
                 rows.append(item)
+
+            _attach_shift_names(rows)
 
     finally:
         conn.close()
@@ -1982,10 +2162,54 @@ async def remove_client_detection(payload: ClientDetectionRemoveRequest):
         conn.close()
 
 
+# ============================================================
+# Operator sharding: operators see only detections from their assigned gpu_ids.
+# admin / client roles (and unauthenticated) see ALL detections.
+# ============================================================
+
+def get_operator_gpu_ids(user_id) -> list:
+    """Return the list of gpu_ids assigned to an operator (empty if none)."""
+    try:
+        conn = _get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT gpu_id FROM users WHERE id = %s", (int(user_id),))
+                rows = cur.fetchall()
+                if rows and rows[0].get("gpu_id") is not None:
+                    return [int(rows[0]["gpu_id"])]
+                return []
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.error(f"[operator_shard] lookup failed for user {user_id}: {e}")
+        return []
+
+
 @sio.event
 async def connect(sid, environ, auth):
-    logger.info(f"Socket.IO client connected: {sid}")
-    await sio.emit("detections:connected", {"success": True}, to=sid)
+    """Role-based rooms:
+       - operator  → join only gpu:{id} rooms for their assigned gpu_ids
+       - admin/client/unauthenticated → join the 'all' room (every detection)
+    """
+    auth = auth or {}
+    role = str(auth.get("role") or "").strip().lower()
+    user_id = auth.get("user_id")
+
+    joined = []
+    if role == "operator" and user_id not in (None, "", 0, "0"):
+        gpu_ids = await asyncio.to_thread(get_operator_gpu_ids, user_id)
+        for g in gpu_ids:
+            await sio.enter_room(sid, f"gpu:{g}")
+            joined.append(f"gpu:{g}")
+        if not joined:
+            logger.warning(f"Operator user_id={user_id} has no gpu assignment — will receive no live detections")
+    else:
+        # admin / client / unauthenticated → see everything
+        await sio.enter_room(sid, "all")
+        joined.append("all")
+
+    logger.info(f"Socket.IO connected sid={sid} role={role or 'none'} rooms={joined}")
+    await sio.emit("detections:connected", {"success": True, "role": role, "rooms": joined}, to=sid)
 
 
 @sio.event

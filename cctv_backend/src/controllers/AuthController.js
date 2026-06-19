@@ -140,7 +140,7 @@ exports.register = async (req, res) => {
  */
 exports.getMe = async (req, res) => {
     const users = await query(
-        "SELECT id, username, email, full_name, phone, company_name, verified, verified_date, role, last_login, created_at FROM users WHERE id = ?",
+        "SELECT id, username, email, full_name, phone, company_name, verified, verified_date, role, gpu_id, last_login, created_at FROM users WHERE id = ?",
         [req.user.id]
     );
 
@@ -226,13 +226,67 @@ exports.verifyUser = async (req, res) => {
 
     // Fetch updated user
     const updatedUsers = await query(
-        "SELECT id, username, email, full_name, phone, company_name, verified, verified_date, role FROM users WHERE id = ?",
+        "SELECT id, username, email, full_name, phone, company_name, verified, verified_date, role, gpu_id FROM users WHERE id = ?",
         [userId]
     );
 
     res.json({
         success: true,
         message: "User updated successfully",
+        data: updatedUsers[0],
+    });
+};
+
+/**
+ * Assign GPU ID to Operator (Admin only)
+ */
+exports.assignGpu = async (req, res) => {
+    // Only admins can assign GPUs
+    if (req.user.role !== "ADMIN") {
+        return res.status(403).json({
+            success: false,
+            message: "Only admins can assign GPUs",
+        });
+    }
+
+    const { userId } = req.params;
+    const { gpu_id } = req.body;
+
+    // Check if user exists and is an OPERATOR
+    const users = await query(
+        "SELECT id, username, role FROM users WHERE id = ?",
+        [userId]
+    );
+
+    if (users.length === 0) {
+        return res.status(404).json({
+            success: false,
+            message: "User not found",
+        });
+    }
+
+    if (users[0].role !== "OPERATOR") {
+        return res.status(400).json({
+            success: false,
+            message: "Only OPERATOR users can be assigned a GPU",
+        });
+    }
+
+    // Update GPU
+    await query(
+        "UPDATE users SET gpu_id = ? WHERE id = ?",
+        [gpu_id === undefined ? null : gpu_id, userId]
+    );
+
+    // Fetch updated user
+    const updatedUsers = await query(
+        "SELECT id, username, email, full_name, phone, company_name, verified, verified_date, role, gpu_id FROM users WHERE id = ?",
+        [userId]
+    );
+
+    res.json({
+        success: true,
+        message: "GPU assigned successfully",
         data: updatedUsers[0],
     });
 };
@@ -277,7 +331,7 @@ exports.updateProfile = async (req, res) => {
 
     // Fetch updated user
     const users = await query(
-        "SELECT id, username, email, full_name, phone, company_name, verified, verified_date, role FROM users WHERE id = ?",
+        "SELECT id, username, email, full_name, phone, company_name, verified, verified_date, role, gpu_id FROM users WHERE id = ?",
         [userId]
     );
 
@@ -797,7 +851,7 @@ exports.getAllUsers = async (req, res) => {
         }
 
         const users = await query(
-            `SELECT id, username, email, full_name, phone, company_name, verified, verified_date, role, last_login, created_at 
+            `SELECT id, username, email, full_name, phone, company_name, verified, verified_date, role, gpu_id, last_login, created_at 
              FROM users ${whereClause} 
              ORDER BY created_at DESC`,
             params

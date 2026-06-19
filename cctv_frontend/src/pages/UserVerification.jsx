@@ -44,7 +44,9 @@ const UserVerification = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [verifyDialog, setVerifyDialog] = useState({ open: false, user: null });
+  const [assignGpuDialog, setAssignGpuDialog] = useState({ open: false, user: null });
   const [selectedRole, setSelectedRole] = useState('');
+  const [selectedGpuId, setSelectedGpuId] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [alert, setAlert] = useState({ show: false, message: '', severity: 'success' });
 
@@ -88,7 +90,7 @@ const UserVerification = () => {
         role: selectedRole,
       });
       
-      showAlert(`User ${verifyDialog.user.full_name || verifyDialog.user.email} verified successfully`);
+      showAlert(`User ${verifyDialog.user.full_name || verifyDialog.user.email} updated successfully`);
       setVerifyDialog({ open: false, user: null });
       setSelectedRole('');
       fetchUsers();
@@ -114,6 +116,30 @@ const UserVerification = () => {
   const openVerifyDialog = (user) => {
     setVerifyDialog({ open: true, user });
     setSelectedRole(user.role || 'VIEWER');
+  };
+
+  const openAssignGpuDialog = (user) => {
+    setAssignGpuDialog({ open: true, user });
+    setSelectedGpuId(user.gpu_id !== null && user.gpu_id !== undefined ? String(user.gpu_id) : '');
+  };
+
+  const handleAssignGpu = async () => {
+    if (!assignGpuDialog.user) return;
+    try {
+      setSubmitting(true);
+      await authAPI.assignGpu(assignGpuDialog.user.id, {
+        gpu_id: selectedGpuId === '' ? null : parseInt(selectedGpuId, 10),
+      });
+      showAlert(`GPU assigned to ${assignGpuDialog.user.full_name || assignGpuDialog.user.email} successfully`);
+      setAssignGpuDialog({ open: false, user: null });
+      setSelectedGpuId('');
+      fetchUsers();
+    } catch (error) {
+      console.error('Error assigning GPU:', error);
+      showAlert('Failed to assign GPU', 'error');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const formatDate = (dateString) => {
@@ -292,8 +318,14 @@ const UserVerification = () => {
                               color: getRoleColor(user.role),
                               fontWeight: 600,
                               fontSize: '0.75rem',
+                              mb: user.role === 'OPERATOR' && user.gpu_id !== null ? 0.5 : 0
                             }}
                           />
+                          {user.role === 'OPERATOR' && user.gpu_id !== null && (
+                            <Typography variant="caption" display="block" color="text.secondary">
+                              GPU: {user.gpu_id}
+                            </Typography>
+                          )}
                         </TableCell>
                         <TableCell>
                           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
@@ -335,26 +367,68 @@ const UserVerification = () => {
                               Verify
                             </Button>
                           ) : (
-                            <Button
-                              variant="outlined"
-                              size="small"
-                              startIcon={<Cancel />}
-                              onClick={() => handleUnverifyUser(user)}
-                              sx={{
-                                borderColor: '#ef4444',
-                                color: '#ef4444',
-                                textTransform: 'none',
-                                fontWeight: 600,
-                                borderRadius: 1.5,
-                                px: 2,
-                                '&:hover': {
-                                  borderColor: '#dc2626',
-                                  backgroundColor: '#fef2f2',
-                                },
-                              }}
-                            >
-                              Unverify
-                            </Button>
+                            <Box sx={{ display: 'flex', gap: 1 }}>
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                onClick={() => openVerifyDialog(user)}
+                                sx={{
+                                  borderColor: '#3b82f6',
+                                  color: '#3b82f6',
+                                  textTransform: 'none',
+                                  fontWeight: 600,
+                                  borderRadius: 1.5,
+                                  px: 2,
+                                  '&:hover': {
+                                    borderColor: '#2563eb',
+                                    backgroundColor: '#eff6ff',
+                                  },
+                                }}
+                              >
+                                Edit Role
+                              </Button>
+                              {user.role === 'OPERATOR' && (
+                                <Button
+                                  variant="outlined"
+                                  size="small"
+                                  onClick={() => openAssignGpuDialog(user)}
+                                  sx={{
+                                    borderColor: '#f59e0b',
+                                    color: '#f59e0b',
+                                    textTransform: 'none',
+                                    fontWeight: 600,
+                                    borderRadius: 1.5,
+                                    px: 2,
+                                    '&:hover': {
+                                      borderColor: '#d97706',
+                                      backgroundColor: '#fffbeb',
+                                    },
+                                  }}
+                                >
+                                  Assign GPU
+                                </Button>
+                              )}
+                              <Button
+                                variant="outlined"
+                                size="small"
+                                startIcon={<Cancel />}
+                                onClick={() => handleUnverifyUser(user)}
+                                sx={{
+                                  borderColor: '#ef4444',
+                                  color: '#ef4444',
+                                  textTransform: 'none',
+                                  fontWeight: 600,
+                                  borderRadius: 1.5,
+                                  px: 2,
+                                  '&:hover': {
+                                    borderColor: '#dc2626',
+                                    backgroundColor: '#fef2f2',
+                                  },
+                                }}
+                              >
+                                Unverify
+                              </Button>
+                            </Box>
                           )}
                         </TableCell>
                       </TableRow>
@@ -439,7 +513,76 @@ const UserVerification = () => {
               },
             }}
           >
-            {submitting ? <CircularProgress size={20} color="inherit" /> : 'Verify User'}
+            {submitting ? <CircularProgress size={20} color="inherit" /> : 'Update User'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Assign GPU Dialog */}
+      <Dialog 
+        open={assignGpuDialog.open} 
+        onClose={() => setAssignGpuDialog({ open: false, user: null })}
+        maxWidth="xs"
+        fullWidth
+        PaperProps={{
+          sx: {
+            borderRadius: 2,
+            bgcolor: '#ffffff',
+          }
+        }}
+      >
+        <DialogTitle sx={{ pb: 1 }}>
+          <Typography variant="h6" fontWeight={600}>
+            Assign GPU
+          </Typography>
+        </DialogTitle>
+        <DialogContent>
+          {assignGpuDialog.user && (
+            <Box sx={{ pt: 1 }}>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                Assign a GPU ID to operator <strong>{assignGpuDialog.user.full_name || assignGpuDialog.user.email}</strong>:
+              </Typography>
+              
+              <TextField
+                fullWidth
+                label="GPU ID"
+                type="number"
+                value={selectedGpuId}
+                onChange={(e) => setSelectedGpuId(e.target.value)}
+                InputProps={{ inputProps: { min: 0 } }}
+                helperText="Enter the GPU ID assigned to this operator"
+              />
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions sx={{ p: 3, pt: 1 }}>
+          <Button
+            onClick={() => setAssignGpuDialog({ open: false, user: null })}
+            sx={{
+              color: '#64748b',
+              textTransform: 'none',
+              fontWeight: 600,
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleAssignGpu}
+            disabled={submitting}
+            variant="contained"
+            sx={{
+              backgroundColor: '#f59e0b',
+              color: 'white',
+              textTransform: 'none',
+              fontWeight: 600,
+              borderRadius: 1.5,
+              px: 3,
+              '&:hover': {
+                backgroundColor: '#d97706',
+              },
+            }}
+          >
+            {submitting ? <CircularProgress size={20} color="inherit" /> : 'Assign GPU'}
           </Button>
         </DialogActions>
       </Dialog>

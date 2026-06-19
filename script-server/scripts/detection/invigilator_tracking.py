@@ -1,6 +1,7 @@
 import cv2
 import time
 import os
+_DET_GPU_ID = int(os.environ["WORKER_INDEX"]) if os.environ.get("WORKER_INDEX", "").strip().isdigit() else int("".join(c for c in os.environ.get("WORKER_ID", "main").split("-")[-1] if c.isdigit()) or "0")
 import logging
 import threading
 import torch
@@ -267,18 +268,19 @@ def detect_invigilator_in_frame(frame, device_id="unknown", camera_no="unknown",
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         import uuid
         uid = str(uuid.uuid4())
-        fname = f"{script_name}_{device_id}_{camera_no}_{ts}_{uid}.jpg"
+        fname = f"{script_name}_{device_id}_{camera_no}_gpu{_DET_GPU_ID}_{ts}_{uid}.jpg"
         filename = os.path.join(SAVE_FOLDER, fname)
         cv2.imwrite(filename, frame)
         logger.warning(f"[{device_id}-{camera_no}] 🚨 Invigilator {status}: {filename}")
 
     return frame, violation_detected, 1 if violation_detected else 0
 
-def detect_invigilator_batch(items):
+def detect_invigilator_batch(items, results=None):
     """Run true batch inference."""
-    model = get_yolo_model()
-    frames = [item['frame'].copy() for item in items]
-    results = model(frames, conf=CONF_THRESHOLD, verbose=False)
+    if results is None:
+        model = get_yolo_model()
+        frames = [item['frame'].copy() for item in items]
+        results = model(frames, conf=CONF_THRESHOLD, verbose=False)
 
     outputs = []
     for item, result in zip(items, results):

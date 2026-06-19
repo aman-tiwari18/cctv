@@ -397,9 +397,9 @@ const ShiftScriptManager = ({
             onClose={handleCloseDialog}
             maxWidth="md"
             fullWidth
-            PaperProps={{ sx: { borderRadius: 3, maxHeight: '90vh', bgcolor: '#f5f5f7' } }}
+            PaperProps={{ sx: { borderRadius: 3, maxHeight: '90vh', bgcolor: '#f5f5f7', m: { xs: 1.5, sm: 4 }, width: { xs: 'calc(100% - 24px)', sm: 'auto' } } }}
         >
-            <DialogTitle sx={{ pb: 0.5, pt: 3, px: 3 }}>
+            <DialogTitle sx={{ pb: 0.5, pt: 3, px: { xs: 2, sm: 3 } }}>
                 <Typography variant="h5" fontWeight={800} color="#0f172a" gutterBottom>
                     Add Script
                 </Typography>
@@ -408,7 +408,7 @@ const ShiftScriptManager = ({
                 </Typography>
             </DialogTitle>
 
-            <DialogContent sx={{ px: 3, py: 2 }}>
+            <DialogContent sx={{ px: { xs: 2, sm: 3 }, py: 2 }}>
                 {error && (
                     <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
                         {error}
@@ -432,7 +432,7 @@ const ShiftScriptManager = ({
                         <Box
                             sx={{
                                 display: 'grid',
-                                gridTemplateColumns: 'repeat(3, 1fr)',
+                                gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', md: 'repeat(3, 1fr)' },
                                 gap: 1.5,
                             }}
                         >
@@ -510,7 +510,7 @@ const ShiftScriptManager = ({
 
                                         {/* Time pickers — stop card-click propagation */}
                                         <Box sx={{ display: 'flex', gap: 1 }} onClick={(e) => e.stopPropagation()}>
-                                            <Box sx={{ flex: 1 }}>
+                                            <Box sx={{ flex: 1, minWidth: 0 }}>
                                                 <Typography sx={{ fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.06em', color: '#94a3b8', mb: 0.4 }}>
                                                     START TIME
                                                 </Typography>
@@ -531,7 +531,7 @@ const ShiftScriptManager = ({
                                                     }}
                                                 />
                                             </Box>
-                                            <Box sx={{ flex: 1 }}>
+                                            <Box sx={{ flex: 1, minWidth: 0 }}>
                                                 <Typography sx={{ fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.06em', color: '#94a3b8', mb: 0.4 }}>
                                                     END TIME
                                                 </Typography>
@@ -572,7 +572,7 @@ const ShiftScriptManager = ({
                 )}
             </DialogContent>
 
-            <DialogActions sx={{ px: 3, py: 2, gap: 1, borderTop: '1px solid #f1f5f9' }}>
+            <DialogActions sx={{ px: { xs: 2, sm: 3 }, py: 2, gap: 1, flexWrap: 'wrap', borderTop: '1px solid #f1f5f9' }}>
                 {configuredCount > 0 && (
                     <Typography sx={{ flex: 1, fontSize: '0.82rem', color: '#3b82f6', fontWeight: 600 }}>
                         {configuredCount} script{configuredCount > 1 ? 's' : ''} ready to assign

@@ -96,7 +96,7 @@ const Executions = () => {
 
   const loadExams = async () => {
     try {
-      const res = await examsAPI.getAll({ is_active: !viewingArchived });
+      const res = await examsAPI.getAll({ is_active: true });
       const list = Array.isArray(res?.data?.data) ? res.data.data : [];
       setExams(list);
       if (urlExamId && list.length > 0 && !viewingArchived) setSelectedExamId(urlExamId);
@@ -197,7 +197,7 @@ const Executions = () => {
   /* Vision RUNNING assignments older than 2h are displayed as COMPLETED */
   const isStaleVisionRunning = (ex) => {
     if (ex.status !== 'RUNNING') return false;
-    if (ex.script?.script_id !== 'vision') return false;
+    if (!['vision', 'vision_neet'].includes(ex.script?.script_id)) return false;
     if (!ex.started_at) return false;
     return (Date.now() - new Date(ex.started_at).getTime()) > 2 * 60 * 60 * 1000;
   };
@@ -312,7 +312,7 @@ const Executions = () => {
   };
 
   return (
-    <Box sx={{ display: 'flex', minHeight: 'calc(100vh - 120px)', bgcolor: '#f8fafc' }}>
+    <Box sx={{ display: 'flex', height: 'calc(100vh - 120px)', overflow: 'hidden', bgcolor: '#f8fafc' }}>
 
       {/* ════ EXAM SIDEBAR ════ */}
       <ExamSidebar

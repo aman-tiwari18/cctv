@@ -44,6 +44,7 @@ export const authAPI = {
     resetPassword: (data) => api.post('/auth/reset-password', data),
     getAllUsers: (params) => api.get('/auth/users', { params }),
     verifyUser: (userId, data) => api.put(`/auth/verify/${userId}`, data),
+    assignGpu: (userId, data) => api.put(`/auth/gpu/${userId}`, data),
     getAvailableCompanies: () => api.get('/auth/companies')
 };
 

@@ -58,6 +58,15 @@ router.put(
     asyncHandler(AuthController.verifyUser)
 );
 
+router.put(
+    "/gpu/:userId",
+    authenticate,
+    [
+        body("gpu_id").optional({ nullable: true }).isInt().withMessage("gpu_id must be an integer"),
+    ],
+    asyncHandler(AuthController.assignGpu)
+);
+
 // Public signup endpoint (no authentication required)
 router.post(
     "/signup",

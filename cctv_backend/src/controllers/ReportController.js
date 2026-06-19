@@ -62,6 +62,50 @@ function makeSheet(headers, rows, colWidths) {
     return ws;
 }
 
+
+
+
+//2 new function
+function parseTimeToMinutes(t) {
+    if (!t) return 0;
+    const [h, m] = t.split(':').map(Number);
+    return (h * 60) + m;
+}
+
+function determineShiftId(dateTimeStr, shifts) {
+    if (!shifts || shifts.length === 0) return 0;
+    if (!dateTimeStr) return shifts[0].id;
+
+    const timePart = dateTimeStr.split(' ')[1];
+    if (!timePart) return shifts[0].id;
+
+    const detMinutes = parseTimeToMinutes(timePart);
+
+    for (const shift of shifts) {
+        const start = parseTimeToMinutes(shift.start_time);
+        const end = parseTimeToMinutes(shift.end_time);
+
+        if (end < start) {
+            if (detMinutes >= start || detMinutes <= end) return shift.id;
+        } else {
+            if (detMinutes >= start && detMinutes <= end) return shift.id;
+        }
+    }
+
+    // Closest shift fallback
+    let closest = shifts[0];
+    let minDiff = Infinity;
+    for (const shift of shifts) {
+        const start = parseTimeToMinutes(shift.start_time);
+        const diff = Math.abs(detMinutes - start);
+        if (diff < minDiff) {
+            minDiff = diff;
+            closest = shift;
+        }
+    }
+    return closest.id;
+}
+
 // ─── Controller ───────────────────────────────────────────────────────────────
 
 exports.downloadReport = async (req, res) => {
@@ -134,31 +178,31 @@ exports.downloadReport = async (req, res) => {
             `SELECT id, shift_id, city, center_name, camera_id, camera_name, camera_no,
                     '' as camera_category, tc_code, device_id, state, camera_status,
                     events, rejected_events, date_time, imageurl, detection_type,
-                    unique_id
-             FROM camera_report_rtsp
-             WHERE exam_id = ? AND date_time LIKE CONCAT(?, '%')
-             ORDER BY shift_id ASC`,
+                    unique_id, pushed_to_client, remove_from_client  -- ✅ add these
+            FROM camera_report_rtsp
+            WHERE exam_id = ? AND date_time LIKE CONCAT(?, '%')
+            ORDER BY shift_id ASC`,
             [examId, searchDate]
         ) : await query(
             `SELECT id, shift_id, city, center_name, camera_id, camera_name,
                     camera_category, tc_code, ch_code, state, camera_status,
                     events, rejected_events, date_time, imageurl, detection_type,
-                    unique_id, created_at
-             FROM camera_report_hls
-             WHERE exam_id = ? AND date_time LIKE CONCAT(?, '%')
-             ORDER BY shift_id ASC, created_at ASC`,
+                    unique_id, created_at, pushed_to_client, remove_from_client  -- ✅ add these
+            FROM camera_report_hls
+            WHERE exam_id = ? AND date_time LIKE CONCAT(?, '%')
+            ORDER BY shift_id ASC, created_at ASC`,
             [examId, searchDate]
         );
 
         // ── 5. Aggregate detections: aggregated[shiftId][key] ───────────────
         const aggregated = {};
-        const shiftsWithData = new Set(); // To track which shifts exist in reports table
+        const shiftsWithData = new Set();
 
         detections.forEach(d => {
-            const sid = d.shift_id;
+            // ✅ shift_id NULL ho to date_time se dynamically determine karo
+            const sid = (d.shift_id != null) ? d.shift_id : determineShiftId(d.date_time, shifts);
+            
             shiftsWithData.add(sid);
-
-            // RTSP key: device_id_camera_no | HLS key: ch_code
             const key = isRTSP ? `${d.device_id}_${d.camera_no}` : d.ch_code;
 
             if (!aggregated[sid]) aggregated[sid] = {};
@@ -166,6 +210,7 @@ exports.downloadReport = async (req, res) => {
                 aggregated[sid][key] = {
                     events: 0,
                     rejected: 0,
+                    falsePositive: 0,  // ✅ add karo
                     status: (d.camera_status || 'Online'),
                     details: {
                         city: d.city,
@@ -177,8 +222,19 @@ exports.downloadReport = async (req, res) => {
                     }
                 };
             }
-            aggregated[sid][key].events += (Number(d.events) || 0);
-            aggregated[sid][key].rejected += (Number(d.rejected_events) || 0);
+
+            
+            if (Number(d.pushed_to_client) === 1) {
+                if (Number(d.remove_from_client) === 1) {
+                    aggregated[sid][key].rejected += 1;
+                } else {
+                    aggregated[sid][key].events += 1;
+                }
+            } else {
+                aggregated[sid][key].falsePositive += 1;  // ✅ pushed_to_client = 0
+            }
+
+
         });
 
         // ── 6. Build Workbook ─────────────────────────────────────────────────
@@ -186,9 +242,10 @@ exports.downloadReport = async (req, res) => {
 
         const SHIFT_HEADERS = [
             'City', 'Center', 'Cam ID', 'Camera Name',
-            'Cam Type', 'TC Code', 'Events (Excluding Rejected)', 'Rejected Events', 'Camera Status'
+            'Cam Type', 'TC Code', 'Events (Excluding Rejected)', 'Rejected Events', 'False Positive', 'Camera Status'
         ];
-        const SHIFT_WIDTHS = [15, 30, 15, 35, 15, 12, 28, 16, 15];
+        const SHIFT_WIDTHS = [15, 30, 15, 35, 15, 12, 28, 16, 15, 15];
+
 
         // ── 7. Shift Sheets (Shift 1, 2, 3...) ──────────────────────────────────
         shifts.forEach((shiftMeta, idx) => {
@@ -217,6 +274,7 @@ exports.downloadReport = async (req, res) => {
                             'TC Code': cam.tc_code || agg.details.tc_code || '',
                             'Events (Excluding Rejected)': agg.events,
                             'Rejected Events': agg.rejected,
+                            'False Positive': agg.falsePositive,  // ✅
                             'Camera Status': agg.status,
                         };
                     } else {
@@ -234,6 +292,7 @@ exports.downloadReport = async (req, res) => {
                             'TC Code': cam.tc_code || '',
                             'Events (Excluding Rejected)': 0,
                             'Rejected Events': 0,
+                            'False Positive': 0,  // ✅
                             'Camera Status': isOnline ? 'Online' : 'Offline',
                         };
                     }
@@ -258,6 +317,7 @@ exports.downloadReport = async (req, res) => {
                             'TC Code': cam.tc_code || '',
                             'Events (Excluding Rejected)': agg.events,
                             'Rejected Events': agg.rejected,
+                            'False Positive': agg.falsePositive,  // ✅
                             'Camera Status': agg.status,
                         };
                     } else {
@@ -275,6 +335,7 @@ exports.downloadReport = async (req, res) => {
                             'TC Code': cam.tc_code || '',
                             'Events (Excluding Rejected)': 0,
                             'Rejected Events': 0,
+                            'False Positive': 0,  // ✅
                             'Camera Status': isOnline ? 'Online' : 'Offline',
                         };
                     }
@@ -288,30 +349,38 @@ exports.downloadReport = async (req, res) => {
         // ── 8. Detections List Sheet ──────────────────────────────────────────
         const DET_HEADERS = [
             'Shift', 'Device ID', 'Camera No', 'Cam ID', 'Camera Name',
-            'Center Name', 'City', 'Detection Type', 'Detection Time', 'Image URL', 'View'
+            'Center Name', 'City', 'Detection Type', 'Detection Time',
+            'Rejected', 'Image URL', 'View'
         ];
-        const DET_WIDTHS = [10, 15, 12, 15, 35, 30, 15, 20, 22, 70, 8];
+        const DET_WIDTHS = [10, 15, 12, 15, 35, 30, 15, 20, 22, 10, 70, 8];
 
-        const detSheetData = detections.map(d => ({
-            'Shift': (shiftMap[d.shift_id] || {}).label || (d.shift_id ? `Shift ${d.shift_id}` : ''),
-            'Device ID': d.device_id || '',
-            'Camera No': d.camera_no || '',
-            'Cam ID': isRTSP ? `${d.device_id}_${d.camera_no}` : formatHlsCamId(d.camera_name, d.ch_code),
-            'Camera Name': d.camera_name || '',
-            'Center Name': d.center_name || '',
-            'City': d.city || '',
-            'Detection Type': d.detection_type || '',
-            'Detection Time': d.date_time || '',
-            'Image URL': d.imageurl || '',
-            'View': d.imageurl ? 'View' : '',
-        }));
+        const detSheetData = detections.map(d => {
+            const resolvedSid = (d.shift_id != null) ? d.shift_id : determineShiftId(d.date_time, shifts);
+            return {
+                'Shift': (shiftMap[resolvedSid] || {}).label || `Shift ${resolvedSid}`,
+                'Device ID': d.device_id || '',
+                'Camera No': d.camera_no || '',
+                'Cam ID': isRTSP ? `${d.device_id}_${d.camera_no}` : formatHlsCamId(d.camera_name, d.ch_code),
+                'Camera Name': d.camera_name || '',
+                'Center Name': d.center_name || '',
+                'City': d.city || '',
+                'Detection Type': d.detection_type || '',
+                'Detection Time': d.date_time || '',
+                'Rejected': Number(d.remove_from_client) === 1 ? 1 : 0,
+                'Image URL': d.imageurl || '',
+                'View': d.imageurl ? 'View' : '',
+            };
+        });
 
         const detWs = makeSheet(DET_HEADERS, detSheetData, DET_WIDTHS);
 
         // Add hyperlinks to the "View" column (index 10)
         const range = XLSX.utils.decode_range(detWs['!ref'] || 'A1');
         for (let R = range.s.r + 1; R <= range.e.r; R++) {
-            const cellAddr = XLSX.utils.encode_cell({ r: R, c: 10 });
+            //purana
+            // const cellAddr = XLSX.utils.encode_cell({ r: R, c: 10 });
+            //naya
+            const cellAddr = XLSX.utils.encode_cell({ r: R, c: 11 });
             const url = detSheetData[R - 1]['Image URL'];
             if (url) {
                 detWs[cellAddr] = { t: 's', v: 'View', l: { Target: url, Tooltip: 'Click to view image' } };
@@ -344,7 +413,10 @@ exports.downloadReport = async (req, res) => {
             // In analysis, we show stats for every scheduled shift
             // Show all master cameras for the exam in every shift (RTSP parity)
             const shiftCams = masterCameras;
-            const shiftDets = detections.filter(d => d.shift_id === shiftId);
+            const shiftDets = detections.filter(d => {
+                const resolvedSid = (d.shift_id != null) ? d.shift_id : determineShiftId(d.date_time, shifts);
+                return resolvedSid === shiftId;
+            });
 
             const total = shiftCams.length;
             // Camera is online if: classification IS NOT NULL AND status = 'Accessible' (case-insensitive)
@@ -529,15 +601,13 @@ exports.downloadClientReport = async (req, res) => {
             [examId, searchDate]
         );
 
+
         // ── 5. Aggregate detections per (shift, camera) ──────────────────────
-        // Counts detection ROWS (not the stored events field). Per the client
-        // semantics: each pushed detection is "one event" from the viewer's
-        // perspective. We split that count into:
-        //   - events    : remove_from_client = 0 (still active on client)
-        //   - rejected  : remove_from_client = 1 (admin pulled it back)
         const aggregated = {};
         detections.forEach(d => {
-            const sid = d.shift_id;
+            // ✅ NULL shift_id → date_time se dynamically determine karo
+            const sid = (d.shift_id != null) ? d.shift_id : determineShiftId(d.date_time, shifts);
+            
             const key = isRTSP ? `${d.device_id}_${d.camera_no}` : d.ch_code;
             if (!aggregated[sid]) aggregated[sid] = {};
             if (!aggregated[sid][key]) {
@@ -664,20 +734,23 @@ exports.downloadClientReport = async (req, res) => {
         ];
         const DET_WIDTHS = [10, 15, 12, 15, 35, 30, 15, 20, 22, 10, 70, 8];
 
-        const detSheetData = detections.map(d => ({
-            'Shift': (shiftMap[d.shift_id] || {}).label || (d.shift_id ? `Shift ${d.shift_id}` : ''),
-            'Device ID': d.device_id || '',
-            'Camera No': d.camera_no || '',
-            'Cam ID': isRTSP ? `${d.device_id}_${d.camera_no}` : formatHlsCamId(d.camera_name, d.ch_code),
-            'Camera Name': d.camera_name || '',
-            'Center Name': d.center_name || '',
-            'City': d.city || '',
-            'Detection Type': d.detection_type || '',
-            'Detection Time': d.date_time || '',
-            'Rejected': Number(d.remove_from_client) === 1 ? 1 : 0,
-            'Image URL': d.imageurl || '',
-            'View': d.imageurl ? 'View' : '',
-        }));
+        const detSheetData = detections.map(d => {
+            const resolvedSid = (d.shift_id != null) ? d.shift_id : determineShiftId(d.date_time, shifts);
+            return {
+                'Shift': (shiftMap[resolvedSid] || {}).label || `Shift ${resolvedSid}`,
+                'Device ID': d.device_id || '',
+                'Camera No': d.camera_no || '',
+                'Cam ID': isRTSP ? `${d.device_id}_${d.camera_no}` : formatHlsCamId(d.camera_name, d.ch_code),
+                'Camera Name': d.camera_name || '',
+                'Center Name': d.center_name || '',
+                'City': d.city || '',
+                'Detection Type': d.detection_type || '',
+                'Detection Time': d.date_time || '',
+                'Rejected': Number(d.remove_from_client) === 1 ? 1 : 0,
+                'Image URL': d.imageurl || '',
+                'View': d.imageurl ? 'View' : '',
+            };
+        });
 
         const detWs = makeSheet(DET_HEADERS, detSheetData, DET_WIDTHS);
 
@@ -715,7 +788,10 @@ exports.downloadClientReport = async (req, res) => {
             }
 
             const shiftCams = masterCameras;
-            const shiftDets = detections.filter(d => d.shift_id === shiftId);
+            const shiftDets = detections.filter(d => {
+                const resolvedSid = (d.shift_id != null) ? d.shift_id : determineShiftId(d.date_time, shifts);
+                return resolvedSid === shiftId;
+            });
 
             const total = shiftCams.length;
             const online = shiftCams.filter(c => {
@@ -780,3 +856,8 @@ exports.downloadClientReport = async (req, res) => {
         return res.status(500).json({ success: false, message: 'Internal Server Error while generating client report.' });
     }
 };
+
+
+
+
+

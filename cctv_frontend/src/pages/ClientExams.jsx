@@ -2,14 +2,24 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Box, Grid, Typography, CircularProgress, Chip } from '@mui/material';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import ReportProblemIcon from '@mui/icons-material/ReportProblem';
-import { CalendarTodayOutlined } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { examsAPI } from '../services/api';
 import { ShiftSvgIcon } from '../components/ShiftSvgIcon';
+import ExamScheduleCalendar from '../components/ExamScheduleCalendar';
 
 
 const formatDateV1 = (date) =>
   new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
+// today, or the exam's last date — whichever is earlier → "DD-MM-YYYY"
+const examDefaultDate = (exam) => {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  let d = today;
+  const end = exam?.end_date ? new Date(exam.end_date) : null;
+  if (end && !isNaN(end)) { end.setHours(0, 0, 0, 0); if (end < today) d = end; }
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()}`;
+};
 
 const ViewOnlyExamCard = ({ exam, examCounts, navigate }) => {
   const isHLS = exam.link_type === 'HLS';
@@ -39,15 +49,15 @@ const ViewOnlyExamCard = ({ exam, examCounts, navigate }) => {
       sx={{
         bgcolor: '#fff', border: '1px solid #f8fafc',
         boxShadow: '0 4px 12px rgba(0,0,0,0.03)', borderRadius: 4,
-        p: 3, py: 3.5, height: '100%', minHeight: 380, maxWidth: 530,
+        p: { xs: 2.5, sm: 3 }, py: 3.5, height: { xs: 'auto', sm: '100%' }, minHeight: { xs: 'auto', md: 340 }, maxWidth: 530,
         display: 'flex', flexDirection: 'column',
       }}
     >
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
-        <Typography sx={{ fontWeight: 600, fontSize: '1.5rem', color: '#0f172a', lineHeight: 1.25, pr: 1, flex: 1 }}>
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'flex-start', gap: 1, mb: 1 }}>
+        <Typography title={exam.exam_name} sx={{ fontWeight: 600, fontSize: { xs: '1.15rem', sm: '1.3rem' }, color: '#0f172a', lineHeight: 1.25, flex: '1 1 auto', minWidth: 0, wordBreak: 'break-word' }}>
           {exam.exam_name}
         </Typography>
-        <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
+        <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', flexShrink: 0 }}>
           <Chip
             label={exam.link_type}
             size="small"
@@ -68,20 +78,20 @@ const ViewOnlyExamCard = ({ exam, examCounts, navigate }) => {
         Exam Body: {exam.exam_body}
       </Typography>
 
-      <Box sx={{ bgcolor: '#f1f5f9', borderRadius: 3, p: 2, mb: 2.5 }}>
+      <Box sx={{ bgcolor: '#f1f5f9', borderRadius: 3, p: { xs: 2, sm: 1.75 }, mb: 2.5 }}>
         {exam.start_date && exam.end_date && (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.2 }}>
-            <CalendarTodayOutlined sx={{ fontSize: 18, color: '#676e80', flexShrink: 0 }} />
-            <Typography sx={{ fontSize: '0.97rem', fontWeight: 600, color: '#676e80' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 1.2 }}>
+            <ExamScheduleCalendar exam={exam} />
+            <Typography sx={{ fontSize: { xs: '0.95rem', sm: '0.84rem' }, fontWeight: 600, color: '#676e80' }}>
               {formatDateV1(exam.start_date)} - {formatDateV1(exam.end_date)}
             </Typography>
           </Box>
         )}
         {totalDays > 0 && (
           <>
-            <Box sx={{ display: 'flex', gap: 2.5, mb: 0.9 }}>
-              <Typography sx={{ fontSize: '0.72rem', fontWeight: 500, color: '#94a3b8' }}>Total Days-{totalDays}</Typography>
-              <Typography sx={{ fontSize: '0.72rem', fontWeight: 500, color: '#94a3b8' }}>Skipped Days-{totalDays - validDays}</Typography>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, mb: 0.9 }}>
+              <Typography sx={{ fontSize: '0.72rem', fontWeight: 500, color: '#94a3b8', whiteSpace: 'nowrap' }}>Total Days-{totalDays}</Typography>
+              <Typography sx={{ fontSize: '0.72rem', fontWeight: 500, color: '#94a3b8', whiteSpace: 'nowrap' }}>Skipped Days-{totalDays - validDays}</Typography>
             </Box>
             {(exam.skip_days?.length > 0 || exam.skip_dates?.length > 0) && (
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.7 }}>
@@ -98,7 +108,7 @@ const ViewOnlyExamCard = ({ exam, examCounts, navigate }) => {
       </Box>
 
       {exam.examShifts?.length > 0 && (
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
+        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1, mb: 2 }}>
           {exam.examShifts.map((shift) => (
             <Chip
               key={shift.id}
@@ -110,24 +120,24 @@ const ViewOnlyExamCard = ({ exam, examCounts, navigate }) => {
         </Box>
       )}
 
-      <Box sx={{ flex: 1 }} />
+      <Box sx={{ flex: 1, display: { xs: 'none', sm: 'block' } }} />
 
       {/* Bottom row: only camera + detection icons */}
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 3, pt: 2, mt: 2 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 3, rowGap: 1, pt: 2, mt: 2 }}>
         <Box
           onClick={() => navigate(`/cameras?exam=${exam.id}`)}
           sx={{ display: 'flex', alignItems: 'center', gap: 0.8, cursor: 'pointer', '&:hover': { opacity: 0.75, color: '#3c81f6' } }}
         >
-          <CameraAltIcon sx={{ fontSize: 20, color: '#8b929cff' }} />
+          <CameraAltIcon sx={{ fontSize: 18, color: '#8b929cff' }} />
           <Typography sx={{ fontSize: '0.8rem', fontWeight: 500, color: '#475569', '&:hover': { color: '#3c81f6' } }}>
             {String(exam.camera_count || 0).padStart(2, '0')}
           </Typography>
         </Box>
         <Box
-          onClick={() => navigate(`/detections?exam_id=${exam.id}`)}
+          onClick={() => navigate(`/detections?exam_id=${exam.id}&date=${examDefaultDate(exam)}`)}
           sx={{ display: 'flex', alignItems: 'center', gap: 0.8, cursor: 'pointer', '&:hover': { opacity: 0.75, color: '#3c81f6' } }}
         >
-          <ReportProblemIcon sx={{ fontSize: 20, color: '#8b929cff' }} />
+          <ReportProblemIcon sx={{ fontSize: 18, color: '#8b929cff' }} />
           <Typography sx={{ fontSize: '0.8rem', fontWeight: 600, color: '#333', '&:hover': { color: '#3c81f6' } }}>
             {String(examCounts[exam.id]?.detections || 0).padStart(2, '0')}
           </Typography>
@@ -184,7 +194,7 @@ const ClientExams = () => {
     <Box>
       <Grid container spacing={3}>
         {exams.map((exam) => (
-          <Grid item xs={12} sm={6} md={3} key={exam.id}>
+          <Grid item xs={12} sm={6} md={4} lg={3} key={exam.id}>
             <ViewOnlyExamCard exam={exam} examCounts={examCounts} navigate={navigate} />
           </Grid>
         ))}

@@ -2,7 +2,11 @@ const Exam = require("../models/Exam");
 const ExamShift = require("../models/ExamShift");
 const CameraLinkHLS = require("../models/CameraLinkHLS");
 const CameraLinkRTSP = require("../models/CameraLinkRTSP");
+const ShiftScriptAssignment = require("../models/ShiftScriptAssignment");
+const ScriptExecution = require("../models/ScriptExecution");
 const { sequelize } = require("../config/db");
+const { Op } = require("sequelize");
+const { getAssignableDates, toDateOnly } = require("./ShiftScriptController");
 
 
 exports.createExam = async (req, res) => {
@@ -156,52 +160,200 @@ exports.getExamById = async (req, res) => {
 };
 
 
+// Exam fields that may be edited after creation. link_type is intentionally
+// excluded — it is immutable because the camera tables (HLS vs RTSP) and all
+// downstream detection wiring are tied to it.
+const EDITABLE_EXAM_FIELDS = [
+    "exam_name", "exam_body", "description",
+    "start_date", "end_date", "skip_days", "skip_dates", "is_active",
+];
+
+const hhmm = (v) => String(v || "").substring(0, 5);
+
+/**
+ * updateExam — STRICT, incremental update. Never destroys-and-recreates.
+ *
+ * Rules:
+ *  - link_type cannot change.
+ *  - An existing shift's start/end time cannot change (it would orphan/scramble
+ *    every script already scheduled against that shift's window). To re-time a
+ *    shift the client must DELETE it (which removes its scheduling) and add a new
+ *    one — the frontend warns about this.
+ *  - Shifts are reconciled by id: existing kept (name may change), new ones
+ *    created, removed ones deleted along with their scheduled assignments +
+ *    executions (cascade).
+ *  - When the date range / skip schedule changes, scripts already scheduled on a
+ *    shift are extended onto newly-added dates, and assignments on dates that are
+ *    no longer valid are removed — without touching the untouched dates.
+ */
 exports.updateExam = async (req, res) => {
     const id = req.params.id;
-    const { shifts, ...examFields } = req.body;
+    const { shifts, link_type, ...rest } = req.body;
 
-    const exam = await Exam.findByPk(id);
+    const exam = await Exam.findByPk(id, {
+        include: [{ model: ExamShift, as: "examShifts" }],
+    });
 
     if (!exam) {
-        return res.status(404).json({
+        return res.status(404).json({ success: false, message: "Exam not found" });
+    }
+
+    // ── Guard 1: link_type is immutable ──────────────────────────────────────
+    if (link_type !== undefined &&
+        String(link_type).toUpperCase() !== String(exam.link_type || "").toUpperCase()) {
+        return res.status(400).json({
             success: false,
-            message: "Exam not found",
+            message: `Link type cannot be changed (this exam is ${exam.link_type}). Create a new exam to use a different link type.`,
         });
     }
 
-    await sequelize.transaction(async (t) => {
-        // Update exam fields
-        await exam.update(examFields, { transaction: t });
+    const existingShifts = exam.examShifts || [];
+    const existingById = new Map(existingShifts.map((s) => [Number(s.id), s]));
 
-        // If shifts are provided, replace all exam-level shifts
-        if (shifts !== undefined) {
-            // Delete old shifts
-            await ExamShift.destroy({
-                where: { exam_id: id },
-                transaction: t,
-            });
-
-            if (shifts && shifts.length > 0) {
-                const shiftData = shifts.map((s) => ({
-                    exam_id: id,
-                    shift_name: s.shift_name,
-                    start_time: s.start_time,
-                    end_time: s.end_time,
-                }));
-                await ExamShift.bulkCreate(shiftData, { transaction: t });
+    // ── Guard 2: an existing shift's timing is immutable ──────────────────────
+    // Validate up front so the request fails cleanly before any write.
+    if (Array.isArray(shifts)) {
+        for (const s of shifts) {
+            if (s.id && existingById.has(Number(s.id))) {
+                const ex = existingById.get(Number(s.id));
+                if ((s.start_time && hhmm(s.start_time) !== hhmm(ex.start_time)) ||
+                    (s.end_time && hhmm(s.end_time) !== hhmm(ex.end_time))) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Shift "${ex.shift_name}" timing cannot be edited. Delete the shift (this also removes all scripts scheduled for it) and add a new shift with the new timing.`,
+                    });
+                }
+            }
+            if (!s.id && (!s.shift_name || !s.start_time || !s.end_time)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "New shifts require shift_name, start_time and end_time.",
+                });
             }
         }
-    });
+    }
 
-    // Re-fetch
-    const updatedExam = await Exam.findByPk(id, {
-        include: [{ model: ExamShift, as: "examShifts" }],
+    // Assignable dates BEFORE the change, to diff against the new schedule.
+    const oldDates = new Set(getAssignableDates(exam));
+
+    const summary = {
+        shiftsCreated: 0, shiftsRenamed: 0, shiftsDeleted: 0,
+        assignmentsAdded: 0, assignmentsRemoved: 0, warnings: [],
+    };
+
+    const updatedExam = await sequelize.transaction(async (t) => {
+        // ── Update scalar exam fields (never link_type) ──
+        const allowed = {};
+        for (const f of EDITABLE_EXAM_FIELDS) {
+            if (rest[f] !== undefined) allowed[f] = rest[f];
+        }
+        await exam.update(allowed, { transaction: t });
+
+        // ── Reconcile shifts incrementally (only when provided) ──
+        if (Array.isArray(shifts)) {
+            const incomingIds = new Set(shifts.filter((s) => s.id).map((s) => Number(s.id)));
+
+            for (const s of shifts) {
+                if (s.id && existingById.has(Number(s.id))) {
+                    const ex = existingById.get(Number(s.id));
+                    if (s.shift_name && s.shift_name !== ex.shift_name) {
+                        await ex.update({ shift_name: s.shift_name }, { transaction: t });
+                        summary.shiftsRenamed++;
+                    }
+                } else if (!s.id) {
+                    await ExamShift.create({
+                        exam_id: id,
+                        shift_name: s.shift_name,
+                        start_time: s.start_time,
+                        end_time: s.end_time,
+                    }, { transaction: t });
+                    summary.shiftsCreated++;
+                }
+            }
+
+            // Removed shifts → delete the shift + its scheduling + executions.
+            const toDelete = existingShifts.filter((s) => !incomingIds.has(Number(s.id)));
+            for (const s of toDelete) {
+                const delAssign = await ShiftScriptAssignment.destroy({ where: { shift_id: s.id }, transaction: t });
+                const delExec = await ScriptExecution.destroy({ where: { shift_id: s.id }, transaction: t });
+                await s.destroy({ transaction: t });
+                summary.shiftsDeleted++;
+                summary.assignmentsRemoved += delAssign;
+                summary.warnings.push(
+                    `Deleted shift "${s.shift_name}" and ${delAssign} scheduled assignment(s)` +
+                    (delExec ? ` and ${delExec} execution record(s)` : "") + "."
+                );
+            }
+        }
+
+        // ── Re-schedule on date / skip changes ──
+        // exam instance now reflects the new dates/skips.
+        const newDates = new Set(getAssignableDates(exam));
+        const added = [...newDates].filter((d) => !oldDates.has(d));
+        const removed = [...oldDates].filter((d) => !newDates.has(d));
+
+        const currentShifts = await ExamShift.findAll({ where: { exam_id: id }, transaction: t, raw: true });
+        const shiftIds = currentShifts.map((s) => s.id);
+
+        // Dates no longer valid → drop their assignments.
+        if (removed.length && shiftIds.length) {
+            summary.assignmentsRemoved += await ShiftScriptAssignment.destroy({
+                where: { shift_id: { [Op.in]: shiftIds }, assignment_date: { [Op.in]: removed } },
+                transaction: t,
+            });
+        }
+
+        // Newly-valid dates (e.g. extended end_date) → replicate each shift's
+        // existing script set onto the new dates, preserving custom timing.
+        if (added.length && shiftIds.length) {
+            for (const shiftId of shiftIds) {
+                const existing = await ShiftScriptAssignment.findAll({
+                    where: { shift_id: shiftId },
+                    order: [["assignment_date", "DESC"]],
+                    transaction: t, raw: true,
+                });
+                if (existing.length === 0) continue;
+
+                const repByScript = new Map();
+                for (const a of existing) {
+                    if (!repByScript.has(a.script_id)) repByScript.set(a.script_id, a);
+                }
+                const existKeys = new Set(existing.map((a) => `${a.script_id}::${toDateOnly(a.assignment_date)}`));
+
+                const rows = [];
+                for (const [scriptId, rep] of repByScript) {
+                    for (const date of added) {
+                        if (existKeys.has(`${scriptId}::${date}`)) continue;
+                        rows.push({
+                            shift_id: shiftId,
+                            script_id: scriptId,
+                            assignment_date: date,
+                            custom_start_time: rep.custom_start_time || null,
+                            custom_end_time: rep.custom_end_time || null,
+                            custom_frequency_minutes: rep.custom_frequency_minutes || null,
+                            notes: rep.notes || null,
+                            is_active: true,
+                        });
+                    }
+                }
+                if (rows.length) {
+                    await ShiftScriptAssignment.bulkCreate(rows, { transaction: t });
+                    summary.assignmentsAdded += rows.length;
+                }
+            }
+        }
+
+        return await Exam.findByPk(id, {
+            include: [{ model: ExamShift, as: "examShifts" }],
+            transaction: t,
+        });
     });
 
     res.json({
         success: true,
         message: "Exam updated successfully",
         data: updatedExam,
+        summary,
     });
 };
 

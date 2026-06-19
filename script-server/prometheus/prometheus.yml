@@ -56,3 +56,82 @@ scrape_configs:
       - targets: ['host.docker.internal:9007']
         labels:
           server_id: worker-4-gpu7
+
+      # ──────── worker-5: 8-GPU box (103.42.51.250:2223) via SSH tunnel ────────
+      # cctv-worker-5-tunnel.service forwards main:9100..9107 -> worker-5 gpu0..7 /metrics
+      - targets: ['host.docker.internal:9100']
+        labels:
+          server_id: worker-5-gpu0
+      - targets: ['host.docker.internal:9101']
+        labels:
+          server_id: worker-5-gpu1
+      - targets: ['host.docker.internal:9102']
+        labels:
+          server_id: worker-5-gpu2
+      - targets: ['host.docker.internal:9103']
+        labels:
+          server_id: worker-5-gpu3
+      - targets: ['host.docker.internal:9104']
+        labels:
+          server_id: worker-5-gpu4
+      - targets: ['host.docker.internal:9105']
+        labels:
+          server_id: worker-5-gpu5
+      - targets: ['host.docker.internal:9106']
+        labels:
+          server_id: worker-5-gpu6
+      - targets: ['host.docker.internal:9107']
+        labels:
+          server_id: worker-5-gpu7
+
+      # ──────── worker-6: 8-GPU box (103.42.51.250:2224) via SSH tunnel ────────
+      # cctv-worker-6-tunnel.service forwards main:9200..9207 -> worker-6 gpu0..7 /metrics
+      - targets: ['host.docker.internal:9200']
+        labels:
+          server_id: worker-6-gpu0
+      - targets: ['host.docker.internal:9201']
+        labels:
+          server_id: worker-6-gpu1
+      - targets: ['host.docker.internal:9202']
+        labels:
+          server_id: worker-6-gpu2
+      - targets: ['host.docker.internal:9203']
+        labels:
+          server_id: worker-6-gpu3
+      - targets: ['host.docker.internal:9204']
+        labels:
+          server_id: worker-6-gpu4
+      - targets: ['host.docker.internal:9205']
+        labels:
+          server_id: worker-6-gpu5
+      - targets: ['host.docker.internal:9206']
+        labels:
+          server_id: worker-6-gpu6
+      - targets: ['host.docker.internal:9207']
+        labels:
+          server_id: worker-6-gpu7
+
+  # ── Host system metrics (node_exporter) — CPU / RAM / disk / network ──
+  # LAN workers expose node_exporter directly on :9100; the 8-GPU VMs (5/6)
+  # reuse the host's existing node_exporter (127.0.0.1:9100), tunneled to
+  # main:9108 (w5) and main:9208 (w6) by the cctv-worker-{5,6}-tunnel services.
+  - job_name: node-exporter
+    metrics_path: /metrics
+    scrape_interval: 30s
+    scrape_timeout: 15s
+    static_configs:
+      - targets: ['192.168.19.43:9100']
+        labels:
+          server_id: worker-1
+      - targets: ['192.168.19.42:9100']
+        labels:
+          server_id: worker-2
+      - targets: ['192.168.19.41:9100']
+        labels:
+          server_id: worker-3
+      - targets: ['host.docker.internal:9108']
+        labels:
+          server_id: worker-5
+      - targets: ['host.docker.internal:9208']
+        labels:
+          server_id: worker-6

@@ -29,6 +29,8 @@ import {
     useMediaQuery,
     useTheme,
 } from '@mui/material';
+import { useNavigate } from 'react-router-dom';
+import * as XLSX from 'xlsx';
 import { LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
@@ -261,7 +263,10 @@ export const KpiCard = ({ title, value, icon, chips = [], loading }) => (
                                     display: 'flex',
                                     flexDirection: 'column',
                                     justifyContent: 'center',
-                                    alignItems: 'center',
+                                    // Left-align both the label name and the value
+                                    // inside the chip so they read as a column the
+                                    // eye scans down, not a centered ribbon.
+                                    alignItems: 'flex-start',
                                     lineHeight: 1.2,
                                     minWidth: 0,
                                     width: '100%',
@@ -470,17 +475,50 @@ export const DetectionDistributionCard = ({ distribution = [], loading }) => {
     const donutTotal = donutData.reduce((a, d) => a + d.count, 0);
     const activeIdx = donutData.findIndex((d) => d.key === activeKey);
 
+    // Export the FULL breakdown (every parent × sub-detection) regardless of
+    // which Select filter is currently on screen — users want the data, not
+    // the current view. Parents with no sub-detections still get one row so
+    // the category is visible in the sheet.
+    const handleExport = () => {
+        const rows = [];
+        const total = tree.grandTotal;
+        tree.parents.forEach((p) => {
+            if (p.subs.length === 0) {
+                rows.push({
+                    'Category':       p.label,
+                    'Detection Type': '—',
+                    'Count':          p.count,
+                    '% of Total':     total > 0 ? ((p.count / total) * 100).toFixed(2) : '0.00',
+                });
+                return;
+            }
+            p.subs.forEach((s) => {
+                rows.push({
+                    'Category':       p.label,
+                    'Detection Type': s.label,
+                    'Count':          s.count,
+                    '% of Total':     total > 0 ? ((s.count / total) * 100).toFixed(2) : '0.00',
+                });
+            });
+        });
+        const ws = XLSX.utils.json_to_sheet(rows);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Detection Distribution');
+        XLSX.writeFile(wb, `detection_distribution_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
+    };
+
     return (
         <Card sx={{ height: '100%', bgcolor: '#fff', borderRadius: '8px', boxShadow: '0 2px 4px 0 rgba(0,0,0,0.05)' }}>
             <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
-                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" useFlexGap flexWrap="wrap" sx={{ mb: 2, gap: 1 }}>
                     <Typography sx={{ color: '#191B23', fontFamily: 'Inter, sans-serif', fontSize: { xs: '17px', sm: '20px' }, fontWeight: 700, lineHeight: '24px' }}>
                         Detection Distribution
                     </Typography>
-                    <Stack direction="row" alignItems="center" spacing={1}>
+                    <Stack direction="row" alignItems="center" spacing={1} useFlexGap flexWrap="wrap" sx={{ flexShrink: 0 }}>
                         <Button
                             variant="outlined"
                             size="small"
+                            onClick={handleExport}
                             startIcon={<FileDownloadOutlinedIcon sx={{ fontSize: 18 }} />}
                             sx={{
                                 textTransform: 'none',
@@ -540,7 +578,7 @@ export const DetectionDistributionCard = ({ distribution = [], loading }) => {
                     </Box>
                 ) : (
                     <Grid container spacing={2} alignItems="flex-start">
-                        <Grid item xs={12} sm={7} md={6}>
+                        <Grid item xs={12} lg={6}>
                             <Box
                                 sx={{
                                     position: 'relative',
@@ -635,7 +673,7 @@ export const DetectionDistributionCard = ({ distribution = [], loading }) => {
                             </Box>
                         </Grid>
 
-                        <Grid item xs={12} sm={5} md={6}>
+                        <Grid item xs={12} lg={6}>
                             <Box sx={{ maxHeight: BOX_HEIGHT_SX, overflowY: 'auto', pr: 0.5, pt: 1 }}>
                                 <Stack spacing={1.5}>
                                     {donutData.map((slice) => {
@@ -782,7 +820,7 @@ const GpuPerformanceCard = () => {
                 </Box>
 
                 <Grid container spacing={2} alignItems="stretch">
-                    <Grid item xs={12} md={7} sx={{ display: 'flex', flexDirection: 'column' }}>
+                    <Grid item xs={12} lg={7} sx={{ display: 'flex', flexDirection: 'column' }}>
                         <Box sx={{ position: 'relative', height: gaugeHeight }}>
                             <ResponsiveContainer
                                 width="100%"
@@ -884,7 +922,7 @@ const GpuPerformanceCard = () => {
                         </Box>
                     </Grid>
 
-                    <Grid item xs={12} md={5}>
+                    <Grid item xs={12} lg={5}>
                         <Stack spacing={1.75}>
                             <Box sx={{ position: 'relative', height: miniHeight }}>
                                 <ResponsiveContainer
@@ -1096,11 +1134,42 @@ const formatShortDate = (raw) => {
 const formatHMM = (raw) => (typeof raw === 'string' ? raw.slice(0, 5) : '');
 
 export const LiveExamsCard = ({ fetcher = dashboardAPI.getLiveExams }) => {
+    const navigate = useNavigate();
     const [rows, setRows] = useState([]);
     const [total, setTotal] = useState(0);
     const [loading, setLoading] = useState(true);
     const [page, setPage] = useState(0);          // 0-indexed for MUI TablePagination
     const [rowsPerPage, setRowsPerPage] = useState(10);
+    const [exporting, setExporting] = useState(false);
+
+    // Build a workbook from the FULL filter context (not just the current page)
+    // and trigger a browser download. Uses whichever `fetcher` is wired by the
+    // parent, so admin gets admin-scope rows and client gets company-scoped rows.
+    const handleExport = async () => {
+        setExporting(true);
+        try {
+            const res = await fetcher({ page: 1, limit: 10000 });
+            const allRows = res?.data?.data?.rows || [];
+            const out = allRows.map((row) => ({
+                'Exam':        row.exam_name,
+                'Date':        row.date ? formatShortDate(row.date) : '',
+                'Shift':       `Shift ${row.shift_index || 1}`,
+                'Shift Start': formatHMM(row.shift_start),
+                'Shift End':   formatHMM(row.shift_end),
+                'Cameras':     Number(row.cameras || 0),
+                'Scripts':     Number(row.scripts || 0),
+                'Detections':  Number(row.detections || 0),
+            }));
+            const ws = XLSX.utils.json_to_sheet(out);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Live Shifts');
+            XLSX.writeFile(wb, `live_shifts_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
+        } catch (err) {
+            console.error('[LiveExamsCard.handleExport]', err);
+        } finally {
+            setExporting(false);
+        }
+    };
 
     useEffect(() => {
         let cancelled = false;
@@ -1172,7 +1241,11 @@ export const LiveExamsCard = ({ fetcher = dashboardAPI.getLiveExams }) => {
                     <Button
                         variant="outlined"
                         size="small"
-                        startIcon={<FileDownloadOutlinedIcon sx={{ fontSize: 18 }} />}
+                        onClick={handleExport}
+                        disabled={exporting}
+                        startIcon={exporting
+                            ? <CircularProgress size={14} />
+                            : <FileDownloadOutlinedIcon sx={{ fontSize: 18 }} />}
                         sx={{
                             textTransform: 'none',
                             fontFamily: 'Inter, sans-serif',
@@ -1265,7 +1338,18 @@ export const LiveExamsCard = ({ fetcher = dashboardAPI.getLiveExams }) => {
                                         <TableCell sx={{ ...bodyCellSx, color: BODY_DARK, fontSize: { xs: '13px', sm: '14px' } }}>
                                             {Number(row.detections || 0).toLocaleString()}
                                         </TableCell>
-                                        <TableCell sx={{ ...bodyCellSx, width: 110, color: ACCENT_BLUE, fontWeight: 600, cursor: 'pointer', display: { xs: 'none', sm: 'table-cell' } }}>
+                                        <TableCell
+                                            onClick={() => navigate(`/exams?highlight=${row.exam_id}`)}
+                                            sx={{
+                                                ...bodyCellSx,
+                                                width: 110,
+                                                color: ACCENT_BLUE,
+                                                fontWeight: 600,
+                                                cursor: 'pointer',
+                                                display: { xs: 'none', sm: 'table-cell' },
+                                                '&:hover': { textDecoration: 'underline' },
+                                            }}
+                                        >
                                             View Details
                                         </TableCell>
                                     </TableRow>
@@ -1663,6 +1747,7 @@ export const AdvancedFiltersDialog = ({
 const Dashboard = () => {
     const [overview, setOverview] = useState(null);
     const [overviewLoading, setOverviewLoading] = useState(true);
+    const [initializing, setInitializing] = useState(true);  // until the initial range is decided
     const [showGpuWarning, setShowGpuWarning] = useState(true);
     const [searchKeyword, setSearchKeyword] = useState('');
     const [dateChip, setDateChip] = useState('today');
@@ -1672,6 +1757,7 @@ const Dashboard = () => {
     const [selectedShifts, setSelectedShifts] = useState([]);
     const [examsList, setExamsList] = useState([]);
     const searchInputRef = useRef(null);
+    const autoSwitchedRef = useRef(false);  // one-time: Today→Last month when Today has 0 exams
 
     // Fetch all exams once on mount so we can label active chips + power autocomplete.
     useEffect(() => {
@@ -1794,19 +1880,33 @@ const Dashboard = () => {
 
     useEffect(() => {
         let cancelled = false;
+        let didAutoSwitch = false;
         setOverviewLoading(true);
         dashboardAPI
             .getOverview(apiParams)
             .then((res) => {
-                if (!cancelled) setOverview(res?.data?.data || null);
+                if (cancelled) return;
+                const data = res?.data?.data || null;
+                // Default-on-open: if Today has 0 exams, switch to Last month WITHOUT
+                // painting the empty Today view — keep the loading skeleton through the
+                // switch so there's no visible flash.
+                if (!autoSwitchedRef.current && dateChip === 'today' && (data?.total_exams?.total || 0) === 0) {
+                    autoSwitchedRef.current = true;
+                    didAutoSwitch = true;
+                    setDateChip('last_month');   // new apiParams → effect refetches; loading stays true
+                    return;
+                }
+                setOverview(data);
+                setInitializing(false);
             })
             .catch((err) => {
                 if (cancelled) return;
                 console.error('[Dashboard.getOverview]', err);
                 setOverview(null);
+                setInitializing(false);
             })
             .finally(() => {
-                if (!cancelled) setOverviewLoading(false);
+                if (!cancelled && !didAutoSwitch) setOverviewLoading(false);
             });
         return () => {
             cancelled = true;
@@ -1987,8 +2087,8 @@ const Dashboard = () => {
                     onClick={() => setFilterMenuOpen(true)}
                     sx={{
                         position: 'relative',
-                        width: 48,
-                        height: 48,
+                        width: { xs: 40, sm: 48 },
+                        height: { xs: 40, sm: 48 },
                         bgcolor: '#3c81f6',
                         border: 'none',
                         borderRadius: '10px',
@@ -2037,7 +2137,7 @@ const Dashboard = () => {
                 sx={{ mb: activeFilters.length ? 1 : 2.5 }}
             >
                 {dateChips.map((c) => {
-                    const active = c.key === dateChip;
+                    const active = !initializing && c.key === dateChip;
                     return (
                         <Box
                             key={c.key}
@@ -2088,6 +2188,8 @@ const Dashboard = () => {
                                 fontWeight: 500,
                                 borderRadius: 999,
                                 height: 28,
+                                maxWidth: { xs: 200, sm: 'none' },
+                                '& .MuiChip-label': { overflow: 'hidden', textOverflow: 'ellipsis' },
                                 '& .MuiChip-deleteIcon': {
                                     color: '#3c81f6',
                                     '&:hover': { color: '#1e40af' },

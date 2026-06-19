@@ -51,6 +51,11 @@ const getAssignableDates = (exam) => {
     return dates;
 };
 
+// Re-exported so ExamController can reuse the exact same date-expansion logic
+// when an exam's date range / skip schedule changes.
+exports.getAssignableDates = getAssignableDates;
+exports.toDateOnly = toDateOnly;
+
 
 /**
  * Assign a script to a shift

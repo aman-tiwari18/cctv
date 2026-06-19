@@ -37,7 +37,6 @@ import {
   Analytics,
   CalendarMonth,
   EventBusy,
-  CalendarTodayOutlined,
   VideocamOutlined,
   LayersOutlined,
   EditOutlined,
@@ -49,11 +48,22 @@ import {
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import ReportProblemIcon from '@mui/icons-material/ReportProblem';
 import { ShiftSvgIcon } from '../components/ShiftSvgIcon';
+import ExamScheduleCalendar from '../components/ExamScheduleCalendar';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { examsAPI, shiftScriptsAPI } from '../services/api';
 
 const ALL_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+// today, or the exam's last date — whichever is earlier → "DD-MM-YYYY"
+const examDefaultDate = (exam) => {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  let d = today;
+  const end = exam?.end_date ? new Date(exam.end_date) : null;
+  if (end && !isNaN(end)) { end.setHours(0, 0, 0, 0); if (end < today) d = end; }
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()}`;
+};
 
 const Exams = () => {
   const navigate = useNavigate();
@@ -160,9 +170,11 @@ const Exams = () => {
         skip_days: exam.skip_days || [],
         skip_dates: exam.skip_dates || [],
         shifts: exam.examShifts?.map(s => ({
+          id: s.id,                         // keep id so the backend updates in place
           shift_name: s.shift_name,
           start_time: s.start_time?.substring(0, 5) || '',
           end_time: s.end_time?.substring(0, 5) || '',
+          _existing: true,                  // marks a saved shift (timing locked)
         })) || [],
       });
     } else {
@@ -273,6 +285,16 @@ const Exams = () => {
   };
 
   const removeShift = (index) => {
+    const shift = formData.shifts[index];
+    // Removing a saved shift cascades — the backend deletes every script already
+    // scheduled for it. Make the user confirm.
+    if (shift?._existing) {
+      const ok = window.confirm(
+        `Remove "${shift.shift_name}"?\n\nThis will permanently delete ALL scripts scheduled for this shift ` +
+        `(across every date) and its execution history. This cannot be undone.`
+      );
+      if (!ok) return;
+    }
     const newShifts = formData.shifts.filter((_, i) => i !== index);
     setFormData({ ...formData, shifts: newShifts });
   };
@@ -480,27 +502,27 @@ const Exams = () => {
           const isLive = examStart && examEnd && now >= examStart && now <= examEnd;
 
           return (
-            <Grid item xs={12} sm={6} md={3} key={exam.id} >
+            <Grid item xs={12} sm={6} md={4} lg={3} key={exam.id} >
               <Box
                 sx={{
                   bgcolor: '#fff',
                   border: '1px solid #f8fafc',
                   boxShadow: '0 4px 12px rgba(0, 0, 0, 0.03)',
                   borderRadius: 4,
-                  p: 3,
+                  p: { xs: 2.5, sm: 3 },
                   py: 3.5,
-                  height: '100%',
-                  minHeight: 420,
+                  height: { xs: 'auto', sm: '100%' },
+                  minHeight: { xs: 'auto', md: 380 },
                   maxWidth: 530,
                   display: 'flex',
                   flexDirection: 'column'
                 }}
               >
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
-                  <Typography sx={{ fontWeight: 600, fontSize: '1.5rem', color: '#0f172a', lineHeight: 1.25, pr: 1, flex: 1 }}>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'flex-start', gap: 1, mb: 1 }}>
+                  <Typography title={exam.exam_name} sx={{ fontWeight: 600, fontSize: { xs: '1.15rem', sm: '1.3rem' }, color: '#0f172a', lineHeight: 1.25, flex: '1 1 auto', minWidth: 0, wordBreak: 'break-word' }}>
                     {exam.exam_name}
                   </Typography>
-                  <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
+                  <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', flexShrink: 0 }}>
                     <Chip
                       label={exam.link_type}
                       size="small"
@@ -536,11 +558,11 @@ const Exams = () => {
                     <Typography sx={{ fontSize: '1.1rem', fontWeight: 800, color: '#94a3b8' }}>Archived</Typography>
                   </Box>
                 ) : (
-                  <Box sx={{ bgcolor: '#f1f5f9', borderRadius: 3, p: 2, mb: 2.5 }}>
+                  <Box sx={{ bgcolor: '#f1f5f9', borderRadius: 3, p: { xs: 2, sm: 1.75 }, mb: 2.5 }}>
                     {exam.start_date && exam.end_date && (
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.2 }}>
-                        <CalendarTodayOutlined sx={{ fontSize: 18, color: '#676e80', flexShrink: 0 }} />
-                        <Typography sx={{ fontSize: '0.97rem', fontWeight: 600, color: '#676e80' }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 1.2 }}>
+                        <ExamScheduleCalendar exam={exam} />
+                        <Typography sx={{ fontSize: { xs: '0.95rem', sm: '0.84rem' }, fontWeight: 600, color: '#676e80' }}>
                           {formatDateV1(exam.start_date)} - {formatDateV1(exam.end_date)}
                         </Typography>
                       </Box>
@@ -548,11 +570,11 @@ const Exams = () => {
                     {/* Stats row */}
                     {dateInfo && (
                       <>
-                        <Box sx={{ display: 'flex', gap: 2.5, mb: 0.9 }}>
-                          <Typography sx={{ fontSize: '0.72rem', fontWeight: 500, color: '#94a3b8' }}>
+                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, mb: 0.9 }}>
+                          <Typography sx={{ fontSize: '0.72rem', fontWeight: 500, color: '#94a3b8', whiteSpace: 'nowrap' }}>
                             Total Days-{dateInfo.totalDays}
                           </Typography>
-                          <Typography sx={{ fontSize: '0.72rem', fontWeight: 500, color: '#94a3b8' }}>
+                          <Typography sx={{ fontSize: '0.72rem', fontWeight: 500, color: '#94a3b8', whiteSpace: 'nowrap' }}>
                             Skipped Days-{dateInfo.skippedDays}
                           </Typography>
                         </Box>
@@ -574,7 +596,7 @@ const Exams = () => {
                 )}
 
                 {exam.examShifts?.length > 0 && (
-                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1, mb: 2 }}>
                     {exam.examShifts.map((shift) => (
                       <Chip
                         key={shift.id}
@@ -596,15 +618,15 @@ const Exams = () => {
                   </Box>
                 )}
 
-                <Box sx={{ flex: 1 }} />
+                <Box sx={{ flex: 1, display: { xs: 'none', sm: 'block' } }} />
 
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 2, pt: 2 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1, mt: 2, pt: 2 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1.5 }}>
                     <Box
                       onClick={() => navigate(`/cameras?exam=${exam.id}`)}
                       sx={{ display: 'flex', alignItems: 'center', gap: 0.8, cursor: 'pointer', '&:hover': { opacity: 0.75, color: '#3c81f6' } }}
                     >
-                      <CameraAltIcon sx={{ fontSize: 20, color: '#8b929cff' }} />
+                      <CameraAltIcon sx={{ fontSize: 18, color: '#8b929cff' }} />
                       <Typography sx={{ fontSize: '0.8rem', fontWeight: 500, color: '#475569', '&:hover': { color: '#3c81f6' } }}>
                         {String(exam.camera_count || 0).padStart(2, '0')}
                       </Typography>
@@ -614,7 +636,7 @@ const Exams = () => {
                       onClick={() => navigate(`/analytics?exam=${exam.id}`)}
                       sx={{ display: 'flex', alignItems: 'center', gap: 0.8, cursor: 'pointer', '&:hover': { opacity: 0.75, color: '#3c81f6' } }}
                     >
-                      <Analytics sx={{ fontSize: 20, color: '#8b929cff' }} />
+                      <Analytics sx={{ fontSize: 18, color: '#8b929cff' }} />
 
 
                       <Typography sx={{ fontSize: '0.8rem', fontWeight: 600, color: '#333', '&:hover': { color: '#3c81f6' } }}>
@@ -622,10 +644,10 @@ const Exams = () => {
                       </Typography>
                     </Box>
                     <Box
-                      onClick={() => navigate(`/detections?exam_id=${exam.id}`)}
+                      onClick={() => navigate(`/detections?exam_id=${exam.id}&date=${examDefaultDate(exam)}`)}
                       sx={{ display: 'flex', alignItems: 'center', gap: 0.8, cursor: 'pointer', '&:hover': { opacity: 0.75, color: '#3c81f6' } }}
                     >
-                      <ReportProblemIcon sx={{ fontSize: 20, color: '#8b929cff' }} />
+                      <ReportProblemIcon sx={{ fontSize: 18, color: '#8b929cff' }} />
 
 
                       <Typography sx={{ fontSize: '0.8rem', fontWeight: 600, color: '#333', '&:hover': { color: '#3c81f6' } }}>
@@ -721,12 +743,17 @@ const Exams = () => {
 
             <Grid item xs={12}>
               <Typography sx={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', mb: 0, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-                Link Type
+                Link Type{editingExam ? ' (locked)' : ''}
               </Typography>
               <RadioGroup row name="link_type" value={formData.link_type} onChange={handleChange}>
-                <FormControlLabel value="RTSP" control={<Radio size="small" sx={{ '&.Mui-checked': { color: '#3c81f6' } }} />} label={<Typography sx={{ fontSize: 13, fontWeight: 600, color: '#475569' }}>RTSP</Typography>} />
-                <FormControlLabel value="HLS" control={<Radio size="small" sx={{ '&.Mui-checked': { color: '#3c81f6' } }} />} label={<Typography sx={{ fontSize: 13, fontWeight: 600, color: '#475569' }}>HLS</Typography>} />
+                <FormControlLabel value="RTSP" disabled={!!editingExam} control={<Radio size="small" sx={{ '&.Mui-checked': { color: '#3c81f6' } }} />} label={<Typography sx={{ fontSize: 13, fontWeight: 600, color: '#475569' }}>RTSP</Typography>} />
+                <FormControlLabel value="HLS" disabled={!!editingExam} control={<Radio size="small" sx={{ '&.Mui-checked': { color: '#3c81f6' } }} />} label={<Typography sx={{ fontSize: 13, fontWeight: 600, color: '#475569' }}>HLS</Typography>} />
               </RadioGroup>
+              {editingExam && (
+                <Typography sx={{ fontSize: 11, color: '#94a3b8', mt: -0.5 }}>
+                  Link type can't be changed after an exam is created.
+                </Typography>
+              )}
             </Grid>
 
             <Grid item xs={12}>
@@ -999,7 +1026,7 @@ const Exams = () => {
               </Box>
               <Box sx={{ width: 130 }}>
                 <Typography sx={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', mb: 0.5, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-                  Start
+                  Start{shift._existing ? ' 🔒' : ''}
                 </Typography>
                 <TextField
                   type="time"
@@ -1007,12 +1034,14 @@ const Exams = () => {
                   onChange={(e) => handleShiftChange(index, 'start_time', e.target.value)}
                   size="small"
                   fullWidth
-                  InputProps={{ sx: { borderRadius: 2, bgcolor: '#ffffff', fontSize: '0.8rem', '& fieldset': { border: 'none' } } }}
+                  disabled={!!shift._existing}
+                  title={shift._existing ? "Saved shift timing can't be changed — remove the shift and add a new one to re-time it." : undefined}
+                  InputProps={{ sx: { borderRadius: 2, bgcolor: shift._existing ? '#f1f5f9' : '#ffffff', fontSize: '0.8rem', '& fieldset': { border: 'none' } } }}
                 />
               </Box>
               <Box sx={{ width: 130 }}>
                 <Typography sx={{ fontSize: '0.7rem', fontWeight: 800, color: '#94a3b8', mb: 0.5, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-                  End
+                  End{shift._existing ? ' 🔒' : ''}
                 </Typography>
                 <TextField
                   type="time"
@@ -1020,7 +1049,9 @@ const Exams = () => {
                   onChange={(e) => handleShiftChange(index, 'end_time', e.target.value)}
                   size="small"
                   fullWidth
-                  InputProps={{ sx: { borderRadius: 2, fontSize: '0.8rem', bgcolor: '#ffffff', '& fieldset': { border: 'none' } } }}
+                  disabled={!!shift._existing}
+                  title={shift._existing ? "Saved shift timing can't be changed — remove the shift and add a new one to re-time it." : undefined}
+                  InputProps={{ sx: { borderRadius: 2, fontSize: '0.8rem', bgcolor: shift._existing ? '#f1f5f9' : '#ffffff', '& fieldset': { border: 'none' } } }}
                 />
               </Box>
               <IconButton
