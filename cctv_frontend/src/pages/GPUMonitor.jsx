@@ -358,7 +358,7 @@ const ServerGpuSidebar = ({ servers, selectedKey, onSelect, expanded, onToggle, 
   const [sortBy, setSortBy] = useState('Utilization');
   const [nodeFilter, setNodeFilter] = useState('All Nodes');
   return (
-    <Card elevation={0} sx={{ ...CARD_SX, maxHeight: { md: 'calc(100vh - 180px)' }, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <Card elevation={0} sx={{ ...CARD_SX, height: { md: '100%' }, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 }, display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1 }}>
         <Stack direction="row" spacing={1} sx={{ mb: 1.5, flexShrink: 0 }}>
           <FilterSelect value={sortBy} onChange={(e) => setSortBy(e.target.value)} options={['Utilization', 'Temperature', 'Memory']} />
@@ -570,12 +570,13 @@ const GPUDetailPanel = ({ server, gpu, processes, rangeKey, onRangeChange, onRef
         </ToggleButtonGroup>
       </Box>
 
-      {/* Two charts side-by-side */}
-      <Grid container spacing={2}>
-        <Grid item xs={12} md={6}>
+      {/* Two charts side-by-side (flex, not Grid — Grid's negative spacing margins
+          would push this row out of alignment with the header / process cards) */}
+      <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2 }}>
+        <Box sx={{ flex: 1, minWidth: 0 }}>
           <UtilizationChart serverId={server.server_id} gpuId={String(gpu.gpu_id)} rangeKey={rangeKey} />
-        </Grid>
-        <Grid item xs={12} md={6}>
+        </Box>
+        <Box sx={{ flex: 1, minWidth: 0 }}>
           <MemoryChart
             serverId={server.server_id}
             gpuId={String(gpu.gpu_id)}
@@ -583,8 +584,8 @@ const GPUDetailPanel = ({ server, gpu, processes, rangeKey, onRangeChange, onRef
             memoryUsedMb={gpu.memory_used}
             rangeKey={rangeKey}
           />
-        </Grid>
-      </Grid>
+        </Box>
+      </Box>
 
       {/* Active processes for this GPU */}
       <Card elevation={0} sx={{ ...CARD_SX }}>
@@ -999,7 +1000,7 @@ const GPUMonitor = () => {
           })}
         </Box>
       </Box>
-      <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2, alignItems: { md: 'flex-start' } }}>
+      <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2, alignItems: { md: 'stretch' } }}>
         <Box sx={{ width: { xs: '100%', md: 300 }, flexShrink: 0 }}>
           <ServerGpuSidebar
             servers={clusterData?.servers || []}
