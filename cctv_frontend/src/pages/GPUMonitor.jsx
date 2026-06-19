@@ -358,7 +358,7 @@ const ServerGpuSidebar = ({ servers, selectedKey, onSelect, expanded, onToggle, 
   const [sortBy, setSortBy] = useState('Utilization');
   const [nodeFilter, setNodeFilter] = useState('All Nodes');
   return (
-    <Card elevation={0} sx={{ ...CARD_SX, maxHeight: { md: 'calc(100vh - 140px)' }, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <Card elevation={0} sx={{ ...CARD_SX, height: { md: '100%' }, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 }, display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1 }}>
         <Stack direction="row" spacing={1} sx={{ mb: 1.5, flexShrink: 0 }}>
           <FilterSelect value={sortBy} onChange={(e) => setSortBy(e.target.value)} options={['Utilization', 'Temperature', 'Memory']} />
@@ -967,8 +967,11 @@ const GPUMonitor = () => {
         </Grid>
       </Grid>
 
+      {/* Bounded shell (md+): the KPIs above scroll away, this bar pins to the top,
+          and the list + content below each scroll inside their own boxes. */}
+      <Box sx={{ display: 'flex', flexDirection: 'column', height: { md: 'calc(100vh - 88px)' }, overflow: { md: 'hidden' } }}>
       {/* Server Details */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 1.5 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 1.5, flexShrink: 0 }}>
         <Typography sx={{ fontFamily: INTER, fontWeight: 700, fontSize: { xs: '17px', sm: '20px' }, color: COLOR.title }}>
           Server Details
         </Typography>
@@ -1000,8 +1003,8 @@ const GPUMonitor = () => {
           })}
         </Box>
       </Box>
-      <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2, alignItems: { md: 'flex-start' } }}>
-        <Box sx={{ width: { xs: '100%', md: 300 }, flexShrink: 0 }}>
+      <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2, flex: { md: 1 }, minHeight: 0, overflow: { md: 'hidden' } }}>
+        <Box sx={{ width: { xs: '100%', md: 300 }, flexShrink: 0, height: { md: '100%' } }}>
           <ServerGpuSidebar
             servers={clusterData?.servers || []}
             selectedKey={selectedKey}
@@ -1013,7 +1016,13 @@ const GPUMonitor = () => {
             onAdd={addCompare}
           />
         </Box>
-        <Box sx={{ flex: 1, minWidth: 0 }}>
+        <Box sx={{
+          flex: 1, minWidth: 0, height: { md: '100%' }, overflowY: { md: 'auto' },
+          scrollbarWidth: 'thin', scrollbarColor: '#cbd5e1 transparent',
+          '&::-webkit-scrollbar': { width: '6px' },
+          '&::-webkit-scrollbar-thumb': { backgroundColor: '#cbd5e1', borderRadius: '3px' },
+          '&::-webkit-scrollbar-track': { backgroundColor: 'transparent' },
+        }}>
           {viewMode === 'inspect' ? (
             <GPUDetailPanel
               server={selectedServer}
@@ -1046,6 +1055,7 @@ const GPUMonitor = () => {
             </Box>
           )}
         </Box>
+      </Box>
       </Box>
     </Box>
   );
