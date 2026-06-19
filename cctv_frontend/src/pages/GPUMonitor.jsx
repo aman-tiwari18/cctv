@@ -183,7 +183,14 @@ const UtilizationChart = ({ serverId, gpuId, rangeKey, compact }) => {
   if (compact) {
     return (
       <Box>
-        <Typography sx={COMPACT_LABEL_SX}>GPU Utilization</Typography>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1, mb: 0.5 }}>
+          <Typography sx={{ ...COMPACT_LABEL_SX, mb: 0 }}>GPU Utilization</Typography>
+          <Stack direction="row" spacing={1.5} sx={{ flexWrap: 'wrap' }}>
+            <Stat label="Peak" value={`${stats.peak}%`} />
+            <Stat label="Avg"  value={`${stats.avg}%`} />
+            <Stat label="Idle" value={`${stats.idleMin}min`} />
+          </Stack>
+        </Box>
         <ChartBody data={data} loading={loading} error={error} color="#3b82f6" yDomain={[0, 100]} unit="%" compact />
       </Box>
     );
@@ -222,7 +229,14 @@ const MemoryChart = ({ serverId, gpuId, memoryTotalMb, memoryUsedMb, rangeKey, c
   if (compact) {
     return (
       <Box>
-        <Typography sx={COMPACT_LABEL_SX}>Memory / VRAM Usage</Typography>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1, mb: 0.5 }}>
+          <Typography sx={{ ...COMPACT_LABEL_SX, mb: 0 }}>Memory / VRAM Usage</Typography>
+          <Stack direction="row" spacing={1.5} sx={{ flexWrap: 'wrap' }}>
+            <Stat label="Peak" value={peakGb} />
+            <Stat label="Avg"  value={avgGb} />
+            <Stat label="Free" value={freeGb} />
+          </Stack>
+        </Box>
         <ChartBody data={data} loading={loading} error={error} color="#10b981" filled yDomain={[0, memoryTotalMb || 'auto']} unit="MB" formatY={(v) => `${Math.round(v / 1024)}`} compact />
       </Box>
     );
@@ -262,7 +276,7 @@ const Stat = ({ label, value }) => (
 );
 
 const ChartBody = ({ data, loading, error, color, filled, yDomain, unit, formatY, compact, height }) => {
-  const h = height || (compact ? 150 : 220);
+  const h = height || (compact ? 170 : 220);
   if (error) {
     return (
       <Box sx={{ height: h, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
@@ -293,18 +307,15 @@ const ChartBody = ({ data, loading, error, color, filled, yDomain, unit, formatY
     <Box sx={{ height: h }}>
       <ResponsiveContainer width="100%" height="100%">
         <ChartComp data={data} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
-          {!compact && <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />}
-          {!compact && <XAxis dataKey="time" tickFormatter={tickTime} stroke="#94a3b8" fontSize={11} />}
-          {!compact && (
-            <YAxis
-              domain={yDomain}
-              tickFormatter={formatY}
-              stroke="#94a3b8"
-              fontSize={11}
-            />
-          )}
-          {compact && <XAxis dataKey="time" hide />}
-          {compact && <YAxis domain={yDomain} hide />}
+          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+          <XAxis dataKey="time" tickFormatter={tickTime} stroke="#94a3b8" fontSize={11} />
+          <YAxis
+            domain={yDomain}
+            tickFormatter={formatY}
+            stroke="#94a3b8"
+            fontSize={11}
+            width={compact ? 28 : undefined}
+          />
           <ChartTooltip
             labelFormatter={(ms) => new Date(ms).toLocaleString()}
             formatter={(v) => [`${v}${unit === '%' ? '%' : ' ' + unit}`, '']}
@@ -695,7 +706,7 @@ const GPUDetailPanel = ({ server, gpu, processes, rangeKey, onRangeChange, onRef
 
 // ── compare view: one GPU's comparison card (real compact charts) ───────────
 const CompareGpuCard = ({ server, gpu, rangeKey, onRemove }) => (
-  <Card elevation={0} sx={{ ...CARD_SX, height: '100%' }}>
+  <Card elevation={0} sx={{ ...CARD_SX }}>
     <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', minWidth: 0 }}>
@@ -746,7 +757,7 @@ const AddGpuSlot = ({ onAdd }) => {
         if (key) onAdd(key);
       }}
       sx={{
-        height: '100%', minHeight: 260, borderRadius: '8px',
+        height: '100%', minHeight: 220, borderRadius: '8px',
         border: `2px dashed ${over ? COLOR.accent : '#E5E7EB'}`,
         bgcolor: over ? '#eff6ff' : 'transparent',
         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
