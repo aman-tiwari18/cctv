@@ -39,6 +39,10 @@ POSITION_WINDOW_SEC     = 30    # Rolling foot-position window in seconds (repla
 MOVING_TOLERANCE_FRAMES = 2     # Consecutive out-of-radius frames required to reset the stillness timer.
                                 # Absorbs single-frame YOLO bbox jitter (~10-25 px wobble on a static person)
                                 # while still catching real foot movement in ~0.4 s at 5 fps sample rate.
+STILL_RATIO_THRESHOLD   = 0.90  # Fraction of last-30-s positions within radius required to count this frame
+                                # as STILL. 0.90 tolerates ~3 s of brief excursion at 5 fps, absorbing YOLO
+                                # bbox glitches that sit in the rolling window; rejects real walking where
+                                # most positions drift outside the radius.
 
 # --- Identity tracking (per-person) ---
 TRACK_MATCH_DIST_RATIO = 0.5   # Match current box to existing track if foot-dist < avg_h * ratio
@@ -177,10 +181,11 @@ class PersonTracker:
             ys = [p[2] for p in positions]
             mx = sorted(xs)[len(xs) // 2]
             my = sorted(ys)[len(ys) // 2]
-            max_dev = max(((x - mx) ** 2 + (y - my) ** 2) ** 0.5
-                          for x, y in zip(xs, ys))
             thresh = max(STATIC_THRESH_FLOOR, track['last_h'] * STATIC_THRESH_RATIO)
-            if max_dev < thresh:
+            inside = sum(1 for x, y in zip(xs, ys)
+                         if ((x - mx) ** 2 + (y - my) ** 2) ** 0.5 < thresh)
+            still_ratio = inside / len(positions)
+            if still_ratio >= STILL_RATIO_THRESHOLD:
                 # Inside radius → clear any pending movement streak.
                 track['moving_streak'] = 0
                 if track['static_start'] is None:
