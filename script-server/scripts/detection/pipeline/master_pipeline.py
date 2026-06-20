@@ -161,13 +161,20 @@ from utils.camera_loader import load_all_pending_cameras, load_cameras_for_execu
 # ================= CONFIG =================
 QUEUE_SIZE     = 5
 STOP           = False
-MAX_CONCURRENT = 24  # FIXED: Reduced from 64 to 24 to prevent ffmpeg/system overload
+# Max cameras that stream CONCURRENTLY per analytic process. This is NOT a
+# startup rate-limit — start_producer() holds the semaphore for the producer's
+# WHOLE lifetime, so any camera beyond this cap blocks forever and is NEVER
+# processed (silent drop). The old hard-coded 24 was tuned for a small box; on
+# the current 8×H200 / 224-core workers it throttled the GPU to ~30% and left
+# most of each worker's camera shard unprocessed. Now env-overridable (per host
+# size) with a default large enough to cover a typical per-worker shard.
+MAX_CONCURRENT = int(os.environ.get("MAX_CONCURRENT", "256"))
 
 # UNIFIED DETECTOR (Scaling Path A): run ONE shared YOLO pass per frame and dispatch the
 # boxes to each camera's enabled analytics, instead of one model-per-analytic worker.
-# Removes the ~10x redundant inference. Default OFF for safe rollout of untested code —
-# set UNIFIED_DETECTOR=1 per-worker to enable after validating it matches the legacy path.
-UNIFIED_DETECTOR = os.environ.get("UNIFIED_DETECTOR", "0") == "1"
+# Removes the ~10x redundant inference. Default ON (validated on worker-3 covering the full
+# shard) — set UNIFIED_DETECTOR=0 per-worker for an instant rollback to the legacy path.
+UNIFIED_DETECTOR = os.environ.get("UNIFIED_DETECTOR", "1") == "1"
 
 # NVDEC hardware decode via GStreamer (Scaling Path A). Default OFF until the worker's
 # OpenCV build is confirmed to have GStreamer + nvv4l2decoder (set USE_NVDEC=1 to enable).
@@ -189,15 +196,20 @@ GST_PIPELINE_TEMPLATE = os.environ.get(
 SAMPLE_FPS      = float(os.environ.get("SAMPLE_FPS", "5"))
 _FRAME_INTERVAL = (1.0 / SAMPLE_FPS) if SAMPLE_FPS > 0 else 0.2
 
-# ROUND-ROBIN (Scaling Path A): cover more cameras than the live pool by rotating a bounded
-# pool of capture slots. Default OFF — the proven continuous-producer model stays default
-# until DSS StartVideo throughput is measured. Requires UNIFIED_DETECTOR=1.
-ROUND_ROBIN          = os.environ.get("ROUND_ROBIN", "0") == "1"
-RR_POOL_SIZE         = int(os.environ.get("RR_POOL_SIZE", "800"))    # concurrent live slots
+# ROUND-ROBIN (Scaling Path A): cover ALL assigned cameras (not just a 256-cap live pool) by
+# rotating a bounded pool of capture slots. Default ON with UNIFIED_DETECTOR. The per-DVR
+# concurrency cap (MAX_STREAMS_PER_DVR) — not RR_POOL_SIZE — is the real throttle, so the pool
+# can be sized to cover the whole shard without overwhelming any single DVR.
+ROUND_ROBIN          = os.environ.get("ROUND_ROBIN", "1") == "1"
+RR_POOL_SIZE         = int(os.environ.get("RR_POOL_SIZE", "256"))    # max concurrent capture threads
 RR_BURST_FRAMES      = int(os.environ.get("RR_BURST_FRAMES", "2"))   # frames grabbed per visit
+# Max simultaneous RTSP streams pulled from one DVR/server. Matches the proven classification
+# path (VISION_MAX_WORKERS_RTSP_CAPTURE=6). A large RR pool fans out across DVRs but never
+# exceeds this per DVR — prevents the 2084/DVR_CAPACITY storms that zeroed the GPU before.
+MAX_STREAMS_PER_DVR  = int(os.environ.get("MAX_STREAMS_PER_DVR", "6"))
 # Cache the per-camera StartVideo (RTSP URL + stream token) for this many seconds to avoid a
-# DSS API call on every revisit. 0 = disabled (must measure the DSS URL/token TTL first).
-STARTVIDEO_CACHE_TTL = float(os.environ.get("STARTVIDEO_CACHE_TTL", "0"))
+# DSS API call on every RR revisit. Default 180s (DSS tokens outlive this); 0 disables.
+STARTVIDEO_CACHE_TTL = float(os.environ.get("STARTVIDEO_CACHE_TTL", "180"))
 _ACTIVE_CHILD_PROCESSES = set()
 _ACTIVE_CHILD_LOCK = threading.Lock()
 
@@ -1127,7 +1139,8 @@ def run_rtsp_pipeline(camera_group, max_concurrent=MAX_CONCURRENT):
 
     if UNIFIED_DETECTOR:
         # Scaling Path A: ONE shared YOLO worker for ALL analytics.
-        unified_queue = mp.Queue(maxsize=QUEUE_SIZE * 4)
+        # Big feed buffer so a large RR pool bursting frames doesn't drop them before the GPU.
+        unified_queue = mp.Queue(maxsize=int(os.environ.get("UNIFIED_QUEUE_SIZE", "256")))
         p = mp.Process(
             target=_worker_process_entry,
             args=("unified_detector", "unified_worker", unified_queue),
@@ -1298,8 +1311,28 @@ def _rr_resolve(first):
     return server
 
 
+# Per-DVR concurrency throttle for round-robin capture. A large RR pool fans out across many
+# DVRs, but no single DVR/server may have more than MAX_STREAMS_PER_DVR streams pulled at once
+# (mirrors the per-server limit proven in vision_classification_rtsp.py). Keyed by server.
+_rr_server_sems: dict = {}
+_rr_server_sems_meta = threading.Lock()
+
+
+def _get_server_sem(server: str) -> threading.Semaphore:
+    with _rr_server_sems_meta:
+        sem = _rr_server_sems.get(server)
+        if sem is None:
+            sem = threading.Semaphore(MAX_STREAMS_PER_DVR)
+            _rr_server_sems[server] = sem
+        return sem
+
+
 def _rr_capture_once(label, configs, enabled_scripts, server_tokens_map, unified_queue):
-    """One round-robin visit: connect, grab a short burst, push packets, disconnect."""
+    """One round-robin visit: connect, grab a short burst, push packets, disconnect.
+
+    Returns True if the visit actually pulled frames, False if it skipped (DVR slot busy or
+    no usable stream) — the caller backs off briefly on False to avoid a hot spin.
+    """
     first      = configs[0]
     device_id  = first.get("camera_id") or first.get("device_id", "")
     camera_no  = first.get("ch_no") or first.get("camera_no", "1")
@@ -1310,49 +1343,59 @@ def _rr_capture_once(label, configs, enabled_scripts, server_tokens_map, unified
     server     = _rr_resolve(first)
     use_dss    = bool(server and not str(direct_url).startswith("rtsp://"))
 
-    stream_urls = []
-    if use_dss:
-        token = server_tokens_map.get(server) or get_server_token(server)
-        if not token:
-            return
-        result = get_rtsp_cached(label, device_id, camera_no, token, server)
-        if not result:
-            return
-        urls, stream_token = result
-        stream_urls = [add_token_to_url(u, stream_token) for u in order_urls(urls)]
-    elif direct_url:
-        stream_urls = [direct_url]
+    # Cap concurrent streams per DVR: if this server is already at capacity, skip this visit
+    # (the slot rotates to a camera on a less-busy DVR instead of blocking).
+    sem_key = server or device_id
+    sem = _get_server_sem(sem_key)
+    if not sem.acquire(blocking=False):
+        return False
+    try:
+        stream_urls = []
+        if use_dss:
+            token = server_tokens_map.get(server) or get_server_token(server)
+            if not token:
+                return False
+            result = get_rtsp_cached(label, device_id, camera_no, token, server)
+            if not result:
+                return False
+            urls, stream_token = result
+            stream_urls = [add_token_to_url(u, stream_token) for u in order_urls(urls)]
+        elif direct_url:
+            stream_urls = [direct_url]
 
-    for stream_url in stream_urls:
-        if is_private_ip_url(stream_url):
-            continue
-        cap = open_video_capture(stream_url)
-        if not cap.isOpened():
+        for stream_url in stream_urls:
+            if is_private_ip_url(stream_url):
+                continue
+            cap = open_video_capture(stream_url)
+            if not cap.isOpened():
+                cap.release()
+                continue
+            grabbed = 0
+            for _ in range(RR_BURST_FRAMES):
+                frame, ok = read_frame_from_capture(cap, label)
+                if not ok:
+                    break
+                packet = {
+                    "frame":           frame.copy(),
+                    "device_id":       device_id,
+                    "ch_no":           camera_no,
+                    "camera_no":       camera_no,
+                    "camera_id_pk":    cam_pk,
+                    "exam_id":         exam_id,
+                    "shift_id":        shift_id,
+                    "enabled_scripts": enabled_scripts,
+                }
+                try:
+                    unified_queue.put(packet, timeout=0.1)
+                except queue_module.Full:
+                    pass
+                grabbed += 1
             cap.release()
-            continue
-        grabbed = 0
-        for _ in range(RR_BURST_FRAMES):
-            frame, ok = read_frame_from_capture(cap, label)
-            if not ok:
-                break
-            packet = {
-                "frame":           frame.copy(),
-                "device_id":       device_id,
-                "ch_no":           camera_no,
-                "camera_no":       camera_no,
-                "camera_id_pk":    cam_pk,
-                "exam_id":         exam_id,
-                "shift_id":        shift_id,
-                "enabled_scripts": enabled_scripts,
-            }
-            try:
-                unified_queue.put(packet, timeout=0.1)
-            except queue_module.Full:
-                pass
-            grabbed += 1
-        cap.release()
-        if grabbed:
-            return  # success on this URL; done for this visit
+            if grabbed:
+                return True  # success on this URL; done for this visit
+        return False
+    finally:
+        sem.release()
 
 
 def _run_round_robin(grouped, server_tokens_map, unified_queue):
@@ -1375,9 +1418,14 @@ def _run_round_robin(grouped, server_tokens_map, unified_queue):
             if not enabled:
                 continue
             try:
-                _rr_capture_once(label, configs, enabled, server_tokens_map, unified_queue)
+                got = _rr_capture_once(label, configs, enabled, server_tokens_map, unified_queue)
             except Exception as e:
                 logger.error(f"[RR] capture error {label}: {e}")
+                got = False
+            if not got:
+                # DVR slot busy or no usable stream — back off briefly so an over-provisioned
+                # pool doesn't hot-spin rotating the deque.
+                time.sleep(0.02)
 
     n_slots = min(RR_POOL_SIZE, max(1, len(work)))
     logger.info(f"[RR] starting {n_slots} capture slots for {len(work)} cameras")

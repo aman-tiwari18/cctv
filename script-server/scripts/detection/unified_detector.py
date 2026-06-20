@@ -78,9 +78,11 @@ def get_shared_model():
 # ============================================================
 # Batch config (mirrors the per-script workers)
 # ============================================================
-GPU_BATCH_SIZE     = 16
-GPU_QUEUE_SIZE     = 32
-BATCH_WAIT_TIMEOUT = 0.2
+# Env-overridable so a worker can be tuned to its host. Larger, fuller batches improve H200
+# throughput; a deeper queue absorbs RR pool bursts without dropping frames before inference.
+GPU_BATCH_SIZE     = int(os.environ.get("UNIFIED_GPU_BATCH_SIZE", "24"))
+GPU_QUEUE_SIZE     = int(os.environ.get("UNIFIED_GPU_QUEUE_SIZE", "128"))
+BATCH_WAIT_TIMEOUT = float(os.environ.get("UNIFIED_BATCH_WAIT_TIMEOUT", "0.2"))
 
 # Per-analytic cooldowns (CLIENT-DEFINED — fixed, never tuned for capacity).
 # Mirrors the COOLDOWN_TIME constants in each detection script.
@@ -304,9 +306,9 @@ def unified_worker(frame_queue):
                 if fn is None:
                     continue  # not yet converted to the unified path
                 try:
-                    fn(result, item, state_for(dev, ch, script))
+                    fn(result, item, state_for(dev, cam_no, script))
                 except Exception as e:
-                    logger.error(f"[Unified] evaluator '{script}' error ({dev}_{ch}): {e}")
+                    logger.error(f"[Unified] evaluator '{script}' error ({dev}_{cam_no}): {e}")
 
         for p in batch:
             p.pop("frame", None)
