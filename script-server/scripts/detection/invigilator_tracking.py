@@ -25,8 +25,15 @@ SAVE_FOLDER = os.path.join(BASE_DIR, "results/invigilator_detection")
 
 # --- Standing-person classification (used by both ABSENT and STATIC) ---
 CONF_THRESHOLD = 0.40          # Tightened from 0.30 — weak phantom standing shapes were polluting the tracker
-MIN_HEIGHT = 100               # Minimum bbox height (px) to be considered standing
-STANDING_ASPECT_RATIO = 1.5    # h/w >= 1.5 → "standing" pose. Below this → sitting / wide-box / not invigilator.
+MIN_HEIGHT_FAR  = 70           # Min bbox height (px) for a person whose foot is at the TOP of the frame
+                               # (background — far from camera, naturally small in pixels)
+MIN_HEIGHT_NEAR = 200          # Min bbox height (px) for a person whose foot is at the BOTTOM of the frame
+                               # (foreground — close to camera). 200 px rejects seated students whose
+                               # torso-above-desk bbox is ~100-160 px tall on high-mount cameras.
+                               # The effective min_h scales linearly between the two by foot_y / frame_h.
+STANDING_ASPECT_RATIO = 2.0    # h/w >= 2.0 → "standing" pose. Was 1.5; tightened because seated
+                               # torso-above-desk bboxes (h/w ~1.2-1.7) were leaking through. A real
+                               # standing person has h/w ~2.5-4 regardless of camera distance.
 
 # --- ABSENT violation (no invigilator in the room) ---
 NO_TARGET_TIME_THRESH = 45     # Seconds of zero-standing-person before ABSENT fires
@@ -109,7 +116,9 @@ class PersonTracker:
     def update(self, person_boxes):
         """
         person_boxes : list of [x1,y1,x2,y2] for STANDING-classified boxes.
-        Returns (absent_violation: bool, static_violation: bool).
+        Returns (absent_violation: bool, static_violation: bool, static_feet: list[(fx,fy)]).
+        `static_feet` carries the last logged foot point of every track whose 7-min
+        timer fired this frame, so the caller can highlight only that subject.
         """
         now = time.time()
 
@@ -120,7 +129,7 @@ class PersonTracker:
             absent = (now - self.no_target_start) > NO_TARGET_TIME_THRESH
             # Brief gaps shouldn't destroy tracks; TTL handles eviction.
             self._evict_stale(now)
-            return absent, False
+            return absent, False, []
 
         # At least one standing person → disarm ABSENT clock
         self.no_target_start = None
@@ -170,6 +179,7 @@ class PersonTracker:
 
         # --- STATIC branch (per-track) -------------------------------------
         static_violation = False
+        static_feet = []
         for track in self.tracks.values():
             positions = track['positions']
             # Need enough wall-clock history before judging stillness.
@@ -192,6 +202,10 @@ class PersonTracker:
                     track['static_start'] = now
                 if (now - track['static_start']) > STATIC_TIME_THRESH:
                     static_violation = True
+                    # Tell the caller which person triggered, so only that bbox
+                    # gets highlighted in the saved frame.
+                    last_t, last_x, last_y = positions[-1]
+                    static_feet.append((last_x, last_y))
                     # Restart the 7-min cycle so the save cadence is intrinsic
                     # to STATIC_TIME_THRESH, not load-bearing on the worker cooldown.
                     track['static_start'] = now
@@ -203,7 +217,7 @@ class PersonTracker:
                 if track['moving_streak'] >= MOVING_TOLERANCE_FRAMES:
                     track['static_start'] = None
 
-        return False, static_violation
+        return False, static_violation, static_feet
 
 # ================= STATE ===================
 trackers = {}
@@ -218,8 +232,12 @@ def detect_invigilator_in_frame(frame, device_id="unknown", camera_no="unknown",
     results = model(frame, conf=CONF_THRESHOLD, verbose=False)[0]
 
     # Only standing persons count as invigilator candidates (per mentor rule).
-    # Standing := height >= MIN_HEIGHT AND height/width >= STANDING_ASPECT_RATIO.
-    # The aspect-ratio gate prevents upright-seated persons (tall but wide box) from leaking in as "standing".
+    # Standing := height >= adaptive_min_h AND height/width >= STANDING_ASPECT_RATIO.
+    # adaptive_min_h scales by foot-Y position so foreground seated-torso bboxes
+    # (h ~100-160 px, foot near bottom of frame) get rejected by MIN_HEIGHT_NEAR=200,
+    # while far-background standing invigilators (small bbox, foot near top) still
+    # pass via MIN_HEIGHT_FAR=70. Aspect-ratio gate rejects seated-torso shape.
+    frame_h = max(frame.shape[0], 1)
     person_boxes = []
     person_confs = []
     for box in results.boxes:
@@ -228,7 +246,9 @@ def detect_invigilator_in_frame(frame, device_id="unknown", camera_no="unknown",
         coords = box.xyxy[0].cpu().numpy()
         h = coords[3] - coords[1]
         w = max(coords[2] - coords[0], 1.0)
-        if h >= MIN_HEIGHT and (h / w) >= STANDING_ASPECT_RATIO:
+        foot_y_norm = max(0.0, min(1.0, coords[3] / frame_h))
+        adaptive_min_h = MIN_HEIGHT_FAR + (MIN_HEIGHT_NEAR - MIN_HEIGHT_FAR) * foot_y_norm
+        if h >= adaptive_min_h and (h / w) >= STANDING_ASPECT_RATIO:
             person_boxes.append(coords)
             person_confs.append(float(box.conf[0]))
 
@@ -238,24 +258,33 @@ def detect_invigilator_in_frame(frame, device_id="unknown", camera_no="unknown",
             trackers[key] = PersonTracker()
         tracker = trackers[key]
 
-    absent, static_violation = tracker.update(person_boxes)
+    absent, static_violation, static_feet = tracker.update(person_boxes)
     violation_detected = absent or static_violation
     status = "ABSENT" if absent else ("STATIC" if static_violation else "Active")
 
-    # Box colour: red = ABSENT, orange = STATIC, green = Active.
-    # When ABSENT fires there are no person_boxes (loop iterates zero times — no box drawn).
-    if absent:
-        box_color = (0, 0, 255)         # red
-    elif static_violation:
-        box_color = (0, 165, 255)       # orange
-    else:
-        box_color = (0, 255, 0)         # green
-
+    # Box drawing:
+    # - On STATIC: the track that fired (matched by foot position) gets a thick
+    #   red box with a "STATIC" label; other standees get thin green boxes.
+    # - On ABSENT: no person_boxes exist this frame, so the loop draws nothing.
+    # - Active: everyone in thin green.
     for box, conf in zip(person_boxes, person_confs):
         x1, y1, x2, y2 = int(box[0]), int(box[1]), int(box[2]), int(box[3])
-        cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
-        cv2.putText(frame, f"Invig {conf:.2f}", (x1, max(y1 - 8, 10)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, box_color, 1)
+        bbox_h = y2 - y1
+        fx = (x1 + x2) / 2.0
+        fy = float(y2)
+        match_r = max(bbox_h * 0.3, 25)
+        is_static_box = static_violation and any(
+            ((fx - sx) ** 2 + (fy - sy) ** 2) ** 0.5 < match_r
+            for sx, sy in static_feet
+        )
+        if is_static_box:
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
+            cv2.putText(frame, "STATIC", (x1, max(y1 - 8, 10)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+        else:
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 1)
+            cv2.putText(frame, f"Invig {conf:.2f}", (x1, max(y1 - 8, 10)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
     # Status overlay
     overlay = frame.copy()
@@ -290,8 +319,8 @@ def detect_invigilator_batch(items, results=None):
     outputs = []
     for item, result in zip(items, results):
         frame = item['frame'].copy()
-        # Only standing persons count as invigilator candidates (per mentor rule).
-        # Standing := height >= MIN_HEIGHT AND height/width >= STANDING_ASPECT_RATIO.
+        # Standing := height >= adaptive_min_h (perspective-aware) AND h/w >= STANDING_ASPECT_RATIO.
+        frame_h = max(frame.shape[0], 1)
         person_boxes = []
         person_confs = []
         for box in result.boxes:
@@ -300,7 +329,9 @@ def detect_invigilator_batch(items, results=None):
             coords = box.xyxy[0].cpu().numpy()
             h = coords[3] - coords[1]
             w = max(coords[2] - coords[0], 1.0)
-            if h >= MIN_HEIGHT and (h / w) >= STANDING_ASPECT_RATIO:
+            foot_y_norm = max(0.0, min(1.0, coords[3] / frame_h))
+            adaptive_min_h = MIN_HEIGHT_FAR + (MIN_HEIGHT_NEAR - MIN_HEIGHT_FAR) * foot_y_norm
+            if h >= adaptive_min_h and (h / w) >= STANDING_ASPECT_RATIO:
                 person_boxes.append(coords)
                 person_confs.append(float(box.conf[0]))
 
@@ -313,23 +344,31 @@ def detect_invigilator_batch(items, results=None):
                 trackers[key] = PersonTracker()
             tracker = trackers[key]
 
-        absent, static_violation = tracker.update(person_boxes)
+        absent, static_violation, static_feet = tracker.update(person_boxes)
         violation_detected = absent or static_violation
         status = "ABSENT" if absent else ("STATIC" if static_violation else "Active")
 
-        # Box colour: red = ABSENT, orange = STATIC, green = Active.
-        if absent:
-            box_color = (0, 0, 255)         # red
-        elif static_violation:
-            box_color = (0, 165, 255)       # orange
-        else:
-            box_color = (0, 255, 0)         # green
-
+        # On STATIC, only the triggering track is drawn in thick red with "STATIC"
+        # label; everyone else gets a thin green box. On ABSENT, no boxes (the
+        # loop is empty). On Active, everyone in thin green.
         for box, conf in zip(person_boxes, person_confs):
             x1, y1, x2, y2 = int(box[0]), int(box[1]), int(box[2]), int(box[3])
-            cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
-            cv2.putText(frame, f"Invig {conf:.2f}", (x1, max(y1 - 8, 10)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, box_color, 1)
+            bbox_h = y2 - y1
+            fx = (x1 + x2) / 2.0
+            fy = float(y2)
+            match_r = max(bbox_h * 0.3, 25)
+            is_static_box = static_violation and any(
+                ((fx - sx) ** 2 + (fy - sy) ** 2) ** 0.5 < match_r
+                for sx, sy in static_feet
+            )
+            if is_static_box:
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
+                cv2.putText(frame, "STATIC", (x1, max(y1 - 8, 10)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            else:
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 1)
+                cv2.putText(frame, f"Invig {conf:.2f}", (x1, max(y1 - 8, 10)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
         # Status overlay
         overlay = frame.copy()
