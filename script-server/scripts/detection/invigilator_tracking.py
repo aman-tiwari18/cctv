@@ -25,15 +25,12 @@ SAVE_FOLDER = os.path.join(BASE_DIR, "results/invigilator_detection")
 
 # --- Standing-person classification (used by both ABSENT and STATIC) ---
 CONF_THRESHOLD = 0.40          # Tightened from 0.30 — weak phantom standing shapes were polluting the tracker
-MIN_HEIGHT_FAR  = 70           # Min bbox height (px) for a person whose foot is at the TOP of the frame
-                               # (background — far from camera, naturally small in pixels)
-MIN_HEIGHT_NEAR = 200          # Min bbox height (px) for a person whose foot is at the BOTTOM of the frame
-                               # (foreground — close to camera). 200 px rejects seated students whose
-                               # torso-above-desk bbox is ~100-160 px tall on high-mount cameras.
-                               # The effective min_h scales linearly between the two by foot_y / frame_h.
+MIN_HEIGHT = 100               # Minimum bbox height (px) to be considered standing.
+                               # Original mentor-set value; below this is YOLO noise from far-away phantoms.
 STANDING_ASPECT_RATIO = 2.0    # h/w >= 2.0 → "standing" pose. Was 1.5; tightened because seated
                                # torso-above-desk bboxes (h/w ~1.2-1.7) were leaking through. A real
-                               # standing person has h/w ~2.5-4 regardless of camera distance.
+                               # standing person has h/w ~2.5-4 regardless of camera distance —
+                               # pure shape discrimination, perspective-independent.
 
 # --- ABSENT violation (no invigilator in the room) ---
 NO_TARGET_TIME_THRESH = 45     # Seconds of zero-standing-person before ABSENT fires
@@ -232,12 +229,9 @@ def detect_invigilator_in_frame(frame, device_id="unknown", camera_no="unknown",
     results = model(frame, conf=CONF_THRESHOLD, verbose=False)[0]
 
     # Only standing persons count as invigilator candidates (per mentor rule).
-    # Standing := height >= adaptive_min_h AND height/width >= STANDING_ASPECT_RATIO.
-    # adaptive_min_h scales by foot-Y position so foreground seated-torso bboxes
-    # (h ~100-160 px, foot near bottom of frame) get rejected by MIN_HEIGHT_NEAR=200,
-    # while far-background standing invigilators (small bbox, foot near top) still
-    # pass via MIN_HEIGHT_FAR=70. Aspect-ratio gate rejects seated-torso shape.
-    frame_h = max(frame.shape[0], 1)
+    # Standing := height >= MIN_HEIGHT AND height/width >= STANDING_ASPECT_RATIO.
+    # The aspect-ratio gate (h/w >= 2.0) rejects seated torso-above-desk bboxes
+    # (h/w ~1.2-1.7) regardless of where they sit in the frame.
     person_boxes = []
     person_confs = []
     for box in results.boxes:
@@ -246,9 +240,7 @@ def detect_invigilator_in_frame(frame, device_id="unknown", camera_no="unknown",
         coords = box.xyxy[0].cpu().numpy()
         h = coords[3] - coords[1]
         w = max(coords[2] - coords[0], 1.0)
-        foot_y_norm = max(0.0, min(1.0, coords[3] / frame_h))
-        adaptive_min_h = MIN_HEIGHT_FAR + (MIN_HEIGHT_NEAR - MIN_HEIGHT_FAR) * foot_y_norm
-        if h >= adaptive_min_h and (h / w) >= STANDING_ASPECT_RATIO:
+        if h >= MIN_HEIGHT and (h / w) >= STANDING_ASPECT_RATIO:
             person_boxes.append(coords)
             person_confs.append(float(box.conf[0]))
 
@@ -319,8 +311,8 @@ def detect_invigilator_batch(items, results=None):
     outputs = []
     for item, result in zip(items, results):
         frame = item['frame'].copy()
-        # Standing := height >= adaptive_min_h (perspective-aware) AND h/w >= STANDING_ASPECT_RATIO.
-        frame_h = max(frame.shape[0], 1)
+        # Standing := height >= MIN_HEIGHT AND h/w >= STANDING_ASPECT_RATIO.
+        # Aspect-ratio gate (>= 2.0) rejects seated torso-above-desk shape.
         person_boxes = []
         person_confs = []
         for box in result.boxes:
@@ -329,9 +321,7 @@ def detect_invigilator_batch(items, results=None):
             coords = box.xyxy[0].cpu().numpy()
             h = coords[3] - coords[1]
             w = max(coords[2] - coords[0], 1.0)
-            foot_y_norm = max(0.0, min(1.0, coords[3] / frame_h))
-            adaptive_min_h = MIN_HEIGHT_FAR + (MIN_HEIGHT_NEAR - MIN_HEIGHT_FAR) * foot_y_norm
-            if h >= adaptive_min_h and (h / w) >= STANDING_ASPECT_RATIO:
+            if h >= MIN_HEIGHT and (h / w) >= STANDING_ASPECT_RATIO:
                 person_boxes.append(coords)
                 person_confs.append(float(box.conf[0]))
 
