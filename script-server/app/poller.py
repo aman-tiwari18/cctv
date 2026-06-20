@@ -31,6 +31,8 @@ class Poller:
         self.scheduled_scripts = {}  # id -> Task
         self.completed_scripts = set()
         self.group_members = {}      # group_key -> [member execution_ids] (grouped detection)
+        self.group_analytics = {}    # group_key -> set(analytics) currently launched
+        self.group_relaunching = set()  # group_keys mid-relaunch (membership grew)
         self._poll_task = None
 
         # --- Crash backoff tracking (merged from worker poller) ---
@@ -62,6 +64,12 @@ class Poller:
         YOLO pass out to all analytics. Vision/neet and non-pipeline assignments
         pass through unchanged. Single-analytic shifts also pass through as-is
         (nothing to merge). Gated by GROUP_DETECTION_ANALYTICS.
+
+        IMPORTANT — scheduling flexibility: the group key includes the scheduled
+        window (start + end), so ONLY analytics scheduled for the SAME time window
+        are merged. Analytics the user scheduled at different times run as separate
+        processes, exactly as before. Same-window members also start AND end
+        together, so no analytic over-runs its window.
         """
         if not GROUP_DETECTION_ANALYTICS:
             return all_data
@@ -76,7 +84,11 @@ class Poller:
             exam  = meta.get("exam_id")  or a.get("exam_id")
             shift = meta.get("shift_id") or a.get("shift_id")
             link  = str(meta.get("link_type") or a.get("link_type") or "HLS").upper()
-            key   = f"grp-{exam}-{shift}-{link}"
+            # Window so only same-time analytics merge (preserves per-script scheduling).
+            sched = a.get("scheduled_at") or meta.get("scheduled_at") or ""
+            end   = (a.get("end_at") or meta.get("end_at")
+                     or a.get("custom_end_time") or a.get("shift_end_time") or "")
+            key   = f"grp-{exam}-{shift}-{link}-{sched}-{end}"
             g = groups.get(key)
             if g is None:
                 g = groups[key] = {"rep": a, "members": [], "analytics": []}
@@ -104,6 +116,26 @@ class Poller:
     async def _update_status_all(self, assignment, status, data=None):
         for tid in self._status_targets(assignment):
             await self.update_assignment_status(tid, status, data)
+
+    async def _relaunch_group(self, assignment):
+        """Stop a grouped detection job and relaunch it with the full (grown)
+        analytics set. Kept guarded by group_relaunching so polls don't double-run."""
+        key = str(assignment["id"])
+        try:
+            task = self.scheduled_scripts.pop(key, None)
+            if task:
+                task.cancel()
+            if key in self.running_scripts:
+                await script_runner.cancel(key)
+                for _ in range(40):                 # wait for the old run to release the key
+                    if key not in self.running_scripts:
+                        break
+                    await asyncio.sleep(0.5)
+            self.running_scripts.discard(key)
+        except Exception as e:
+            logger.warning(f"[group] relaunch cleanup for {key} failed: {e}")
+        # run_assignment re-adds the key and clears group_relaunching once committed.
+        await self.run_assignment(assignment)
 
     async def start(self):
         if self.is_running:
@@ -249,6 +281,26 @@ class Poller:
         assignment_id = str(assignment["id"])
         already_running = str(assignment.get("status", "")).upper() == "RUNNING"
 
+        grouped = assignment.get("_analytics")
+        # A relaunch (membership grew) is in flight — don't double-launch.
+        if grouped and assignment_id in self.group_relaunching:
+            return
+        # Grouped detection: if more analytics for this (exam,shift,link) appeared
+        # after the group was already queued/running, relaunch with the FULL set —
+        # otherwise the late analytics never run (each later poll just "skips").
+        if grouped and (assignment_id in self.running_scripts or assignment_id in self.scheduled_scripts):
+            current   = set(grouped)
+            committed = self.group_analytics.get(assignment_id, set())
+            if current - committed:
+                logger.info(
+                    f"[group] {assignment_id} grew {sorted(committed)} → {sorted(current)} "
+                    f"— relaunching with all analytics"
+                )
+                self.group_relaunching.add(assignment_id)
+                self.group_analytics[assignment_id] = current
+                asyncio.create_task(self._relaunch_group(assignment))
+            return
+
         # If queued for future but backend says RUNNING now — cancel and run immediately
         if assignment_id in self.scheduled_scripts and already_running:
             logger.info(f"Assignment {assignment_id} is now RUNNING on backend — triggering immediate run")
@@ -327,6 +379,10 @@ class Poller:
         self.running_scripts.add(assignment_id)
         if assignment.get("_member_ids"):
             self.group_members[assignment_id] = assignment["_member_ids"]
+        if assignment.get("_analytics"):
+            self.group_analytics[assignment_id] = set(assignment["_analytics"])
+        # Launch committed (key now in running_scripts) — allow future growth detection.
+        self.group_relaunching.discard(assignment_id)
         is_vision = self._is_vision(assignment)
 
         try:
@@ -402,6 +458,8 @@ class Poller:
         finally:
             self.running_scripts.discard(assignment_id)
             self.group_members.pop(assignment_id, None)
+            self.group_analytics.pop(assignment_id, None)
+            self.group_relaunching.discard(assignment_id)
 
     async def update_assignment_status(self, assignment_id, status, data=None):
         if data is None:
