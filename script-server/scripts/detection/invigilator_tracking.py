@@ -25,17 +25,33 @@ SAVE_FOLDER = os.path.join(BASE_DIR, "results/invigilator_detection")
 
 # --- Standing-person classification (used by both ABSENT and STATIC) ---
 CONF_THRESHOLD = 0.40          # Tightened from 0.30 — weak phantom standing shapes were polluting the tracker
-MIN_HEIGHT = 100               # Minimum bbox height (px) to be considered standing
-STANDING_ASPECT_RATIO = 1.5    # h/w >= 1.5 → "standing" pose. Below this → sitting / wide-box / not invigilator.
+MIN_HEIGHT = 100               # Minimum bbox height (px) to be considered standing.
+                               # Original mentor-set value; below this is YOLO noise from far-away phantoms.
+STANDING_ASPECT_RATIO = 2.5    # h/w >= 2.5 → "standing" pose. Tightened from 2.3 because half-body
+                               # seated bboxes of upright students (head + torso + arms at desk) were
+                               # leaking through at h/w ~2.4-2.5. A standing invigilator with arms
+                               # relaxed has h/w ~3-4; arms-out / oblique poses ~2.3-2.7. Brief
+                               # rejection on arms-out frames is safe — the 30 s percentile window
+                               # (>= 90 % inside radius) absorbs short detection gaps without
+                               # resetting the 7-min STATIC timer. This is the practical ceiling
+                               # of bbox-only standing classification; going further requires pose
+                               # estimation, which no script in this codebase currently uses.
 
 # --- ABSENT violation (no invigilator in the room) ---
 NO_TARGET_TIME_THRESH = 45     # Seconds of zero-standing-person before ABSENT fires
 
 # --- STATIC violation (per-person, perspective-aware) ---
-STATIC_TIME_THRESH    = 420    # Seconds — 7 min of continuous stillness before STATIC fires (per detection frequency spec)
-STATIC_THRESH_FLOOR   = 35     # Baseline pixel radius for "still"
-STATIC_THRESH_RATIO   = 0.20   # Adaptive radius = max(floor, bbox_h * ratio) — absorbs jitter on close-up cameras
-POSITION_WINDOW_SEC   = 30     # Rolling foot-position window in seconds (replaces fixed-frame deque)
+STATIC_TIME_THRESH      = 420   # Seconds — 7 min of continuous stillness before STATIC fires (per client spec)
+STATIC_THRESH_FLOOR     = 35    # Baseline pixel radius for "still"
+STATIC_THRESH_RATIO     = 0.20  # Adaptive radius = max(floor, bbox_h * ratio) — absorbs jitter on close-up cameras
+POSITION_WINDOW_SEC     = 30    # Rolling foot-position window in seconds (replaces fixed-frame deque)
+MOVING_TOLERANCE_FRAMES = 2     # Consecutive out-of-radius frames required to reset the stillness timer.
+                                # Absorbs single-frame YOLO bbox jitter (~10-25 px wobble on a static person)
+                                # while still catching real foot movement in ~0.4 s at 5 fps sample rate.
+STILL_RATIO_THRESHOLD   = 0.90  # Fraction of last-30-s positions within radius required to count this frame
+                                # as STILL. 0.90 tolerates ~3 s of brief excursion at 5 fps, absorbing YOLO
+                                # bbox glitches that sit in the rolling window; rejects real walking where
+                                # most positions drift outside the radius.
 
 # --- Identity tracking (per-person) ---
 TRACK_MATCH_DIST_RATIO = 0.5   # Match current box to existing track if foot-dist < avg_h * ratio
@@ -102,7 +118,9 @@ class PersonTracker:
     def update(self, person_boxes):
         """
         person_boxes : list of [x1,y1,x2,y2] for STANDING-classified boxes.
-        Returns (absent_violation: bool, static_violation: bool).
+        Returns (absent_violation: bool, static_violation: bool, static_feet: list[(fx,fy)]).
+        `static_feet` carries the last logged foot point of every track whose 7-min
+        timer fired this frame, so the caller can highlight only that subject.
         """
         now = time.time()
 
@@ -113,7 +131,7 @@ class PersonTracker:
             absent = (now - self.no_target_start) > NO_TARGET_TIME_THRESH
             # Brief gaps shouldn't destroy tracks; TTL handles eviction.
             self._evict_stale(now)
-            return absent, False
+            return absent, False, []
 
         # At least one standing person → disarm ABSENT clock
         self.no_target_start = None
@@ -141,6 +159,7 @@ class PersonTracker:
                 unmatched_current.discard(best_i)
                 (fx, fy), h = current[best_i]
                 track['positions'].append((now, fx, fy))
+                track['heights'].append(h)
                 track['last_seen'] = now
                 track['last_h'] = h
                 while track['positions'] and now - track['positions'][0][0] > POSITION_WINDOW_SEC:
@@ -152,38 +171,62 @@ class PersonTracker:
             tid = self._next_id
             self._next_id += 1
             self.tracks[tid] = {
-                'positions':    deque([(now, fx, fy)]),
-                'static_start': None,
-                'last_seen':    now,
-                'last_h':       h,
+                'positions':     deque([(now, fx, fy)]),
+                'heights':       deque([h], maxlen=10),
+                'static_start':  None,
+                'last_seen':     now,
+                'last_h':        h,
+                'moving_streak': 0,
             }
 
         self._evict_stale(now)
 
         # --- STATIC branch (per-track) -------------------------------------
         static_violation = False
+        static_feet = []
         for track in self.tracks.values():
             positions = track['positions']
             # Need enough wall-clock history before judging stillness.
             if len(positions) < 5 or (now - positions[0][0]) < STILLNESS_WARMUP_SEC:
                 track['static_start'] = None
+                track['moving_streak'] = 0
                 continue
             xs = [p[1] for p in positions]
             ys = [p[2] for p in positions]
             mx = sorted(xs)[len(xs) // 2]
             my = sorted(ys)[len(ys) // 2]
-            max_dev = max(((x - mx) ** 2 + (y - my) ** 2) ** 0.5
-                          for x, y in zip(xs, ys))
-            thresh = max(STATIC_THRESH_FLOOR, track['last_h'] * STATIC_THRESH_RATIO)
-            if max_dev < thresh:
+            # Use rolling-median bbox height for the radius so one oversized YOLO
+            # bbox (~2x normal from shadow / overlap / partial occlusion) can't
+            # transiently inflate the radius and let a moving person read as still.
+            hs = sorted(track['heights'])
+            med_h = hs[len(hs) // 2]
+            thresh = max(STATIC_THRESH_FLOOR, med_h * STATIC_THRESH_RATIO)
+            inside = sum(1 for x, y in zip(xs, ys)
+                         if ((x - mx) ** 2 + (y - my) ** 2) ** 0.5 < thresh)
+            still_ratio = inside / len(positions)
+            if still_ratio >= STILL_RATIO_THRESHOLD:
+                # Inside radius → clear any pending movement streak.
+                track['moving_streak'] = 0
                 if track['static_start'] is None:
                     track['static_start'] = now
                 if (now - track['static_start']) > STATIC_TIME_THRESH:
                     static_violation = True
+                    # Tell the caller which person triggered, so only that bbox
+                    # gets highlighted in the saved frame.
+                    last_t, last_x, last_y = positions[-1]
+                    static_feet.append((last_x, last_y))
+                    # Restart the 7-min cycle so the save cadence is intrinsic
+                    # to STATIC_TIME_THRESH, not load-bearing on the worker cooldown.
+                    track['static_start'] = now
             else:
-                track['static_start'] = None
+                # Outside radius → count consecutive movement frames;
+                # only reset after MOVING_TOLERANCE_FRAMES so single-frame
+                # YOLO bbox jitter doesn't destroy a long stillness run.
+                track['moving_streak'] = track.get('moving_streak', 0) + 1
+                if track['moving_streak'] >= MOVING_TOLERANCE_FRAMES:
+                    track['static_start'] = None
 
-        return False, static_violation
+        return False, static_violation, static_feet
 
 # ================= STATE ===================
 trackers = {}
@@ -199,7 +242,8 @@ def detect_invigilator_in_frame(frame, device_id="unknown", camera_no="unknown",
 
     # Only standing persons count as invigilator candidates (per mentor rule).
     # Standing := height >= MIN_HEIGHT AND height/width >= STANDING_ASPECT_RATIO.
-    # The aspect-ratio gate prevents upright-seated persons (tall but wide box) from leaking in as "standing".
+    # The aspect-ratio gate (h/w >= 2.0) rejects seated torso-above-desk bboxes
+    # (h/w ~1.2-1.7) regardless of where they sit in the frame.
     person_boxes = []
     person_confs = []
     for box in results.boxes:
@@ -218,24 +262,33 @@ def detect_invigilator_in_frame(frame, device_id="unknown", camera_no="unknown",
             trackers[key] = PersonTracker()
         tracker = trackers[key]
 
-    absent, static_violation = tracker.update(person_boxes)
+    absent, static_violation, static_feet = tracker.update(person_boxes)
     violation_detected = absent or static_violation
     status = "ABSENT" if absent else ("STATIC" if static_violation else "Active")
 
-    # Box colour: red = ABSENT, orange = STATIC, green = Active.
-    # When ABSENT fires there are no person_boxes (loop iterates zero times — no box drawn).
-    if absent:
-        box_color = (0, 0, 255)         # red
-    elif static_violation:
-        box_color = (0, 165, 255)       # orange
-    else:
-        box_color = (0, 255, 0)         # green
-
+    # Box drawing:
+    # - On STATIC: the track that fired (matched by foot position) gets a thick
+    #   red box with a "STATIC" label; other standees get thin green boxes.
+    # - On ABSENT: no person_boxes exist this frame, so the loop draws nothing.
+    # - Active: everyone in thin green.
     for box, conf in zip(person_boxes, person_confs):
         x1, y1, x2, y2 = int(box[0]), int(box[1]), int(box[2]), int(box[3])
-        cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
-        cv2.putText(frame, f"Invig {conf:.2f}", (x1, max(y1 - 8, 10)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, box_color, 1)
+        bbox_h = y2 - y1
+        fx = (x1 + x2) / 2.0
+        fy = float(y2)
+        match_r = max(bbox_h * 0.3, 25)
+        is_static_box = static_violation and any(
+            ((fx - sx) ** 2 + (fy - sy) ** 2) ** 0.5 < match_r
+            for sx, sy in static_feet
+        )
+        if is_static_box:
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
+            cv2.putText(frame, "STATIC", (x1, max(y1 - 8, 10)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+        else:
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 1)
+            cv2.putText(frame, f"Invig {conf:.2f}", (x1, max(y1 - 8, 10)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
     # Status overlay
     overlay = frame.copy()
@@ -270,8 +323,8 @@ def detect_invigilator_batch(items, results=None):
     outputs = []
     for item, result in zip(items, results):
         frame = item['frame'].copy()
-        # Only standing persons count as invigilator candidates (per mentor rule).
-        # Standing := height >= MIN_HEIGHT AND height/width >= STANDING_ASPECT_RATIO.
+        # Standing := height >= MIN_HEIGHT AND h/w >= STANDING_ASPECT_RATIO.
+        # Aspect-ratio gate (>= 2.0) rejects seated torso-above-desk shape.
         person_boxes = []
         person_confs = []
         for box in result.boxes:
@@ -293,23 +346,31 @@ def detect_invigilator_batch(items, results=None):
                 trackers[key] = PersonTracker()
             tracker = trackers[key]
 
-        absent, static_violation = tracker.update(person_boxes)
+        absent, static_violation, static_feet = tracker.update(person_boxes)
         violation_detected = absent or static_violation
         status = "ABSENT" if absent else ("STATIC" if static_violation else "Active")
 
-        # Box colour: red = ABSENT, orange = STATIC, green = Active.
-        if absent:
-            box_color = (0, 0, 255)         # red
-        elif static_violation:
-            box_color = (0, 165, 255)       # orange
-        else:
-            box_color = (0, 255, 0)         # green
-
+        # On STATIC, only the triggering track is drawn in thick red with "STATIC"
+        # label; everyone else gets a thin green box. On ABSENT, no boxes (the
+        # loop is empty). On Active, everyone in thin green.
         for box, conf in zip(person_boxes, person_confs):
             x1, y1, x2, y2 = int(box[0]), int(box[1]), int(box[2]), int(box[3])
-            cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
-            cv2.putText(frame, f"Invig {conf:.2f}", (x1, max(y1 - 8, 10)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, box_color, 1)
+            bbox_h = y2 - y1
+            fx = (x1 + x2) / 2.0
+            fy = float(y2)
+            match_r = max(bbox_h * 0.3, 25)
+            is_static_box = static_violation and any(
+                ((fx - sx) ** 2 + (fy - sy) ** 2) ** 0.5 < match_r
+                for sx, sy in static_feet
+            )
+            if is_static_box:
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
+                cv2.putText(frame, "STATIC", (x1, max(y1 - 8, 10)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            else:
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 1)
+                cv2.putText(frame, f"Invig {conf:.2f}", (x1, max(y1 - 8, 10)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
         # Status overlay
         overlay = frame.copy()

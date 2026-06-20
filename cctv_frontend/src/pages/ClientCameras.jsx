@@ -29,9 +29,23 @@ import {
   Download,
 } from '@mui/icons-material';
 import { useSearchParams } from 'react-router-dom';
-import { examsAPI, camerasAPI, clientDashboardAPI } from '../services/api';
+import { examsAPI, camerasAPI, clientDashboardAPI, executionsAPI } from '../services/api';
 import ExamSidebar from '../components/ExamSidebar';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
+import { format } from 'date-fns';
+import { IMG_BASE } from '../constants/data';
+import * as XLSX from 'xlsx';
+
+// Build the script-server frame URL from a stored absolute frame_path
+// (mirrors the admin Cameras page helper).
+const buildFrameImageUrl = (framePath) => {
+  if (!framePath) return '';
+  const marker = 'classification_frames/';
+  const idx = framePath.indexOf(marker);
+  if (idx === -1) return '';
+  const relative = framePath.slice(idx);
+  return `${IMG_BASE}/serve-rtsp-detection-images/${relative}`;
+};
 
 const formatDateDDMMYYYY = (dateStr) => {
   if (!dateStr) return '';
@@ -120,6 +134,7 @@ const ClientCameras = () => {
   const [camTotal, setCamTotal] = useState(0);
   const [camFilterShiftId, setCamFilterShiftId] = useState('');
   const [camFilterExamDate, setCamFilterExamDate] = useState('');
+  const [camVisionSummary, setCamVisionSummary] = useState(null);
 
   // Update the default page size only when the viewport crosses the sm
   // boundary (mobile <-> desktop), so it stays responsive to resizing while a
@@ -173,15 +188,33 @@ const ClientCameras = () => {
     finally { setCamLoading(false); }
   }, [selectedCamExamId, camPage, camRowsPerPage, camFilterShiftId, camFilterExamDate, camDebouncedSearch]);
 
+  const loadVisionSummary = useCallback(() => {
+    if (!selectedCamExamId) return;
+    executionsAPI.getVisionSummary({ exam_id: selectedCamExamId })
+      .then((res) => setCamVisionSummary(res?.data?.data || null))
+      .catch(() => setCamVisionSummary(null));
+  }, [selectedCamExamId]);
+
   useEffect(() => {
-    if (selectedCamExamId) loadCameras();
-    else { setCameras([]); setCamTotal(0); }
+    if (selectedCamExamId) { loadCameras(); loadVisionSummary(); }
+    else { setCameras([]); setCamTotal(0); setCamVisionSummary(null); }
     setCamFilterShiftId('');
     setCamFilterExamDate('');
     setCamSearchQuery('');
     setCamDebouncedSearch('');
     setCamPage(0);
   }, [selectedCamExamId]);
+
+  /* Re-fetch vision summary every 60s while it started today and workers may still be active */
+  useEffect(() => {
+    if (!camVisionSummary?.started_at) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const startedToday = camVisionSummary.started_at.startsWith(today);
+    const durationShort = (camVisionSummary.duration_minutes ?? 0) < 600;
+    if (!startedToday || !durationShort) return;
+    const timer = setInterval(loadVisionSummary, 60_000);
+    return () => clearInterval(timer);
+  }, [camVisionSummary, loadVisionSummary]);
 
   useEffect(() => {
     if (selectedCamExamId) loadCameras();
@@ -221,10 +254,99 @@ const ClientCameras = () => {
     catch (e) { console.error('Failed to download template', e); }
   };
 
-  const handleDownloadAccessibility = async (type) => {
+  /* ── Download cameras sheet by status (same as admin Cameras page) ──
+     statusKey: 'accessible' | 'notAccessible' | 'total' */
+  const downloadStatusSheet = async (statusKey) => {
     if (!selectedCamExamId) return;
-    try { await clientDashboardAPI.downloadCameraAccessibility({ exam_id: selectedCamExamId, type }); }
-    catch (e) { console.error('Failed to download camera accessibility', e); }
+    try {
+      const params = { is_active: true, page: 1, limit: 1000000 };
+      if (camFilterShiftId) params.shift_id = camFilterShiftId;
+      if (camFilterExamDate) params.exam_date = parseDDMMYYYYToISO(camFilterExamDate);
+      const res = await camerasAPI.getByExam(selectedCamExamId, params);
+      let rows = res.data.data || [];
+      const hls = (res.data.linkType === 'HLS') || isHLS;
+
+      if (statusKey === 'accessible') {
+        rows = rows.filter((c) => String(c.status || '').toLowerCase() === 'accessible');
+      } else if (statusKey === 'notAccessible') {
+        rows = rows.filter((c) => String(c.status || '').toLowerCase() === 'not accessible');
+      }
+      if (rows.length === 0) return;
+
+      const toAbsFrame = (fp) => {
+        const rel = buildFrameImageUrl(fp);
+        if (!rel) return '';
+        return /^https?:/i.test(rel)
+          ? rel
+          : `http://www.examscctvmonitoring.com${rel.startsWith('/') ? '' : '/'}${rel}`;
+      };
+
+      // Not Accessible cameras have no classification / frame → drop those columns.
+      const dropClassView = statusKey === 'notAccessible';
+
+      let sheetRows, viewCol, cols;
+      if (hls) {
+        sheetRows = rows.map((cam) => ({
+          'Centre Name': cam.centre_name || '-',
+          'TC Code': cam.tc_code || '-',
+          'State': cam.state || '-',
+          'Camera Name': cam.camera_name || '-',
+          'Ch Code': cam.ch_code || '-',
+          'Camera Category': cam.camera_category || 'N/A',
+          ...(dropClassView ? {} : { 'Classification': cam.classification || '-' }),
+          'Status': cam.status || '-',
+          'Exam Date': formatDateDDMMYYYY(cam.exam_date) || '-',
+          'Shift': cam.shift_id
+            ? (camShifts.find((s) => s.id === cam.shift_id)?.shift_name || `#${cam.shift_id}`)
+            : 'All shifts',
+          ...(dropClassView ? {} : { 'View': toAbsFrame(cam.frame_path) }),
+        }));
+        viewCol = dropClassView ? -1 : 10;
+        cols = dropClassView
+          ? [{ wch: 30 }, { wch: 14 }, { wch: 18 }, { wch: 22 }, { wch: 12 }, { wch: 18 }, { wch: 16 }, { wch: 14 }, { wch: 16 }]
+          : [{ wch: 30 }, { wch: 14 }, { wch: 18 }, { wch: 22 }, { wch: 12 }, { wch: 18 }, { wch: 18 }, { wch: 16 }, { wch: 14 }, { wch: 16 }, { wch: 60 }];
+      } else {
+        sheetRows = rows.map((cam) => ({
+          'Device ID': cam.device_id || '-',
+          'Camera No': cam.camera_no ?? '-',
+          'TC Code': cam.tc_code || '-',
+          'Camera Name': cam.camera_name || '-',
+          'Centre Name': cam.centre_name || cam.tc_name || '-',
+          'State': cam.state || '-',
+          ...(dropClassView ? {} : { 'Classification': cam.classification || '-' }),
+          'Status': cam.status || '-',
+          ...(dropClassView ? {} : { 'View': toAbsFrame(cam.frame_path) }),
+          'CCTV URL': cam.cctv_url || cam.url || '-',
+        }));
+        viewCol = dropClassView ? -1 : 8;
+        cols = dropClassView
+          ? [{ wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 22 }, { wch: 34 }, { wch: 16 }, { wch: 16 }, { wch: 60 }]
+          : [{ wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 22 }, { wch: 34 }, { wch: 16 }, { wch: 18 }, { wch: 16 }, { wch: 12 }, { wch: 60 }];
+      }
+
+      const ws = XLSX.utils.json_to_sheet(sheetRows);
+      ws['!cols'] = cols;
+
+      if (viewCol >= 0) {
+        const range = XLSX.utils.decode_range(ws['!ref']);
+        for (let R = range.s.r + 1; R <= range.e.r; R++) {
+          const addr = XLSX.utils.encode_cell({ r: R, c: viewCol });
+          const url = sheetRows[R - 1]['View'];
+          ws[addr] = url
+            ? { v: 'View', t: 's', l: { Target: url, Tooltip: 'Open frame' } }
+            : { v: '-', t: 's' };
+        }
+      }
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Cameras');
+      const label = statusKey === 'accessible' ? 'Accessible'
+        : statusKey === 'notAccessible' ? 'Not_Accessible' : 'All';
+      const examName = (selectedCamExamData?.exam_name || 'exam').replace(/[^\w]+/g, '_');
+      XLSX.writeFile(wb, `${examName}_${label}_cameras.xlsx`);
+    } catch (e) {
+      console.error('Camera status download failed:', e);
+    }
   };
 
   return (
@@ -258,7 +380,38 @@ const ClientCameras = () => {
                   </Typography>
                   {selectedCamExamData && <Chip label={camExamLinkType || selectedCamExamData.link_type} size="small" sx={{ fontWeight: 700, fontSize: '0.7rem', height: 20, borderRadius: '6px', bgcolor: isHLS ? '#3b82f6' : '#a4b5fe', color: isHLS ? '#fff' : '#384b91' }} />}
                 </Box>
-                <Typography sx={{ fontSize: '0.9rem', color: '#64748b' }}>{camTotal} camera{camTotal !== 1 ? 's' : ''} • {isHLS ? 'HLS streams' : 'RTSP streams'}</Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+                  <Typography sx={{ fontSize: '0.9rem', color: '#64748b' }}>{camTotal} camera{camTotal !== 1 ? 's' : ''} • {isHLS ? 'HLS streams' : 'RTSP streams'}</Typography>
+                  {camVisionSummary?.started_at && (() => {
+                    const today = new Date().toISOString().slice(0, 10);
+                    const startedToday = camVisionSummary.started_at.startsWith(today);
+                    const workersActive = startedToday && (camVisionSummary.duration_minutes ?? 0) < 600;
+                    const durMins = camVisionSummary.duration_minutes;
+                    const durStr = durMins == null ? null
+                      : durMins >= 60
+                        ? `${Math.floor(durMins / 60)}h ${durMins % 60}m`
+                        : `${durMins} min`;
+                    return (
+                      <>
+                        <Typography sx={{ fontSize: '0.9rem', color: '#cbd5e1' }}>·</Typography>
+                        <Typography sx={{ fontSize: '0.85rem', color: '#64748b' }}>
+                          Last classification:{' '}
+                          <Box component="span" sx={{ color: '#0369a1', fontWeight: 600 }}>
+                            {format(new Date(camVisionSummary.started_at), 'dd MMM, HH:mm')}
+                          </Box>
+                          {durStr && (
+                            <Box component="span">
+                              {' '}·{' '}
+                              <Box component="span" sx={{ fontWeight: 600, color: workersActive ? '#d97706' : '#0369a1' }}>
+                                Time : {durStr}
+                              </Box>
+                            </Box>
+                          )}
+                        </Typography>
+                      </>
+                    );
+                  })()}
+                </Box>
               </Box>
 
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap', flexShrink: 0, width: { xs: '100%', md: 'auto' } }}>
@@ -304,7 +457,7 @@ const ClientCameras = () => {
                 <Button
                   variant="outlined"
                   size="small"
-                  onClick={() => handleDownloadAccessibility('accessible')}
+                  onClick={() => downloadStatusSheet('accessible')}
                   startIcon={<Download sx={{ fontSize: 16 }} />}
                   sx={{ flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' }, height: 32, px: 2, borderRadius: 2, borderColor: '#3b82f6', color: '#3b82f6', textTransform: 'none', whiteSpace: 'nowrap', '&:hover': { bgcolor: '#eff6ff' } }}
                 >
@@ -315,12 +468,23 @@ const ClientCameras = () => {
                 <Button
                   variant="outlined"
                   size="small"
-                  onClick={() => handleDownloadAccessibility('not_accessible')}
+                  onClick={() => downloadStatusSheet('notAccessible')}
                   startIcon={<Download sx={{ fontSize: 16 }} />}
                   sx={{ flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' }, height: 32, px: 2, borderRadius: 2, borderColor: '#333', color: '#333', textTransform: 'none', whiteSpace: 'nowrap', '&:hover': { bgcolor: '#f3f4f6' } }}
                 >
                   <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, mr: 1, whiteSpace: 'nowrap' }}>Not Accessible</Typography>
                   <Typography sx={{ fontSize: '0.75rem', fontWeight: 700 }}>{camStatusCounts.notAccessible}</Typography>
+                </Button>
+
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={() => downloadStatusSheet('total')}
+                  startIcon={<Download sx={{ fontSize: 16 }} />}
+                  sx={{ flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' }, height: 32, px: 2, borderRadius: 2, borderColor: '#16a34a', color: '#16a34a', textTransform: 'none', whiteSpace: 'nowrap', '&:hover': { bgcolor: '#f0fdf4' } }}
+                >
+                  <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, mr: 1, whiteSpace: 'nowrap' }}>Total</Typography>
+                  <Typography sx={{ fontSize: '0.75rem', fontWeight: 700 }}>{camStatusCounts.accessible + camStatusCounts.notAccessible + camStatusCounts.unknown}</Typography>
                 </Button>
 
                 {camStatusCounts.unknown > 0 && (

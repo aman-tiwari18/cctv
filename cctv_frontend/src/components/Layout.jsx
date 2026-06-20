@@ -56,7 +56,7 @@ import { useDetectionCounts } from '../contexts/DetectionCountsContext';
 import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
 import { CustomSvgIcon } from './DetectionSvgIcon';
 import { ShiftSvgIcon } from './ShiftSvgIcon';
-import { dashboardAPI } from '../services/api';
+import { dashboardAPI, examsAPI } from '../services/api';
 
 const DRAWER_WIDTH = 260;
 const APPBAR_HEIGHT = 64;
@@ -423,8 +423,19 @@ function LayoutInner() {
     if (location.pathname === '/') {
       const fetchLiveExams = async () => {
         try {
-          const res = await dashboardAPI.getLiveExams({ page: 1, limit: 1 });
-          setLiveExamsCount(res.data?.data?.total || 0);
+          // Count exams that are LIVE by date range (today within
+          // [start_date, end_date]) — same definition as the Exams page LIVE
+          // badge, so the two stay consistent. (The dashboard's Live Exam Table
+          // uses a stricter "shift running right now" rule via getLiveExams.)
+          const res = await examsAPI.getAll({ is_active: true });
+          const list = res.data?.data || [];
+          const now = new Date();
+          const count = list.filter((exam) => {
+            const start = exam.start_date ? new Date(exam.start_date) : null;
+            const end = exam.end_date ? new Date(exam.end_date) : null;
+            return start && end && now >= start && now <= end;
+          }).length;
+          setLiveExamsCount(count);
         } catch (err) {
           console.error("Failed to fetch live exams:", err);
         }

@@ -23,6 +23,7 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { format } from 'date-fns';
 import { camerasAPI, examsAPI, executionsAPI } from '../services/api';
 import { IMG_BASE } from '../constants/data';
+import * as XLSX from 'xlsx';
 import { useAuth } from '../contexts/AuthContext';
 import ExamSidebar from '../components/ExamSidebar';
 
@@ -281,6 +282,107 @@ const Cameras = () => {
   const isHLS = examLinkType === 'HLS' || selectedExamData?.link_type?.toUpperCase() === 'HLS';
   const shifts = selectedExamData?.examShifts || [];
 
+  /* ── Download cameras sheet by status ──
+     statusKey: 'accessible' | 'notAccessible' | 'total'
+     Fetches ALL cameras for the exam (respecting the active shift/date scope,
+     not search), filters by status, and builds an Excel mirroring the table's
+     columns. The "View" column is a clickable link to the camera's frame. */
+  const downloadStatusSheet = async (statusKey) => {
+    if (!selectedExamId) return;
+    try {
+      const params = { is_active: true, page: 1, limit: 1000000 };
+      if (filterShiftId) params.shift_id = filterShiftId;
+      if (filterExamDate) params.exam_date = parseDDMMYYYYToISO(filterExamDate);
+      const res = await camerasAPI.getByExam(selectedExamId, params);
+      let rows = res.data.data || [];
+      const hls = (res.data.linkType === 'HLS') || isHLS;
+
+      if (statusKey === 'accessible') {
+        rows = rows.filter((c) => String(c.status || '').toLowerCase() === 'accessible');
+      } else if (statusKey === 'notAccessible') {
+        rows = rows.filter((c) => String(c.status || '').toLowerCase() === 'not accessible');
+      }
+      if (rows.length === 0) return;
+
+      // Full, openable frame URL (same domain convention as the detections export).
+      const toAbsFrame = (fp) => {
+        const rel = buildFrameImageUrl(fp);
+        if (!rel) return '';
+        return /^https?:/i.test(rel)
+          ? rel
+          : `http://www.examscctvmonitoring.com${rel.startsWith('/') ? '' : '/'}${rel}`;
+      };
+
+      // Not Accessible cameras have no classification and no captured frame,
+      // so drop the Classification and View columns from that sheet.
+      const dropClassView = statusKey === 'notAccessible';
+
+      let sheetRows, viewCol, cols;
+      if (hls) {
+        sheetRows = rows.map((cam) => ({
+          'Centre Name': cam.centre_name || '-',
+          'TC Code': cam.tc_code || '-',
+          'State': cam.state || '-',
+          'Camera Name': cam.camera_name || '-',
+          'Ch Code': cam.ch_code || '-',
+          'Camera Category': cam.camera_category || 'N/A',
+          ...(dropClassView ? {} : { 'Classification': cam.classification || '-' }),
+          'Status': cam.status || '-',
+          'Exam Date': formatDateDDMMYYYY(cam.exam_date) || '-',
+          'Shift': cam.shift_id
+            ? (shifts.find((s) => s.id === cam.shift_id)?.shift_name || `#${cam.shift_id}`)
+            : 'All shifts',
+          ...(dropClassView ? {} : { 'View': toAbsFrame(cam.frame_path) }),
+        }));
+        viewCol = dropClassView ? -1 : 10;
+        cols = dropClassView
+          ? [{ wch: 30 }, { wch: 14 }, { wch: 18 }, { wch: 22 }, { wch: 12 }, { wch: 18 }, { wch: 16 }, { wch: 14 }, { wch: 16 }]
+          : [{ wch: 30 }, { wch: 14 }, { wch: 18 }, { wch: 22 }, { wch: 12 }, { wch: 18 }, { wch: 18 }, { wch: 16 }, { wch: 14 }, { wch: 16 }, { wch: 60 }];
+      } else {
+        sheetRows = rows.map((cam) => ({
+          'Device ID': cam.device_id || '-',
+          'Camera No': cam.camera_no ?? '-',
+          'TC Code': cam.tc_code || '-',
+          'Camera Name': cam.camera_name || '-',
+          'Centre Name': cam.centre_name || cam.tc_name || '-',
+          'State': cam.state || '-',
+          ...(dropClassView ? {} : { 'Classification': cam.classification || '-' }),
+          'Status': cam.status || '-',
+          ...(dropClassView ? {} : { 'View': toAbsFrame(cam.frame_path) }),
+          'CCTV URL': cam.cctv_url || cam.url || '-',
+        }));
+        viewCol = dropClassView ? -1 : 8;
+        cols = dropClassView
+          ? [{ wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 22 }, { wch: 34 }, { wch: 16 }, { wch: 16 }, { wch: 60 }]
+          : [{ wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 22 }, { wch: 34 }, { wch: 16 }, { wch: 18 }, { wch: 16 }, { wch: 12 }, { wch: 60 }];
+      }
+
+      const ws = XLSX.utils.json_to_sheet(sheetRows);
+      ws['!cols'] = cols;
+
+      // "View" column → short clickable "View" link to the frame URL (when present).
+      if (viewCol >= 0) {
+        const range = XLSX.utils.decode_range(ws['!ref']);
+        for (let R = range.s.r + 1; R <= range.e.r; R++) {
+          const addr = XLSX.utils.encode_cell({ r: R, c: viewCol });
+          const url = sheetRows[R - 1]['View'];
+          ws[addr] = url
+            ? { v: 'View', t: 's', l: { Target: url, Tooltip: 'Open frame' } }
+            : { v: '-', t: 's' };
+        }
+      }
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Cameras');
+      const label = statusKey === 'accessible' ? 'Accessible'
+        : statusKey === 'notAccessible' ? 'Not_Accessible' : 'All';
+      const examName = (selectedExamData?.exam_name || 'exam').replace(/[^\w]+/g, '_');
+      XLSX.writeFile(wb, `${examName}_${label}_cameras.xlsx`);
+    } catch (e) {
+      console.error('Camera status download failed:', e);
+    }
+  };
+
   /* ── Sorting logic ── */
   const handleRequestSort = (property) => {
     const isAsc = orderBy === property && order === 'asc';
@@ -494,7 +596,7 @@ const Cameras = () => {
                               <Box component="span">
                                 {' '}·{' '}
                                 <Box component="span" sx={{ fontWeight: 600, color: workersActive ? '#d97706' : '#0369a1' }}>
-                                  {durStr}{workersActive ? '…' : ''}
+                                  Time : {durStr}
                                 </Box>
                               </Box>
                             )}
@@ -656,7 +758,10 @@ const Cameras = () => {
               {cameras.length > 0 && cameras.some(cam => cam.status !== null && cam.status !== undefined) && (
                 <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap', justifyContent: { xs: 'flex-start', sm: 'flex-end' } }}>
 
-                  <Box sx={{
+                  <Box
+                    onClick={() => downloadStatusSheet('accessible')}
+                    title="Download Accessible cameras sheet"
+                    sx={{
                     flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' },
                     height: 30,
                     px: 1,
@@ -666,12 +771,11 @@ const Cameras = () => {
                     gap: 1,
                     borderRadius: 2,
                     border: '1px solid #3c81f6',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    '&:hover': { bgcolor: '#eff6ff', boxShadow: '0 1px 4px rgba(60,129,246,0.25)' },
                   }}>
-                    <Box sx={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: '50%',
-                    }} />
+                    <Download sx={{ fontSize: 14, color: 'primary.main' }} />
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <Typography sx={{ fontSize: '0.75rem', color: 'primary.main', fontWeight: 600 }}>
                         Accessible
@@ -682,7 +786,10 @@ const Cameras = () => {
                     </Box>
                   </Box>
 
-                  <Box sx={{
+                  <Box
+                    onClick={() => downloadStatusSheet('notAccessible')}
+                    title="Download Not Accessible cameras sheet"
+                    sx={{
                     flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' },
                     height: 30,
                     px: 1,
@@ -692,18 +799,45 @@ const Cameras = () => {
                     gap: 1,
                     borderRadius: 2,
                     border: '1px solid #333',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    '&:hover': { bgcolor: '#f3f4f6', boxShadow: '0 1px 4px rgba(0,0,0,0.18)' },
                   }}>
-                    <Box sx={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: '50%',
-                    }} />
+                    <Download sx={{ fontSize: 14, color: '#777' }} />
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <Typography sx={{ fontSize: '0.75rem', color: '#777', fontWeight: 600 }}>
                         Not Accessible
                       </Typography>
                       <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, color: '#777' }}>
                         {statusCounts.notAccessible}
+                      </Typography>
+                    </Box>
+                  </Box>
+
+                  <Box
+                    onClick={() => downloadStatusSheet('total')}
+                    title="Download all cameras sheet"
+                    sx={{
+                    flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' },
+                    height: 30,
+                    px: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 1,
+                    borderRadius: 2,
+                    border: '1px solid #16a34a',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    '&:hover': { bgcolor: '#f0fdf4', boxShadow: '0 1px 4px rgba(22,163,74,0.25)' },
+                  }}>
+                    <Download sx={{ fontSize: 14, color: '#16a34a' }} />
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Typography sx={{ fontSize: '0.75rem', color: '#16a34a', fontWeight: 600 }}>
+                        Total
+                      </Typography>
+                      <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, color: '#16a34a' }}>
+                        {statusCounts.accessible + statusCounts.notAccessible + statusCounts.unknown}
                       </Typography>
                     </Box>
                   </Box>
