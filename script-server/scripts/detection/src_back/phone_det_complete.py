@@ -320,7 +320,7 @@ def authenticate_and_get_token():
     print("Status Code 1:", response.status_code)
     
     userName = "system"
-    password = "Coreiseven@@"
+    password = "Sasd@12345"
     realm = response_content["realm"]
     randomKey = response_content["randomKey"]
     publicKey = response_content["publickey"]

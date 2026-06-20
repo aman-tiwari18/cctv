@@ -60,7 +60,7 @@ TIMEOUT_VLM    = 60    # VLM classification timeout (seconds)
 
 AUTH_USERNAME = "system"
 # AUTH_PASSWORD = "Sasd@12345"
-AUTH_PASSWORD = "Coreiseven@@"
+AUTH_PASSWORD = "Sasd@12345"
 
 
 TOKEN_EXPIRY_SECONDS = 90  
@@ -1006,7 +1006,7 @@ if __name__ == "__main__":
 # TIMEOUT_CAMERA      = 90        # seconds — overall per-camera hard cap (Pass-2)
 
 # AUTH_USERNAME        = "system"
-# # AUTH_PASSWORD        = "Coreiseven@@"
+# # AUTH_PASSWORD        = "Sasd@12345"
 # AUTH_USERNAME = "Sasd@12345"
 # TOKEN_EXPIRY_SECONDS = 90
 

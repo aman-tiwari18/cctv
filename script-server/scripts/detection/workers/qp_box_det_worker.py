@@ -69,12 +69,11 @@ _gpu_queue = queue.Queue(maxsize=GPU_QUEUE_SIZE)
 # =====================================================
 def _gpu_batch_worker(stop_event, save_folder, cooldown_time=600):
     """
-    GPU batch worker — TRUE batch inference.
+    GPU batch worker — YOLO inference + GPU color verification.
+    Warms up YOLO model on first start so first real frame isn't slow.
     """
-    logger.info("🚀 [QPBox] GPU worker started (true batch mode)")
-    
-    # Warm up model
-    qp_core.get_yolo_model()
+    logger.info("🚀 [QPBox] GPU batch worker started (YOLO + color-verify mode)")
+    qp_core.get_yolo_model()   # warm up YOLO on GPU before first frame arrives
     log_counter = 0
 
     while not stop_event.is_set():

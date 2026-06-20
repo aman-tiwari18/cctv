@@ -97,6 +97,12 @@ TIMEOUT_OPENCV_REAL: int = 6        # hard wall-clock thread join for OpenCV
 TIMEOUT_FFMPEG:      int = int(os.getenv("VISION_TIMEOUT_FFMPEG", "10"))  # 10s: enough for RTSP grab, short enough to release DVR slots quickly
 TIMEOUT_VLM:         int = int(os.getenv("VISION_TIMEOUT_VLM", "120"))
 TIMEOUT_API:         int = int(os.getenv("VISION_TIMEOUT_API",  "10"))
+# Hard wall-clock cap on a single Pass-1 camera capture (StartVideo auth + FFmpeg
+# grab). Without this, a capture that wedges on an unresponsive DVR holds the
+# concurrency semaphore forever and the whole Pass-1 deadlocks (observed on the
+# 8-GPU workers: all 16 stuck >1h, 0 ffmpeg, idle CPU). On timeout we cancel,
+# release the slot, and mark the camera failed so Pass-1 keeps draining.
+CAPTURE_HARD_TIMEOUT: int = int(os.getenv("VISION_CAPTURE_HARD_TIMEOUT", "60"))
 
 VLLM_URL:       str = os.getenv("VISION_VLLM_URL",             "http://localhost:8001/v1/chat/completions")
 VLLM_MODEL:     str = os.getenv("VISION_VLLM_MODEL",           "Qwen/Qwen3-VL-30B-A3B-Instruct")
@@ -108,15 +114,19 @@ DEFAULT_EXAM_DATE: str = datetime.now().strftime("%Y-%m-%d")
 
 VISION_ASSIGNMENT_PAYLOAD: Optional[str] = os.getenv("VISION_ASSIGNMENT_PAYLOAD")
 
-SAVE_FOLDER         = os.path.join(PROJECT_ROOT, "results/neet_combined_classification")
-# Frames must land on NFS so they persist on the main server AND so Pass-2
-# (same worker, same run) can read them back without re-capturing from the DVR.
-# The detection results dir (/app/scripts/detection/results) is a symlink to
-# /data/nfs/cctv_images on all workers, so basing FRAMES_FOLDER here routes
-# every saved JPEG through NFS to the main server automatically.
+# Frames AND the NEET Excel report must land on NFS so they persist on the main
+# server AND so Pass-2 (same worker, same run) can read frames back without
+# re-capturing from the DVR. The detection results dir
+# (/app/scripts/detection/results) is a symlink to /data/nfs/cctv_images on every
+# worker, so basing BOTH SAVE_FOLDER and FRAMES_FOLDER on _SCRIPT_DIR/results
+# routes every JPEG and the report through NFS to the main server automatically —
+# the same structure regardless of each host's repo path. (PROJECT_ROOT/results
+# is worker-LOCAL and previously trapped the Excel on each worker's container so
+# it never reached main.)
 # Pass-2 reads frame_path with os.path.exists() — NFS sync export guarantees
 # Pass-1 writes are durable before Pass-2 reads them.
 _SCRIPT_DIR         = os.path.dirname(os.path.abspath(__file__))
+SAVE_FOLDER         = os.path.join(_SCRIPT_DIR, "results", "neet_combined_classification")
 FRAMES_FOLDER       = os.path.join(_SCRIPT_DIR, "results", "classification_frames")
 CHECKPOINT_FILE     = "checkpoint_progress.json"
 CHECKPOINT_INTERVAL = 500
@@ -147,7 +157,7 @@ import hashlib as _hashlib
 import socket as _socket
 
 _CAMVIEW_AUTH_USER   = os.getenv("CAMVIEW_AUTH_USER",  "system")
-_CAMVIEW_AUTH_PASS   = os.getenv("CAMVIEW_AUTH_PASS",  "Coreiseven@@")
+_CAMVIEW_AUTH_PASS   = os.getenv("CAMVIEW_AUTH_PASS",  "Sasd@12345")
 
 # Token coordination server — eliminates cross-VM session collision.
 # Camview DVRs allow only ONE active session per username. With 4 workers all
@@ -1528,12 +1538,26 @@ async def _check_rtsp_camera(
         return _fail("missing_device_id_or_camera_no")
 
     # Camview camera: capture frame atomically (StartVideo + FFmpeg inside RTSP semaphore)
+    # Hard-timeout the capture so a wedged DVR can't hold the semaphore and deadlock Pass-1.
     async with sem:
         _cap_ctx = _RTSP_CAP_SEM if _RTSP_CAP_SEM is not None else contextlib.nullcontext()
         async with _cap_ctx:
-            jpeg, frame_path = await _camview_rtsp_capture_and_save(
-                camera, cam_id, frames_dir or FRAMES_FOLDER
-            )
+            try:
+                jpeg, frame_path = await asyncio.wait_for(
+                    _camview_rtsp_capture_and_save(
+                        camera, cam_id, frames_dir or FRAMES_FOLDER
+                    ),
+                    timeout=CAPTURE_HARD_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    f"[Pass-1] capture hard-timeout ({CAPTURE_HARD_TIMEOUT}s) for {cam_id} "
+                    f"({device_id}_{camera_no}) — releasing slot, marking failed"
+                )
+                return _fail("capture_timeout")
+            except Exception as e:
+                logger.warning(f"[Pass-1] capture error for {cam_id}: {e}")
+                return _fail(f"capture_error: {e}")
 
     if not jpeg:
         return _fail("frame_capture_failed")
@@ -1766,6 +1790,24 @@ _df               = pd.DataFrame()
 # Full NEET result dicts collected during the default-mode run (for the Excel report).
 _neet_results: List[dict] = []
 
+# Live accumulators so a SIGTERM (e.g. shift-window close, or the slow 8-GPU
+# workers getting cut off mid-Pass-2) can still flush a PARTIAL NEET Excel.
+# The assignment path (run_assignment_mode) otherwise writes the report only
+# after Pass-2 fully completes, so a terminated run produced NO Excel at all.
+# These reference the same in-flight lists so the signal handler can save
+# whatever has been classified so far.
+_LIVE_RUNTIME: Optional[dict] = None
+_LIVE_CLASSIFICATIONS: List[dict] = []
+_LIVE_FAILED: List[dict] = []
+_RUN_START_TS: Optional[float] = None   # wall-clock start of this worker's run
+
+
+def _fmt_elapsed(seconds: float) -> str:
+    s = int(seconds)
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    return (f"{h}h {m}m {sec}s" if h else f"{m}m {sec}s")
+
 
 def _update_df(row_id: int, label: str, status: str, detail: str,
                frame_path: Optional[str] = None) -> None:
@@ -1877,8 +1919,12 @@ def _save_neet_report(results: List[dict], tag: str = "") -> Optional[str]:
         sub = rdf[rdf["Sheet"] == name].copy()
         return sub[[c for c in _NEET_DISPLAY_COLUMNS if c in sub.columns]]
 
+    # Tag with the worker id so each worker's shard report is distinct on the
+    # shared NFS folder (otherwise two workers finishing in the same second on
+    # the same assignment would collide).
+    worker_tag = os.environ.get("WORKER_ID", "worker-0")
     suffix = f"_{tag}" if tag else ""
-    out_file = os.path.join(SAVE_FOLDER, f"neet_results{suffix}_{ts}.xlsx")
+    out_file = os.path.join(SAVE_FOLDER, f"neet_results{suffix}_{worker_tag}_{ts}.xlsx")
     with pd.ExcelWriter(out_file, engine="openpyxl") as writer:
         for sheet_name in ("Classified", "Mismatch", "Unrecognized", "Offline"):
             _sheet(sheet_name).to_excel(writer, sheet_name=sheet_name, index=False)
@@ -1949,6 +1995,13 @@ async def run_assignment_mode() -> dict:
 
     accessible: List[dict] = []
     failed:     List[dict] = []
+
+    # Expose to the SIGTERM handler so a cut-off run can still flush a partial Excel.
+    global _LIVE_RUNTIME, _LIVE_CLASSIFICATIONS, _LIVE_FAILED, _RUN_START_TS
+    _LIVE_RUNTIME = runtime
+    _LIVE_FAILED = failed   # same object → Pass-1/2 appends are visible to the handler
+    _RUN_START_TS = time.time()
+    logger.info(f"Assignment {runtime.get('assignment_id')} START | {len(cameras)} cameras | type={runtime['link_type']}")
 
     async with aiohttp.ClientSession(connector=_make_connector()) as session:
 
@@ -2031,6 +2084,7 @@ async def run_assignment_mode() -> dict:
             for r in accessible
         ]
         classifications: List[dict] = []
+        _LIVE_CLASSIFICATIONS = classifications   # expose for partial-save on SIGTERM
         p2_start = time.time()
 
         async for fut in atqdm(
@@ -2079,6 +2133,14 @@ async def run_assignment_mode() -> dict:
         for f in failed if f.get("cam")
     ]
     _save_neet_report(report_rows, tag=f"assign{runtime.get('assignment_id')}")
+
+    if _RUN_START_TS:
+        total_elapsed = time.time() - _RUN_START_TS
+        logger.info(
+            f"Assignment {runtime.get('assignment_id')} COMPLETE | "
+            f"total time {_fmt_elapsed(total_elapsed)} ({total_elapsed:.1f}s) | "
+            f"cameras={len(cameras)} classified={len(classifications)}"
+        )
 
     return {
         "assignment_id":                    runtime["assignment_id"],
@@ -2341,6 +2403,7 @@ def _shutdown_vllm(reason: str) -> None:
     if _VLLM_CLEANUP_DONE:
         return
     _VLLM_CLEANUP_DONE = True
+    _arm_cleanup_watchdog(90)   # never let teardown hang the process / hold the GPU
 
     pids = set()
     if _VLLM_PROC and _VLLM_PROC.poll() is None:
@@ -2405,18 +2468,119 @@ def _shutdown_vllm(reason: str) -> None:
     # and on workers eventually trip the 32 GB cgroup OOMKiller. The same
     # pkill is also run at vLLM startup, but if no next job runs, orphans
     # stay forever — reap them here at shutdown instead.
+    # Inline, in-container final sweep. Does NOT depend on an external
+    # stop_vllm.sh (which isn't present at /app inside the worker containers —
+    # /app root is baked into the image, not bind-mounted). Kills the vLLM
+    # server, its EngineCore, and the tensor-parallel spawn_main workers that
+    # survive a parent SIGKILL and otherwise leak GPU + container RAM.
+    for _pat in ("spawn_main.*--multiprocessing-fork", "vllm serve Qwen"):
+        try:
+            subprocess.run(["pkill", "-9", "-f", _pat], check=False, timeout=5)
+        except Exception as e:
+            logger.debug(f"reaper pkill {_pat!r} failed: {e}")
+    # The GPU-holding process is named (comm) "VLLM::EngineCore" — truncated by
+    # the kernel to "VLLM::EngineCor" (15 chars) and its CMDLINE is "python -c …"
+    # (so `pkill -f VLLM::EngineCore` NEVER matches and the engine orphans, holding
+    # GPU across runs/restarts). Match the comm directly instead.
     try:
-        subprocess.run(
-            ["pkill", "-9", "-f", "spawn_main.*--multiprocessing-fork"],
-            check=False, timeout=5,
-        )
-        logger.info("orphan reaper: dispatched SIGKILL to lingering spawn_main subprocesses")
+        subprocess.run(["pkill", "-9", "EngineCor"], check=False, timeout=5)
     except Exception as e:
-        logger.debug(f"orphan reaper failed: {e}")
+        logger.debug(f"reaper pkill EngineCor (comm) failed: {e}")
+    # Last-resort: kill whatever still holds this container's GPU (we are pinned to
+    # one GPU via CUDA_VISIBLE_DEVICES, so compute-apps PIDs here are all ours).
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-compute-apps=pid", "--format=csv,noheader"],
+            check=False, timeout=8, stdout=subprocess.PIPE, text=True,
+        ).stdout
+        for _p in out.split():
+            if _p.strip().isdigit() and int(_p) != os.getpid():
+                try: os.kill(int(_p), signal.SIGKILL)
+                except Exception: pass
+    except Exception as e:
+        logger.debug(f"reaper nvidia-smi kill failed: {e}")
+    logger.info("orphan reaper: SIGKILL dispatched to vLLM / EngineCore / spawn_main")
+
+    # ── Host-level vLLM kill (Worker 5/6 specific) ───────────────────────
+    # On multi-GPU workers (Worker 5, 6), vLLM starts on the HOST via
+    # start_vllm.sh (not inside the container). The container runs under a
+    # different PID namespace, so os.kill(host_pid) above silently fails
+    # with EPERM — the PIDs seen by ps inside the container are container-
+    # namespace PIDs, not the host-level PIDs. Fix: call stop_vllm.sh via
+    # the host-mounted script path, which executes on the host and can
+    # actually reach the vLLM processes.
+    _stop_script = os.path.join(PROJECT_ROOT, "stop_vllm.sh")
+    if os.path.isfile(_stop_script) and os.access(_stop_script, os.X_OK):
+        try:
+            result = subprocess.run(
+                ["/bin/bash", _stop_script],
+                check=False, timeout=30,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            )
+            logger.info(f"host-level stop_vllm.sh: {result.stdout.strip()}")
+        except Exception as e:
+            logger.warning(f"host-level stop_vllm.sh failed: {e}")
+
+
+def _arm_cleanup_watchdog(seconds: int = 90) -> None:
+    """Guarantee the process dies (and releases its GPU) even if vLLM teardown
+    wedges. vLLM shutdown occasionally hangs on a stuck CUDA context, leaving
+    the script — and ~77 GB of GPU RAM — stuck forever (the 'vllm not stopping /
+    stuck' symptom on the 8-GPU workers). A daemon timer force-kills vLLM and
+    exits if cleanup overruns."""
+    def _kill_and_exit():
+        for pat in ("vllm serve Qwen", "spawn_main.*--multiprocessing-fork"):
+            try:
+                subprocess.run(["pkill", "-9", "-f", pat], check=False, timeout=5)
+            except Exception:
+                pass
+        # EngineCore comm is "VLLM::EngineCor" (truncated) with a "python -c" cmdline,
+        # so it must be matched by comm, not -f. Plus kill anything still on our GPU.
+        try:
+            subprocess.run(["pkill", "-9", "EngineCor"], check=False, timeout=5)
+        except Exception:
+            pass
+        try:
+            out = subprocess.run(["nvidia-smi", "--query-compute-apps=pid", "--format=csv,noheader"],
+                                 check=False, timeout=8, stdout=subprocess.PIPE, text=True).stdout
+            for _p in out.split():
+                if _p.strip().isdigit() and int(_p) != os.getpid():
+                    try: os.kill(int(_p), signal.SIGKILL)
+                    except Exception: pass
+        except Exception:
+            pass
+        os._exit(0)
+    t = threading.Timer(seconds, _kill_and_exit)
+    t.daemon = True
+    t.start()
+
+
+def _save_partial_report(reason: str) -> None:
+    """Flush a partial NEET Excel from whatever Pass-2 has classified so far, so a
+    run terminated mid-Pass-2 (SIGTERM at shift-window close — common on the slow
+    8-GPU workers) still lands a report on NFS instead of producing nothing."""
+    try:
+        rows = list(_LIVE_CLASSIFICATIONS) + [
+            _offline_neet_result(f.get("cam", {}), f.get("reason", ""))
+            for f in _LIVE_FAILED if f.get("cam")
+        ]
+        if not rows:
+            logger.info(f"No partial NEET results to save on {reason}")
+            return
+        tag = (f"assign{_LIVE_RUNTIME.get('assignment_id')}_partial"
+               if _LIVE_RUNTIME else "partial")
+        _save_neet_report(rows, tag=tag)
+        ran_for = (f" after {_fmt_elapsed(time.time() - _RUN_START_TS)}"
+                   if _RUN_START_TS else "")
+        logger.info(f"Saved PARTIAL NEET report on {reason}{ran_for}: {len(rows)} rows")
+    except Exception as e:
+        logger.error(f"Partial NEET report save failed on {reason}: {e}")
 
 
 def _handle_shutdown_signal(signum, frame):
-    logger.warning(f"Received signal {signum}; cleaning up classification vLLM before exit")
+    logger.warning(f"Received signal {signum}; saving partial NEET report + stopping vLLM")
+    _arm_cleanup_watchdog(90)
+    _save_partial_report(f"signal {signum}")
     _shutdown_vllm(f"signal {signum}")
     raise SystemExit(128 + signum)
 
@@ -2436,25 +2600,48 @@ def _ensure_vllm_running():
     logger.info("Starting temporary vLLM server process. Please wait (~20 seconds)...")
     _vllm_script = os.getenv("VLLM_START_SCRIPT", os.path.join(PROJECT_ROOT, "start_vllm.sh"))
     logger.info(f"Using vLLM start script: {_vllm_script}")
+    # DEBUG: capture vLLM's stdout/stderr to a per-run log file instead of DEVNULL,
+    # so EngineCore crash stack traces ("EngineCore encountered an issue" HTTP 500)
+    # and the real startup timing/cause are visible. Logged path lets us tail it.
+    _vllm_log_fh = subprocess.DEVNULL
+    _vllm_log_path = None
+    try:
+        _vllm_log_dir = os.path.join(_SCRIPT_DIR, "..", "logs", "vllm")
+        os.makedirs(_vllm_log_dir, exist_ok=True)
+        _wtag = os.environ.get("WORKER_ID", "worker-0")
+        _vllm_log_path = os.path.join(
+            _vllm_log_dir, f"vllm_{_wtag}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+        )
+        _vllm_log_fh = open(_vllm_log_path, "ab", buffering=0)
+        logger.info(f"vLLM output → {_vllm_log_path}")
+    except Exception as e:
+        logger.warning(f"Could not open vLLM debug log ({e}); using DEVNULL")
     proc = subprocess.Popen(
         ["/bin/bash", _vllm_script],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=_vllm_log_fh,
+        stderr=subprocess.STDOUT,
         preexec_fn=os.setsid
     )
     _VLLM_PROC = proc
+    _t0 = time.time()
     for _ in range(300):
         try:
             if requests.get("http://localhost:8001/health", timeout=2).status_code == 200:
-                logger.info("Temporary vLLM server successfully started!")
+                logger.info(f"Temporary vLLM server successfully started in {time.time()-_t0:.0f}s!")
                 return proc
         except:
             pass
         time.sleep(2)
         if proc.poll() is not None:
-            logger.error("vLLM server crashed during startup.")
+            logger.error(
+                f"vLLM server crashed during startup after {time.time()-_t0:.0f}s"
+                + (f" — see {_vllm_log_path}" if _vllm_log_path else "")
+            )
             return proc
-    logger.error("vLLM server timed out during startup.")
+    logger.error(
+        f"vLLM server timed out during startup after {time.time()-_t0:.0f}s"
+        + (f" — see {_vllm_log_path}" if _vllm_log_path else "")
+    )
     return proc
 
 if __name__ == "__main__":

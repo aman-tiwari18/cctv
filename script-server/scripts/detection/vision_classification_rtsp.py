@@ -147,7 +147,7 @@ import hashlib as _hashlib
 import socket as _socket
 
 _CAMVIEW_AUTH_USER   = os.getenv("CAMVIEW_AUTH_USER",  "system")
-_CAMVIEW_AUTH_PASS   = os.getenv("CAMVIEW_AUTH_PASS",  "Coreiseven@@")
+_CAMVIEW_AUTH_PASS   = os.getenv("CAMVIEW_AUTH_PASS",  "Sasd@12345")
 
 # Token coordination server — eliminates cross-VM session collision.
 # Camview DVRs allow only ONE active session per username. With 4 workers all

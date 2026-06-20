@@ -237,7 +237,12 @@ class ScriptRunner:
         env["CAMERA_NAME"] = str(meta.get("camera_name") or execution.get("camera_name") or "")
         env["CAMERA_CLASSIFICATION"] = str(meta.get("classification") or execution.get("classification") or "")
 
-        if script_code == "vision":
+        # Both the regular vision classification (vision → rtsp/hls script) and the
+        # NEET classification (vision_neet) consume the assignment via this payload.
+        # vision_neet was previously excluded, so the NEET script launched with no
+        # payload and silently fell back to its main() defaults (exam 2 / shift 7 /
+        # HLS) — finding 0 cameras instead of the real RTSP exam.
+        if script_code in ("vision", "vision_neet"):
             import json as _json
             env["VISION_ASSIGNMENT_PAYLOAD"] = _json.dumps({
                 "assignment_id": execution_id,

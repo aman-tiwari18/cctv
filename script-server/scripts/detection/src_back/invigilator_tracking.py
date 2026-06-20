@@ -18,7 +18,7 @@ import hashlib  # Added
 # Constants from rtsp_auth.py (or make them configurable)
 API_BASE_URL = "https://d11.camview.io:443"
 AUTH_USER_NAME = "system"
-AUTH_PASSWORD = "Coreiseven@@"
+AUTH_PASSWORD = "Sasd@12345"
 
 # Helper functions from rtsp_auth.py
 def generate_signature(userName, password, realm, randomKey):
@@ -471,7 +471,7 @@ class MultiStreamTracker:
             return None
             
         # Hardcoded credentials for signature generation
-        signature = generate_signature("system", "Coreiseven@@", realm, randomKey)
+        signature = generate_signature("system", "Sasd@12345", realm, randomKey)
 
         payload2 = {
             "mac": '',

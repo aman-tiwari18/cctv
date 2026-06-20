@@ -42,6 +42,8 @@ import ErrorOutlineRoundedIcon from '@mui/icons-material/ErrorOutlineRounded';
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
 import TuneRoundedIcon from '@mui/icons-material/TuneRounded';
 import HistoryRoundedIcon from '@mui/icons-material/HistoryRounded';
+import axios from 'axios';
+import { API_BASE_1 } from '../constants/data';
 import { dashboardAPI, examsAPI } from '../services/api';
 import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
 import { ShiftSvgIcon } from '../components/ShiftSvgIcon';
@@ -738,8 +740,36 @@ export const DetectionDistributionCard = ({ distribution = [], loading }) => {
 };
 
 // ---------------------------------------------------------------------------
-// GpuPerformanceCard — static / dummy data; no API
+// GpuPerformanceCard — overall (average) GPU utilization across the fleet.
 // ---------------------------------------------------------------------------
+// Sourced from ONE lightweight Prometheus instant query — avg(gpu_utilization_percent)
+// — so Prometheus does the aggregation (no per-worker nvidia-smi fan-out). The value
+// is cached in localStorage and only refetched when stale, so the dashboard paints the
+// last known value instantly and never blocks first load on the network. Not live —
+// refreshed "time to time" (every few minutes).
+const AVG_GPU_CACHE_KEY  = 'cctv:avgGpuUtil:v1';
+const AVG_GPU_REFRESH_MS = 5 * 60 * 1000; // 5 min
+
+const readCachedAvgGpu = () => {
+    try {
+        const c = JSON.parse(localStorage.getItem(AVG_GPU_CACHE_KEY) || 'null');
+        if (c && typeof c.value === 'number' && typeof c.ts === 'number') return c;
+    } catch { /* ignore corrupt cache */ }
+    return null;
+};
+
+const fetchAvgGpuUtil = async () => {
+    try {
+        const res = await axios.get(`${API_BASE_1}/prometheus-api/query`, {
+            params: { query: 'avg(gpu_utilization_percent)' },
+            timeout: 8000,
+        });
+        const num = Number(res?.data?.data?.result?.[0]?.value?.[1]);
+        if (Number.isFinite(num)) return Math.round(num * 10) / 10; // 1 decimal
+    } catch { /* keep last cached value on any failure */ }
+    return null;
+};
+
 
 // Four fixed quarter-bands (25% each), light → dark going clockwise.
 // Only the bands the value reaches are emitted; the leftover arc renders as
@@ -762,7 +792,32 @@ const buildGaugeSegments = (value) => {
 };
 
 const GpuPerformanceCard = () => {
-    const utilization = 88.2;
+    // Avg GPU utilization across all GPUs. Initial value comes straight from the
+    // localStorage cache (instant paint); a background effect refreshes it only when
+    // stale. Falls back to 0 until the first sample lands.
+    const [utilization, setUtilization] = useState(() => readCachedAvgGpu()?.value ?? 0);
+
+    useEffect(() => {
+        let cancelled = false;
+        const refresh = async () => {
+            const cached = readCachedAvgGpu();
+            if (cached && Date.now() - cached.ts < AVG_GPU_REFRESH_MS) {
+                if (!cancelled) setUtilization(cached.value); // fresh enough — no network call
+                return;
+            }
+            const val = await fetchAvgGpuUtil();
+            if (val != null && !cancelled) {
+                setUtilization(val);
+                try {
+                    localStorage.setItem(AVG_GPU_CACHE_KEY, JSON.stringify({ value: val, ts: Date.now() }));
+                } catch { /* ignore quota/serialization errors */ }
+            }
+        };
+        refresh();                                          // on mount: fetches only if stale
+        const id = setInterval(refresh, AVG_GPU_REFRESH_MS); // periodic, lightweight
+        return () => { cancelled = true; clearInterval(id); };
+    }, []);
+
     const gaugeData = buildGaugeSegments(utilization);
     // Optimal Efficiency mini gauge — visual only, ~82% filled.
     const miniData = buildGaugeSegments(82);
@@ -815,7 +870,7 @@ const GpuPerformanceCard = () => {
                         fontWeight: 400,
                         lineHeight: '18px',
                     }}>
-                        Real-Time GPU Allocation Efficiency Across Active Nodes
+                        Average GPU Utilization Across Active Nodes
                     </Typography>
                 </Box>
 

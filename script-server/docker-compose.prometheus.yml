@@ -9,7 +9,10 @@ services:
       - "127.0.0.1:9090:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prom_data:/prometheus
+      # TSDB lives on the large /data disk (743 GB), NOT the 48 GB root LV which
+      # fills from IDE-server/pm2 cruft and previously broke Prometheus writes
+      # (WAL: "no space left on device"). See reference_gpu_avg_exporter memory.
+      - /data/prometheus_data:/prometheus
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
@@ -23,6 +26,3 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-
-volumes:
-  prom_data:

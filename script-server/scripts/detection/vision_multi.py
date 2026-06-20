@@ -70,7 +70,7 @@ RESUME_FROM_CHECKPOINT = True  # Resume from last checkpoint if exists
 
 # Authentication settings
 AUTH_USERNAME = "system"
-# AUTH_PASSWORD = "Coreiseven@@"
+# AUTH_PASSWORD = "Sasd@12345"
 AUTH_PASSWORD = "Sasd@12345"
 TOKEN_EXPIRY_SECONDS = 90  # Refresh token after 90 seconds
 
