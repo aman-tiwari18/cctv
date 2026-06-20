@@ -159,6 +159,7 @@ class PersonTracker:
                 unmatched_current.discard(best_i)
                 (fx, fy), h = current[best_i]
                 track['positions'].append((now, fx, fy))
+                track['heights'].append(h)
                 track['last_seen'] = now
                 track['last_h'] = h
                 while track['positions'] and now - track['positions'][0][0] > POSITION_WINDOW_SEC:
@@ -171,6 +172,7 @@ class PersonTracker:
             self._next_id += 1
             self.tracks[tid] = {
                 'positions':     deque([(now, fx, fy)]),
+                'heights':       deque([h], maxlen=10),
                 'static_start':  None,
                 'last_seen':     now,
                 'last_h':        h,
@@ -193,7 +195,12 @@ class PersonTracker:
             ys = [p[2] for p in positions]
             mx = sorted(xs)[len(xs) // 2]
             my = sorted(ys)[len(ys) // 2]
-            thresh = max(STATIC_THRESH_FLOOR, track['last_h'] * STATIC_THRESH_RATIO)
+            # Use rolling-median bbox height for the radius so one oversized YOLO
+            # bbox (~2x normal from shadow / overlap / partial occlusion) can't
+            # transiently inflate the radius and let a moving person read as still.
+            hs = sorted(track['heights'])
+            med_h = hs[len(hs) // 2]
+            thresh = max(STATIC_THRESH_FLOOR, med_h * STATIC_THRESH_RATIO)
             inside = sum(1 for x, y in zip(xs, ys)
                          if ((x - mx) ** 2 + (y - my) ** 2) ** 0.5 < thresh)
             still_ratio = inside / len(positions)
