@@ -27,10 +27,15 @@ SAVE_FOLDER = os.path.join(BASE_DIR, "results/invigilator_detection")
 CONF_THRESHOLD = 0.40          # Tightened from 0.30 — weak phantom standing shapes were polluting the tracker
 MIN_HEIGHT = 100               # Minimum bbox height (px) to be considered standing.
                                # Original mentor-set value; below this is YOLO noise from far-away phantoms.
-STANDING_ASPECT_RATIO = 2.0    # h/w >= 2.0 → "standing" pose. Was 1.5; tightened because seated
-                               # torso-above-desk bboxes (h/w ~1.2-1.7) were leaking through. A real
-                               # standing person has h/w ~2.5-4 regardless of camera distance —
-                               # pure shape discrimination, perspective-independent.
+STANDING_ASPECT_RATIO = 2.5    # h/w >= 2.5 → "standing" pose. Tightened from 2.3 because half-body
+                               # seated bboxes of upright students (head + torso + arms at desk) were
+                               # leaking through at h/w ~2.4-2.5. A standing invigilator with arms
+                               # relaxed has h/w ~3-4; arms-out / oblique poses ~2.3-2.7. Brief
+                               # rejection on arms-out frames is safe — the 30 s percentile window
+                               # (>= 90 % inside radius) absorbs short detection gaps without
+                               # resetting the 7-min STATIC timer. This is the practical ceiling
+                               # of bbox-only standing classification; going further requires pose
+                               # estimation, which no script in this codebase currently uses.
 
 # --- ABSENT violation (no invigilator in the room) ---
 NO_TARGET_TIME_THRESH = 45     # Seconds of zero-standing-person before ABSENT fires
