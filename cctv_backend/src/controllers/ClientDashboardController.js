@@ -90,7 +90,7 @@ const bracketForTime = (time) => {
  *
  * - ADMIN or missing company_name: no filter (sees all). NULL/empty company_name
  *   case mirrors existing behavior — flagged for separate hardening.
- * - 'EY' company: special-cased to see SSC + TCS exam bodies.
+ * - 'EY' company: special-cased to see SSC + TCS + NTA exam bodies.
  * - Other companies: exact match on exam_body.
  *
  * @param {string} userRole
@@ -104,7 +104,7 @@ const buildCompanyFilter = (userRole, userCompanyName, examColumnAlias = 'exam_b
         return { clause: '', params: [] };
     }
     if (userCompanyName === 'EY') {
-        return { clause: ` AND ${examColumnAlias} IN ('SSC','TCS')`, params: [] };
+        return { clause: ` AND ${examColumnAlias} IN ('SSC','TCS','NTA')`, params: [] };
     }
     return { clause: ` AND ${examColumnAlias} = ?`, params: [userCompanyName] };
 };
@@ -155,7 +155,7 @@ exports.getClientDashboardStats = async (req, res) => {
 
         if (userRole !== 'ADMIN' && userCompanyName) {
             if (userCompanyName === 'EY') {
-                examQuery += ` AND exam_body IN ('SSC', 'TCS')`;
+                examQuery += ` AND exam_body IN ('SSC', 'TCS', 'NTA')`;
             } else {
                 examQuery += ` AND exam_body = ?`;
                 queryParams.push(userCompanyName);
@@ -423,7 +423,7 @@ exports.getCameraAccessibility = async (req, res) => {
 
         if (userRole !== 'ADMIN' && userCompanyName) {
             if (userCompanyName === 'EY') {
-                examFilter = ` AND e.exam_body IN ('SSC', 'TCS')`;
+                examFilter = ` AND e.exam_body IN ('SSC', 'TCS', 'NTA')`;
             } else {
                 examFilter = ` AND e.exam_body = ?`;
                 examParams.push(userCompanyName);
@@ -583,7 +583,7 @@ exports.downloadCameraAccessibility = async (req, res) => {
 
         if (userRole !== 'ADMIN' && userCompanyName) {
             if (userCompanyName === 'EY') {
-                examFilter = ` AND e.exam_body IN ('SSC', 'TCS')`;
+                examFilter = ` AND e.exam_body IN ('SSC', 'TCS', 'NTA')`;
             } else {
                 examFilter = ` AND e.exam_body = ?`;
                 examParams.push(userCompanyName);
@@ -756,12 +756,12 @@ exports.getExamBodyDetails = async (req, res) => {
 
         // Check if non-admin user is trying to access unauthorized data
         if (userRole !== 'ADMIN' && userCompanyName) {
-            // EY users can access SSC and TCS
+            // EY users can access SSC, TCS and NTA
             if (userCompanyName === 'EY') {
-                if (!['SSC', 'TCS'].includes(examBody)) {
+                if (!['SSC', 'TCS', 'NTA'].includes(examBody)) {
                     return res.status(403).json({
                         success: false,
-                        message: 'Access denied. You can only view SSC and TCS data.'
+                        message: 'Access denied. You can only view SSC, TCS and NTA data.'
                     });
                 }
             } else {

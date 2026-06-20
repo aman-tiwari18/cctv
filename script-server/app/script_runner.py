@@ -132,23 +132,7 @@ class ScriptRunner:
         camera_id   = execution.get("camera_id") or execution_metadata.get("camera_id")
         execution_id = str(execution.get("id"))
 
-        pipeline_codes = {
-            "server",
-            "crowd",
-            "crowd_five",
-            "crowd_zero",
-            "crowd_biometric",  # ← ADDED
-            "intruder",
-            "entry_exit",
-            "proximity",
-            "phone",
-            "invigilator",
-            "inversion",
-            "tampering",
-            "blind_spot",
-            "strongroom",       # ← ADDED
-            "qp_box",           # ← ADDED
-        }
+        pipeline_codes = self.PIPELINE_CODES
 
         link_type_for_path = str(execution_metadata.get("link_type") or execution.get("link_type") or "HLS").upper()
 
@@ -261,8 +245,13 @@ class ScriptRunner:
             start_new_session=True
         )
 
-        # Register so cancel() can reach this process
+        # Register so cancel() can reach this process. For a grouped detection run
+        # (one process serving many analytics) also register under every member
+        # execution_id so a per-analytic cancel from the UI stops the shared process.
         self._active_processes[execution_id] = process
+        for _mid in execution.get("_member_ids", []):
+            if str(_mid) != execution_id:
+                self._active_processes[str(_mid)] = process
 
         async def read_stream(stream, is_stderr=False):
             """Read output line by line, writing to both named log and log_manager."""
@@ -356,6 +345,8 @@ class ScriptRunner:
         finally:
             # Deregister and close file handler in all exit paths
             self._active_processes.pop(execution_id, None)
+            for _mid in execution.get("_member_ids", []):
+                self._active_processes.pop(str(_mid), None)
             try:
                 file_handler.close()
                 named_log.removeHandler(file_handler)
@@ -377,6 +368,27 @@ class ScriptRunner:
             named_log.error(f"\n{'='*70}\n  FAILED (exit code {process.returncode})\n{'='*70}\n")
             log_manager.write_log(execution_id, f"Script FAILED (exit code {process.returncode})", "ERROR")
             raise Exception(f"Script exited with code {process.returncode}: {stderr_result}")
+
+    # Detection analytics that run via master_pipeline.py. Used to (a) pick the
+    # script path and (b) let the poller group all of a shift's detection analytics
+    # into ONE master_pipeline process per worker (capture-once + shared YOLO).
+    PIPELINE_CODES = {
+        "server",
+        "crowd",
+        "crowd_five",
+        "crowd_zero",
+        "crowd_biometric",
+        "intruder",
+        "entry_exit",
+        "proximity",
+        "phone",
+        "invigilator",
+        "inversion",
+        "tampering",
+        "blind_spot",
+        "strongroom",
+        "qp_box",
+    }
 
     # Script codes that are classification/vision passes (one-shot per worker
     # over its camera shard; must NOT auto-restart). Includes NEET classification.
@@ -407,10 +419,20 @@ class ScriptRunner:
                 "--assignment_date", assignment_date,
             ])
         else:
-            # master_pipeline.py uses --analytics <code>
-            analytics_arg = self.ANALYTICS_ARG_OVERRIDES.get(script_code, script_code)
-            if analytics_arg:
-                args.extend(["--analytics", analytics_arg])
+            # master_pipeline.py uses --analytics <code...>. When the poller has
+            # grouped a whole shift's detection analytics into one process, it sets
+            # execution["_analytics"] = [all codes] so this worker captures each
+            # camera ONCE and the unified detector fans out to every analytic.
+            grouped = execution.get("_analytics")
+            if grouped:
+                codes = [self.ANALYTICS_ARG_OVERRIDES.get(c, c) for c in grouped]
+                codes = [c for c in codes if c]
+                if codes:
+                    args.extend(["--analytics", *codes])
+            else:
+                analytics_arg = self.ANALYTICS_ARG_OVERRIDES.get(script_code, script_code)
+                if analytics_arg:
+                    args.extend(["--analytics", analytics_arg])
 
         return args
 

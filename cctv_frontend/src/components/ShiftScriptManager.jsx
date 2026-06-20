@@ -121,7 +121,7 @@ const SCRIPT_META = {
         category: 'people',
     },
     qp_box: {
-        label: 'QP Box Detection',
+        label: 'QP Box Not Visible In Strong Room',
         icon: Extension,
         iconColor: '#dc2626',
         bg: '#fee2e2',

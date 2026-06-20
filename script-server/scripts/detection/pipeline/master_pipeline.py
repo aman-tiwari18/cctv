@@ -56,6 +56,18 @@ logger = logging.getLogger(__name__)
 # Force RTSP over TCP for OpenCV — prevents UDP data loss behind QEMU/KVM NAT
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
 
+# Silence the OpenCV/FFmpeg capture-error flood. Round-robin probing of
+# capacity-limited DVRs produces thousands of "open VIDEOIO(FFMPEG)" / "method
+# OPTIONS failed: 401" lines per minute on stderr; that flood bloats the per-run
+# logs to 60+ MB and starves the poller's event loop (which drains subprocess
+# output), contributing to its instability. These are expected DVR rejections,
+# not actionable errors — quiet them at the libav + OpenCV layers.
+os.environ.setdefault("OPENCV_FFMPEG_LOGLEVEL", "-8")  # AV_LOG_QUIET
+try:
+    cv2.setLogLevel(0)  # 0 = LOG_LEVEL_SILENT
+except Exception:
+    pass
+
 
 def _worker_process_entry(module_name, fn_name, queue):
     """

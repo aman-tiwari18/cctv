@@ -499,7 +499,8 @@ const Cameras = () => {
                               </Box>
                             )}
                             {(() => {
-                              // Live fleet-wide progress + ETA to complete vision across all workers.
+                              // Live ETA to complete vision across all workers — TIME ONLY
+                              // (percent / processed-count intentionally not shown).
                               const p = visionSummary.progress;
                               if (!p || p.percent == null || p.percent >= 100) return null;
                               const fmt = (s) => {
@@ -510,17 +511,13 @@ const Cameras = () => {
                               const etaStr = p.eta_seconds == null
                                 ? null
                                 : p.eta_seconds <= 30 ? 'finishing…' : `~${fmt(p.eta_seconds)} left`;
+                              if (!etaStr) return null;
                               return (
                                 <Box component="span">
                                   {' '}·{' '}
                                   <Box component="span" sx={{ fontWeight: 600, color: '#0369a1' }}>
-                                    {p.percent}% ({p.processed_count}/{p.total_cameras})
+                                    {etaStr}
                                   </Box>
-                                  {etaStr && (
-                                    <Box component="span" sx={{ color: '#64748b' }}>
-                                      {' · '}{etaStr}
-                                    </Box>
-                                  )}
                                 </Box>
                               );
                             })()}

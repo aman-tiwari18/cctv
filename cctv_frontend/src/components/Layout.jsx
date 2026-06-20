@@ -92,7 +92,7 @@ const TYPE_META = {
   tamper: { label: 'Camera Tampering', icon: SecurityUpdateWarning, iconColor: '#00c8d4' },
   // tampering: { label: 'Camera Tampering', icon: SecurityUpdateWarning, iconColor: '#00c8d4' },
   strongroom: { label: 'Strong Room Movement', icon: SecurityUpdateWarning, iconColor: '#b91c1c' },
-  qp_box: { label: 'QP Box Detection', icon: SecurityUpdateWarning, iconColor: '#dc2626' },
+  qp_box: { label: 'QP Box Not Visible In Strong Room', icon: SecurityUpdateWarning, iconColor: '#dc2626' },
   vision: { label: 'Vision Detection', icon: Visibility, iconColor: '#3b82f6' },
 };
 

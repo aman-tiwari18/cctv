@@ -129,6 +129,50 @@ _SCRIPT_DIR         = os.path.dirname(os.path.abspath(__file__))
 SAVE_FOLDER         = os.path.join(_SCRIPT_DIR, "results", "neet_combined_classification")
 FRAMES_FOLDER       = os.path.join(_SCRIPT_DIR, "results", "classification_frames")
 CHECKPOINT_FILE     = "checkpoint_progress.json"
+
+# Public, externally-viewable base for classification frame images. Frames live
+# under <results>/classification_frames/... and <results> is the symlink the
+# script-server serves at /serve-rtsp-detection-images/. Mirrors the detection
+# workers' DETECTION_RTSP_IMAGE_BASE_URL (utils/db_client.py) and the frontend's
+# buildFrameImageUrl, so the NEET Excel's frame links open from OUTSIDE the
+# network exactly like the admin Detections page / consolidated report — instead
+# of the worker-local filesystem path that is unreachable off-host.
+_RTSP_IMAGE_BASE_URL = os.environ.get(
+    "DETECTION_RTSP_IMAGE_BASE_URL",
+    "http://103.42.51.250/cctv_dev/serve-rtsp-detection-images",
+).rstrip("/")
+
+
+def _frame_path_to_url(frame_path: Optional[str]) -> str:
+    """Convert a stored frame filesystem path to its public, viewable URL.
+
+    e.g. /data/nfs/cctv_images/classification_frames/assignment_9244/foo.jpg
+      -> http://examscctvmonitoring.com/cctv_dev/serve-rtsp-detection-images/classification_frames/assignment_9244/foo.jpg
+
+    The script-server serves images relative to the detection results dir, so we
+    keep everything from the `classification_frames/` marker onward (same rule as
+    the frontend's buildFrameImageUrl). Returns "" for empty input, and passes
+    through values that are already URLs or have an unrecognised shape.
+    """
+    if not frame_path:
+        return ""
+    fp = str(frame_path).strip()
+    if not fp:
+        return ""
+    if fp.startswith("http://") or fp.startswith("https://"):
+        return fp
+    fp_norm = fp.replace("\\", "/")
+    marker = "classification_frames/"
+    idx = fp_norm.find(marker)
+    if idx != -1:
+        return f"{_RTSP_IMAGE_BASE_URL}/{fp_norm[idx:]}"
+    # Fallback: anything under a results/ root is still servable by relative path.
+    rmarker = "results/"
+    ridx = fp_norm.find(rmarker)
+    if ridx != -1:
+        return f"{_RTSP_IMAGE_BASE_URL}/{fp_norm[ridx + len(rmarker):]}"
+    # Unknown shape — keep the original so no information is lost.
+    return fp
 CHECKPOINT_INTERVAL = 500
 RESUME_FROM_CHECKPOINT = True
 SCENE_COLUMN_TARGET = "Scene Classification"
@@ -1078,24 +1122,33 @@ def _sync_ffmpeg_capture(url: str, is_rtsp: bool = False) -> Optional[bytes]:
         "-loglevel", "error",
         "pipe:1",
     ]
-    try:
-        res = subprocess.run(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            timeout=TIMEOUT_FFMPEG + 3,
-        )
-        if res.returncode == 0 and res.stdout:
+    result_box: List[Optional[bytes]] = [None]
+    
+    def _worker():
+        try:
+            res = subprocess.run(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                timeout=TIMEOUT_FFMPEG + 3,
+            )
+            if res.returncode == 0 and res.stdout:
+                stderr_txt = res.stderr.decode(errors="replace")
+                if "401" in stderr_txt or "Unauthorized" in stderr_txt:
+                    logger.debug(f"FFmpeg 401 on {url[:60]}")
+                    result_box[0] = b"_FFmpeg401_"
+                    return
+                result_box[0] = res.stdout
+                return
             stderr_txt = res.stderr.decode(errors="replace")
             if "401" in stderr_txt or "Unauthorized" in stderr_txt:
-                logger.debug(f"FFmpeg 401 on {url[:60]}")
-                return b"_FFmpeg401_"  # sentinel — caller retries StartVideo for fresh token
-            return res.stdout
-        stderr_txt = res.stderr.decode(errors="replace")
-        if "401" in stderr_txt or "Unauthorized" in stderr_txt:
-            return b"_FFmpeg401_"
-        return None
-    except Exception as e:
-        logger.debug(f"FFmpeg error: {e}")
-        return None
+                result_box[0] = b"_FFmpeg401_"
+                return
+        except Exception as e:
+            logger.debug(f"FFmpeg error: {e}")
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    t.join(timeout=TIMEOUT_FFMPEG + 5)
+    return result_box[0]
 
 
 async def _capture_frame_bytes(url: str, is_rtsp: bool = False) -> Optional[bytes]:
@@ -1156,13 +1209,21 @@ async def _capture_frame_with_save(
     fname    = f"{safe_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
     fpath    = os.path.join(FRAMES_FOLDER, fname)
     try:
-        with open(fpath, "wb") as fh:
-            fh.write(jpeg)
+        # Offload to a thread — FRAMES_FOLDER is a slow sshfs mount on w5/w6;
+        # an inline write here would block the event loop (see _write_bytes_file).
+        await asyncio.get_event_loop().run_in_executor(_THREAD_POOL, _write_bytes_file, fpath, jpeg)
     except Exception as e:
         logger.debug(f"Frame save failed for {cam_id}: {e}")
         fpath = None
 
     return jpeg, fpath
+
+
+def _write_bytes_file(path: str, data: bytes) -> None:
+    """Blocking file write — always run via run_in_executor so a slow store
+    (sshfs to main on w5/w6) can never block the asyncio event loop."""
+    with open(path, "wb") as fh:
+        fh.write(data)
 
 
 async def _camview_rtsp_capture_and_save(
@@ -1266,8 +1327,14 @@ async def _camview_rtsp_capture_and_save(
     fname  = f"{device_id}_{camera_no}_{safe_name}.jpg"
     fpath  = os.path.join(frames_dir, fname)
     try:
-        with open(fpath, "wb") as fh:
-            fh.write(jpeg)
+        # CRITICAL: offload the file write to the thread pool. On the 8-GPU
+        # workers (w5/w6) frames_dir is an sshfs mount to the main server
+        # (~0.5s per write, and stalls under 16 concurrent processes). Doing the
+        # write inline blocked the asyncio event loop in a socket send
+        # (sock_alloc_send_pskb) and froze the ENTIRE Pass-1 pipeline. Awaiting it
+        # in a worker thread keeps the loop processing other cameras while many
+        # writes run concurrently. (On w0-3 this is fast NFS, so it was harmless.)
+        await loop.run_in_executor(_THREAD_POOL, _write_bytes_file, fpath, jpeg)
     except Exception as e:
         logger.debug(f"[Pass-1] Frame save failed for {cam_id}: {e}")
         fpath = None
@@ -1870,7 +1937,7 @@ _NEET_DISPLAY_COLUMNS = [
     "Expected Category", "VLM Category",
     "OCR TC Code", "OCR Camera Label", "OCR Text Side",
     "TC Match", "Name Match", "Confidence", "VLM Reason",
-    "Frame Path", "Notes",
+    "Frame URL", "Notes",
 ]
 
 
@@ -1894,7 +1961,7 @@ def _neet_row_from_result(r: dict) -> dict:
         "Name Match":        r.get("name_match", ""),
         "Confidence":        r.get("confidence", ""),
         "VLM Reason":        r.get("vlm_reason", r.get("detail", "")),
-        "Frame Path":        r.get("frame_path", ""),
+        "Frame URL":         _frame_path_to_url(r.get("frame_path", "")),
         "Notes":             r.get("notes", ""),
         "Sheet":             r.get("sheet", ""),
     }
@@ -1928,6 +1995,28 @@ def _save_neet_report(results: List[dict], tag: str = "") -> Optional[str]:
     with pd.ExcelWriter(out_file, engine="openpyxl") as writer:
         for sheet_name in ("Classified", "Mismatch", "Unrecognized", "Offline"):
             _sheet(sheet_name).to_excel(writer, sheet_name=sheet_name, index=False)
+
+        # Make the "Frame URL" column clickable (like the consolidated report's
+        # "View" links) so the frame opens straight from the Excel off-network.
+        from openpyxl.styles import Font
+        link_font = Font(color="0563C1", underline="single")
+        for sheet_name in ("Classified", "Mismatch", "Unrecognized", "Offline"):
+            ws = writer.sheets.get(sheet_name)
+            if ws is None or ws.max_row < 2:
+                continue
+            url_col = None
+            for cell in next(ws.iter_rows(min_row=1, max_row=1)):
+                if cell.value == "Frame URL":
+                    url_col = cell.column
+                    break
+            if not url_col:
+                continue
+            for row in range(2, ws.max_row + 1):
+                cell = ws.cell(row=row, column=url_col)
+                val = cell.value
+                if isinstance(val, str) and val.startswith("http"):
+                    cell.hyperlink = val
+                    cell.font = link_font
 
     counts = rdf["Sheet"].value_counts().to_dict()
     logger.info(f"NEET report → {out_file} | {counts}")
@@ -2060,7 +2149,7 @@ async def run_assignment_mode() -> dict:
                 "camera_no": str(cam.get("camera_no") or ""),
                 "status": "Not Accessible",
             })
-        _bulk_persist_status(runtime, statuses_to_persist)
+        await asyncio.get_event_loop().run_in_executor(_THREAD_POOL, _bulk_persist_status, runtime, statuses_to_persist)
 
         if not accessible:
             logger.warning("No accessible cameras — nothing to classify")
@@ -2121,10 +2210,10 @@ async def run_assignment_mode() -> dict:
             f"Pass-2: {len(pass2_failed_statuses)} cameras failed after Pass-1 success — "
             f"reverting DB status to Not Accessible"
         )
-        _bulk_persist_status(runtime, pass2_failed_statuses)
+        await asyncio.get_event_loop().run_in_executor(_THREAD_POOL, _bulk_persist_status, runtime, pass2_failed_statuses)
 
     # Bulk persist — one round-trip at the end (same DB writes as the RTSP path)
-    updated = _bulk_persist(runtime, classifications)
+    updated = await asyncio.get_event_loop().run_in_executor(_THREAD_POOL, _bulk_persist, runtime, classifications)
 
     # NEET Excel report: Pass-2 results (Classified/Mismatch/Unrecognized) +
     # Pass-1 failures as Offline. (Kept exactly like the original NEET output.)

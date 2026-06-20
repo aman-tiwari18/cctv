@@ -13,6 +13,11 @@ from app.camera_distributor import should_process_camera
 WORKER_ID = os.environ.get("WORKER_ID", "worker-0")
 IS_MAIN_WORKER = WORKER_ID in ("worker-0", "main")
 
+# Capture-once scaling: collapse all of a shift's detection analytics into ONE
+# master_pipeline process per worker (shared YOLO, fan-out to every analytic)
+# instead of one process per analytic. Set GROUP_DETECTION_ANALYTICS=0 to revert.
+GROUP_DETECTION_ANALYTICS = os.environ.get("GROUP_DETECTION_ANALYTICS", "1") == "1"
+
 class Poller:
     def __init__(self):
         self.is_running = False
@@ -25,6 +30,7 @@ class Poller:
         self.running_scripts = set()
         self.scheduled_scripts = {}  # id -> Task
         self.completed_scripts = set()
+        self.group_members = {}      # group_key -> [member execution_ids] (grouped detection)
         self._poll_task = None
 
         # --- Crash backoff tracking (merged from worker poller) ---
@@ -48,6 +54,56 @@ class Poller:
 
     def _is_vision(self, assignment) -> bool:
         return self._normalized_code(assignment) in script_runner.VISION_CODES
+
+    def _group_detection_assignments(self, all_data):
+        """Collapse all of a shift's detection analytics into ONE job per
+        (exam_id, shift_id, link_type) so each worker runs a single master_pipeline
+        that captures every camera ONCE and the unified detector fans the shared
+        YOLO pass out to all analytics. Vision/neet and non-pipeline assignments
+        pass through unchanged. Single-analytic shifts also pass through as-is
+        (nothing to merge). Gated by GROUP_DETECTION_ANALYTICS.
+        """
+        if not GROUP_DETECTION_ANALYTICS:
+            return all_data
+        passthrough = []
+        groups = {}
+        for a in all_data:
+            code = self._normalized_code(a)
+            if self._is_vision(a) or code not in script_runner.PIPELINE_CODES:
+                passthrough.append(a)
+                continue
+            meta  = a.get("execution_metadata", {}) or {}
+            exam  = meta.get("exam_id")  or a.get("exam_id")
+            shift = meta.get("shift_id") or a.get("shift_id")
+            link  = str(meta.get("link_type") or a.get("link_type") or "HLS").upper()
+            key   = f"grp-{exam}-{shift}-{link}"
+            g = groups.get(key)
+            if g is None:
+                g = groups[key] = {"rep": a, "members": [], "analytics": []}
+            g["members"].append(str(a["id"]))
+            if code not in g["analytics"]:
+                g["analytics"].append(code)
+        combined = []
+        for key, g in groups.items():
+            if len(g["members"]) == 1:
+                combined.append(g["rep"])          # nothing to merge
+                continue
+            rep = dict(g["rep"])                    # shallow copy — keeps exam/shift/link/scheduled_at/metadata
+            rep["id"] = key
+            rep["_member_ids"] = g["members"]
+            rep["_analytics"]  = g["analytics"]
+            combined.append(rep)
+            logger.info(f"[group] {key}: {len(g['members'])} analytics → one master_pipeline ({g['analytics']})")
+        return passthrough + combined
+
+    def _status_targets(self, assignment):
+        """The real backend execution_ids whose status this job represents — the
+        member ids for a grouped detection job, else just the assignment id."""
+        return assignment.get("_member_ids") or [str(assignment.get("id"))]
+
+    async def _update_status_all(self, assignment, status, data=None):
+        for tid in self._status_targets(assignment):
+            await self.update_assignment_status(tid, status, data)
 
     async def start(self):
         if self.is_running:
@@ -90,15 +146,23 @@ class Poller:
         """
         for execution_id in list(self.running_scripts):
             try:
-                r = await client.get(
-                    f"{self.backend_url}/executions/{execution_id}",
-                    headers={"X-API-Key": self.api_key},
-                )
-                if r.status_code != 200:
-                    continue
-                data = r.json().get("data") or {}
-                status = str(data.get("status", "")).upper()
-                if status in ("CANCELLED", "CANCELED", "STOPPED"):
+                # A grouped detection job's key ("grp-…") is not a real backend
+                # execution — check its member executions instead.
+                member_ids = self.group_members.get(execution_id, [execution_id])
+                cancelled = False
+                for mid in member_ids:
+                    r = await client.get(
+                        f"{self.backend_url}/executions/{mid}",
+                        headers={"X-API-Key": self.api_key},
+                    )
+                    if r.status_code != 200:
+                        continue
+                    data = r.json().get("data") or {}
+                    status = str(data.get("status", "")).upper()
+                    if status in ("CANCELLED", "CANCELED", "STOPPED"):
+                        cancelled = True
+                        break
+                if cancelled:
                     logger.info(
                         f"⏹ Execution {execution_id} is {status} in backend — "
                         f"stopping local script"
@@ -106,6 +170,7 @@ class Poller:
                     await script_runner.cancel(execution_id)
                     self.running_scripts.discard(execution_id)
                     self.scheduled_scripts.pop(execution_id, None)
+                    self.group_members.pop(execution_id, None)
             except Exception as e:
                 logger.debug(f"Cancellation check for {execution_id} failed: {e}")
 
@@ -167,7 +232,8 @@ class Poller:
 
                 if all_data:
                     logger.info(f"Fetched {len(all_data)} assignment(s) (Pending: {len(pending_data)}, Running: {len(running_data)})")
-                    for assignment in all_data:
+                    # Capture-once: merge a shift's detection analytics into one job/worker.
+                    for assignment in self._group_detection_assignments(all_data):
                         # Filter assignments based on camera distribution
                         if should_process_camera(assignment):
                             self.queue_assignment(assignment)
@@ -259,6 +325,8 @@ class Poller:
             return
 
         self.running_scripts.add(assignment_id)
+        if assignment.get("_member_ids"):
+            self.group_members[assignment_id] = assignment["_member_ids"]
         is_vision = self._is_vision(assignment)
 
         try:
@@ -266,7 +334,7 @@ class Poller:
 
             # Only main worker updates global status to RUNNING
             if IS_MAIN_WORKER:
-                await self.update_assignment_status(assignment_id, "RUNNING")
+                await self._update_status_all(assignment, "RUNNING")
 
             result = await script_runner.execute_script(assignment)
 
@@ -294,13 +362,13 @@ class Poller:
             # marks it COMPLETED once the window ends. Non-vision detectors re-run
             # every frequency cycle, so they still complete immediately.
             if IS_MAIN_WORKER and (not is_vision or self._shift_window_closed(assignment)):
-                await self.update_assignment_status(assignment_id, "COMPLETED", {"result_data": result})
+                await self._update_status_all(assignment, "COMPLETED", {"result_data": result})
 
         except Exception as e:
             if "__TIMEOUT_COMPLETED__" in str(e):
                 logger.info(f"✔ Assignment {assignment_id} timed out after duration — marking COMPLETED")
                 if IS_MAIN_WORKER:
-                    await self.update_assignment_status(assignment_id, "COMPLETED", {"result_data": {"note": "Script ran for full duration"}})
+                    await self._update_status_all(assignment, "COMPLETED", {"result_data": {"note": "Script ran for full duration"}})
                 # A clean duration-timeout is a successful run.
                 self._crash_tracker.pop(assignment_id, None)
                 if is_vision:
@@ -308,7 +376,7 @@ class Poller:
             else:
                 logger.error(f"✘ Assignment {assignment_id} failed: {e}")
                 if IS_MAIN_WORKER:
-                    await self.update_assignment_status(assignment_id, "FAILED", {"error_log": str(e)})
+                    await self._update_status_all(assignment, "FAILED", {"error_log": str(e)})
 
                 # --- Crash backoff: track failures for non-vision scripts ---
                 # Vision is one-shot (completed_scripts), so it can't crash-loop;
@@ -333,6 +401,7 @@ class Poller:
 
         finally:
             self.running_scripts.discard(assignment_id)
+            self.group_members.pop(assignment_id, None)
 
     async def update_assignment_status(self, assignment_id, status, data=None):
         if data is None:

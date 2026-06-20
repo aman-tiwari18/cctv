@@ -10,6 +10,7 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  TableSortLabel,
   Button,
   Chip,
   Typography,
@@ -49,6 +50,9 @@ const UserVerification = () => {
   const [selectedGpuId, setSelectedGpuId] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [alert, setAlert] = useState({ show: false, message: '', severity: 'success' });
+  // Verified-users table sorting (by assigned gpu_id). orderBy '' = no sort.
+  const [order, setOrder] = useState('asc');
+  const [orderBy, setOrderBy] = useState('');
 
   console.log('UserVerification component mounted');
 
@@ -160,11 +164,31 @@ const UserVerification = () => {
     }
   };
 
-  const filteredUsers = users.filter(user => 
+  const filteredUsers = users.filter(user =>
     (user.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
      user.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
      user.company_name?.toLowerCase().includes(searchTerm.toLowerCase())) ?? false
   );
+
+  const handleRequestSort = () => {
+    const isAsc = orderBy === 'gpu_id' && order === 'asc';
+    setOrder(isAsc ? 'desc' : 'asc');
+    setOrderBy('gpu_id');
+  };
+
+  // Sort the table by the assigned gpu_id when active. Unassigned (null/undefined)
+  // operators always sink to the bottom regardless of asc/desc direction.
+  const displayedUsers = React.useMemo(() => {
+    if (orderBy !== 'gpu_id') return filteredUsers;
+    const val = (u) => (u.gpu_id === null || u.gpu_id === undefined ? null : Number(u.gpu_id));
+    return [...filteredUsers].sort((a, b) => {
+      const av = val(a), bv = val(b);
+      if (av === null && bv === null) return 0;
+      if (av === null) return 1;
+      if (bv === null) return -1;
+      return order === 'asc' ? av - bv : bv - av;
+    });
+  }, [filteredUsers, orderBy, order]);
 
   return (
     <Box sx={{ p: { xs: 0, sm: 3 } }}>
@@ -259,20 +283,31 @@ const UserVerification = () => {
                     {tabValue === 1 && (
                       <TableCell sx={{ fontWeight: 600, color: '#374151' }}>Verified</TableCell>
                     )}
+                    {tabValue === 1 && (
+                      <TableCell sx={{ fontWeight: 600, color: '#374151' }} sortDirection={orderBy === 'gpu_id' ? order : false}>
+                        <TableSortLabel
+                          active={orderBy === 'gpu_id'}
+                          direction={orderBy === 'gpu_id' ? order : 'asc'}
+                          onClick={handleRequestSort}
+                        >
+                          GPU
+                        </TableSortLabel>
+                      </TableCell>
+                    )}
                     <TableCell sx={{ fontWeight: 600, color: '#374151' }}>Actions</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
                   {filteredUsers.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={tabValue === 1 ? 7 : 6} sx={{ textAlign: 'center', py: 4 }}>
+                      <TableCell colSpan={tabValue === 1 ? 8 : 6} sx={{ textAlign: 'center', py: 4 }}>
                         <Typography color="text.secondary">
                           {searchTerm ? 'No users found matching your search' : `No ${tabValue === 0 ? 'pending' : 'verified'} users found`}
                         </Typography>
                       </TableCell>
                     </TableRow>
                   ) : (
-                    filteredUsers.map((user) => (
+                    displayedUsers.map((user) => (
                       <TableRow key={user.id} hover>
                         <TableCell>
                           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -318,14 +353,8 @@ const UserVerification = () => {
                               color: getRoleColor(user.role),
                               fontWeight: 600,
                               fontSize: '0.75rem',
-                              mb: user.role === 'OPERATOR' && user.gpu_id !== null ? 0.5 : 0
                             }}
                           />
-                          {user.role === 'OPERATOR' && user.gpu_id !== null && (
-                            <Typography variant="caption" display="block" color="text.secondary">
-                              GPU: {user.gpu_id}
-                            </Typography>
-                          )}
                         </TableCell>
                         <TableCell>
                           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
@@ -343,6 +372,19 @@ const UserVerification = () => {
                                 {formatDate(user.verified_date)}
                               </Typography>
                             </Box>
+                          </TableCell>
+                        )}
+                        {tabValue === 1 && (
+                          <TableCell>
+                            {user.gpu_id !== null && user.gpu_id !== undefined ? (
+                              <Chip
+                                label={`GPU ${user.gpu_id}`}
+                                size="small"
+                                sx={{ backgroundColor: '#fff7ed', color: '#b45309', fontWeight: 600, fontSize: '0.75rem' }}
+                              />
+                            ) : (
+                              <Typography variant="body2" color="text.secondary">—</Typography>
+                            )}
                           </TableCell>
                         )}
                         <TableCell>

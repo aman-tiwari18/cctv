@@ -194,7 +194,7 @@ exports.getRemovedDetections = async (req, res) => {
                 let examSql = 'SELECT id FROM exams WHERE is_active = 1';
                 const examParams = [];
                 if (userCompany === 'EY') {
-                    examSql += " AND exam_body IN ('SSC','TCS')";
+                    examSql += " AND exam_body IN ('SSC','TCS','NTA')";
                 } else {
                     examSql += ' AND exam_body = ?';
                     examParams.push(userCompany);

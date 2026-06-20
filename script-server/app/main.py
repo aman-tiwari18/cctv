@@ -2,6 +2,7 @@
 import asyncio
 import re
 import os
+import time
 import shutil
 import openpyxl
 from openpyxl.styles import Font
@@ -36,7 +37,17 @@ from scripts.detection.backend.pipeline_manager import (
     cleanup_old_pipelines, processes, ALL_ANALYTICS
 )
 
-DETECTION_SCAN_INTERVAL_SECONDS = 10
+# How often the watch loop wakes. Each wake does a cheap INCREMENTAL scan
+# (only files newer than the last scan, via directory-mtime pruning), so this
+# can be short without re-walking the whole ~200k-file history every time.
+DETECTION_SCAN_INTERVAL_SECONDS = 3
+# Periodically fall back to a FULL rescan so deletions / anything the
+# incremental pass missed are reconciled into the snapshot + date index.
+DETECTION_FULL_RESCAN_SECONDS = 300
+# Look-back overlap (s) applied to the incremental mtime cutoff so we never miss
+# a file because of clock skew or NFS attribute-cache lag. The snapshot diff
+# (new = recent − known) prevents the overlap from re-emitting anything.
+DETECTION_SCAN_MTIME_OVERLAP = 30
 known_detection_files = {}
 # Secondary index: type_key → date_str → Set[tagged_path]
 # Allows O(k) date-filtered lookups instead of O(N) full scans.
@@ -343,7 +354,7 @@ def _attach_shift_names(items) -> None:
             it["shift_name"] = nm
 
 
-def _enrich_detection_item_from_report(item: dict) -> dict:
+def _enrich_detection_item_from_report(item: dict, conn=None) -> dict:
     uid = item.get("uid")
     if not uid:
         return item
@@ -356,9 +367,12 @@ def _enrich_detection_item_from_report(item: dict) -> dict:
     else:
         tables = ["camera_report_hls", "camera_report_rtsp"]
 
-    conn = None
+    # Reuse a caller-provided connection (the watch loop opens ONE per cycle and
+    # passes it for every new file) instead of opening+closing one per detection.
+    own_conn = conn is None
     try:
-        conn = _get_connection()
+        if own_conn:
+            conn = _get_connection()
         with conn.cursor() as cur:
             for table in tables:
                 cur.execute(
@@ -397,7 +411,7 @@ def _enrich_detection_item_from_report(item: dict) -> dict:
     except Exception as e:
         logger.error(f"Detection report metadata lookup failed: {e}")
     finally:
-        if conn:
+        if own_conn and conn:
             conn.close()
 
     return item
@@ -560,6 +574,67 @@ def list_detection_files() -> dict:
     return snapshot
 
 
+def _iter_recent_detection_files(type_key: str, folder: Path, since_ts: float):
+    """Yield image files under `folder` modified at/after `since_ts`.
+
+    Incremental analog of _iter_detection_files. We still descend every
+    subdirectory (a write deep in the tree only bumps its immediate parent's
+    mtime, not its ancestors'), but we only stat the FILES inside a directory
+    whose OWN mtime is >= since_ts. Unchanged history is therefore skipped
+    instead of re-statting all ~200k files every few seconds — the per-cycle
+    cost becomes O(directories + new files) rather than O(all files).
+    """
+    if not folder.exists():
+        return
+    stack = [str(folder)]
+    while stack:
+        d = stack.pop()
+        try:
+            dir_recent = os.stat(d).st_mtime >= since_ts
+        except OSError:
+            dir_recent = True  # can't tell → don't skip its files
+        try:
+            with os.scandir(d) as it:
+                for entry in it:
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            stack.append(entry.path)
+                            continue
+                        if not dir_recent:
+                            continue
+                        name = entry.name.lower()
+                        if not name.endswith((".jpg", ".jpeg", ".png")):
+                            continue
+                        # Invigilator: skip periodic /annotated snapshots (event images only).
+                        if type_key == "invigilator" and "annotated" in entry.path.lower().split(os.sep):
+                            continue
+                        if entry.stat().st_mtime >= since_ts:
+                            yield Path(entry.path)
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+
+
+def scan_recent_detection_files(since_ts: float) -> dict:
+    """Incremental scan: like list_detection_files but only files newer than
+    since_ts (per type, both HLS + RTSP roots). Returns the same tagged-path
+    shape so the watch loop can diff it against the running snapshot."""
+    snapshot = {}
+    for type_key, folder_name in DETECTION_FOLDERS.items():
+        files = set()
+        hls_folder = RESULTS_DIR / folder_name
+        if hls_folder.exists():
+            for f in _iter_recent_detection_files(type_key, hls_folder, since_ts):
+                files.add("hls:" + str(f.relative_to(hls_folder).as_posix()))
+        rtsp_folder = RTSP_RESULTS_DIR / folder_name
+        if rtsp_folder.exists():
+            for f in _iter_recent_detection_files(type_key, rtsp_folder, since_ts):
+                files.add("rtsp:" + str(f.relative_to(rtsp_folder).as_posix()))
+        snapshot[type_key] = files
+    return snapshot
+
+
 def _build_date_index(snapshot: dict) -> dict:
     """Build a type_key → date_str → set[tagged_path] index from a snapshot."""
     by_date: dict = {}
@@ -589,51 +664,76 @@ def _tagged_detection_matches(tagged_path: str, date: Optional[str] = None) -> b
 async def detection_watch_loop():
     global known_detection_files, known_detection_by_date
 
+    # Wall-clock cutoff for the next incremental scan, and a monotonic marker for
+    # when the last FULL reconcile ran. The startup snapshot (built in lifespan)
+    # is already complete, so the first incremental pass only needs to look back
+    # a little before "now".
+    last_scan_wall = time.time()
+    last_full_rescan = time.monotonic()
+
     while True:
         await asyncio.sleep(DETECTION_SCAN_INTERVAL_SECONDS)
         try:
-            # Run in thread — rglob over 90k files blocks for ~0.5s synchronously.
-            current_snapshot = await asyncio.to_thread(list_detection_files)
+            do_full = (time.monotonic() - last_full_rescan) >= DETECTION_FULL_RESCAN_SECONDS
 
-            for type_key, current_files in current_snapshot.items():
-                previous_files = known_detection_files.get(type_key, set())
-                new_files = current_files - previous_files
-                removed_files = previous_files - current_files
-
-                # Incrementally maintain the date index for added/removed files.
-                if type_key not in known_detection_by_date:
-                    known_detection_by_date[type_key] = {}
-                date_map = known_detection_by_date[type_key]
-
-                for tagged_path in new_files:
-                    try:
-                        _, relative_path = tagged_path.split(":", 1)
-                    except ValueError:
+            # ── Decide per-type NEW files, and the snapshot/date-index to publish.
+            # Both branches build FRESH dict/set objects (copy-on-write) and rebind
+            # the globals only at the end, so the REST handlers — which take a
+            # stable reference and iterate — never see a set mutate underneath them.
+            if do_full:
+                # Full rescan: re-walk everything (reconciles deletions too).
+                new_known = await asyncio.to_thread(list_detection_files)
+                per_type_new = {
+                    tk: cur - known_detection_files.get(tk, set())
+                    for tk, cur in new_known.items()
+                }
+                new_date_index = _build_date_index(new_known)
+                last_full_rescan = time.monotonic()
+            else:
+                # Incremental: only files modified since the last scan (minus an
+                # overlap), pruned by directory mtime. O(dirs + new files).
+                cutoff = last_scan_wall - DETECTION_SCAN_MTIME_OVERLAP
+                recent = await asyncio.to_thread(scan_recent_detection_files, cutoff)
+                new_known = dict(known_detection_files)
+                new_date_index = dict(known_detection_by_date)
+                per_type_new = {}
+                for type_key, recent_files in recent.items():
+                    previous = new_known.get(type_key, set())
+                    fresh = recent_files - previous
+                    per_type_new[type_key] = fresh
+                    if not fresh:
                         continue
-                    d = _basic_detection_meta(relative_path).get("date")
-                    if d:
-                        date_map.setdefault(d, set()).add(tagged_path)
+                    new_known[type_key] = previous | fresh          # new set (COW)
+                    date_map = dict(new_date_index.get(type_key, {}))
+                    for tagged_path in fresh:
+                        try:
+                            _, relative_path = tagged_path.split(":", 1)
+                        except ValueError:
+                            continue
+                        d = _basic_detection_meta(relative_path).get("date")
+                        if d:
+                            date_map[d] = date_map.get(d, set()) | {tagged_path}
+                    new_date_index[type_key] = date_map
 
-                for tagged_path in removed_files:
-                    try:
-                        _, relative_path = tagged_path.split(":", 1)
-                    except ValueError:
+            last_scan_wall = time.time()
+
+            # ── Emit new files. One shared DB connection per cycle for enrichment
+            # (was one open+close PER file — the per-cycle latency killer).
+            total_new = sum(len(v) for v in per_type_new.values())
+            conn = await asyncio.to_thread(_get_connection) if total_new else None
+            try:
+                for type_key, new_files in per_type_new.items():
+                    if not new_files:
                         continue
-                    d = _basic_detection_meta(relative_path).get("date")
-                    if d and d in date_map:
-                        date_map[d].discard(tagged_path)
 
-                if new_files:
-                    def _new_file_mtime(tagged_path: str) -> float:
+                    def _new_file_mtime(tagged_path: str, _tk=type_key) -> float:
                         try:
                             origin, relative_path = tagged_path.split(":", 1)
                             base_dir = RTSP_RESULTS_DIR if origin == "rtsp" else RESULTS_DIR
-                            return (base_dir / DETECTION_FOLDERS[type_key] / relative_path).stat().st_mtime
+                            return (base_dir / DETECTION_FOLDERS[_tk] / relative_path).stat().st_mtime
                         except Exception:
                             return 0
 
-                    # Sorting calls .stat() per file, which is an NFS round trip
-                    # each. Offload to a thread so the event loop stays free.
                     sorted_new = await asyncio.to_thread(
                         lambda paths: sorted(paths, key=_new_file_mtime),
                         new_files,
@@ -645,15 +745,14 @@ async def detection_watch_loop():
                             origin, relative_path = tagged_path.split(":", 1)
                             base_dir = RTSP_RESULTS_DIR if origin == "rtsp" else RESULTS_DIR
                             file_path = base_dir / DETECTION_FOLDERS[type_key] / relative_path
-                            # parse_detection_filename hits the in-memory camera
-                            # index (mostly cache hits) but may also hit MySQL on
-                            # miss — keep it off the event loop just in case.
                             payload = await asyncio.to_thread(
                                 parse_detection_filename,
                                 relative_path, type_key, file_path,
                                 True, origin,
                             )
-                            payload = await asyncio.to_thread(_enrich_detection_item_from_report, payload)
+                            payload = await asyncio.to_thread(
+                                _enrich_detection_item_from_report, payload, conn,
+                            )
                             # Role-based routing: 'all' room = admin/client (everything);
                             # gpu:{id} room = operators assigned to that gpu. Disjoint rooms,
                             # so no double-delivery. Missing gpu_id (old files) → admin/client only.
@@ -666,16 +765,25 @@ async def detection_watch_loop():
                             logger.error(f"Failed to emit live detection {type_key} {tagged_path}: {exc}")
 
                     logger.info(f"Live detections emitted: {type_key} count={emitted} new_files={len(new_files)}")
+            finally:
+                if conn is not None:
+                    try:
+                        await asyncio.to_thread(conn.close)
+                    except Exception:
+                        pass
 
-            # O(1) today count via date index — no more O(N) iteration every 2 s.
+            # Publish the new snapshot + date index atomically (readers see the
+            # complete old or complete new structures, never a half-updated one).
+            known_detection_files = new_known
+            known_detection_by_date = new_date_index
+
+            # O(1) today count via date index — no O(N) iteration.
             today_iso = datetime.now().date().isoformat()
             counts = {
                 k: len(known_detection_by_date.get(k, {}).get(today_iso, set()))
-                for k in current_snapshot
+                for k in DETECTION_FOLDERS
             }
             await sio.emit("detection:counts", counts)
-
-            known_detection_files = current_snapshot
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -1475,6 +1583,8 @@ def parse_detection_filename(
         "source":      source,
         "cameraName":  camera_name,
         "centerName":  center_name,
+        "device_id":   cam_meta.get("device_id") or "",
+        "camera_no":   cam_meta.get("camera_no") or ch_no_display,
         "city":        city,
         "state":       state,
         "tcCode":      tc_code,
@@ -1506,6 +1616,7 @@ def list_detections(
     end_time: Optional[str] = None,
     exam_id: Optional[str] = None,
     shift_id: Optional[str] = None,
+    gpu_id: Optional[int] = None,      # operator sharding: restrict to this worker's gpu
     page: int = 1,
     limit: int = 50,
 ):
@@ -1516,6 +1627,10 @@ def list_detections(
     # data that lacks a reliable shift tag). Fold it into start/end time bounds.
     start_time, end_time = _apply_shift_window(shift_id, start_time, end_time)
     has_extra_filters = bool(exam_id or start_time or end_time)
+
+    # Operator gpu sharding: pre-compile a cheap regex for the _gpu{N}_ token
+    # embedded in detection filenames. None = no gpu filter (admin/client).
+    _gpu_filter_pat = re.compile(rf'_gpu{int(gpu_id)}[_.]', re.IGNORECASE) if gpu_id is not None else None
 
     # Take stable references to avoid races with the background watcher.
     snapshot = known_detection_files
@@ -1547,6 +1662,14 @@ def list_detections(
                 continue
             if source == "hls" and origin != "hls":
                 continue
+
+            # Operator gpu sharding: skip files that don't carry this gpu's token.
+            # Files without any _gpu token are old/untagged → only shown when
+            # no gpu filter is active (i.e. admin/client sees everything).
+            if _gpu_filter_pat is not None:
+                basename_for_gpu = relative_path.split("/")[-1] if "/" in relative_path else relative_path
+                if not _gpu_filter_pat.search(basename_for_gpu):
+                    continue
 
             # Date is pre-filtered by the index; only run the regex for the
             # remaining filters to avoid redundant filename parsing.
@@ -1686,7 +1809,11 @@ def list_detections(
         uid = item.get("uid")
         meta = uid_db_meta.get(uid, {})
         item["pushed_to_client"] = 1 if uid in pushed_uids else 0
-        item["gpu_id"] = meta.get("gpu_id")
+        # Filename gpu_id is primary (e.g. _gpu4_ token); only fall back to the
+        # DB column when the filename had no _gpu token (older detections).
+        db_gpu = meta.get("gpu_id")
+        if db_gpu is not None and item.get("gpu_id") is None:
+            item["gpu_id"] = db_gpu
         if meta.get("shift_id") is not None:
             item["shift_id"] = meta.get("shift_id")
         if meta.get("shiftName"):
@@ -1940,7 +2067,7 @@ def list_client_detections(
             if user_role and user_role != 'ADMIN':
                 if user_company:
                     if user_company == 'EY':
-                        cur.execute("SELECT id FROM exams WHERE exam_body IN ('SSC', 'TCS') AND is_active = 1")
+                        cur.execute("SELECT id FROM exams WHERE exam_body IN ('SSC', 'TCS', 'NTA') AND is_active = 1")
                     else:
                         cur.execute("SELECT id FROM exams WHERE exam_body = %s AND is_active = 1", (user_company,))
                     user_exam_ids = [row['id'] for row in cur.fetchall()]
@@ -2230,4 +2357,45 @@ async def disconnect(sid):
 
 
 fastapi_app = app
-app = socketio.ASGIApp(sio, other_asgi_app=fastapi_app, socketio_path="socket.io")
+_socket_app = socketio.ASGIApp(sio, other_asgi_app=fastapi_app, socketio_path="socket.io")
+
+
+class _ResilientASGIApp:
+    """Top-level ASGI guard.
+
+    The embedded Socket.IO/engineio polling handler intermittently raises
+    ``RuntimeError: Response content longer/shorter than Content-Length`` under
+    heavy ``/socket`` load. As the outermost ASGI app that exception propagated
+    into uvicorn's serve TaskGroup and crashed the whole process — which made pm2
+    restart the poller and SIGINT-kill any in-flight (multi-hour) NEET
+    classification job, so classification never completed.
+
+    Swallow per-request (http/websocket) errors here so one bad request can never
+    take down the server. Lifespan errors are always re-raised (startup/shutdown
+    must surface). Errors after the response has started can't be recovered, but
+    ending the request quietly is far better than killing the process.
+    """
+
+    def __init__(self, app):
+        self._app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "lifespan":
+            await self._app(scope, receive, send)
+            return
+        try:
+            await self._app(scope, receive, send)
+        except RuntimeError as exc:
+            if "Content-Length" in str(exc):
+                logger.warning(
+                    f"Suppressed ASGI Content-Length error on {scope.get('path')!r}: {exc}"
+                )
+                return
+            logger.exception(f"Suppressed ASGI RuntimeError on {scope.get('path')!r}")
+            return
+        except Exception:  # noqa: BLE001 — never let a request crash the server
+            logger.exception(f"Suppressed unhandled ASGI error on {scope.get('path')!r}")
+            return
+
+
+app = _ResilientASGIApp(_socket_app)

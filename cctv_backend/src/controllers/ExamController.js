@@ -76,8 +76,8 @@ exports.getAllExams = async (req, res) => {
     // hide cameras they're supposed to be reviewing.
     if (userRole !== 'ADMIN' && userRole !== 'OPERATOR' && userCompanyName) {
         if (userCompanyName === 'EY') {
-            // EY users see both SSC and TCS exams
-            where.exam_body = ['SSC', 'TCS'];
+            // EY users see SSC, TCS and NTA exams
+            where.exam_body = ['SSC', 'TCS', 'NTA'];
         } else {
             // Other users see only their company's exams
             where.exam_body = userCompanyName;

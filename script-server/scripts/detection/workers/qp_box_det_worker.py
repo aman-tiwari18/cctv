@@ -67,7 +67,7 @@ _gpu_queue = queue.Queue(maxsize=GPU_QUEUE_SIZE)
 # =====================================================
 # 🚀 GPU BATCH WORKER
 # =====================================================
-def _gpu_batch_worker(stop_event, save_folder, cooldown_time=600):
+def _gpu_batch_worker(stop_event, save_folder, cooldown_time=240):
     """
     GPU batch worker — YOLO inference + GPU color verification.
     Warms up YOLO model on first start so first real frame isn't slow.

@@ -10,9 +10,27 @@ export const SocketProvider = ({ children }) => {
   const clientExamsRef = useRef([]);
 
   useEffect(() => {
+    // Read auth credentials at connection time so the server can shard
+    // operators into their assigned gpu:{id} rooms.
+    // Operators → join only their gpu room(s); admin/client → join "all".
+    let authPayload = {};
+    try {
+      const savedUser = localStorage.getItem('user');
+      if (savedUser) {
+        const u = JSON.parse(savedUser);
+        authPayload = {
+          role:    (u.role    || '').toUpperCase(),
+          user_id: u.id ?? u.user_id ?? null,
+        };
+      }
+    } catch (_) {
+      // Ignore parse errors — server will treat this client as unauthenticated
+    }
+
     const resolvedPath = SOCKET_PATH || '/cctv_dev/socket.io';
     const newSocket = io(SOCKET_URL, {
       path: resolvedPath,
+      auth: authPayload,          // ← role + user_id sent in the handshake
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
@@ -20,12 +38,16 @@ export const SocketProvider = ({ children }) => {
 
     newSocket.on('connect', () => {
       setConnected(true);
-      console.log('✅ Socket connected');
+      console.log('✅ Socket connected', authPayload);
     });
 
     newSocket.on('disconnect', () => {
       setConnected(false);
       console.log('❌ Socket disconnected');
+    });
+
+    newSocket.on('detections:connected', (data) => {
+      console.log('📡 Socket room assignment:', data);
     });
 
     // unfilteredCounts is now owned entirely by page-local API fetches and
@@ -40,7 +62,7 @@ export const SocketProvider = ({ children }) => {
       newSocket.disconnect();
       console.log('🔌 Socket cleanup completed');
     };
-  }, []);
+  }, []);  // runs once on mount — credentials are read from localStorage
 
   // Method to set client exams for filtering
   const setClientExams = (examIds) => {

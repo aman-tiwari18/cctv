@@ -56,6 +56,7 @@ exports.login = async (req, res) => {
             id: user.id,
             username: user.username,
             role: user.role,
+            gpu_id: user.gpu_id ?? null,
         },
         process.env.JWT_SECRET,
         { expiresIn: process.env.JWT_EXPIRES_IN || "24h" }
@@ -76,6 +77,7 @@ exports.login = async (req, res) => {
                 verified: user.verified,
                 verified_date: user.verified_date,
                 role: user.role,
+                gpu_id: user.gpu_id ?? null,   // ← operator sharding key
             },
         },
     });

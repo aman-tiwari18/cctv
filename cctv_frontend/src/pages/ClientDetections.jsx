@@ -60,6 +60,7 @@ import { useSocket } from '../contexts/SocketContext';
 import { useSearchParams } from 'react-router-dom';
 import { examsAPI, reportAPI, clientDetectionsAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import * as XLSX from 'xlsx';
 
 const TYPE_META = {
   proximity: { label: 'Close Proximity', color: '#5cb88a', bg: '#e5f5ed' },
@@ -70,7 +71,7 @@ const TYPE_META = {
   server: { label: 'Server Room', color: '#a0623d', bg: '#f3ebe4' },
   intruder: { label: 'Intruder', color: '#d94466', bg: '#fce4ea' },
   strongroom: { label: 'Strong Room Movement', color: '#b91c1c', bg: '#fef2f2' },
-  qp_box: { label: 'QP Box Detection', color: '#dc2626', bg: '#fee2e2' },
+  qp_box: { label: 'QP Box Not Visible In Strong Room', color: '#dc2626', bg: '#fee2e2' },
   entry_exit: { label: 'Entry/Exit', color: '#1d7a7d', bg: '#e0f0f0' },
   phone: { label: 'Phone', color: '#465a38', bg: '#e8ece5' },
   blind_spot: { label: 'Blind Spot', color: '#b0a850', bg: '#f3f2e4' },
@@ -1082,7 +1083,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, onUndo, removi
 }
 
 const ClientDetections = () => {
-  const { setUnfilteredCounts, typeFilter, setTypeFilter, setDownloadConsolidatedReport, setReportValidationError } = useDetectionCounts();
+  const { setUnfilteredCounts, typeFilter, setTypeFilter, setExportToExcel, setDownloadConsolidatedReport, setReportValidationError } = useDetectionCounts();
   const { user } = useAuth(); // Get user from context
   const theme = useTheme();
   // List view is keyboard-driven (↑↓ → ←) — irrelevant on touch, so force Grid below md.
@@ -1251,6 +1252,106 @@ const ClientDetections = () => {
   useEffect(() => {
     setDownloadConsolidatedReport(() => handleDownloadClientReport);
   }, [handleDownloadClientReport, setDownloadConsolidatedReport]);
+
+  /* Client "Export detections" — mirrors the admin export but hits the
+     company-scoped /client-detections endpoint. Exports the FULL filtered set
+     (all pages, limit = total), not just the current "Images per page" slice. */
+  const exportToExcel = useCallback(async () => {
+    const buildParams = (limit) => {
+      const params = new URLSearchParams({ page: 1, limit });
+      if (typeFilter.length > 0) params.append('type', typeFilter.join(','));
+      if (sourceFilter) params.append('source', sourceFilter);
+      if (dateFilter) params.append('date', parseDateForQuery(dateFilter));
+      if (search.trim()) params.append('search', search.trim());
+      if (appliedStartTime) params.append('start_time', appliedStartTime);
+      if (appliedEndTime) params.append('end_time', appliedEndTime);
+      if (examFilter) params.append('exam_id', examFilter);
+      if (shiftFilter) params.append('shift_id', shiftFilter);
+      if (user?.role) params.append('user_role', user.role);
+      if (user?.company_name) params.append('user_company', user.company_name);
+      return params;
+    };
+
+    let exportItems = [];
+    try {
+      const exportTotal = total || 0;
+      if (exportTotal > 0) {
+        const res = await axios.get(`${API_BASE_1}/client-detections?${buildParams(exportTotal)}`);
+        exportItems = Array.isArray(res.data?.data) ? res.data.data : [];
+      }
+    } catch (err) {
+      console.error('Client export fetch failed:', err);
+    }
+    if (exportItems.length === 0) return;
+
+    const TYPE_LABELS = {
+      proximity: 'Close Proximity', crowd: 'Crowd Detection', crowd_five: 'Crowd < 5',
+      crowd_zero: 'Zero Person', server: 'Server Room', intruder: 'Intruder',
+      entry_exit: 'Entry/Exit', phone: 'Phone', blind_spot: 'Blind Spot',
+      invigilator: 'Invigilator', inversion: 'Camera Inversion', tamper: 'Camera Tampering',
+    };
+
+    const rows = exportItems.map((item) => {
+      const rawDate = item.date || '';
+      const formattedDate = rawDate.match(/^\d{4}-\d{2}-\d{2}$/)
+        ? rawDate.split('-').reverse().join('-')
+        : rawDate;
+
+      const timeStr = (() => {
+        const m = /,\s*(\d{1,2}):(\d{2}):(\d{2})\s*(AM|PM)/i.exec(item.detected_at || '');
+        if (!m) return item.detected_at || '-';
+        let h = parseInt(m[1], 10);
+        const min = m[2], sec = m[3], ampm = m[4].toUpperCase();
+        if (ampm === 'PM' && h !== 12) h += 12;
+        if (ampm === 'AM' && h === 12) h = 0;
+        return `${String(h).padStart(2, '0')}:${min}:${sec}`;
+      })();
+
+      const imageUrl = item.image_url
+        ? `http://www.examscctvmonitoring.com/cctv_dev${String(item.image_url).replace(/^\/+/, '/')}`
+        : '';
+
+      return {
+        'Detection Type': TYPE_LABELS[item.type] || item.type,
+        'Center Name': item.centerName || item.centre_name || '-',
+        'Camera Name': item.cameraName || item.camera_name || item.camera_id || '-',
+        'Location': item.city || '-',
+        'Device ID': item.deviceId || item.device_id || '-',
+        'Camera No': item.cameraNo || item.camera_no || (item.chNo != null ? String(item.chNo) : '') || '-',
+        'Date': formattedDate || '-',
+        'Time': timeStr,
+        'Timestamp': item.detected_at || '-',
+        'City': item.city || '-',
+        'Frame URL': imageUrl,
+      };
+    });
+
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws['!cols'] = [
+      { wch: 18 }, { wch: 40 }, { wch: 25 }, { wch: 20 }, { wch: 15 },
+      { wch: 12 }, { wch: 14 }, { wch: 22 }, { wch: 28 }, { wch: 20 },
+      { wch: 80 },
+    ];
+
+    // "Frame URL" column (index 10): short "View" link to the full frame URL.
+    const range = XLSX.utils.decode_range(ws['!ref']);
+    for (let R = range.s.r + 1; R <= range.e.r; R++) {
+      const cellAddr = XLSX.utils.encode_cell({ r: R, c: 10 });
+      const url = rows[R - 1]['Frame URL'];
+      if (url) {
+        ws[cellAddr] = { v: 'View', t: 's', l: { Target: url, Tooltip: 'Click to open image' } };
+      }
+    }
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Detections');
+    const dateStr = dateFilter || formatDateDDMMYYYY(new Date());
+    XLSX.writeFile(wb, `cctv_detections_${dateStr}.xlsx`);
+  }, [typeFilter, sourceFilter, dateFilter, search, appliedStartTime, appliedEndTime, examFilter, shiftFilter, user, total]);
+
+  useEffect(() => {
+    setExportToExcel(() => exportToExcel);
+  }, [exportToExcel, setExportToExcel]);
 
   // Memoized filter function to check if an item matches current filters
   const matchesFilters = useCallback((item) => {

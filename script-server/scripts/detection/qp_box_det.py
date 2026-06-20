@@ -77,11 +77,35 @@ QP_BOX_MIN_AREA     = int(os.environ.get("QP_BOX_MIN_AREA",  3000))
 COLOR_RATIO_THRESH  = float(os.environ.get("QP_BOX_COLOR_RATIO", "0.10"))
 MIN_COLOR_PX_GLOBAL = int(os.environ.get("QP_BOX_MIN_COLOR_PX", "2000"))
 
+# ── Target colours ────────────────────────────────────────────────────────────
+# QP boxes are wrapped in different coloured cloth at different centres. The
+# legacy config matched only YELLOW, but many centres wrap the box in a
+# PINK / MAGENTA cloth (see field photo), which the yellow hue band (15-45)
+# completely misses. So we now match a LIST of colour ranges and treat a box as
+# valid if it contains enough of ANY of them. Each entry is
+# (name, hue_low, hue_high, sat_low, sat_high, val_low, val_high) in OpenCV HSV
+# (H 0-179). Set QP_BOX_INCLUDE_PINK=0 to revert to yellow-only.
+QP_BOX_COLOR_RANGES = [
+    (QP_BOX_COLOR_NAME, QP_BOX_HUE_LOW, QP_BOX_HUE_HIGH,
+     QP_BOX_SAT_LOW, QP_BOX_SAT_HIGH, QP_BOX_VAL_LOW, QP_BOX_VAL_HIGH),
+]
+if os.environ.get("QP_BOX_INCLUDE_PINK", "1") == "1":
+    QP_BOX_COLOR_RANGES.append((
+        "pink",
+        int(os.environ.get("QP_BOX_PINK_HUE_LOW",  140)),
+        int(os.environ.get("QP_BOX_PINK_HUE_HIGH", 175)),
+        int(os.environ.get("QP_BOX_PINK_SAT_LOW",   60)),
+        255,
+        int(os.environ.get("QP_BOX_PINK_VAL_LOW",   80)),
+        255,
+    ))
+
+# Combined name used on the annotated frame / logs (e.g. "yellow+pink").
+QP_BOX_DISPLAY_NAME = "+".join(r[0] for r in QP_BOX_COLOR_RANGES)
+
 logger.info(
-    f"[QPBox] color={QP_BOX_COLOR_NAME} "
-    f"H=[{QP_BOX_HUE_LOW},{QP_BOX_HUE_HIGH}] "
-    f"S=[{QP_BOX_SAT_LOW},{QP_BOX_SAT_HIGH}] "
-    f"V=[{QP_BOX_VAL_LOW},{QP_BOX_VAL_HIGH}] "
+    f"[QPBox] colors={QP_BOX_DISPLAY_NAME} "
+    f"ranges={[(n, hl, hh, sl, sh, vl, vh) for (n, hl, hh, sl, sh, vl, vh) in QP_BOX_COLOR_RANGES]} "
     f"min_area={QP_BOX_MIN_AREA} ratio_thresh={COLOR_RATIO_THRESH}"
 )
 
@@ -147,20 +171,24 @@ def _count_color_pixels_gpu(frame_np: np.ndarray, roi=None) -> int:
         return 0
 
     if not torch.cuda.is_available():
-        # CPU fallback
-        hsv   = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
-        lo    = np.array([QP_BOX_HUE_LOW,  QP_BOX_SAT_LOW,  QP_BOX_VAL_LOW],  np.uint8)
-        hi    = np.array([QP_BOX_HUE_HIGH, QP_BOX_SAT_HIGH, QP_BOX_VAL_HIGH], np.uint8)
-        return int(cv2.inRange(hsv, lo, hi).sum() // 255)
+        # CPU fallback — OR every configured colour range together.
+        hsv  = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
+        mask = None
+        for (_n, hl, hh, sl, sh, vl, vh) in QP_BOX_COLOR_RANGES:
+            lo = np.array([hl, sl, vl], np.uint8)
+            hi = np.array([hh, sh, vh], np.uint8)
+            m  = cv2.inRange(hsv, lo, hi)
+            mask = m if mask is None else cv2.bitwise_or(mask, m)
+        return int(mask.sum() // 255) if mask is not None else 0
 
     hsv = _bgr_to_hsv_torch(patch)           # [H,W,3] on GPU
     h, s, v = hsv[..., 0], hsv[..., 1], hsv[..., 2]
-    mask = (
-        (h >= QP_BOX_HUE_LOW)  & (h <= QP_BOX_HUE_HIGH) &
-        (s >= QP_BOX_SAT_LOW)  & (s <= QP_BOX_SAT_HIGH) &
-        (v >= QP_BOX_VAL_LOW)  & (v <= QP_BOX_VAL_HIGH)
-    )
-    return int(mask.sum().item())
+    # A pixel counts if it falls inside ANY of the target colour ranges.
+    mask = None
+    for (_n, hl, hh, sl, sh, vl, vh) in QP_BOX_COLOR_RANGES:
+        m = (h >= hl) & (h <= hh) & (s >= sl) & (s <= sh) & (v >= vl) & (v <= vh)
+        mask = m if mask is None else (mask | m)
+    return int(mask.sum().item()) if mask is not None else 0
 
 
 # ── Core two-stage detector ───────────────────────────────────────────────────
@@ -197,7 +225,7 @@ def _detect_qp_box(frame: np.ndarray):
             found      = True
             box_count += 1
             cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            label = f"QP Box [{QP_BOX_COLOR_NAME}] {color_ratio:.0%}"
+            label = f"QP Box [{QP_BOX_DISPLAY_NAME}] {color_ratio:.0%}"
             cv2.putText(annotated, label, (x1, max(y1 - 8, 12)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 2)
         else:
@@ -211,7 +239,7 @@ def _detect_qp_box(frame: np.ndarray):
             found      = True
             box_count  = 1
             cv2.putText(annotated,
-                        f"QP Box [{QP_BOX_COLOR_NAME}] color={global_px}px (fallback)",
+                        f"QP Box [{QP_BOX_DISPLAY_NAME}] color={global_px}px (fallback)",
                         (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 0), 2)
 
     return found, annotated, box_count

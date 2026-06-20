@@ -112,7 +112,7 @@ const TYPE_META = {
   server: { label: 'Server Room', color: '#a0623d', bg: '#f3ebe4', iconKey: 'server' },
   intruder: { label: 'Intruder', color: '#d94466', bg: '#fce4ea', iconKey: 'intruder' },
   strongroom: { label: 'Strong Room Movement', color: '#b91c1c', bg: '#fef2f2', iconKey: 'strongroom' },
-  qp_box: { label: 'QP Box Detection', color: '#dc2626', bg: '#fee2e2', iconKey: 'qp_box' },
+  qp_box: { label: 'QP Box Not Visible In Strong Room', color: '#dc2626', bg: '#fee2e2', iconKey: 'qp_box' },
   entry_exit: { label: 'Entry/Exit', color: '#1d7a7d', bg: '#e0f0f0', iconKey: 'entry_exit' },
   phone: { label: 'Phone', color: '#465a38', bg: '#e8ece5', iconKey: 'phone' },
   blind_spot: { label: 'Blind Spot', color: '#b0a850', bg: '#f3f2e4', iconKey: 'blind_spot' },
@@ -1019,8 +1019,14 @@ export default function Detections() {
     if (shiftFilter) params.append('shift_id', shiftFilter);
     if (appliedStartTime) params.append('start_time', appliedStartTime);
     if (appliedEndTime) params.append('end_time', appliedEndTime);
+    // Operator sharding: restrict to their assigned GPU's detections only.
+    // Admin / Client / Viewer pass no gpu_id → see everything.
+    if (user?.role === 'OPERATOR' && user?.gpu_id != null) {
+      params.append('gpu_id', user.gpu_id);
+    }
     return params;
-  }, [typeFilter, dateFilter, debouncedSearch, examFilter, shiftFilter, appliedStartTime, appliedEndTime, rowsPerPage]);
+  }, [typeFilter, dateFilter, debouncedSearch, examFilter, shiftFilter, appliedStartTime, appliedEndTime, rowsPerPage, user]);
+
 
   // Optimized fetch with abort controller and request deduplication
   const fetchDetections = useCallback(async (pg = 1, rpp = rowsPerPage) => {
@@ -1318,8 +1324,28 @@ export default function Detections() {
   };
   const totalAll = Object.values(counts).reduce((a, b) => a + b, 0);
 
-  const exportToExcel = () => {
-    if (filteredData.length === 0) return;
+  const exportToExcel = async () => {
+    // Export the FULL filtered dataset (every matching detection across all
+    // pages), NOT just the current "Images per page" slice. The active filters
+    // already encode the intent: when no type is selected in the sidebar the
+    // backend returns all types, when some are selected it returns only those —
+    // so we just re-fetch page 1 with limit = total to pull everything.
+    let exportItems = [];
+    try {
+      const exportTotal = total || 0;
+      if (exportTotal > 0) {
+        const params = buildDetectionParams(1, exportTotal);
+        const res = await axios.get(`${API_BASE_1}/detections?${params}`);
+        exportItems = Array.isArray(res.data?.data) ? res.data.data : [];
+      }
+    } catch (err) {
+      console.error('Export fetch failed, falling back to current page:', err);
+    }
+
+    // Fallback to the in-memory current page if the bulk fetch returned nothing
+    // (e.g. network error) so the user still gets an export.
+    if (exportItems.length === 0) exportItems = filteredData;
+    if (exportItems.length === 0) return;
 
     const TYPE_LABELS = {
       proximity: 'Close Proximity', crowd: 'Crowd Detection', crowd_five: 'Crowd < 5',
@@ -1329,7 +1355,7 @@ export default function Detections() {
     };
 
     // Build rows
-    const rows = filteredData.map((item) => {
+    const rows = exportItems.map((item) => {
       // Convert date: "2026-04-08" → "08-04-2026"
       const rawDate = item.date || '';
       const formattedDate = rawDate.match(/^\d{4}-\d{2}-\d{2}$/)
@@ -1350,25 +1376,29 @@ export default function Detections() {
       // Image URL: use the correct base path
       // const IMAGE_BASE = 'http://172.31.102.8/cctv/images/results/new_tcs_results/';
       // const imageUrl = item.image_url ? `${IMAGE_BASE}${item.image_url}` : '';
-      const IMAGE_BASE = `${API_BASE_1}`;
+
+
+      // const IMAGE_BASE = `${API_BASE_1}`;
+      // const imageUrl = item.image_url
+      //   ? `${IMAGE_BASE}${item.image_url}`
+      //   : '';
+
       const imageUrl = item.image_url
-        ? `${IMAGE_BASE}${item.image_url}`
+        ? `http://www.examscctvmonitoring.com/cctv_dev${item.image_url.replace(/^\/+/, '/')}`
         : '';
 
       return {
         'Detection Type': TYPE_LABELS[item.type] || item.type,
         'Center Name': item.centerName || item.centre_name || '-',
         'Camera Name': item.cameraName || item.camera_name || item.camera_id || '-',
-        'Location': item.location || '-',
+        'Location': item.location || item.city || '-',
         'Device ID': item.deviceId || item.device_id || '-',
-        'Camera No': item.cameraNo || item.camera_no || '-',
+        'Camera No': item.cameraNo || item.camera_no || (item.chNo != null ? String(item.chNo) : '') || '-',
         'Date': formattedDate || '-',
         'Time': timeStr,
         'Timestamp': item.detected_at || '-',
-        'Persons Count': item.count ?? '',
-        'Confidence': item.confidence != null ? `${(item.confidence * 100).toFixed(1)}%` : '',
         'City': item.city || '-',
-        'Download Image': imageUrl,
+        'Frame URL': imageUrl,
       };
     });
 
@@ -1377,18 +1407,19 @@ export default function Detections() {
     // Column widths
     ws['!cols'] = [
       { wch: 18 }, { wch: 40 }, { wch: 25 }, { wch: 20 }, { wch: 15 },
-      { wch: 12 }, { wch: 14 }, { wch: 22 }, { wch: 28 }, { wch: 14 },
-      { wch: 12 }, { wch: 20 }, { wch: 80 },
+      { wch: 12 }, { wch: 14 }, { wch: 22 }, { wch: 28 }, { wch: 20 },
+      { wch: 80 },
     ];
 
-    // Add hyperlinks to the "Download Image" column (column M, index 12)
+    // Add hyperlinks to the "Frame URL" column (column K, index 10).
+    // Cell shows a short "View" link that opens the full frame URL.
     const range = XLSX.utils.decode_range(ws['!ref']);
     for (let R = range.s.r + 1; R <= range.e.r; R++) {
-      const cellAddr = XLSX.utils.encode_cell({ r: R, c: 12 }); // column M
-      const url = rows[R - 1]['Download Image'];
+      const cellAddr = XLSX.utils.encode_cell({ r: R, c: 10 }); // column K
+      const url = rows[R - 1]['Frame URL'];
       if (url) {
         ws[cellAddr] = {
-          v: 'Click to Download',
+          v: 'View',
           t: 's',
           l: { Target: url, Tooltip: 'Click to open image' },
         };

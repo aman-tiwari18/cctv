@@ -45,6 +45,13 @@ const formatDateDDMMYYYY = (dateStr) => {
 
 const truncate = (str, n = 40) => str && str.length > n ? str.slice(0, n) + '…' : str;
 
+const COLUMN_LABELS = {
+  tc_code: 'Center Code',
+};
+
+const formatColumnLabel = (col) =>
+  COLUMN_LABELS[col] || col.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+
 const getStatusChipProps = (status) => {
   const normalized = String(status || '').trim().toLowerCase();
 
@@ -338,7 +345,7 @@ const ClientCameras = () => {
                             {['centre_name', 'tc_code', 'state', 'camera_name', 'ch_code', 'camera_category', 'classification', 'status', 'exam_date', 'shift_name'].map((col) => (
                               <TableCell key={col} sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b' }}>
                                 <TableSortLabel active={camOrderBy === col} direction={camOrderBy === col ? camOrder : 'asc'} onClick={() => handleCamSort(col)}>
-                                  {col.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                                  {formatColumnLabel(col)}
                                 </TableSortLabel>
                               </TableCell>
                             ))}
@@ -348,7 +355,7 @@ const ClientCameras = () => {
                             {['device_id', 'camera_no', 'tc_code', 'camera_name', 'centre_name', 'state', 'classification', 'status'].map((col) => (
                               <TableCell key={col} sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b' }}>
                                 <TableSortLabel active={camOrderBy === col} direction={camOrderBy === col ? camOrder : 'asc'} onClick={() => handleCamSort(col)}>
-                                  {col.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                                  {formatColumnLabel(col)}
                                 </TableSortLabel>
                               </TableCell>
                             ))}
