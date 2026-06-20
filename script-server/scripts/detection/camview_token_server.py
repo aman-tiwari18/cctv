@@ -50,7 +50,7 @@ logger = logging.getLogger("camview_token_server")
 # Configuration (mirrors vision_classification_rtsp.py)
 # ---------------------------------------------------------------------------
 _AUTH_USER    = os.getenv("CAMVIEW_AUTH_USER", "system")
-_AUTH_PASS    = os.getenv("CAMVIEW_AUTH_PASS", "Coreiseven@@")
+_AUTH_PASS    = os.getenv("CAMVIEW_AUTH_PASS", "Sasd@12345")
 _TIMEOUT_API  = int(os.getenv("VISION_TIMEOUT_API", "6"))
 _KEEPALIVE_S  = 22   # keepalive interval in seconds
 _AUTH_BACKOFF = int(os.getenv("CAMVIEW_AUTH_BACKOFF", "400"))  # seconds before retrying a failed auth (>300s DVR lockout window)

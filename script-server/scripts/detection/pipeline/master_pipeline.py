@@ -202,8 +202,8 @@ _ACTIVE_CHILD_PROCESSES = set()
 _ACTIVE_CHILD_LOCK = threading.Lock()
 
 DSS_USER = "system"
+DSS_PASS = "Sasd@12345"
 # DSS_PASS = "Sasd@12345"
-DSS_PASS = "Coreiseven@@"
 
 # ================= CRITICAL FIX: Shared disk-based token cache =================
 TOKEN_CACHE_FILE = os.path.join(PROJECT_ROOT, "server_tokens.json")

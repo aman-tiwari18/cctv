@@ -57,7 +57,7 @@ logger = logging.getLogger(__name__)
 
 # ── Config ───────────────────────────────────────────────────────────────────
 CAMVIEW_USER = os.getenv("CAMVIEW_AUTH_USER", "system")
-CAMVIEW_PASS = os.getenv("CAMVIEW_AUTH_PASS", "Coreiseven@@")
+CAMVIEW_PASS = os.getenv("CAMVIEW_AUTH_PASS", "Sasd@12345")
 TIMEOUT_API  = 10
 TIMEOUT_FFMPEG = 15
 OLLAMA_URL   = os.getenv("VISION_OLLAMA_URL", "http://localhost:11434/api/generate")

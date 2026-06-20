@@ -109,10 +109,20 @@ exports.getPending = async (req, res) => {
     const now        = new Date();
     const windowStart = new Date(now.getTime() - graceMins      * 60 * 1000);
     const windowEnd   = new Date(now.getTime() + lookaheadMins  * 60 * 1000);
-    const windowStartStr = toTimeStr(windowStart); // e.g. "11:28:05"
-    const windowEndStr   = toTimeStr(windowEnd);   // e.g. "12:01:05"
-    // Use LOCAL date (IST), NOT UTC date. toISOString() gives UTC which is 5h30m behind IST —
-    // between 00:00–05:30 IST this would return yesterday's date and miss all early-morning assignments.
+
+    // Compare FULL datetimes (assignment_date + start time), NOT time-of-day.
+    // The old time-only BETWEEN broke across midnight: e.g. polled at 00:28 with
+    // grace=30, the window was '23:58'..'00:31' and `'00:26' BETWEEN '23:58' AND
+    // '00:31'` is FALSE — so anything scheduled just after midnight was invisible
+    // and never dispatched. Full-datetime comparison handles midnight correctly.
+    const fmtDT = (d) => {
+        const p = (n) => String(n).padStart(2, "0");
+        return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} `
+             + `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+    };
+    const windowStartDT = fmtDT(windowStart); // local (IST) "YYYY-MM-DD HH:MM:SS"
+    const windowEndDT   = fmtDT(windowEnd);
+    // Use LOCAL date (IST) for the data-mapping fallback below.
     const todayStr = [
         now.getFullYear(),
         String(now.getMonth() + 1).padStart(2, "0"),
@@ -146,12 +156,12 @@ exports.getPending = async (req, res) => {
             ssa.status    = 'PENDING'
             AND ssa.is_active = TRUE
             AND e.is_active   = TRUE
-            AND ssa.assignment_date = ?
-            AND COALESCE(ssa.custom_start_time, es.start_time) BETWEEN ? AND ?
-        ORDER BY COALESCE(ssa.custom_start_time, es.start_time) ASC
+            AND TIMESTAMP(ssa.assignment_date, COALESCE(ssa.custom_start_time, es.start_time))
+                BETWEEN ? AND ?
+        ORDER BY TIMESTAMP(ssa.assignment_date, COALESCE(ssa.custom_start_time, es.start_time)) ASC
         LIMIT ?
     `, {
-        replacements: [todayStr, windowStartStr, windowEndStr, limit],
+        replacements: [windowStartDT, windowEndDT, limit],
         type: sequelize.QueryTypes.SELECT,
     });
 
@@ -534,28 +544,47 @@ exports.getVisionSummary = async (req, res) => {
 
     const { sequelize } = require("../config/db");
 
+    // Clock alignment: ssa.started_at / completed_at are TIMESTAMPs (read as true
+    // UTC because the connection runs at +00:00), but camera_links_rtsp.updated_at
+    // is a DATETIME the Python workers write in LOCAL (system / IST) time, so it
+    // reads back ~5h30m ahead of UTC. Subtracting one from the other in JS (as the
+    // old code did) inflated the duration by the tz offset (e.g. a real 2h31m run
+    // showed as 8h1m). Fix: do the duration math in SQL, with started_at converted
+    // into the SAME SYSTEM clock as updated_at, then convert the resulting
+    // last-finish back to UTC for the response.
     const [rows] = await sequelize.query(`
         SELECT
-            ssa.id                AS assignment_id,
-            ssa.status,
-            ssa.started_at,
-            ssa.completed_at,
-            ssa.assignment_date,
-            (
-                SELECT MAX(clr.updated_at)
-                FROM camera_links_rtsp clr
-                WHERE clr.exam_id = :exam_id
-                  AND clr.updated_at > ssa.started_at
-            ) AS last_worker_finished_at
-        FROM shift_script_assignments ssa
-        JOIN scripts s ON s.id = ssa.script_id
-        JOIN exam_shifts es ON es.id = ssa.shift_id
-        WHERE s.script_id = 'vision'
-          AND es.exam_id = :exam_id
-          AND ssa.is_active = TRUE
-          AND ssa.started_at IS NOT NULL
-        ORDER BY ssa.started_at DESC
-        LIMIT 1
+            assignment_id,
+            status,
+            started_at,
+            completed_at,
+            assignment_date,
+            TIMESTAMPDIFF(MINUTE, started_local, last_finish_local) AS duration_minutes,
+            CONVERT_TZ(last_finish_local, 'SYSTEM', @@session.time_zone) AS last_worker_finished_at
+        FROM (
+            SELECT
+                ssa.id        AS assignment_id,
+                ssa.status,
+                ssa.started_at,
+                ssa.completed_at,
+                ssa.assignment_date,
+                CONVERT_TZ(ssa.started_at, @@session.time_zone, 'SYSTEM') AS started_local,
+                (
+                    SELECT MAX(clr.updated_at)
+                    FROM camera_links_rtsp clr
+                    WHERE clr.exam_id = :exam_id
+                      AND clr.updated_at > CONVERT_TZ(ssa.started_at, @@session.time_zone, 'SYSTEM')
+                ) AS last_finish_local
+            FROM shift_script_assignments ssa
+            JOIN scripts s ON s.id = ssa.script_id
+            JOIN exam_shifts es ON es.id = ssa.shift_id
+            WHERE s.script_id IN ('vision', 'vision_neet')
+              AND es.exam_id = :exam_id
+              AND ssa.is_active = TRUE
+              AND ssa.started_at IS NOT NULL
+            ORDER BY ssa.started_at DESC
+            LIMIT 1
+        ) t
     `, { replacements: { exam_id: parseInt(exam_id) } });
 
     if (!rows || rows.length === 0) {
@@ -563,12 +592,64 @@ exports.getVisionSummary = async (req, res) => {
     }
 
     const row = rows[0];
-    let duration_minutes = null;
-    const finishedAt = row.last_worker_finished_at || row.completed_at;
-    if (row.started_at && finishedAt) {
+    let duration_minutes = row.duration_minutes != null ? Number(row.duration_minutes) : null;
+    let finishedAt = row.last_worker_finished_at || row.completed_at;
+    // Fallback when no camera has been (re)processed yet for this run: use the
+    // assignment's own completed_at, which is a TIMESTAMP in the same UTC clock as
+    // started_at, so this subtraction is clock-consistent.
+    if (duration_minutes == null && row.started_at && row.completed_at) {
         duration_minutes = Math.round(
-            (new Date(finishedAt) - new Date(row.started_at)) / 60000
+            (new Date(row.completed_at) - new Date(row.started_at)) / 60000
         );
+        finishedAt = row.completed_at;
+    }
+
+    // ── Live progress + ETA across ALL workers for this exam's vision run ──
+    // Cameras are sharded across the GPU fleet; the run completes only when the
+    // slowest worker finishes. Estimate that from overall progress: how many of
+    // the exam's cameras have been (re)processed since the run started vs total,
+    // projected over elapsed wall-clock. Naturally stretches as the slower 8-GPU
+    // workers lag behind.
+    let progress = null;
+    if (row.started_at) {
+        // NOTE on clocks: updated_at is stored in SYSTEM/local (IST) time, and the
+        // mysql2 driver binds the :started_at JS Date as a local-time string too,
+        // so this comparison is already clock-consistent (both IST) — no CONVERT_TZ
+        // needed here. (The duration query above converts because it compares the
+        // raw started_at TIMESTAMP *column*, which is read as UTC.)
+        const [pr] = await sequelize.query(`
+            SELECT
+                COUNT(*)                       AS total_cameras,
+                SUM(updated_at >= :started_at) AS processed
+            FROM camera_links_rtsp
+            WHERE exam_id = :exam_id
+        `, { replacements: { exam_id: parseInt(exam_id), started_at: row.started_at } });
+
+        if (pr && pr[0] && Number(pr[0].total_cameras) > 0) {
+            const total      = Number(pr[0].total_cameras);
+            const processed  = Number(pr[0].processed) || 0;
+            const elapsedSec = Math.max(0, Math.round((Date.now() - new Date(row.started_at).getTime()) / 1000));
+            const percent    = Math.min(100, Math.round((processed * 100) / total));
+            // ETA only makes sense while the run is actively RUNNING. Once the
+            // assignment is COMPLETED we still report percent/processed (so an
+            // incomplete run — e.g. the slow 8-GPU workers cut off — is visible),
+            // but no "time remaining" projection.
+            const isRunning  = String(row.status || "").toUpperCase() === "RUNNING";
+            let eta_seconds  = null;
+            if (processed >= total) {
+                eta_seconds = 0;                                   // all cameras processed
+            } else if (isRunning && processed > 0 && elapsedSec > 0) {
+                eta_seconds = Math.round(elapsedSec * (total - processed) / processed);
+            }
+            progress = {
+                total_cameras: total,
+                processed_count: processed,
+                percent,
+                elapsed_seconds: elapsedSec,
+                eta_seconds,                                       // est. seconds remaining (null = unknown)
+                est_total_seconds: eta_seconds == null ? null : elapsedSec + eta_seconds,
+            };
+        }
     }
 
     res.json({
@@ -580,6 +661,7 @@ exports.getVisionSummary = async (req, res) => {
             started_at: row.started_at,
             last_worker_finished_at: finishedAt,
             duration_minutes,
+            progress,
         },
     });
 };

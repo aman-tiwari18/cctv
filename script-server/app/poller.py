@@ -78,11 +78,45 @@ class Poller:
             await self.poll()
             await asyncio.sleep(self.poll_interval_s)
 
+    async def _enforce_cancellations(self, client):
+        """Stop locally-running scripts that have been CANCELLED in the backend.
+
+        The HTTP cancel fan-out from the main server can't reach workers in this
+        environment (their FastAPI ports are firewalled / not routable from main),
+        so each worker self-cancels: it polls the status of its own running
+        executions and kills any that the backend now marks CANCELLED/STOPPED.
+        Workers CAN always reach the backend (that's how they poll), so this path
+        is reliable regardless of the cross-host network topology.
+        """
+        for execution_id in list(self.running_scripts):
+            try:
+                r = await client.get(
+                    f"{self.backend_url}/executions/{execution_id}",
+                    headers={"X-API-Key": self.api_key},
+                )
+                if r.status_code != 200:
+                    continue
+                data = r.json().get("data") or {}
+                status = str(data.get("status", "")).upper()
+                if status in ("CANCELLED", "CANCELED", "STOPPED"):
+                    logger.info(
+                        f"⏹ Execution {execution_id} is {status} in backend — "
+                        f"stopping local script"
+                    )
+                    await script_runner.cancel(execution_id)
+                    self.running_scripts.discard(execution_id)
+                    self.scheduled_scripts.pop(execution_id, None)
+            except Exception as e:
+                logger.debug(f"Cancellation check for {execution_id} failed: {e}")
+
     async def poll(self):
         try:
             logger.debug("Polling for upcoming assignments...")
 
             async with httpx.AsyncClient() as client:
+                # 0. Enforce cancellations on anything we're running locally.
+                await self._enforce_cancellations(client)
+
                 # 1. Fetch PENDING tasks
                 pending_response = await client.get(
                     f"{self.backend_url}/executions/pending",

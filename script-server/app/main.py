@@ -876,14 +876,22 @@ async def cancel_execution(execution_id: str, forwarded: bool = False):
     killed = await script_runner.cancel(execution_id)
     forwarded_kill = False
 
-    # If we didn't kill anything locally, the script may be running on another worker.
-    # Fan out to the other workers (skip when called via forwarding to avoid loops).
-    if not killed and not forwarded:
+    # A distributed analytic (detection: entry_exit / crowd / intruder / …, and
+    # vision classification) runs the SAME execution_id on EVERY worker at once —
+    # each over its own camera shard. So a cancel must reach ALL workers, not just
+    # the one that happens to answer first.
+    #   Previous bug: fan-out was gated on `not killed` (so if main had a local
+    #   copy it never told the others) AND `break` after the first hit — leaving
+    #   the rest of the fleet running the cancelled script (observed on worker-6).
+    # Fix: always fan out (unless this call is itself a forward), to ALL remote
+    # workers concurrently, no early break.
+    if not forwarded:
         remote_workers = [
             w for w in GPU_WORKERS
             if w["ip"] not in ("localhost", "127.0.0.1", "0.0.0.0")
         ]
-        for w in remote_workers:
+
+        async def _forward_cancel(w):
             try:
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     r = await client.post(
@@ -891,11 +899,15 @@ async def cancel_execution(execution_id: str, forwarded: bool = False):
                         params={"forwarded": "true"},
                     )
                     if r.status_code == 200 and r.json().get("process_killed"):
-                        forwarded_kill = True
-                        logger.info(f"⏹ {execution_id} cancelled on remote worker {w['id']} ({w['ip']})")
-                        break  # one worker had it; no need to ask the rest
+                        logger.info(f"⏹ {execution_id} cancelled on remote worker {w['id']} ({w['ip']}:{w['port']})")
+                        return True
             except Exception as e:
-                logger.debug(f"Cancel fan-out to {w['id']} ({w['ip']}) failed: {e}")
+                logger.debug(f"Cancel fan-out to {w['id']} ({w['ip']}:{w['port']}) failed: {e}")
+            return False
+
+        if remote_workers:
+            results = await asyncio.gather(*[_forward_cancel(w) for w in remote_workers])
+            forwarded_kill = any(results)
 
     if not killed and not forwarded_kill:
         # Not in active processes anywhere — check if poller still tracks it.

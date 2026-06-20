@@ -104,7 +104,7 @@ TIMEOUT_OPENCV_HARD  = 6    # FIX #7: wall-clock thread-join limit for OpenCV (s
 TIMEOUT_FFMPEG       = 6    # seconds for FFmpeg subprocess
 
 AUTH_USERNAME        = "system"
-AUTH_PASSWORD        = "Coreiseven@@"
+AUTH_PASSWORD        = "Sasd@12345"
 TOKEN_EXPIRY_SECONDS = 3600   # FIX #3: was 90s, now 1 hour
 AUTH_MAX_ATTEMPTS    = 2
 

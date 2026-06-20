@@ -34,9 +34,18 @@ exec vllm serve Qwen/Qwen3-VL-30B-A3B-Instruct \
     --gpu-memory-utilization 0.55 \
     --max-num-seqs 12 \
     --dtype bfloat16 \
-    --moe-backend triton
+    --moe-backend triton \
+    --enforce-eager
 # --moe-backend triton: forces the pre-compiled Triton MoE kernel instead of
 # FlashInfer CUTLASS. The CUTLASS path JIT-compiles its kernel with nvcc, which
 # is not installed in this environment (caused "Could not find nvcc" crash
 # during determine_available_memory after weights had loaded). Triton kernels
 # ship pre-compiled and are well-tested for Qwen3-VL-MoE on H200.
+#
+# --enforce-eager: disable CUDA graphs. The Qwen3-VL deepstack path crashed the
+# EngineCore with "Requested more deepstack tokens than available in buffer:
+# num_tokens=24 > 21" — a forward padded to a captured graph size (24) overflowed
+# the profiled deepstack buffer (21), killing vLLM (EngineDeadError → all requests
+# 500). Eager mode runs each forward at its real token count (no padding to a
+# captured size), so the buffer never overflows. Costs some throughput, no
+# accuracy change. (vLLM v0.20.1 Qwen3-VL bug.)
