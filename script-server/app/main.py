@@ -7,7 +7,7 @@ import shutil
 import openpyxl
 from openpyxl.styles import Font
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import quote
@@ -2084,110 +2084,112 @@ def list_client_detections(
                     if k.strip() in DETECTION_FOLDERS
                 ]
 
-            def _build_where() -> tuple:
-                """Build WHERE clause shared by both tables. Type filter is omitted
-                here so we can count all types for the sidebar in one pass.
+            # Date/time are filtered on created_at (an indexed TIMESTAMP that equals the
+            # detection's insert time, ~seconds after capture) instead of the unreliable
+            # varchar date_time. This lets total/per-type counts/pagination be computed
+            # accurately in SQL (COUNT / GROUP BY / LIMIT-OFFSET) instead of capping the
+            # fetch at 5000 and counting in Python (which under-reported the real total).
+            created_lo = created_hi = None
+            if date:
+                try:
+                    _d = datetime.strptime(str(date)[:10], "%Y-%m-%d")
+                    created_lo = _d.strftime("%Y-%m-%d 00:00:00")
+                    created_hi = (_d + timedelta(days=1)).strftime("%Y-%m-%d 00:00:00")
+                except Exception:
+                    created_lo = created_hi = None
 
-                NOTE: date is intentionally NOT pushed into SQL because exam_date
-                is unreliable (NULL on many rows, or set to the exam schedule date
-                rather than the detection date). Date filtering uses _basic_detection_meta
-                on the filename, which is always correct.
-                """
+            def _build_where(include_type: bool) -> tuple:
+                """WHERE shared by count/group/data queries. `include_type` adds the
+                detection_type filter (kept OUT for the sidebar counts pass)."""
                 conds = ["pushed_to_client = 1", "remove_from_client = 0"]
                 params: list = []
                 if exam_id:
-                    conds.append("exam_id = %s")
-                    params.append(exam_id)
+                    conds.append("exam_id = %s"); params.append(exam_id)
                 elif user_exam_ids:
                     ph = ','.join(['%s'] * len(user_exam_ids))
-                    conds.append(f"exam_id IN ({ph})")
-                    params.extend(user_exam_ids)
+                    conds.append(f"exam_id IN ({ph})"); params.extend(user_exam_ids)
+                if created_lo and created_hi:
+                    conds.append("created_at >= %s AND created_at < %s")
+                    params.extend([created_lo, created_hi])
+                if start_time:
+                    conds.append("TIME(created_at) >= %s"); params.append(f"{start_time}:00")
+                if end_time:
+                    conds.append("TIME(created_at) <= %s"); params.append(f"{end_time}:59")
+                if search:
+                    like = f"%{search}%"
+                    conds.append("(camera_name LIKE %s OR center_name LIKE %s OR city LIKE %s "
+                                 "OR state LIKE %s OR tc_code LIKE %s OR imageurl LIKE %s)")
+                    params.extend([like] * 6)
+                if include_type and sql_folder_names:
+                    ph = ','.join(['%s'] * len(sql_folder_names))
+                    conds.append(f"detection_type IN ({ph})"); params.extend(sql_folder_names)
                 return " AND ".join(conds), params
 
-            where_clause, where_params = _build_where()
+            where_data, params_data = _build_where(include_type=True)
+            where_cnt,  params_cnt  = _build_where(include_type=False)
 
-            # Per-table hard cap: ORDER BY created_at DESC LIMIT N ensures we always
-            # fetch the most recent rows and never pull unbounded history into Python.
-            _FETCH_CAP = 5000
-
-            db_rows: List[dict] = []
-            for table, idx in [
-                ("camera_report_hls",  "idx_exam_shift_push"),
-                ("camera_report_rtsp", "idx_push_status_rtsp"),
-            ]:
+            active_tables = []
+            for table in ("camera_report_hls", "camera_report_rtsp"):
                 if source == "rtsp" and table == "camera_report_hls":
                     continue
                 if source == "hls" and table == "camera_report_rtsp":
                     continue
+                active_tables.append(table)
+
+            # ── Accurate total: SQL COUNT(*) summed across the active tables ──
+            total = 0
+            for table in active_tables:
                 try:
-                    cur.execute(
-                        f"SELECT * FROM {table} USE INDEX ({idx})"
-                        f" WHERE {where_clause}"
-                        f" ORDER BY created_at DESC LIMIT {_FETCH_CAP}",
-                        tuple(where_params) if where_params else None,
-                    )
-                    db_rows.extend(cur.fetchall())
+                    cur.execute(f"SELECT COUNT(*) AS c FROM {table} WHERE {where_data}",
+                                tuple(params_data) if params_data else None)
+                    total += int((cur.fetchone() or {}).get("c") or 0)
+                except Exception as e:
+                    logger.error(f"Client detections count failed ({table}): {e}")
+
+            # ── Per-type sidebar counts: SQL GROUP BY (type filter excluded) ──
+            for table in active_tables:
+                try:
+                    cur.execute(f"SELECT detection_type, COUNT(*) AS c FROM {table} "
+                                f"WHERE {where_cnt} GROUP BY detection_type",
+                                tuple(params_cnt) if params_cnt else None)
+                    for r in cur.fetchall():
+                        folder_name = r.get("detection_type", "")
+                        key = next((k for k, v in DETECTION_FOLDERS.items() if v == folder_name), folder_name)
+                        if key in all_counts:
+                            all_counts[key] += int(r.get("c") or 0)
+                except Exception as e:
+                    logger.error(f"Client detections counts failed ({table}): {e}")
+
+            # ── Page data: SQL ORDER BY created_at DESC, fetch up to this page, then
+            #    merge the two tables and slice. No 5000 cap — any page is reachable. ──
+            need = max(1, page * limit)
+            db_rows: List[dict] = []
+            for table in active_tables:
+                try:
+                    cur.execute(f"SELECT * FROM {table} WHERE {where_data} "
+                                f"ORDER BY created_at DESC LIMIT {int(need)}",
+                                tuple(params_data) if params_data else None)
+                    for r in cur.fetchall():
+                        r["_source"] = "rtsp" if table.endswith("rtsp") else "hls"
+                        db_rows.append(r)
                 except Exception as e:
                     logger.error(f"Client detections fetch failed ({table}): {e}")
 
             db_rows.sort(key=lambda x: str(x.get("created_at", "")), reverse=True)
-            shift_name_map = _shift_names_for_ids(row.get("shift_id") for row in db_rows)
-            user_name_map = _user_names_for_ids(row.get("pushed_by") for row in db_rows)
+            start_idx = (page - 1) * limit
+            page_rows = db_rows[start_idx: start_idx + limit]
 
-            # ── Light pass: cheap filtering without calling parse_detection_filename ──
-            # Date/time filtering uses the LRU-cached _basic_detection_meta (regex only,
-            # no DB). Search uses DB columns already in the row. parse_detection_filename
-            # (regex + camera DB lookups) is deferred to the paginated slice only.
-            filtered: List[tuple] = []  # (row, filename, type_key, source_part)
-            for row in db_rows:
+            shift_name_map = _shift_names_for_ids(row.get("shift_id") for row in page_rows)
+            user_name_map = _user_names_for_ids(row.get("pushed_by") for row in page_rows)
+
+            page_slice: List[tuple] = []  # (row, filename, type_key, source_part)
+            for row in page_rows:
                 imageurl_full = str(row.get("imageurl", ""))
                 filename = imageurl_full.split("/")[-1] if "/" in imageurl_full else imageurl_full
                 folder_name = row.get("detection_type", "")
                 type_key = next((k for k, v in DETECTION_FOLDERS.items() if v == folder_name), folder_name)
-                source_part = "rtsp" if "rtsp" in imageurl_full else "hls"
-
-                # Cheap date + time check from filename (single cached call)
-                if date or start_time or end_time:
-                    basic = _basic_detection_meta(filename)
-                    if date and not basic["date"].startswith(date):
-                        continue
-                    if start_time or end_time:
-                        t = basic.get("time", "")
-                        if len(t) >= 4:
-                            h_m = f"{t[:2]}:{t[2:4]}"
-                            if start_time and h_m < start_time:
-                                continue
-                            if end_time and h_m > end_time:
-                                continue
-
-                # Search against DB columns — no filename parse required.
-                if search:
-                    q = search.lower()
-                    haystack = " ".join([
-                        str(row.get("camera_name") or ""),
-                        str(row.get("center_name") or ""),
-                        str(row.get("centre_name") or ""),
-                        str(row.get("city") or ""),
-                        str(row.get("state") or ""),
-                        str(row.get("tc_code") or ""),
-                        filename,
-                    ]).lower()
-                    if q not in haystack:
-                        continue
-
-                # Count all types for the sidebar (before the type filter below).
-                if type_key in all_counts:
-                    all_counts[type_key] += 1
-
-                # Python-side type filter (omitted from SQL so counts stay accurate).
-                if sql_folder_names and folder_name not in sql_folder_names:
-                    continue
-
-                filtered.append((row, filename, type_key, source_part))
-
-            total = len(filtered)
-            start_idx = (page - 1) * limit
-            page_slice = filtered[start_idx: start_idx + limit]
+                source_part = row.get("_source") or ("rtsp" if "rtsp" in imageurl_full else "hls")
+                page_slice.append((row, filename, type_key, source_part))
 
             # ── Full parse only for the current page (at most `limit` rows) ──
             rows = []
@@ -2211,7 +2213,10 @@ def list_client_detections(
                     "shift_id":    row.get("shift_id") or item.get("shift_id"),
                     "shiftName":   shift_name_map.get(row.get("shift_id")) or item.get("shiftName"),
                     "shift_name":  shift_name_map.get(row.get("shift_id")) or item.get("shift_name"),
-                    "category":    row.get("camera_category", ""),
+                    # DB camera_category (HLS) wins; fall back to the scene
+                    # classification parsed via cam_meta (RTSP classification),
+                    # which is what the admin /detections endpoint already returns.
+                    "category":    row.get("camera_category") or item.get("category") or "",
                     "exam_id":     row.get("exam_id"),
                     "uid":         row.get("unique_id"),
                     "pushedBy":    row.get("pushed_by"),

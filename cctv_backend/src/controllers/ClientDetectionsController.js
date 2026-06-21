@@ -221,10 +221,10 @@ exports.getRemovedDetections = async (req, res) => {
             whereParams.push(...allowedExamIds);
         }
 
-        // Normalize date → "dd/mm/yyyy%" for the date_time LIKE filter.
-        // The frontend sends either "YYYY-MM-DD" or "DD-MM-YYYY".
-        let dateLike = '';
-        let dateYYYYMMDD = '';
+        // Date/time/search filter on created_at (indexed TIMESTAMP ~= detection time)
+        // so total / per-type counts / pagination are computed exactly in SQL
+        // (COUNT, GROUP BY, LIMIT/OFFSET) instead of capping the fetch at 5000 and
+        // counting in JS (which under-reported the true total).
         if (rawDate) {
             let y, m, d;
             const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(rawDate);
@@ -232,25 +232,64 @@ exports.getRemovedDetections = async (req, res) => {
             if (iso) { [, y, m, d] = iso; }
             else if (dmy) { [, d, m, y] = dmy; }
             if (y && m && d) {
-                dateLike = `${d}/${m}/${y}%`;
-                dateYYYYMMDD = `${y}${m}${d}`;
-                whereConds.push('date_time LIKE ?');
-                whereParams.push(dateLike);
+                whereConds.push('created_at >= ? AND created_at < (? + INTERVAL 1 DAY)');
+                whereParams.push(`${y}-${m}-${d} 00:00:00`, `${y}-${m}-${d} 00:00:00`);
             }
+        }
+        if (startTime) { whereConds.push('TIME(created_at) >= ?'); whereParams.push(`${startTime}:00`); }
+        if (endTime)   { whereConds.push('TIME(created_at) <= ?'); whereParams.push(`${endTime}:59`); }
+        if (search) {
+            whereConds.push('(LOWER(camera_name) LIKE ? OR LOWER(center_name) LIKE ? OR LOWER(city) LIKE ? OR LOWER(state) LIKE ? OR LOWER(tc_code) LIKE ? OR LOWER(imageurl) LIKE ?)');
+            const lk = `%${search}%`; whereParams.push(lk, lk, lk, lk, lk, lk);
         }
 
         const whereClause = whereConds.join(' AND ');
-
-        // Per-table fetch cap. Mirrors script-server: ORDER BY created_at DESC
-        // LIMIT N — we count + paginate in JS over the merged set rather than
-        // doing a UNION ALL with proper LIMIT/OFFSET in SQL. Cap keeps memory
-        // bounded; 5000 covers a day's worth for the visible-to-client subset.
-        const FETCH_CAP = 5000;
 
         const tables = [];
         if (source !== 'rtsp') tables.push({ name: 'camera_report_hls', source: 'hls' });
         if (source !== 'hls') tables.push({ name: 'camera_report_rtsp', source: 'rtsp' });
 
+        // Type filter (SQL) applies to total + page data; the counts query omits it
+        // so the sidebar stays full when the user toggles a type.
+        const typeKeys = typeParam ? typeParam.split(',').map(s => s.trim()).filter(Boolean) : [];
+        const folderNames = typeKeys.map(k => DETECTION_FOLDERS[k]).filter(Boolean);
+        let whereData = whereClause, paramsData = whereParams;
+        if (folderNames.length > 0) {
+            whereData = `${whereClause} AND detection_type IN (${folderNames.map(() => '?').join(',')})`;
+            paramsData = whereParams.concat(folderNames);
+        }
+
+        // ── Accurate total: SQL COUNT(*) summed across active tables ──
+        let total = 0;
+        for (const tbl of tables) {
+            try {
+                const r = await query(`SELECT COUNT(*) AS c FROM ${tbl.name} WHERE ${whereData}`, paramsData);
+                total += Number((r[0] && r[0].c) || 0);
+            } catch (err) {
+                console.error(`[getRemovedDetections] count failed for ${tbl.name}:`, err.message);
+            }
+        }
+
+        // ── Per-type sidebar counts: SQL GROUP BY (type filter excluded) ──
+        const counts = emptyCounts();
+        for (const tbl of tables) {
+            try {
+                const grp = await query(
+                    `SELECT detection_type, COUNT(*) AS c FROM ${tbl.name} WHERE ${whereClause} GROUP BY detection_type`,
+                    whereParams,
+                );
+                for (const g of grp) {
+                    const key = FOLDER_TO_KEY[g.detection_type] || g.detection_type;
+                    if (key in counts) counts[key] += Number(g.c || 0);
+                }
+            } catch (err) {
+                console.error(`[getRemovedDetections] counts failed for ${tbl.name}:`, err.message);
+            }
+        }
+
+        // ── Page data: SQL ORDER BY created_at DESC, fetch up to this page, merge,
+        //    slice. No 5000 cap — any page is reachable. ──
+        const need = Math.max(1, page * limit);
         let rows = [];
         for (const tbl of tables) {
             const sql = `SELECT id, exam_id, shift_id, city, center_name, camera_id,
@@ -259,70 +298,29 @@ exports.getRemovedDetections = async (req, res) => {
                                 imageurl, detection_type, unique_id, created_at,
                                 pushed_to_client, remove_from_client, updated_at
                          FROM ${tbl.name}
-                         WHERE ${whereClause}
+                         WHERE ${whereData}
                          ORDER BY created_at DESC
-                         LIMIT ${FETCH_CAP}`;
+                         LIMIT ${need}`;
             try {
-                const fetched = await query(sql, whereParams);
+                const fetched = await query(sql, paramsData);
                 fetched.forEach(r => { r._source = tbl.source; });
                 rows = rows.concat(fetched);
             } catch (err) {
                 console.error(`[getRemovedDetections] fetch failed for ${tbl.name}:`, err.message);
             }
         }
-
-        // Merge-sort by created_at desc across both tables.
         rows.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
 
-        // Build counts over ALL types (sidebar should not collapse when the
-        // user toggles a type filter), and apply remaining filters in JS.
-        const typeKeys = typeParam ? typeParam.split(',').map(s => s.trim()).filter(Boolean) : [];
-        const typeKeySet = new Set(typeKeys);
-        const counts = emptyCounts();
-
-        const filtered = [];
-        for (const row of rows) {
+        const startIdx = (page - 1) * limit;
+        const slice = rows.slice(startIdx, startIdx + limit).map(row => {
             const imageUrlRaw = String(row.imageurl || '');
             const filename = imageUrlRaw.includes('/')
                 ? imageUrlRaw.slice(imageUrlRaw.lastIndexOf('/') + 1)
                 : imageUrlRaw;
-            const folderName = row.detection_type || '';
-            const typeKey = FOLDER_TO_KEY[folderName] || folderName;
-
-            // Parse filename for date/time/count/confidence/issueType
+            const typeKey = FOLDER_TO_KEY[row.detection_type || ''] || (row.detection_type || '');
             const meta = parseFilename(filename, typeKey);
-
-            // Date filter via filename (more accurate than date_time on some
-            // legacy rows). date_time LIKE already ran in SQL, but a row may
-            // have a stale date_time — filename is authoritative when present.
-            if (dateYYYYMMDD && meta.date && !meta.date.startsWith(dateYYYYMMDD)) continue;
-
-            // Time range filter (HH:MM strings).
-            if ((startTime || endTime) && meta.time && meta.time.length >= 4) {
-                const hm = `${meta.time.slice(0, 2)}:${meta.time.slice(2, 4)}`;
-                if (startTime && hm < startTime) continue;
-                if (endTime && hm > endTime) continue;
-            }
-
-            // Search across DB columns + filename
-            if (search) {
-                const hay = [
-                    row.camera_name, row.center_name, row.city, row.state,
-                    row.tc_code, row.ch_code, row.device_id, row.camera_no, filename,
-                ].map(v => String(v || '').toLowerCase()).join(' ');
-                if (!hay.includes(search)) continue;
-            }
-
-            // Count BEFORE applying the type filter (so sidebar stays full).
-            if (typeKey in counts) counts[typeKey] += 1;
-            if (typeKeys.length > 0 && !typeKeySet.has(typeKey)) continue;
-
-            filtered.push({ row, filename, typeKey, meta, source: row._source });
-        }
-
-        const total = filtered.length;
-        const startIdx = (page - 1) * limit;
-        const slice = filtered.slice(startIdx, startIdx + limit);
+            return { row, filename, typeKey, meta, source: row._source };
+        });
 
         const data = slice.map(({ row, filename, typeKey, meta, source: src }) => {
             const detectedAt = meta.date && meta.time
