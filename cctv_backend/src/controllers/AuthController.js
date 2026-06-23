@@ -2,7 +2,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { query } = require("../config/database");
 const { generateOTP, storeOTP, verifyOTP, clearOTP } = require("../services/otpService");
-const { sendOTPEmail } = require("../services/emailService");
+const { sendOTPEmail, sendRegistrationNotification, sendVerificationNotification } = require("../services/emailService");
 const { sendOTPSMS } = require("../services/smsService");
 const logger = require("../utils/logger");
 /**
@@ -232,6 +232,15 @@ exports.verifyUser = async (req, res) => {
         [userId]
     );
 
+    // Notify the user by email when their account is newly verified/approved.
+    // Best-effort: a mail failure must not fail the verification request.
+    if ((verified === true || verified === 'true') && updatedUsers[0]?.email) {
+        const u = updatedUsers[0];
+        sendVerificationNotification(u.email, u.full_name).catch((e) =>
+            logger.error(`Failed to send verification notification to ${u.email}: ${e.message}`)
+        );
+    }
+
     res.json({
         success: true,
         message: "User updated successfully",
@@ -351,11 +360,12 @@ exports.signup = async (req, res) => {
     try {
         const { name, email, phone, companyName, password } = req.body;
 
-        // Validate required fields
-        if (!name || !email || !phone || !password) {
+        // Validate required fields. Phone is optional now that verification is
+        // email-only (mobile OTP has been removed from registration).
+        if (!name || !email || !password) {
             return res.status(400).json({
                 success: false,
-                message: "Name, email, phone, and password are required",
+                message: "Name, email, and password are required",
             });
         }
 
@@ -368,20 +378,21 @@ exports.signup = async (req, res) => {
             });
         }
 
-        // Validate phone format (basic validation)
-        const phoneRegex = /^[+]?[\d\s-()]+$/;
-        if (!phoneRegex.test(phone)) {
-            return res.status(400).json({
-                success: false,
-                message: "Invalid phone number format",
-            });
+        // Validate phone format only when a phone number is provided
+        if (phone) {
+            const phoneRegex = /^[+]?[\d\s-()]+$/;
+            if (!phoneRegex.test(phone)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid phone number format",
+                });
+            }
         }
 
-        // Check if user already exists
-        const existing = await query(
-            "SELECT id FROM users WHERE email = ? OR phone = ?",
-            [email, phone]
-        );
+        // Check if user already exists (email always; phone only when provided)
+        const existing = phone
+            ? await query("SELECT id FROM users WHERE email = ? OR phone = ?", [email, phone])
+            : await query("SELECT id FROM users WHERE email = ?", [email]);
 
         if (existing.length > 0) {
             return res.status(409).json({
@@ -400,14 +411,19 @@ exports.signup = async (req, res) => {
         // Create unverified user
         const result = await query(
             "INSERT INTO users (username, email, password_hash, full_name, phone, company_name, role, verified) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            [username, email, password_hash, name, phone, companyName || null, "VIEWER", false]
+            [username, email, password_hash, name, phone || null, companyName || null, "VIEWER", false]
         );
 
         logger.info(`New user signed up: ${email}`);
 
+        // Best-effort registration notification (must not block signup on mail failure)
+        sendRegistrationNotification(email, name).catch((e) =>
+            logger.error(`Failed to send registration notification to ${email}: ${e.message}`)
+        );
+
         res.status(201).json({
             success: true,
-            message: "Account created successfully. Please verify your email and phone.",
+            message: "Account created successfully. Please verify your email.",
             data: {
                 id: result.insertId,
                 email,

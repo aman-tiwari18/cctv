@@ -48,7 +48,7 @@ import {
   Warning,
   Close as CloseIcon,
   GridView, LocationCity, Close, Memory, DeleteOutline, Undo as UndoIcon,
-  Person,
+  Person, LocalOffer,
 } from '@mui/icons-material';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -172,6 +172,8 @@ function DetectionCard({ item, onClick, onRemove, onUndo, isRemoving, isPendingR
   const examDate = item.examDate || (item.date ? item.date.split('-').reverse().join('-') : '-');
   const tcCode = getDetectionTcCode(item);
   const shiftName = getDetectionShiftName(item);
+  // Camera's scene classification (RTSP classification / HLS camera_category).
+  const classification = item.category || item.classification || '';
   const pushedBy = canViewPushedBy(user?.role) ? getDetectionPushedBy(item) : null;
   const invigilatorEventLabel = item.type === 'invigilator'
     ? (item.issueLabel || (item.issueType ? String(item.issueType).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : ''))
@@ -313,6 +315,15 @@ function DetectionCard({ item, onClick, onRemove, onUndo, isRemoving, isPendingR
           <Typography noWrap title={shiftName} sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
             Shift: {shiftName}
           </Typography>
+
+          {classification && (
+            <>
+              <LocalOffer sx={{ fontSize: 14, color: '#777' }} />
+              <Typography noWrap title={classification} sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
+                Classification: {classification}
+              </Typography>
+            </>
+          )}
 
           {pushedBy && (
             <>
@@ -729,6 +740,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, onUndo, removi
   const itemRefs = useRef([]); // ✅ ref array for each list item
   const tcCode = item ? getDetectionTcCode(item) : '-';
   const shiftName = item ? getDetectionShiftName(item) : '-';
+  const classification = item ? (item.category || item.classification || '') : '';
   const pushedBy = item && canViewPushedBy(user?.role) ? getDetectionPushedBy(item) : null;
   const isPendingRemoval = item ? pendingRemovals.has(item.uid) : false;
   const isRemoving = item ? removingId === item.uid : false;
@@ -911,6 +923,15 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, onUndo, removi
                     <Typography noWrap title={shiftName} sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
                       Shift: {shiftName}
                     </Typography>
+
+                    {classification && (
+                      <>
+                        <LocalOffer sx={{ fontSize: 14, color: '#777' }} />
+                        <Typography noWrap title={classification} sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
+                          Classification: {classification}
+                        </Typography>
+                      </>
+                    )}
 
                     {pushedBy && (
                       <>
@@ -1312,7 +1333,7 @@ const ClientDetections = () => {
         : '';
 
       return {
-        'Detection Type': TYPE_LABELS[item.type] || item.type,
+        'Detection Type': TYPE_META[item.type]?.label || TYPE_LABELS[item.type] || item.type,
         'Center Name': item.centerName || item.centre_name || '-',
         'Camera Name': item.cameraName || item.camera_name || item.camera_id || '-',
         'Location': item.city || '-',

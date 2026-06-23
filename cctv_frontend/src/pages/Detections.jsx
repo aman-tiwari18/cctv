@@ -15,7 +15,7 @@ import {
   WarningAmber, ImageNotSupported, FlipCameraAndroid, SecurityUpdateWarning,
   VisibilityOff, PersonOff,
   ChevronLeft, ChevronRight, ViewList,
-  Check, Close as CloseIcon, Memory
+  Check, Close as CloseIcon, Memory, LocalOffer
 } from '@mui/icons-material';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
@@ -208,6 +208,10 @@ function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onS
   const examDate = item.examDate || (item.date ? item.date.split('-').reverse().join('-') : '-');
   const tcCode = getDetectionTcCode(item);
   const shiftName = getDetectionShiftName(item);
+  // Camera's scene classification (e.g. "Inside Classroom", "Entry/Exit",
+  // "Uncertain"). Backend sends it as `category` (RTSP classification / HLS
+  // camera_category); fall back to `classification` just in case.
+  const classification = item.category || item.classification || '';
   const invigilatorEventLabel = item.type === 'invigilator'
     ? (item.issueLabel || (item.issueType ? String(item.issueType).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : ''))
     : '';
@@ -333,6 +337,15 @@ function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onS
           <Typography noWrap title={shiftName} sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
             Shift: {shiftName}
           </Typography>
+
+          {classification && (
+            <>
+              <LocalOffer sx={{ fontSize: 14, color: '#777' }} />
+              <Typography noWrap title={classification} sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
+                Classification: {classification}
+              </Typography>
+            </>
+          )}
         </Box>
 
         {item.confidence != null && (
@@ -526,6 +539,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
   const isPushed = item ? (pushedUids.has(item.uid || item.id || item.image_url) || item.pushed_to_client === 1 || item.pushed_to_client === true) : false;
   const tcCode = item ? getDetectionTcCode(item) : '-';
   const shiftName = item ? getDetectionShiftName(item) : '-';
+  const classification = item ? (item.category || item.classification || '') : '';
   const itemRefs = useRef([]);
 
   const goNext = useCallback(() => onSelect(Math.min(data.length - 1, selectedIndex + 1)), [data.length, selectedIndex, onSelect]);
@@ -714,6 +728,15 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
                     <Typography noWrap title={shiftName} sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
                       Shift: {shiftName}
                     </Typography>
+
+                    {classification && (
+                      <>
+                        <LocalOffer sx={{ fontSize: 14, color: '#777' }} />
+                        <Typography noWrap title={classification} sx={{ fontSize: 14, lineHeight: 1.5, m: 0, color: '#777' }}>
+                          Classification: {classification}
+                        </Typography>
+                      </>
+                    )}
                     <Box
                       sx={{
                         display: 'flex',
@@ -1388,7 +1411,7 @@ export default function Detections() {
         : '';
 
       return {
-        'Detection Type': TYPE_LABELS[item.type] || item.type,
+        'Detection Type': TYPE_META[item.type]?.label || TYPE_LABELS[item.type] || item.type,
         'Center Name': item.centerName || item.centre_name || '-',
         'Camera Name': item.cameraName || item.camera_name || item.camera_id || '-',
         'Location': item.location || item.city || '-',

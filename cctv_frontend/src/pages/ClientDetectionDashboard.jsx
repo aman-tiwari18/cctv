@@ -101,25 +101,30 @@ const TodaysScriptDistributionCard = () => {
     useEffect(() => {
         let cancelled = false;
         setExamsLoading(true);
-        clientDashboardAPI
-            .getLiveExams({ page: 1, limit: 100 })
+        // "Live today" = today within the exam's [start_date, end_date] (date-based),
+        // matching the Exams page LIVE badge and the dashboard "Live Exams" pill.
+        // The old /client-dashboard/live-exams only returned exams whose shift is
+        // running RIGHT NOW, so outside shift hours the dropdown was empty
+        // ("No exams today") and stayed disabled — so the script grid never loaded.
+        examsAPI
+            .getAll({ is_active: true })
             .then((res) => {
                 if (cancelled) return;
-                const rows = res?.data?.data?.rows || [];
-                const seen = new Set();
-                const uniq = [];
-                rows.forEach((r) => {
-                    if (!seen.has(r.exam_id)) {
-                        seen.add(r.exam_id);
-                        uniq.push({ exam_id: r.exam_id, exam_name: r.exam_name });
-                    }
-                });
+                const list = res?.data?.data || [];
+                const now = new Date();
+                const uniq = list
+                    .filter((ex) => {
+                        const s = ex.start_date ? new Date(ex.start_date) : null;
+                        const e = ex.end_date ? new Date(ex.end_date) : null;
+                        return s && e && now >= s && now <= e;
+                    })
+                    .map((ex) => ({ exam_id: ex.id, exam_name: ex.exam_name }));
                 setExams(uniq);
                 if (uniq.length > 0) setSelectedExamId(uniq[0].exam_id);
             })
             .catch((err) => {
                 if (cancelled) return;
-                console.error('[TodaysScriptDistribution.getLiveExams]', err);
+                console.error('[TodaysScriptDistribution.exams]', err);
                 setExams([]);
             })
             .finally(() => {

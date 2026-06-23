@@ -30,13 +30,10 @@ const Register = () => {
   });
   const [otpData, setOtpData] = useState({
     emailOtp: '000000',
-    phoneOtp: '000000',
   });
   const [verification, setVerification] = useState({
     emailVerified: false,
-    phoneVerified: false,
     emailSent: false,
-    phoneSent: false,
   });
   const [availableCompanies, setAvailableCompanies] = useState([]);
   const [loadingCompanies, setLoadingCompanies] = useState(true);
@@ -109,7 +106,7 @@ const Register = () => {
 
     try {
       const identifier = type === 'email' ? formData.email : formData.phone;
-      const otp = type === 'email' ? otpData.emailOtp : otpData.phoneOtp;
+      const otp = otpData.emailOtp;
 
       if (!otp || otp.length !== 6) {
         setError('Please enter a valid 6-digit OTP');
@@ -133,8 +130,8 @@ const Register = () => {
 
   // Continue to password setup
   const handleContinueToPassword = async () => {
-    if (!verification.emailVerified || !verification.phoneVerified) {
-      setError('Please verify both email and phone before continuing');
+    if (!verification.emailVerified) {
+      setError('Please verify your email before continuing');
       return;
     }
 
@@ -369,27 +366,20 @@ const Register = () => {
 
             <Box mb={2.5}>
               <Typography sx={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', letterSpacing: 0.5, textTransform: 'uppercase', mb: 1, px: 0.5 }}>
-                Phone *
+                Phone
               </Typography>
               <TextField
                 fullWidth
                 name="phone"
-                placeholder="Enter your phone number"
+                placeholder="Enter your phone number (optional)"
                 value={formData.phone}
                 onChange={handleChange}
-                required
-                disabled={verification.phoneSent}
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
                       <PhoneOutlined sx={{ color: '#9ca3af', fontSize: 20, ml: 0.5 }} />
                     </InputAdornment>
                   ),
-                  endAdornment: verification.phoneVerified ? (
-                    <InputAdornment position="end">
-                      <CheckCircle sx={{ color: '#10b981', fontSize: 20, mr: 0.5 }} />
-                    </InputAdornment>
-                  ) : null,
                   sx: {
                     bgcolor: '#f4f6f8',
                     borderRadius: '10px',
@@ -398,56 +388,6 @@ const Register = () => {
                   }
                 }}
               />
-              {!verification.phoneVerified && (
-                <Box mt={1}>
-                  {!verification.phoneSent ? (
-                    <Button
-                      size="small"
-                      onClick={() => handleSendOTP('phone')}
-                      disabled={loading || !formData.phone}
-                      sx={{
-                        textTransform: 'none',
-                        fontSize: 12,
-                        fontWeight: 600,
-                        color: '#3b82f6',
-                      }}
-                    >
-                      Send OTP
-                    </Button>
-                  ) : (
-                    <Box display="flex" gap={1} alignItems="center">
-                      <TextField
-                        size="small"
-                        name="phoneOtp"
-                        placeholder="Enter OTP"
-                        value={otpData.phoneOtp}
-                        onChange={handleOtpChange}
-                        inputProps={{ maxLength: 6 }}
-                        sx={{
-                          flex: 1,
-                          '& .MuiOutlinedInput-root': {
-                            bgcolor: 'white',
-                            '& fieldset': { borderColor: '#e5e7eb' },
-                          }
-                        }}
-                      />
-                      <Button
-                        size="small"
-                        onClick={() => handleVerifyOTP('phone')}
-                        disabled={loading || !otpData.phoneOtp}
-                        sx={{
-                          textTransform: 'none',
-                          fontSize: 12,
-                          fontWeight: 600,
-                          color: '#3b82f6',
-                        }}
-                      >
-                        Verify
-                      </Button>
-                    </Box>
-                  )}
-                </Box>
-              )}
             </Box>
 
             <Box mb={4}>
@@ -503,7 +443,7 @@ const Register = () => {
             <Button
               fullWidth
               onClick={handleContinueToPassword}
-              disabled={!verification.emailVerified || !verification.phoneVerified || !formData.companyName || loading}
+              disabled={!verification.emailVerified || !formData.companyName || loading}
               sx={{
                 py: 1.5,
                 mb: 3,
