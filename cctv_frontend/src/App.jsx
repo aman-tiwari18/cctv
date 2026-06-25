@@ -78,6 +78,11 @@ const theme = createTheme({
           background: '#f4f7fb',
           color: '#0f172a',
         },
+        // Recharts focuses the clicked SVG sector; the browser then paints its default
+        // outline (a box) around it. The charts aren't keyboard-interactive — suppress it.
+        '.recharts-wrapper :focus, .recharts-surface:focus, .recharts-sector:focus': {
+          outline: 'none',
+        },
         'input[type="date"]::-webkit-calendar-picker-indicator, input[type="time"]::-webkit-calendar-picker-indicator': {
           position: 'absolute',
           top: 0,
