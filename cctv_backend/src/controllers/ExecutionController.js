@@ -139,6 +139,7 @@ exports.getPending = async (req, res) => {
             ssa.custom_start_time,
             ssa.custom_end_time,
             ssa.custom_frequency_minutes,
+            ssa.camera_classifications,
             ssa.notes,
             s.name                     AS task_name,
             s.default_duration_minutes AS duration_minutes,
@@ -190,6 +191,8 @@ exports.getPending = async (req, res) => {
             scheduled_at:     `${assignmentDate}T${startTimeStr}`,
             // ISO datetime the script should stop at (next day if overnight)
             end_at:           endTimeStr ? `${endDateStr}T${endTimeStr}` : null,
+            custom_frequency_minutes: row.custom_frequency_minutes || null,
+            camera_classifications: row.camera_classifications || null,
             execution_metadata: {
                 assignment_id: row.id,
                 assignment_date: assignmentDate,
@@ -201,6 +204,8 @@ exports.getPending = async (req, res) => {
                 exam_name:     row.exam_name,
                 exam_id:       row.exam_id,
                 link_type: row.link_type,
+                custom_frequency_minutes: row.custom_frequency_minutes || null,
+                camera_classifications: row.camera_classifications || null,
             },
         };
     });
@@ -248,6 +253,7 @@ exports.getRunning = async (req, res) => {
             ssa.custom_start_time,
             ssa.custom_end_time,
             ssa.custom_frequency_minutes,
+            ssa.camera_classifications,
             ssa.notes,
             s.name                     AS task_name,
             s.default_duration_minutes AS duration_minutes,
@@ -294,6 +300,8 @@ exports.getRunning = async (req, res) => {
             exam_name:        row.exam_name,
             scheduled_at:     `${assignmentDate}T${startTimeStr}`,
             end_at:           endTimeStr ? `${endDateStr}T${endTimeStr}` : null,
+            custom_frequency_minutes: row.custom_frequency_minutes || null,
+            camera_classifications: row.camera_classifications || null,
             execution_metadata: {
                 assignment_id: row.id,
                 assignment_date: assignmentDate,
@@ -305,6 +313,8 @@ exports.getRunning = async (req, res) => {
                 exam_name:     row.exam_name,
                 exam_id:       row.exam_id,
                 link_type:     row.link_type,
+                custom_frequency_minutes: row.custom_frequency_minutes || null,
+                camera_classifications: row.camera_classifications || null,
             },
         };
     });

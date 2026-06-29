@@ -275,6 +275,8 @@ exports.bulkAssign = async (req, res) => {
                 assignment_date: date,
                 custom_start_time: s.custom_start_time || null,
                 custom_end_time: s.custom_end_time || null,
+                custom_frequency_minutes: s.custom_frequency_minutes || null,
+                camera_classifications: s.camera_classifications || null,
                 notes: s.notes || null,
                 sms_enabled: !!s.sms_enabled,
             });
