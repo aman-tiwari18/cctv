@@ -12,7 +12,7 @@ const { getAssignableDates, toDateOnly } = require("./ShiftScriptController");
 exports.createExam = async (req, res) => {
     const {
         exam_name, exam_body, link_type, description,
-        start_date, end_date, skip_days, skip_dates, shifts
+        start_date, end_date, skip_days, skip_dates, observer_phone, shifts
     } = req.body;
 
     const result = await sequelize.transaction(async (t) => {
@@ -27,6 +27,7 @@ exports.createExam = async (req, res) => {
                 end_date: end_date || null,
                 skip_days: skip_days || [],
                 skip_dates: skip_dates || [],
+                observer_phone: observer_phone || null,
             },
             { transaction: t }
         );
@@ -165,7 +166,7 @@ exports.getExamById = async (req, res) => {
 // downstream detection wiring are tied to it.
 const EDITABLE_EXAM_FIELDS = [
     "exam_name", "exam_body", "description",
-    "start_date", "end_date", "skip_days", "skip_dates", "is_active",
+    "start_date", "end_date", "skip_days", "skip_dates", "observer_phone", "is_active",
 ];
 
 const hhmm = (v) => String(v || "").substring(0, 5);

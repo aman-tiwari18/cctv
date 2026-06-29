@@ -10,7 +10,7 @@ const SMSController = require('../controllers/SMSController');
 // Internal endpoint for Python script-server to trigger SMS
 router.post('/send-push-alert', (req, res) => SMSController.sendPushAlert(req, res));
 
-// Manual Test endpoint
-router.post('/test', (req, res) => SMSController.testSMSSending(req, res));
+// Lists exam_body clients with an enabled SMS config (frontend gating)
+router.get('/clients', (req, res) => SMSController.getSmsClients(req, res));
 
 module.exports = router;

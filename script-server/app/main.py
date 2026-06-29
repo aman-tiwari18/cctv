@@ -1750,7 +1750,7 @@ def list_detections(
                     cur.execute(
                         f"""
                         SELECT cr.unique_id, cr.pushed_to_client, cr.gpu_id,
-                               cr.shift_id, cr.tc_code, es.shift_name
+                               cr.shift_id, cr.tc_code, cr.sms_sent, es.shift_name
                         FROM camera_report_hls AS cr USE INDEX (idx_unique_id)
                         LEFT JOIN exam_shifts AS es ON es.id = cr.shift_id
                         WHERE cr.unique_id IN ({fmt})
@@ -1771,6 +1771,8 @@ def list_detections(
                                 meta["shiftName"] = row.get("shift_name")
                             if row.get("tc_code"):
                                 meta["tcCode"] = row.get("tc_code")
+                            if row.get("sms_sent") is not None:
+                                meta["sms_sent"] = row.get("sms_sent")
                 except Exception as e:
                     logger.error(f"HLS pushed uids fetch failed: {e}")
 
@@ -1778,7 +1780,7 @@ def list_detections(
                     cur.execute(
                         f"""
                         SELECT cr.unique_id, cr.pushed_to_client, cr.gpu_id,
-                               cr.shift_id, cr.tc_code, es.shift_name
+                               cr.shift_id, cr.tc_code, cr.sms_sent, es.shift_name
                         FROM camera_report_rtsp AS cr USE INDEX (idx_unique_id)
                         LEFT JOIN exam_shifts AS es ON es.id = cr.shift_id
                         WHERE cr.unique_id IN ({fmt})
@@ -1799,6 +1801,8 @@ def list_detections(
                                 meta["shiftName"] = row.get("shift_name")
                             if row.get("tc_code"):
                                 meta["tcCode"] = row.get("tc_code")
+                            if row.get("sms_sent") is not None:
+                                meta["sms_sent"] = row.get("sms_sent")
                 except Exception as e:
                     logger.error(f"RTSP pushed uids fetch failed: {e}")
             conn.close()
@@ -1809,6 +1813,7 @@ def list_detections(
         uid = item.get("uid")
         meta = uid_db_meta.get(uid, {})
         item["pushed_to_client"] = 1 if uid in pushed_uids else 0
+        item["sms_sent"] = 1 if meta.get("sms_sent") == 1 else 0
         # Filename gpu_id is primary (e.g. _gpu4_ token); only fall back to the
         # DB column when the filename had no _gpu token (older detections).
         db_gpu = meta.get("gpu_id")
@@ -1875,6 +1880,31 @@ class ClientDetectionCopyRequest(BaseModel):
     items: list[ClientDetectionCopyItem]
     # User id of the operator pushing these detections to the client.
     pushedBy: Optional[int] = None
+
+
+# Strong refs to fire-and-forget background tasks so they are not GC'd mid-flight.
+_BACKGROUND_TASKS: set = set()
+
+
+async def _trigger_sms_alert(uid: str, source: str) -> None:
+    """Fire-and-forget call to the Node SMS bridge after a detection is pushed.
+
+    All gating (NTA exam, invigilator/proximity template, per-assignment toggle,
+    idempotency, recipient resolution) lives in the Node endpoint. Any failure
+    here must never affect the push, so everything is swallowed.
+    """
+    if not uid:
+        return
+    try:
+        url = f"{MAIN_BACKEND_URL}/sms/send-push-alert"
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            resp = await client.post(url, json={"uid": uid, "source": source})
+            try:
+                logger.info(f"SMS bridge {uid} ({source}) -> {resp.status_code}: {resp.text[:200]}")
+            except Exception:
+                pass
+    except Exception as e:
+        logger.warning(f"SMS bridge call failed for uid={uid}: {e}")
 
 
 @app.post("/client-detections/copy")
@@ -1965,6 +1995,8 @@ async def copy_client_detections(payload: ClientDetectionCopyRequest):
                         "uid": row.get("unique_id"),
                         "updatedAt": pushed_at_ms,
                         "updated_at": pushed_at_ms,
+                        # SMS fires async after push; starts 0, badge appears on next fetch.
+                        "sms_sent": 0,
                         "pushedBy": pushed_by,
                         "pushed_by": pushed_by,
                         "pushedByName": pushed_by_name,
@@ -2034,6 +2066,18 @@ async def copy_client_detections(payload: ClientDetectionCopyRequest):
         return {"success": False, "error": str(e)}
     finally:
         conn.close()
+
+    # After a successful push+commit, trigger the SMS bridge for each item.
+    # Fire-and-forget so the push response is never delayed/blocked by SMS.
+    for item in copied:
+        try:
+            task = asyncio.create_task(
+                _trigger_sms_alert(item.get("uid"), item.get("source"))
+            )
+            _BACKGROUND_TASKS.add(task)
+            task.add_done_callback(_BACKGROUND_TASKS.discard)
+        except Exception as e:
+            logger.warning(f"Failed to schedule SMS bridge task: {e}")
 
     return {"success": True, "copied": copied, "failed": failed}
 
@@ -2222,6 +2266,8 @@ def list_client_detections(
                     "pushedBy":    row.get("pushed_by"),
                     "pushed_by":   row.get("pushed_by"),
                     "pushedByName": user_name_map.get(row.get("pushed_by")),
+                    "sms_sent":    1 if row.get("sms_sent") == 1 else 0,
+                    "sms_sent_at": _epoch_ms(row.get("sms_sent_at")),
                     "_mtime":      _epoch_ms(row.get("created_at")) or 0,
                     "updatedAt":   _epoch_ms(row.get("updated_at")),
                     "updated_at":  _epoch_ms(row.get("updated_at")),

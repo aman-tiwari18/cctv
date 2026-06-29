@@ -1,9 +1,22 @@
 const { query } = require('../config/database');
-const { sendAlertSMS } = require('../services/smsService');
+const { sendAlertWithConfig, TYPE_MAP } = require('../services/smsService');
 const logger = require('../utils/logger');
 
+// Detection types eligible for SMS (DLT-approved templates only).
+const SMS_ELIGIBLE_TYPES = new Set(['invigilator', 'proximity']);
+
 /**
- * SMS Controller handles triggering alerts based on database reports
+ * SMS Controller handles triggering alerts based on database reports.
+ *
+ * sendPushAlert is the single gated bridge invoked by the script-server right
+ * after a detection is pushed to the client. It applies three gates before any
+ * SMS is sent:
+ *   1. client gate   — the exam's client (exam_body) must have an enabled
+ *                      sms_configs row; that row supplies the gateway account,
+ *                      DLT template ids and message wording for this client.
+ *   2. template gate — detection type must map to invigilator / proximity
+ *   3. toggle gate   — the shift's scheduled script must have sms_enabled = 1
+ * On success it records sms_sent / sms_sent_at on the report row (idempotent).
  */
 class SMSController {
     /**
@@ -27,8 +40,9 @@ class SMSController {
             const tableName = source.toLowerCase() === 'rtsp' ? 'camera_report_rtsp' : 'camera_report_hls';
 
             // Query metadata from DB
-            const sql = `SELECT center_name, tc_code, camera_name, detection_type, date_time
-                   FROM ${tableName} 
+            const sql = `SELECT exam_id, shift_id, center_name, tc_code, camera_name,
+                                detection_type, date_time, sms_sent
+                   FROM ${tableName}
                    WHERE unique_id = ? LIMIT 1`;
 
             const results = await query(sql, [uid]);
@@ -44,17 +58,85 @@ class SMSController {
             const metadata = results[0];
             const detectionType = metadata.detection_type;
 
-            // Trigger the SMS Service
-            const alertResult = await sendAlertSMS(detectionType, {
+            // Idempotency — never send twice for the same pushed detection.
+            if (Number(metadata.sms_sent) === 1) {
+                logger.info(`SMS already sent for UID ${uid} — skipping`);
+                return res.json({ success: true, skipped: true, reason: 'already_sent' });
+            }
+
+            // ── Gate 2: template gate (only invigilator / proximity) ──────────
+            const typeKey = TYPE_MAP[detectionType] || detectionType;
+            if (!SMS_ELIGIBLE_TYPES.has(typeKey)) {
+                logger.info(`SMS skipped → '${detectionType}' (${typeKey}) not SMS-eligible`);
+                return res.json({ success: true, skipped: true, reason: 'type_not_eligible' });
+            }
+
+            // ── Gate 1: client gate — resolve the exam's client + SMS config ──
+            if (!metadata.exam_id) {
+                logger.info(`SMS skipped → no exam_id on report ${uid}`);
+                return res.json({ success: true, skipped: true, reason: 'no_exam' });
+            }
+            const examRows = await query(
+                'SELECT exam_body, observer_phone FROM exams WHERE id = ? LIMIT 1',
+                [metadata.exam_id]
+            );
+            const exam = examRows && examRows[0];
+            const examBody = exam?.exam_body || null;
+            const observerPhone = exam?.observer_phone || null;
+
+            const configRows = await query(
+                'SELECT * FROM sms_configs WHERE exam_body = ? AND enabled = 1 LIMIT 1',
+                [examBody]
+            );
+            const clientConfig = configRows && configRows[0];
+            if (!clientConfig) {
+                logger.info(`SMS skipped → no enabled SMS config for client '${examBody}'`);
+                return res.json({ success: true, skipped: true, reason: 'no_client_config' });
+            }
+
+            // ── Gate 3: per-assignment toggle (sms_enabled on the shift's script)
+            const toggleRows = await query(
+                `SELECT 1
+                   FROM shift_script_assignments ssa
+                   JOIN scripts s ON s.id = ssa.script_id
+                  WHERE ssa.shift_id = ?
+                    AND s.script_id = ?
+                    AND ssa.sms_enabled = 1
+                    AND ssa.is_active = 1
+                  LIMIT 1`,
+                [metadata.shift_id, typeKey]
+            );
+            if (!toggleRows || toggleRows.length === 0) {
+                logger.info(`SMS skipped → sms_enabled off for shift ${metadata.shift_id} / ${typeKey}`);
+                return res.json({ success: true, skipped: true, reason: 'toggle_off' });
+            }
+
+            // Recipient: per-exam observer_phone wins; else client default_recipients
+            // (resolved inside the service).
+            const alertResult = await sendAlertWithConfig(clientConfig, typeKey, {
                 center_name: metadata.center_name,
                 tc_code: metadata.tc_code,
                 camera_name: metadata.camera_name,
-                detected_at: metadata.date_time
-            });
+                time: metadata.date_time,
+                count: metadata.count,
+            }, observerPhone);
+
+            // Record sms_sent so the client image shows the badge (and we never resend).
+            if (alertResult.success && !alertResult.skipped) {
+                try {
+                    await query(
+                        `UPDATE ${tableName} SET sms_sent = 1, sms_sent_at = NOW() WHERE unique_id = ?`,
+                        [uid]
+                    );
+                } catch (e) {
+                    logger.error(`Failed to mark sms_sent for UID ${uid}: ${e.message}`);
+                }
+            }
 
             return res.json({
                 success: alertResult.success,
-                message: alertResult.skipped ? 'Alert skipped (disabled in config)' : 'Alert processed',
+                sms_sent: !!(alertResult.success && !alertResult.skipped),
+                message: alertResult.skipped ? 'Alert skipped' : 'Alert processed',
                 details: alertResult.results || null
             });
 
@@ -68,27 +150,22 @@ class SMSController {
     }
 
     /**
-     * Manual test endpoint for SMS
+     * List exam_body clients that have an enabled SMS config. Used by the
+     * frontend to decide which exams show the SMS toggle / observer field,
+     * instead of hardcoding NTA. Returns only non-sensitive fields.
      */
-    // async testSMSSending(req, res) {
-    //     const { type, phone } = req.body;
-
-    //     try {
-    //         const metadata = {
-    //             center_name: 'Test Center',
-    //             tc_code: 'TC001',
-    //             camera_name: 'Camera 01',
-    //             time: '120000',
-    //             count: 5,
-    //             detected_at: '21 Apr 2026, 12:00:00 PM'
-    //         };
-
-    //         const result = await sendAlertSMS(type || 'proximity', metadata);
-    //         return res.json(result);
-    //     } catch (error) {
-    //         return res.status(500).json({ success: false, error: error.message });
-    //     }
-    // }
+    async getSmsClients(req, res) {
+        try {
+            const rows = await query(
+                'SELECT exam_body FROM sms_configs WHERE enabled = 1'
+            );
+            const bodies = (rows || []).map(r => r.exam_body).filter(Boolean);
+            return res.json({ success: true, bodies });
+        } catch (error) {
+            logger.error(`Error in getSmsClients: ${error.message}`);
+            return res.status(500).json({ success: false, bodies: [] });
+        }
+    }
 }
 
 module.exports = new SMSController();

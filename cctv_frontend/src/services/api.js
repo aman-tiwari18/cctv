@@ -131,6 +131,11 @@ export const shiftScriptsAPI = {
     bulkDelete: (payload) => api.post(`/shift-scripts/bulk-delete`, payload),
 };
 
+export const smsAPI = {
+    // exam_body clients that have an enabled SMS config -> { bodies: [...] }
+    getClients: () => api.get('/sms/clients'),
+};
+
 export const reportAPI = {
     downloadReport: (params) => api.get('/report/download', {
         params: params,

@@ -38,39 +38,10 @@ const TYPE_MAP = {
 };
 
 /**
- * 📩 SMS Templates (DLT Approved)
+ * 📩 OTP template (env-based, on the default/SSC account). Alert templates are
+ * resolved per-client from the sms_configs DB table — see sendAlertWithConfig.
  */
 const SMS_TEMPLATES = {
-    entry_exit: {
-        templateId: process.env.SMS_TEMPLATE_MOVEMENT,
-        getMessage: (data) =>
-            `Movement Detected in ${data.center_name || 'Center'} at ${formatTime(data.time)}. TC Code: ${data.tc_code || 'N/A'} - SSC`
-    },
-
-    proximity: {
-        templateId: process.env.SMS_TEMPLATE_PROXIMITY,
-        getMessage: (data) =>
-            `Two or more people are in close proximity in ${data.center_name || 'Center'} at ${formatTime(data.time)}. TC Code: ${data.tc_code || 'N/A'} - SSC`
-    },
-
-    phone: {
-        templateId: process.env.SMS_TEMPLATE_MOBILE,
-        getMessage: (data) =>
-            `Mobile Detected in ${data.center_name || 'Center'} at ${formatTime(data.time)}. TC Code: ${data.tc_code || 'N/A'} - SSC`
-    },
-
-    server: {
-        templateId: process.env.SMS_TEMPLATE_SERVERROOM,
-        getMessage: (data) =>
-            `Max people threshold crossed: ${data.count || 'Multiple'} persons are in ${data.center_name || 'Server Room'} at ${formatTime(data.time)}. TC Code: ${data.tc_code || 'N/A'} - SSC`
-    },
-
-    invigilator: {
-        templateId: process.env.SMS_TEMPLATE_INVIGILATOR,
-        getMessage: (data) =>
-            `Invigilator not moving in ${data.center_name || 'Center'} at ${formatTime(data.time)}. TC Code: ${data.tc_code || 'N/A'} - SSC`
-    },
-
     otp: {
         templateId: process.env.SMS_TEMPLATE_OTP,
         getMessage: (data) =>
@@ -79,27 +50,51 @@ const SMS_TEMPLATES = {
 };
 
 /**
- * 🚀 Send SMS (SMSGatewayHub)
+ * Render a DLT message body by substituting {camname}, {centername},
+ * {timestamp}, {tccode}, {count} placeholders from the detection metadata.
  */
-async function sendSMS(phoneNumber, message, templateId) {
+function renderMessage(text, data = {}) {
+    if (!text) return '';
+    const map = {
+        camname: data.camera_name || data.cameraName || 'Camera',
+        centername: data.center_name || data.centerName || 'Center',
+        timestamp: formatTime(data.time),
+        tccode: data.tc_code || data.tcCode || 'N/A',
+        count: data.count != null ? String(data.count) : '',
+    };
+    return text.replace(/\{(\w+)\}/g, (m, key) =>
+        Object.prototype.hasOwnProperty.call(map, key) ? map[key] : m
+    );
+}
+
+/**
+ * 🚀 Send SMS (SMSGatewayHub). `creds` (api_key/sender_id/entity_id/route/
+ * channel/dcs/flashsms) overrides the env account when provided — used to send
+ * on a specific client's gateway account. OTP path passes no creds (env account).
+ */
+async function sendSMS(phoneNumber, message, templateId, creds = {}) {
     try {
         const smsUrl = 'https://www.smsgatewayhub.com/api/mt/SendSMS';
 
-        if (!process.env.SMS_API_KEY || !process.env.SMS_SENDER_ID || !process.env.SMS_ENTITY_ID) {
+        const apiKey = creds.api_key || process.env.SMS_API_KEY;
+        const senderId = creds.sender_id || process.env.SMS_SENDER_ID;
+        const entityId = creds.entity_id || process.env.SMS_ENTITY_ID;
+
+        if (!apiKey || !senderId || !entityId) {
             logger.error('SMS Service: Missing credentials');
             return { success: false };
         }
 
         const params = {
-            APIKey: process.env.SMS_API_KEY,
-            senderid: process.env.SMS_SENDER_ID,
-            channel: process.env.SMS_CHANNEL || '2',
-            DCS: process.env.SMS_DCS || '0',
-            flashsms: process.env.SMS_FLASH || '0',
+            APIKey: apiKey,
+            senderid: senderId,
+            channel: creds.channel || process.env.SMS_CHANNEL || '2',
+            DCS: creds.dcs || process.env.SMS_DCS || '0',
+            flashsms: creds.flashsms || process.env.SMS_FLASH || '0',
             number: phoneNumber,
             text: message,
-            route: process.env.SMS_ROUTE || '47',
-            EntityId: process.env.SMS_ENTITY_ID,
+            route: creds.route || process.env.SMS_ROUTE || '47',
+            EntityId: entityId,
             dlttemplateid: templateId
         };
 
@@ -122,39 +117,59 @@ async function sendSMS(phoneNumber, message, templateId) {
 }
 
 /**
- * 🎯 MAIN FUNCTION
+ * 🎯 Send an alert SMS using a per-client config row (from sms_configs).
+ *
+ * @param {object} config   - sms_configs row for the exam's client (exam_body)
+ * @param {string} typeKey  - 'invigilator' | 'proximity'
+ * @param {object} metadata - { camera_name, center_name, time, tc_code, count }
+ * @param {string|string[]} recipientList - per-exam observer_phone override; falls
+ *        back to config.default_recipients when empty.
  */
-async function sendAlertSMS(detectionType, metadata) {
+async function sendAlertWithConfig(config, typeKey, metadata, recipientList) {
     try {
-        const typeKey = TYPE_MAP[detectionType] || detectionType;
-
-        logger.info(`Detection: ${detectionType} → ${typeKey}`);
-
-        if (!typeKey) {
-            logger.info(`SMS SKIPPED → No mapping for '${detectionType}'`);
+        if (!config || config.enabled === 0) {
+            logger.info(`SMS SKIPPED → no/disabled client config`);
             return { success: true, skipped: true };
         }
 
-        const template = SMS_TEMPLATES[typeKey];
+        // Resolve template id + message body for this detection type.
+        const templateId = typeKey === 'invigilator'
+            ? config.template_invigilator
+            : typeKey === 'proximity' ? config.template_proximity : null;
+        const messageText = typeKey === 'invigilator'
+            ? config.message_invigilator
+            : typeKey === 'proximity' ? config.message_proximity : null;
 
-        if (!template || !template.templateId) {
-            logger.info(`SMS SKIPPED → No template for '${typeKey}'`);
+        if (!templateId || !messageText) {
+            logger.info(`SMS SKIPPED → client '${config.exam_body}' has no template for '${typeKey}'`);
             return { success: true, skipped: true };
         }
 
-        const numbers = process.env.ALERT_PHONE_NUMBERS;
+        // Recipient: explicit (per-exam observer_phone) wins, else client default.
+        const numbers = (
+            Array.isArray(recipientList) ? recipientList.join(',') : recipientList
+        ) || config.default_recipients;
         if (!numbers) {
-            logger.error('No phone numbers configured');
+            logger.error(`No phone numbers for client '${config.exam_body}'`);
             return { success: false };
         }
 
-        const recipients = numbers.split(',').map(n => n.trim());
-        const message = template.getMessage(metadata);
+        const recipients = String(numbers).split(',').map(n => n.trim()).filter(Boolean);
+        const message = renderMessage(messageText, metadata);
+
+        const creds = {
+            api_key: config.api_key,
+            sender_id: config.sender_id,
+            entity_id: config.entity_id,
+            route: config.route,
+            channel: config.channel,
+            dcs: config.dcs,
+            flashsms: config.flashsms,
+        };
 
         const results = [];
-
         for (const number of recipients) {
-            const res = await sendSMS(number, message, template.templateId);
+            const res = await sendSMS(number, message, templateId, creds);
             results.push(res);
         }
 
@@ -203,8 +218,10 @@ async function sendOTPSMS(phoneNumber, otp) {
 }
 
 module.exports = {
-    sendAlertSMS,
+    sendAlertWithConfig,
     sendSMS,
     sendOTPSMS,
-    SMS_TEMPLATES
+    renderMessage,
+    SMS_TEMPLATES,
+    TYPE_MAP
 };

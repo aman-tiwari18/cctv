@@ -51,6 +51,12 @@ const Exam = sequelize.define(
             comment: 'Array of specific dates to skip, e.g. ["2026-03-15","2026-03-20"]',
         },
 
+        observer_phone: {
+            type: DataTypes.STRING,
+            allowNull: true,
+            comment: 'NTA observer phone for SMS alerts, falls back to ALERT_PHONE_NUMBERS env',
+        },
+
         is_active: {
             type: DataTypes.BOOLEAN,
             defaultValue: true,

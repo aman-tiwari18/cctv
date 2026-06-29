@@ -60,6 +60,12 @@ const ShiftScriptAssignment = sequelize.define(
             allowNull: true,
         },
 
+        sms_enabled: {
+            type: DataTypes.BOOLEAN,
+            defaultValue: false,
+            allowNull: false,
+        },
+
         notes: {
             type: DataTypes.TEXT,
             allowNull: true,

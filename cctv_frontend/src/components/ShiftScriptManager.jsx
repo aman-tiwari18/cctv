@@ -22,6 +22,7 @@ import {
     InputLabel,
     Select,
     MenuItem,
+    Switch,
 } from '@mui/material';
 import {
     Add,
@@ -40,7 +41,7 @@ import {
     FlipCameraAndroid,
     SecurityUpdateWarning,
 } from '@mui/icons-material';
-import { shiftScriptsAPI, scriptsAPI, executionsAPI } from '../services/api';
+import { shiftScriptsAPI, scriptsAPI, executionsAPI, smsAPI } from '../services/api';
 import ExecutionStatusBadge from './ExecutionStatusBadge';
 
 /* ─────────────────────────────────────────────────────────────
@@ -193,9 +194,15 @@ const CATEGORIES = [
  *   onCloseDialog                    — close callback
  *   onScriptNamesReady(assignments)  — pass active assignments to parent
  */
+// Scripts whose pushed detections can trigger an SMS alert (DLT-approved
+// templates). SMS toggle is only shown for these, and only on exams whose
+// client (exam_body) has an enabled SMS config (fetched from /sms/clients).
+const SMS_ELIGIBLE_SCRIPTS = new Set(['invigilator', 'proximity']);
+
 const ShiftScriptManager = ({
     shift,
     examId,
+    examBody,
     onUpdate,
     renderInline = true,
     openDialog: externalOpenDialog,
@@ -214,8 +221,26 @@ const ShiftScriptManager = ({
 
     /* Per-script card times: { [scriptDbId]: { start, end } } */
     const [cardTimes, setCardTimes] = useState({});
+    /* Per-script SMS toggle: { [scriptDbId]: bool } (NTA + eligible scripts only) */
+    const [cardSms, setCardSms] = useState({});
     /* Which cards the user has clicked (show blue outline) */
     const [selectedCards, setSelectedCards] = useState(new Set());
+
+    /* exam_body clients that have an enabled SMS config (NTA, SSC, ...) */
+    const [smsClientBodies, setSmsClientBodies] = useState([]);
+    const examHasSmsConfig = smsClientBodies
+        .map((b) => String(b).toUpperCase())
+        .includes(String(examBody || '').toUpperCase());
+    const smsEligible = (script) =>
+        examHasSmsConfig && SMS_ELIGIBLE_SCRIPTS.has(script?.script_id);
+
+    useEffect(() => {
+        let alive = true;
+        smsAPI.getClients()
+            .then((res) => { if (alive) setSmsClientBodies(res?.data?.bodies || []); })
+            .catch(() => { if (alive) setSmsClientBodies([]); });
+        return () => { alive = false; };
+    }, []);
 
     /* Resolve dialog open state */
     const isDialogOpen = renderInline ? internalOpenDialog : !!externalOpenDialog;
@@ -258,12 +283,14 @@ const ShiftScriptManager = ({
     useEffect(() => {
         if (!isDialogOpen) {
             setCardTimes({});
+            setCardSms({});
             setSelectedCards(new Set());
             setError('');
             return;
         }
 
         const newCardTimes = {};
+        const newCardSms = {};
         const newSelectedCards = new Set();
 
         visibleAssignments.forEach((a) => {
@@ -273,10 +300,12 @@ const ShiftScriptManager = ({
                     start: a.custom_start_time ? a.custom_start_time.substring(0, 5) : '',
                     end: a.custom_end_time ? a.custom_end_time.substring(0, 5) : ''
                 };
+                newCardSms[a.script_id] = !!a.sms_enabled;
             }
         });
 
         setCardTimes(newCardTimes);
+        setCardSms(newCardSms);
         setSelectedCards(newSelectedCards);
         setError('');
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -321,7 +350,7 @@ const ShiftScriptManager = ({
     const handleCloseDialog = () => {
         if (renderInline) setInternalOpenDialog(false);
         else if (externalOnCloseDialog) externalOnCloseDialog();
-        setCardTimes({}); setError('');
+        setCardTimes({}); setCardSms({}); setError('');
     };
 
     const handleTimeChange = (scriptDbId, field, value) => {
@@ -331,6 +360,12 @@ const ShiftScriptManager = ({
             ...prev,
             [scriptDbId]: { ...prev[scriptDbId], [field]: value },
         }));
+    };
+
+    const handleSmsToggle = (scriptDbId, checked) => {
+        // Toggling SMS implies the card is selected for assignment.
+        setSelectedCards((prev) => new Set([...prev, scriptDbId]));
+        setCardSms((prev) => ({ ...prev, [scriptDbId]: checked }));
     };
 
     const handleCardClick = (scriptDbId) => {
@@ -357,6 +392,8 @@ const ShiftScriptManager = ({
                 script_id: s.id,
                 custom_start_time: cardTimes[s.id].start,
                 custom_end_time: cardTimes[s.id].end,
+                // Only send SMS toggle for eligible scripts on NTA exams.
+                ...(smsEligible(s) ? { sms_enabled: !!cardSms[s.id] } : {}),
             }));
 
         if (!toAssign.length) {
@@ -553,6 +590,36 @@ const ShiftScriptManager = ({
                                                 />
                                             </Box>
                                         </Box>
+
+                                        {/* SMS alert toggle — NTA + eligible scripts only */}
+                                        {smsEligible(script) && (
+                                            <Box
+                                                onClick={(e) => e.stopPropagation()}
+                                                sx={{
+                                                    mt: 1.25,
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'space-between',
+                                                    bgcolor: '#f8fafc',
+                                                    border: '1px solid #eef2f7',
+                                                    borderRadius: 1.5,
+                                                    px: 1,
+                                                    py: 0.25,
+                                                }}
+                                            >
+                                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                                                    <Smartphone sx={{ fontSize: 16, color: '#64748b' }} />
+                                                    <Typography sx={{ fontSize: '0.7rem', fontWeight: 700, color: '#475569' }}>
+                                                        SMS alert
+                                                    </Typography>
+                                                </Box>
+                                                <Switch
+                                                    size="small"
+                                                    checked={!!cardSms[script.id]}
+                                                    onChange={(e) => handleSmsToggle(script.id, e.target.checked)}
+                                                />
+                                            </Box>
+                                        )}
                                     </Box>
                                 );
                             })}
@@ -666,6 +733,15 @@ const ShiftScriptManager = ({
                                             </Typography>
                                             {assignment.script?.script_id && (
                                                 <Chip label={assignment.script.script_id} size="small" color="secondary" variant="outlined" />
+                                            )}
+                                            {assignment.sms_enabled && (
+                                                <Chip
+                                                    icon={<Smartphone sx={{ fontSize: 13 }} />}
+                                                    label="SMS"
+                                                    size="small"
+                                                    color="success"
+                                                    variant="outlined"
+                                                />
                                             )}
                                         </Box>
                                     }

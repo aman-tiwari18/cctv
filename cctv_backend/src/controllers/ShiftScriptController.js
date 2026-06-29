@@ -66,6 +66,7 @@ exports.assignScript = async (req, res) => {
         custom_start_time,
         custom_end_time,
         notes,
+        sms_enabled,
     } = req.body;
     const shift_id = req.params.shiftId;
 
@@ -124,10 +125,26 @@ exports.assignScript = async (req, res) => {
             custom_start_time: custom_start_time || null,
             custom_end_time: custom_end_time || null,
             notes: notes || null,
+            sms_enabled: !!sms_enabled,
         }));
 
     if (newRecords.length > 0) {
         await ShiftScriptAssignment.bulkCreate(newRecords);
+    }
+
+    // If SMS toggle was provided, apply it to ALL matching assignments (including
+    // ones that already existed for some dates) so the switch reflects intent.
+    if (sms_enabled !== undefined) {
+        await ShiftScriptAssignment.update(
+            { sms_enabled: !!sms_enabled },
+            {
+                where: {
+                    shift_id,
+                    script_id,
+                    assignment_date: { [Op.in]: assignableDates },
+                },
+            }
+        );
     }
 
     const results = await ShiftScriptAssignment.findAll({
@@ -259,12 +276,29 @@ exports.bulkAssign = async (req, res) => {
                 custom_start_time: s.custom_start_time || null,
                 custom_end_time: s.custom_end_time || null,
                 notes: s.notes || null,
+                sms_enabled: !!s.sms_enabled,
             });
         }
     }
 
     if (assignments.length > 0) {
         await ShiftScriptAssignment.bulkCreate(assignments);
+    }
+
+    // Apply each script's SMS toggle to all matching assignments (covers dates
+    // that already existed and were skipped above).
+    for (const s of prepared) {
+        if (s.sms_enabled === undefined) continue;
+        await ShiftScriptAssignment.update(
+            { sms_enabled: !!s.sms_enabled },
+            {
+                where: {
+                    shift_id,
+                    script_id: s.script_id,
+                    assignment_date: { [Op.in]: targetDates },
+                },
+            }
+        );
     }
 
     res.status(201).json({

@@ -818,6 +818,7 @@ const Analytics = () => {
                       <ShiftScriptManager
                         shift={shift}
                         examId={selectedExamId}
+                        examBody={selectedExam?.exam_body}
                         onUpdate={handleRefresh}
                         openDialog={openShiftDialogId === shift.id}
                         onCloseDialog={() => setOpenShiftDialogId(null)}

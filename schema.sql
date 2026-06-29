@@ -160,6 +160,8 @@ CREATE TABLE `camera_report_hls` (
   `pushed_to_client` tinyint(1) NOT NULL DEFAULT '0',
   `remove_from_client` tinyint(1) NOT NULL DEFAULT '0',
   `pushed_by` int DEFAULT NULL,
+  `sms_sent` tinyint(1) NOT NULL DEFAULT '0',
+  `sms_sent_at` datetime DEFAULT NULL,
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `shift_id` (`shift_id`),
@@ -204,6 +206,8 @@ CREATE TABLE `camera_report_rtsp` (
   `remove_from_client` tinyint(1) DEFAULT '0',
   `pushed_by` int DEFAULT NULL,
   `rejected_events` int DEFAULT '0',
+  `sms_sent` tinyint(1) NOT NULL DEFAULT '0',
+  `sms_sent_at` datetime DEFAULT NULL,
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `shift_id` (`shift_id`),
@@ -255,6 +259,7 @@ CREATE TABLE `exams` (
   `end_date` date DEFAULT NULL COMMENT 'Exam end date',
   `skip_days` json DEFAULT NULL COMMENT 'Array of day names to skip, e.g. ["Saturday","Sunday"]',
   `skip_dates` json DEFAULT NULL COMMENT 'Array of specific dates to skip, e.g. ["2026-03-15","2026-03-20"]',
+  `observer_phone` varchar(64) DEFAULT NULL COMMENT 'NTA observer phone for SMS alerts; falls back to ALERT_PHONE_NUMBERS env',
   `is_active` tinyint(1) DEFAULT '1',
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -263,6 +268,34 @@ CREATE TABLE `exams` (
   KEY `idx_is_active` (`is_active`)
 ) ENGINE=InnoDB AUTO_INCREMENT=11 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `sms_configs`
+-- Per-client (exam_body) SMSGatewayHub account + DLT templates. Seeded out-of-band.
+--
+
+DROP TABLE IF EXISTS `sms_configs`;
+CREATE TABLE `sms_configs` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `exam_body` varchar(64) NOT NULL COMMENT 'Client key, matches exams.exam_body',
+  `enabled` tinyint(1) NOT NULL DEFAULT '1',
+  `api_key` varchar(128) DEFAULT NULL,
+  `sender_id` varchar(32) DEFAULT NULL,
+  `entity_id` varchar(64) DEFAULT NULL,
+  `route` varchar(16) DEFAULT '47',
+  `channel` varchar(8) DEFAULT '2',
+  `dcs` varchar(8) DEFAULT '0',
+  `flashsms` varchar(8) DEFAULT '0',
+  `default_recipients` varchar(255) DEFAULT NULL COMMENT 'Comma-separated fallback when exam.observer_phone is empty',
+  `template_invigilator` varchar(64) DEFAULT NULL,
+  `message_invigilator` text,
+  `template_proximity` varchar(64) DEFAULT NULL,
+  `message_proximity` text,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uniq_exam_body` (`exam_body`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 --
 -- Temporary view structure for view `execution_summary`
@@ -376,6 +409,7 @@ CREATE TABLE `shift_script_assignments` (
   `custom_start_time` time DEFAULT NULL,
   `custom_end_time` time DEFAULT NULL,
   `custom_frequency_minutes` int DEFAULT NULL,
+  `sms_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'When 1, pushing a detection from this scheduled script sends an SMS alert',
   `notes` text COLLATE utf8mb4_unicode_ci,
   `started_at` datetime DEFAULT NULL,
   `completed_at` datetime DEFAULT NULL,

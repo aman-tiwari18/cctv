@@ -296,7 +296,7 @@ exports.getRemovedDetections = async (req, res) => {
                                 camera_name, ${tbl.source === 'rtsp' ? 'device_id, camera_no,' : 'camera_category, ch_code,'}
                                 tc_code, state, camera_status, events, date_time,
                                 imageurl, detection_type, unique_id, created_at,
-                                pushed_to_client, remove_from_client, updated_at
+                                pushed_to_client, remove_from_client, sms_sent, sms_sent_at, updated_at
                          FROM ${tbl.name}
                          WHERE ${whereData}
                          ORDER BY created_at DESC
@@ -360,6 +360,8 @@ exports.getRemovedDetections = async (req, res) => {
                 created_at: row.created_at,
                 pushed_to_client: row.pushed_to_client,
                 remove_from_client: row.remove_from_client,
+                sms_sent: row.sms_sent,
+                sms_sent_at: row.sms_sent_at,
             };
         });
 

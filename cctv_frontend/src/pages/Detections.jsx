@@ -249,6 +249,18 @@ function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onS
           addedAt={item.newBadgeAt}
           sx={{ position: 'absolute', top: 8, right: 8 }}
         />
+        {Number(item.sms_sent) === 1 && (
+          <Chip
+            icon={<Smartphone sx={{ fontSize: 12, color: '#fff !important' }} />}
+            label="SMS sent"
+            size="small"
+            sx={{
+              position: 'absolute', bottom: 8, left: 8,
+              bgcolor: '#16a34a', color: '#fff',
+              fontWeight: 700, fontSize: '0.65rem',
+            }}
+          />
+        )}
         {invigilatorEventLabel && (
           <Chip
             label={invigilatorEventLabel}

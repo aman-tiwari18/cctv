@@ -194,6 +194,18 @@ exports.downloadReport = async (req, res) => {
             [examId, searchDate]
         );
 
+        // ── 4b. Server-address (cctv_url) lookup from camera_links ───────────
+        // The report tables don't carry the server URL, so map it per camera.
+        // Keyed the same way as detections: device_id_camera_no (RTSP) / ch_code (HLS).
+        const linkRows = isRTSP
+            ? await query(`SELECT device_id, camera_no, cctv_url FROM camera_links_rtsp WHERE exam_id = ?`, [examId])
+            : await query(`SELECT ch_code, cctv_url FROM camera_links_hls WHERE exam_id = ?`, [examId]);
+        const serverByKey = {};
+        linkRows.forEach(l => {
+            const k = isRTSP ? `${l.device_id}_${l.camera_no}` : String(l.ch_code);
+            if (serverByKey[k] === undefined) serverByKey[k] = l.cctv_url || '';
+        });
+
         // ── 5. Aggregate detections: aggregated[shiftId][key] ───────────────
         const aggregated = {};
         const shiftsWithData = new Set();
@@ -348,11 +360,11 @@ exports.downloadReport = async (req, res) => {
 
         // ── 8. Detections List Sheet ──────────────────────────────────────────
         const DET_HEADERS = [
-            'Shift', 'Device ID', 'Camera No', 'Cam ID', 'Camera Name',
-            'Center Name', 'City', 'Detection Type', 'Detection Time',
+            'Shift', 'Device ID', 'Camera No', 'Cam ID', 'TC Code', 'Camera Name',
+            'Center Name', 'City', 'Server Address', 'Detection Type', 'Detection Time',
             'Rejected', 'Image URL', 'View'
         ];
-        const DET_WIDTHS = [10, 15, 12, 15, 35, 30, 15, 20, 22, 10, 70, 8];
+        const DET_WIDTHS = [10, 15, 12, 15, 14, 35, 30, 15, 28, 20, 22, 10, 70, 8];
 
         const detSheetData = detections.map(d => {
             const resolvedSid = (d.shift_id != null) ? d.shift_id : determineShiftId(d.date_time, shifts);
@@ -361,9 +373,11 @@ exports.downloadReport = async (req, res) => {
                 'Device ID': d.device_id || '',
                 'Camera No': d.camera_no || '',
                 'Cam ID': isRTSP ? `${d.device_id}_${d.camera_no}` : formatHlsCamId(d.camera_name, d.ch_code),
+                'TC Code': d.tc_code || '',
                 'Camera Name': d.camera_name || '',
                 'Center Name': d.center_name || '',
                 'City': d.city || '',
+                'Server Address': serverByKey[isRTSP ? `${d.device_id}_${d.camera_no}` : String(d.ch_code)] || '',
                 'Detection Type': d.detection_type || '',
                 'Detection Time': d.date_time || '',
                 'Rejected': Number(d.remove_from_client) === 1 ? 1 : 0,
@@ -380,7 +394,7 @@ exports.downloadReport = async (req, res) => {
             //purana
             // const cellAddr = XLSX.utils.encode_cell({ r: R, c: 10 });
             //naya
-            const cellAddr = XLSX.utils.encode_cell({ r: R, c: 11 });
+            const cellAddr = XLSX.utils.encode_cell({ r: R, c: DET_HEADERS.indexOf('View') });
             const url = detSheetData[R - 1]['Image URL'];
             if (url) {
                 detWs[cellAddr] = { t: 's', v: 'View', l: { Target: url, Tooltip: 'Click to view image' } };
@@ -601,6 +615,17 @@ exports.downloadClientReport = async (req, res) => {
             [examId, searchDate]
         );
 
+        // ── 4b. Server-address (cctv_url) lookup from camera_links ───────────
+        // The report tables don't carry the server URL, so map it per camera.
+        // Keyed the same way as detections: device_id_camera_no (RTSP) / ch_code (HLS).
+        const linkRows = isRTSP
+            ? await query(`SELECT device_id, camera_no, cctv_url FROM camera_links_rtsp WHERE exam_id = ?`, [examId])
+            : await query(`SELECT ch_code, cctv_url FROM camera_links_hls WHERE exam_id = ?`, [examId]);
+        const serverByKey = {};
+        linkRows.forEach(l => {
+            const k = isRTSP ? `${l.device_id}_${l.camera_no}` : String(l.ch_code);
+            if (serverByKey[k] === undefined) serverByKey[k] = l.cctv_url || '';
+        });
 
         // ── 5. Aggregate detections per (shift, camera) ──────────────────────
         const aggregated = {};
@@ -728,11 +753,11 @@ exports.downloadClientReport = async (req, res) => {
         // the admin later pulled this detection back from the client UI
         // (remove_from_client = 1), 0 when it's still active on the client.
         const DET_HEADERS = [
-            'Shift', 'Device ID', 'Camera No', 'Cam ID', 'Camera Name',
-            'Center Name', 'City', 'Detection Type', 'Detection Time',
+            'Shift', 'Device ID', 'Camera No', 'Cam ID', 'TC Code', 'Camera Name',
+            'Center Name', 'City', 'Server Address', 'Detection Type', 'Detection Time',
             'Rejected', 'Image URL', 'View'
         ];
-        const DET_WIDTHS = [10, 15, 12, 15, 35, 30, 15, 20, 22, 10, 70, 8];
+        const DET_WIDTHS = [10, 15, 12, 15, 14, 35, 30, 15, 28, 20, 22, 10, 70, 8];
 
         const detSheetData = detections.map(d => {
             const resolvedSid = (d.shift_id != null) ? d.shift_id : determineShiftId(d.date_time, shifts);
@@ -741,9 +766,11 @@ exports.downloadClientReport = async (req, res) => {
                 'Device ID': d.device_id || '',
                 'Camera No': d.camera_no || '',
                 'Cam ID': isRTSP ? `${d.device_id}_${d.camera_no}` : formatHlsCamId(d.camera_name, d.ch_code),
+                'TC Code': d.tc_code || '',
                 'Camera Name': d.camera_name || '',
                 'Center Name': d.center_name || '',
                 'City': d.city || '',
+                'Server Address': serverByKey[isRTSP ? `${d.device_id}_${d.camera_no}` : String(d.ch_code)] || '',
                 'Detection Type': d.detection_type || '',
                 'Detection Time': d.date_time || '',
                 'Rejected': Number(d.remove_from_client) === 1 ? 1 : 0,
@@ -758,7 +785,7 @@ exports.downloadClientReport = async (req, res) => {
         // inserted between Detection Time and Image URL.
         const range = XLSX.utils.decode_range(detWs['!ref'] || 'A1');
         for (let R = range.s.r + 1; R <= range.e.r; R++) {
-            const cellAddr = XLSX.utils.encode_cell({ r: R, c: 11 });
+            const cellAddr = XLSX.utils.encode_cell({ r: R, c: DET_HEADERS.indexOf('View') });
             const url = detSheetData[R - 1]['Image URL'];
             if (url) {
                 detWs[cellAddr] = { t: 's', v: 'View', l: { Target: url, Tooltip: 'Click to view image' } };

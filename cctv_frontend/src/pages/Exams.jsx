@@ -51,7 +51,7 @@ import { ShiftSvgIcon } from '../components/ShiftSvgIcon';
 import ExamScheduleCalendar from '../components/ExamScheduleCalendar';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { examsAPI, shiftScriptsAPI } from '../services/api';
+import { examsAPI, shiftScriptsAPI, smsAPI } from '../services/api';
 
 const ALL_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -80,16 +80,24 @@ const Exams = () => {
     end_date: '',
     skip_days: [],
     skip_dates: [],
+    observer_phone: '',
     shifts: [],
   });
   const [error, setError] = useState('');
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [newSkipDate, setNewSkipDate] = useState('');
   const [examCounts, setExamCounts] = useState({}); // Store script and detection counts
+  const [smsClientBodies, setSmsClientBodies] = useState([]); // exam_body clients with SMS config
 
   useEffect(() => {
     loadExams();
+    smsAPI.getClients()
+      .then((res) => setSmsClientBodies(res?.data?.bodies || []))
+      .catch(() => setSmsClientBodies([]));
   }, []);
+
+  const examBodyHasSms = (body) =>
+    smsClientBodies.map((b) => String(b).toUpperCase()).includes(String(body || '').toUpperCase());
 
   const loadExams = async () => {
     try {
@@ -169,6 +177,7 @@ const Exams = () => {
         end_date: exam.end_date ? formatDateDDMMYYYY(exam.end_date) : '',
         skip_days: exam.skip_days || [],
         skip_dates: exam.skip_dates || [],
+        observer_phone: exam.observer_phone || '',
         shifts: exam.examShifts?.map(s => ({
           id: s.id,                         // keep id so the backend updates in place
           shift_name: s.shift_name,
@@ -188,6 +197,7 @@ const Exams = () => {
         end_date: '',
         skip_days: ['Saturday', 'Sunday'],
         skip_dates: [],
+        observer_phone: '',
         shifts: [
           { shift_name: 'Shift 1', start_time: '09:00', end_time: '12:00' },
         ],
@@ -736,8 +746,9 @@ const Exams = () => {
                 <MenuItem value="EY">EY(Ernst & Young)</MenuItem>
                 <MenuItem value="SSC">SSC(Staff Selection Commission)</MenuItem>
                 <MenuItem value="TCS">TCS(Tata Consultancy Services)</MenuItem>
+                <MenuItem value="NTA">NTA(National Testing Agency)</MenuItem>
                 {/* <MenuItem value="CDIS">CDIS</MenuItem> */}
-                {formData.exam_body && !['EY', 'SSC', 'TCS', 'CDIS'].includes(formData.exam_body) && <MenuItem value={formData.exam_body}>{formData.exam_body}</MenuItem>}
+                {formData.exam_body && !['EY', 'SSC', 'TCS', 'NTA', 'CDIS'].includes(formData.exam_body) && <MenuItem value={formData.exam_body}>{formData.exam_body}</MenuItem>}
               </TextField>
             </Grid>
 
@@ -772,6 +783,26 @@ const Exams = () => {
                 InputProps={{ sx: { borderRadius: 2, bgcolor: '#f1f5f9', '& fieldset': { border: 'none' }, fontSize: '0.9rem' } }}
               />
             </Grid>
+
+            {examBodyHasSms(formData.exam_body) && (
+              <Grid item xs={12} sm={6}>
+                <Typography sx={{ fontSize: '0.65rem', fontWeight: 800, color: '#64748b', mb: 0.5, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                  {String(formData.exam_body || '').toUpperCase()} Observer Phone (SMS alerts)
+                </Typography>
+                <TextField
+                  fullWidth
+                  name="observer_phone"
+                  value={formData.observer_phone}
+                  onChange={handleChange}
+                  size="small"
+                  placeholder="e.g. 919876543210 (comma-separate for multiple)"
+                  InputProps={{ sx: { borderRadius: 2, bgcolor: '#f1f5f9', '& fieldset': { border: 'none' } } }}
+                />
+                <Typography sx={{ fontSize: 11, color: '#94a3b8', mt: 0.5 }}>
+                  Recipient for invigilator / close-proximity SMS alerts. Leave blank to use the system default.
+                </Typography>
+              </Grid>
+            )}
           </Grid>
 
           {/* EXAM DATE RANGE */}
