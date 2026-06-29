@@ -64,6 +64,17 @@ scrape_configs:
       # cctv-gpu-agg-w6.service forwards main:9210 -> worker-6:8030 (one exporter, all 8 GPUs).
       - targets: ['host.docker.internal:9210']
 
+    # The w5/w6 aggregated exporters label gpu_id by HOST index (0..7), but each
+    # 8-GPU container is one logical worker the UI queries as a single GPU with
+    # gpu_id="0" (CUDA_VISIBLE_DEVICES maps its GPU to device 0). server_id
+    # (worker-5-gpuN) already distinguishes them, so force gpu_id="0" here to make
+    # the per-GPU util/memory charts match (previously only gpu0 had data).
+    metric_relabel_configs:
+      - source_labels: [instance]
+        regex: 'host\.docker\.internal:(9110|9210)'
+        target_label: gpu_id
+        replacement: '0'
+
   # ── Host system metrics (node_exporter) — CPU / RAM / disk / network ──
   # LAN workers expose node_exporter directly on :9100; the 8-GPU VMs (5/6)
   # reuse the host's existing node_exporter (127.0.0.1:9100), tunneled to
