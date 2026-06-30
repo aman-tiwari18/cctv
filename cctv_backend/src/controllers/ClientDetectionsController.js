@@ -12,6 +12,11 @@
 'use strict';
 
 const { query } = require('../config/database');
+const { sendAlertWithConfig, TYPE_MAP } = require('../services/smsService');
+const { getObserverNumbers } = require('../utils/observerList');
+
+// Detection types eligible for SMS (the only DLT-approved templates we have).
+const SMS_ELIGIBLE_TYPES = new Set(['invigilator', 'proximity']);
 
 // Reverse-mapping of script-server's DETECTION_FOLDERS. The detection_type
 // column stores the folder name (e.g. "proximity_detection"); the frontend
@@ -146,6 +151,138 @@ exports.undoRemoveDetection = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: 'Failed to undo removal',
+            error: err.message,
+        });
+    }
+};
+
+/**
+ * POST /cctv_analytics/api/client-detections/accept
+ * Body: { uid: string }
+ *
+ * Client-side "Accept" action. SMS alerts used to fire automatically when the
+ * admin pushed a detection; they now fire here, when the CLIENT accepts it.
+ * Two effects:
+ *   1. Flags the report row accepted_by_client = 1 (persists the badge).
+ *   2. Sends the SMS alert to the observer number(s) mapped to this detection's
+ *      tc_code in the NTA Observer List sheet (utils/observerList).
+ *
+ * Gating: the client's explicit Accept is itself the trigger, so the old
+ * per-shift sms_enabled toggle gate is NOT applied here. We still require a
+ * usable template (type → invigilator/proximity), an enabled client SMS config
+ * (gateway creds), and at least one tc_code-mapped recipient — without these
+ * the gateway can't deliver. Idempotent on sms_sent.
+ */
+exports.acceptDetection = async (req, res) => {
+    const uid = req.body?.uid;
+    if (!uid) {
+        return res.status(400).json({ success: false, message: 'uid is required' });
+    }
+    try {
+        // The unique_id lives in exactly one of the two report tables. Find it +
+        // the metadata we need for the SMS. (sms_sent exists since migration 027.)
+        let tableName = null;
+        let row = null;
+        for (const t of ['camera_report_hls', 'camera_report_rtsp']) {
+            try {
+                const r = await query(
+                    `SELECT exam_id, shift_id, center_name, tc_code, camera_name,
+                            detection_type, date_time, sms_sent
+                       FROM ${t} WHERE unique_id = ? LIMIT 1`,
+                    [uid]
+                );
+                if (r && r.length) { tableName = t; row = r[0]; break; }
+            } catch (e) {
+                console.error(`[acceptDetection] lookup failed for ${t}:`, e.message);
+            }
+        }
+
+        if (!row) {
+            return res.status(404).json({ success: false, message: 'Detection not found' });
+        }
+
+        // 1) Mark accepted (idempotent — keep the first accepted_at). Tolerate the
+        //    columns not existing yet (migration 029) so accept still sends SMS.
+        try {
+            await query(
+                `UPDATE ${tableName}
+                    SET accepted_by_client = 1,
+                        accepted_at = COALESCE(accepted_at, NOW())
+                  WHERE unique_id = ?`,
+                [uid]
+            );
+        } catch (e) {
+            console.error(`[acceptDetection] mark-accepted failed for ${uid}:`, e.message);
+        }
+
+        // 2) Send the SMS alert to the tc_code-mapped observer number(s).
+        let smsSent = false;
+        let smsReason = null;
+
+        const typeKey = TYPE_MAP[row.detection_type] || row.detection_type;
+
+        if (Number(row.sms_sent) === 1) {
+            smsReason = 'already_sent';
+        } else if (!SMS_ELIGIBLE_TYPES.has(typeKey)) {
+            smsReason = 'type_not_eligible';
+        } else if (!row.exam_id) {
+            smsReason = 'no_exam';
+        } else {
+            const examRows = await query(
+                'SELECT exam_body FROM exams WHERE id = ? LIMIT 1',
+                [row.exam_id]
+            );
+            const examBody = examRows && examRows[0] ? examRows[0].exam_body : null;
+
+            const configRows = await query(
+                'SELECT * FROM sms_configs WHERE exam_body = ? AND enabled = 1 LIMIT 1',
+                [examBody]
+            );
+            const clientConfig = configRows && configRows[0];
+
+            // Recipient(s): the observer number(s) mapped to THIS detection's tc_code.
+            const recipients = getObserverNumbers(row.tc_code);
+
+            if (!clientConfig) {
+                smsReason = 'no_client_config';
+            } else if (recipients.length === 0) {
+                smsReason = 'no_observer_number';
+            } else {
+                const alertResult = await sendAlertWithConfig(clientConfig, typeKey, {
+                    center_name: row.center_name,
+                    tc_code: row.tc_code,
+                    camera_name: row.camera_name,
+                    time: row.date_time,
+                }, recipients);
+
+                if (alertResult.success && !alertResult.skipped) {
+                    smsSent = true;
+                    try {
+                        await query(
+                            `UPDATE ${tableName} SET sms_sent = 1, sms_sent_at = NOW() WHERE unique_id = ?`,
+                            [uid]
+                        );
+                    } catch (e) {
+                        console.error(`[acceptDetection] mark sms_sent failed for ${uid}:`, e.message);
+                    }
+                } else {
+                    smsReason = alertResult.skipped ? 'config_skipped' : 'send_failed';
+                }
+            }
+        }
+
+        return res.json({
+            success: true,
+            uid,
+            accepted: true,
+            sms_sent: smsSent,
+            sms_reason: smsReason,
+        });
+    } catch (err) {
+        console.error('[acceptDetection] error:', err);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to accept detection',
             error: err.message,
         });
     }

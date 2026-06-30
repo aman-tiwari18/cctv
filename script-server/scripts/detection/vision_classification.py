@@ -68,6 +68,10 @@ logger = logging.getLogger(__name__)
 # ===========================================================================
 _CPU_CORES = multiprocessing.cpu_count()
 
+# Project root = script-server/ (this file lives at scripts/detection/). Used to
+# anchor SAVE_FOLDER and the vLLM start script. Mirrors the RTSP/NEET scripts.
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+
 MAX_WORKERS_NETWORK: int = int(os.getenv("VISION_MAX_WORKERS_NETWORK", "256"))
 MAX_WORKERS_VLM:     int = int(os.getenv("VISION_MAX_WORKERS_VLM",     "16"))
 THREAD_POOL_SIZE:    int = int(os.getenv("VISION_THREAD_POOL",         str(min(_CPU_CORES * 2, 128))))

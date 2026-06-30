@@ -145,6 +145,10 @@ const NewBadge = ({ addedAt, sx }) => {
 
 const getDetectionTcCode = (item = {}) => item.tcCode || item.tc_code || item.tc || '-';
 
+// A detection is "accepted" once the client clicks Accept (persisted as
+// accepted_by_client on the backend; mirrored here as item.accepted).
+const isDetectionAccepted = (item = {}) => item.accepted === 1 || item.accepted_by_client === 1;
+
 const getDetectionShiftName = (item = {}) => (
   item.shiftName
   || item.shift_name
@@ -162,7 +166,7 @@ const getDetectionPushedBy = (item = {}) => (
 // "Pushed by" is internal info — only ADMIN/OPERATOR see it, never the client (VIEWER).
 const canViewPushedBy = (role) => role === 'ADMIN' || role === 'OPERATOR';
 
-function DetectionCard({ item, onClick, onRemove, onUndo, isRemoving, isPendingRemoval }) {
+function DetectionCard({ item, onClick, onRemove, onUndo, onAccept, isRemoving, isPendingRemoval, isAccepting, isAccepted }) {
   const { user } = useAuth();
   const meta = TYPE_META[item.type] || { label: item.type, color: '#94a3b8', bg: '#f1f5f9' };
   const [imgError, setImgError] = useState(false);
@@ -395,7 +399,34 @@ function DetectionCard({ item, onClick, onRemove, onUndo, isRemoving, isPendingR
             </Button>
           </Box>
         ) : (
-          <Box sx={{ display: 'flex', justifyContent: 'end', gap: 1.5 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: 1.5 }}>
+            <Button
+              variant="contained"
+              disableElevation
+              startIcon={isAccepted ? <Check sx={{ fontSize: 16 }} /> : null}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (onAccept && !isAccepting && !isAccepted) onAccept(item);
+              }}
+              disabled={isAccepting || isAccepted}
+              sx={{
+                bgcolor: '#16a34a',
+                color: '#fff',
+                fontWeight: 900,
+                height: "40px",
+                flex: 1,
+                minWidth: 0,
+                maxWidth: { xs: 'none', sm: 160 },
+                borderRadius: 3,
+                textTransform: 'none',
+                fontSize: 12,
+                whiteSpace: 'nowrap',
+                '&:hover': { bgcolor: '#15803d' },
+                '&.Mui-disabled': { bgcolor: isAccepted ? '#16a34a' : '#cbd5e1', color: '#fff', opacity: isAccepted ? 0.9 : 0.7 },
+              }}
+            >
+              {isAccepted ? 'Accepted' : isAccepting ? 'Accepting...' : 'Accept'}
+            </Button>
             <Button
               variant="contained"
               disableElevation
@@ -746,7 +777,7 @@ const buildImageKey = (item) => `${item.source}|${item.type}|${item.relativePath
 //   );
 // }
 
-function ListViewPanel({ data, selectedIndex, onSelect, onRemove, onUndo, removingId, pendingRemovals }) {
+function ListViewPanel({ data, selectedIndex, onSelect, onRemove, onUndo, onAccept, removingId, pendingRemovals, acceptingId }) {
   const { user } = useAuth();
   const item = data[selectedIndex];
   const itemRefs = useRef([]); // ✅ ref array for each list item
@@ -756,6 +787,8 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, onUndo, removi
   const pushedBy = item && canViewPushedBy(user?.role) ? getDetectionPushedBy(item) : null;
   const isPendingRemoval = item ? pendingRemovals.has(item.uid) : false;
   const isRemoving = item ? removingId === item.uid : false;
+  const isAccepting = item ? acceptingId === item.uid : false;
+  const isAccepted = item ? isDetectionAccepted(item) : false;
 
   useEffect(() => {
     const handler = (e) => {
@@ -1039,6 +1072,25 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, onUndo, removi
                       <Button
                         variant="contained"
                         disableElevation
+                        startIcon={isAccepted ? <Check sx={{ fontSize: 18 }} /> : null}
+                        onClick={() => {
+                          if (onAccept && !isAccepting && !isAccepted) onAccept(item);
+                        }}
+                        disabled={isAccepting || isAccepted}
+                        sx={{
+                          bgcolor: '#16a34a', color: '#fff', fontWeight: 900,
+                          height: "40px",
+                          width: "160px",
+                          borderRadius: 2, textTransform: 'none', fontSize: 14,
+                          '&:hover': { bgcolor: '#15803d' },
+                          '&.Mui-disabled': { bgcolor: isAccepted ? '#16a34a' : '#cbd5e1', color: '#fff', opacity: isAccepted ? 0.9 : 0.7 },
+                        }}
+                      >
+                        {isAccepted ? 'Accepted' : isAccepting ? 'Accepting...' : 'Accept'}
+                      </Button>
+                      <Button
+                        variant="contained"
+                        disableElevation
                         onClick={() => {
                           if (onRemove && !isRemoving) onRemove(item);
                         }}
@@ -1158,6 +1210,7 @@ const ClientDetections = () => {
   const pendingRemovalsRef = useRef(pendingRemovals);
   useEffect(() => { pendingRemovalsRef.current = pendingRemovals; }, [pendingRemovals]);
   const [removingId, setRemovingId] = useState(null);
+  const [acceptingId, setAcceptingId] = useState(null);
   const [keyboardHintShown, setKeyboardHintShown] = useState(false);
 
   const UNDO_WINDOW_MS = 15000;
@@ -1610,6 +1663,42 @@ const ClientDetections = () => {
     }
   };
 
+  // Client "Accept": flags the detection accepted + triggers the SMS alert to
+  // the observer number(s) mapped to its tc_code (handled on cctv_backend).
+  // Optimistically marks the card accepted; reflects the SMS-sent badge when
+  // the backend reports it delivered.
+  const handleAccept = async (item) => {
+    if (!item || !item.uid) return;
+    if (isDetectionAccepted(item)) return;
+    const uid = item.uid;
+    setAcceptingId(uid);
+    try {
+      const res = await clientDetectionsAPI.accept(uid);
+      const smsSent = !!res?.data?.sms_sent;
+      setImages(prev => prev.map(i => (
+        i.uid === uid
+          ? { ...i, accepted: 1, accepted_by_client: 1, sms_sent: smsSent ? 1 : i.sms_sent }
+          : i
+      )));
+      setSnackbar({
+        open: true,
+        message: smsSent
+          ? 'Detection accepted — SMS alert sent to the observer'
+          : 'Detection accepted',
+        severity: 'success',
+      });
+    } catch (err) {
+      console.error('Accept failed:', err);
+      setSnackbar({
+        open: true,
+        message: 'Failed to accept detection. Please try again.',
+        severity: 'error',
+      });
+    } finally {
+      setAcceptingId(null);
+    }
+  };
+
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: '#f8fafc' }}>
 
@@ -1944,8 +2033,11 @@ const ClientDetections = () => {
                 onClick={setSelected}
                 onRemove={handleRemove}
                 onUndo={handleUndo}
+                onAccept={handleAccept}
                 isRemoving={removingId === item.uid}
                 isPendingRemoval={pendingRemovals.has(item.uid)}
+                isAccepting={acceptingId === item.uid}
+                isAccepted={isDetectionAccepted(item)}
               />
             </Grid>
           ))}
@@ -1957,8 +2049,10 @@ const ClientDetections = () => {
           onSelect={setListSelectedIndex}
           onRemove={handleRemove}
           onUndo={handleUndo}
+          onAccept={handleAccept}
           removingId={removingId}
           pendingRemovals={pendingRemovals}
+          acceptingId={acceptingId}
         />
       )}
 
