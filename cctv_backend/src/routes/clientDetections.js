@@ -37,4 +37,18 @@ router.post(
     asyncHandler(ClientDetectionsController.undoRemoveDetection)
 );
 
+/**
+ * @route   POST /cctv_analytics/api/client-detections/accept
+ * @body    { uid: string }
+ * @access  Authenticated
+ * @returns { success, uid, accepted, sms_sent, sms_reason } — flags the row
+ *          accepted_by_client=1 and sends the SMS alert to the observer
+ *          number(s) mapped to the detection's tc_code (NTA Observer List).
+ */
+router.post(
+    '/accept',
+    authenticate,
+    asyncHandler(ClientDetectionsController.acceptDetection)
+);
+
 module.exports = router;

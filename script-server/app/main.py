@@ -1995,8 +1995,9 @@ async def copy_client_detections(payload: ClientDetectionCopyRequest):
                         "uid": row.get("unique_id"),
                         "updatedAt": pushed_at_ms,
                         "updated_at": pushed_at_ms,
-                        # SMS fires async after push; starts 0, badge appears on next fetch.
+                        # SMS now fires when the client ACCEPTS (not on push).
                         "sms_sent": 0,
+                        "accepted": 0,
                         "pushedBy": pushed_by,
                         "pushed_by": pushed_by,
                         "pushedByName": pushed_by_name,
@@ -2067,17 +2068,10 @@ async def copy_client_detections(payload: ClientDetectionCopyRequest):
     finally:
         conn.close()
 
-    # After a successful push+commit, trigger the SMS bridge for each item.
-    # Fire-and-forget so the push response is never delayed/blocked by SMS.
-    for item in copied:
-        try:
-            task = asyncio.create_task(
-                _trigger_sms_alert(item.get("uid"), item.get("source"))
-            )
-            _BACKGROUND_TASKS.add(task)
-            task.add_done_callback(_BACKGROUND_TASKS.discard)
-        except Exception as e:
-            logger.warning(f"Failed to schedule SMS bridge task: {e}")
+    # NOTE: SMS alerts are NO LONGER sent on push. They are now sent when the
+    # CLIENT accepts a detection (cctv_backend POST /client-detections/accept),
+    # which delivers to the tc_code-mapped observer number(s). The push-time
+    # _trigger_sms_alert bridge is intentionally not called here anymore.
 
     return {"success": True, "copied": copied, "failed": failed}
 
@@ -2268,6 +2262,9 @@ def list_client_detections(
                     "pushedByName": user_name_map.get(row.get("pushed_by")),
                     "sms_sent":    1 if row.get("sms_sent") == 1 else 0,
                     "sms_sent_at": _epoch_ms(row.get("sms_sent_at")),
+                    # Client "Accept" state (cctv_backend sets accepted_by_client).
+                    "accepted":    1 if row.get("accepted_by_client") == 1 else 0,
+                    "accepted_at": _epoch_ms(row.get("accepted_at")),
                     "_mtime":      _epoch_ms(row.get("created_at")) or 0,
                     "updatedAt":   _epoch_ms(row.get("updated_at")),
                     "updated_at":  _epoch_ms(row.get("updated_at")),

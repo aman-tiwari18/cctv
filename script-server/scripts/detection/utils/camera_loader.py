@@ -18,54 +18,66 @@ logger = logging.getLogger(__name__)
 
 
 # ================= ANALYTIC -> CLASSIFICATION MAPPING =================
-# This ensures each script only processes relevant cameras.
-# Updated 2026-06-19 to the current DB classification values:
-#   Inside Classroom · Entry/Exit · Strong Room · Biometric · Uncertain
-# Matching is case-insensitive substring (see _camera_matches_script). Room
-# names "Strong Room/Control Room/Principal Room" all carry the DB value
-# "Strong Room". "Uncertain" cameras (room not confidently classified) are NOT
-# routed to room-specific analytics — only the "all" scripts (tamper/inversion).
+# This ensures each script only processes relevant cameras, per the NTA SOP.
+# Updated 2026-06-30 for the HLS exam (exam_id=27) DB classification values:
+#   Computer Lab · Server Room · Entry · Outside Area · Parking Lot ·
+#   Outdoor Scene · Uncertain · NULL
+# RTSP values (Inside Classroom · Entry/Exit · Strong Room · Biometric) are kept
+# in the lists too, so the same map works for both link types.
+#
+# Matching is case-insensitive SUBSTRING (see _camera_matches_script): each token
+# below must be a substring of the camera's classification. e.g. token "entry"
+# matches both "Entry" and "Entry/Exit"; "computer lab" matches "Computer Lab".
+# "Uncertain"/"Uncertain/Obstructed" cameras are NOT routed to room-specific
+# analytics — only the "all" scripts (tamper/inversion). Cameras with a blank /
+# NULL classification fall through to True (processed by every analytic).
+#
+# SOP "Camera Type" → DB classification tokens:
+#   Inside Lab     -> "computer lab", "inside classroom"
+#   Server Room    -> "server room", "strong room"
+#   Entry / Exit   -> "entry"                (matches "Entry" and "Entry/Exit")
+#   Outside        -> "outside area", "outdoor scene", "parking lot"
 SCRIPT_CLASSIFICATION_MAP = {
-    # 1. Intruder — Movement in strong room / control room / principal room
-    "intruder":        ["strong room"],
+    # 1. Intruder detection in exam lab and server room -> Inside Lab / Server Room
+    "intruder":        ["computer lab", "inside classroom", "server room", "strong room"],
 
-    # 2/3. Crowd — >10 people at entry / frisking / biometric area
-    "crowd":           ["entry/exit", "biometric"],
-    "crowd_biometric": ["entry/exit", "biometric"],
+    # 3. Crowd — >10 people at entry gate -> Outside / Entry Exit
+    "crowd":           ["entry", "outside area", "outdoor scene", "parking lot"],
+    "crowd_biometric": ["entry", "outside area", "outdoor scene", "parking lot", "biometric"],
 
-    # 4. Invigilator not moving — inside classroom
-    "invigilator":     ["inside classroom"],
+    # 4. Invigilator not moving in exam room -> Inside Lab
+    "invigilator":     ["computer lab", "inside classroom"],
 
-    # 5. Two or more people in close proximity — inside classroom
-    "proximity":       ["inside classroom"],
+    # 5. Two or more people in close proximity -> Inside Lab
+    "proximity":       ["computer lab", "inside classroom"],
 
-    # 6. Server / strong-room threshold
-    "server":          ["strong room"],
+    # 6. Server-room threshold -> Server Room
+    "server":          ["server room", "strong room"],
 
-    # 7. Mobile phone detection in classroom
-    "phone":           ["inside classroom"],
+    # 7. Mobile phone detection -> Inside Lab + Inside Server Room
+    "phone":           ["computer lab", "inside classroom", "server room", "strong room"],
 
-    # 8. Movement at entry / exit during examination
-    "entry_exit":      ["entry/exit"],
+    # 8. Movement at entry / exit during examination -> Entry/Exit
+    "entry_exit":      ["entry"],
 
-    # 9. Camera feed is inverted — all cameras
+    # 9. Camera feed is inverted -> Inside Lab / Server Room / Outside (all)
     "inversion":       ["all"],
 
-    # 10. 0 candidates in a room — inside classroom
-    "crowd_zero":      ["inside classroom"],
+    # 10. 0 candidates in a room -> Inside Lab
+    "crowd_zero":      ["computer lab", "inside classroom"],
 
-    # 11. Less than 5 candidates in a room — inside classroom
-    "crowd_five":      ["inside classroom"],
+    # 11. Less than 5 candidates in a room -> Inside Lab
+    "crowd_five":      ["computer lab", "inside classroom"],
 
-    # 12. Blind spot detected — inside classroom
-    "blind_spot":      ["inside classroom"],
+    # 12. Blind spot detected inside lab -> Inside Lab
+    "blind_spot":      ["computer lab", "inside classroom"],
 
-    # Camera tampering — all cameras
+    # Camera tampering -> all cameras
     "tamper":          ["all"],
 
-    # Strong room / QP-box not visible — strong room / control room / principal room
-    "strongroom":      ["strong room"],
-    "qp_box":          ["strong room"],
+    # Strong room / QP-box not visible -> Strong Room / Server Room
+    "strongroom":      ["strong room", "server room"],
+    "qp_box":          ["strong room", "server room"],
 }
 
 def _camera_matches_script(classification, script_code, custom_classifications=None):

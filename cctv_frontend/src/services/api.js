@@ -157,6 +157,10 @@ export const clientDetectionsAPI = {
     // Reverts a /client-detections/remove (script-server) by flipping
     // remove_from_client back to 0. Hits cctv_backend so undo is JWT-scoped.
     undoRemove: (uid) => api.post('/client-detections/undo', { uid }),
+    // Client "Accept": flags the detection accepted_by_client=1 and sends the
+    // SMS alert to the observer number(s) mapped to its tc_code. Hits cctv_backend
+    // (JWT-scoped) where the SMS service + observer list live.
+    accept: (uid) => api.post('/client-detections/accept', { uid }),
 };
 
 export const clientDashboardAPI = {
