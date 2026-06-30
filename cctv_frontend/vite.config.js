@@ -37,6 +37,13 @@ export default defineConfig({
                 changeOrigin: true,
             },
 
+            // Socket.io — strip /cctv_dev prefix so server receives /socket.io/...
+            '/cctv_dev/socket.io': {
+                target: 'http://localhost:8000',
+                changeOrigin: true,
+                ws: true,
+                rewrite: (path) => path.replace(/^\/cctv_dev/, ''),
+            },
             // FastAPI
             '/cctv_dev': {
                 target: 'http://localhost:8000',
