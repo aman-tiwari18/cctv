@@ -475,7 +475,7 @@ const ShiftScriptManager = ({
             PaperProps={{ sx: { borderRadius: 3, maxHeight: '90vh', bgcolor: '#f5f5f7', m: { xs: 1.5, sm: 4 }, width: { xs: 'calc(100% - 24px)', sm: 'auto' } } }}
         >
             <DialogTitle sx={{ pb: 0.5, pt: 3, px: { xs: 2, sm: 3 } }}>
-                <Typography variant="h5" fontWeight={800} color="#0f172a" gutterBottom>
+                <Typography variant="h5" component="div" fontWeight={800} color="#0f172a" gutterBottom>
                     Add Script
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
