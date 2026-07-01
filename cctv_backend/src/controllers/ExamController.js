@@ -41,19 +41,20 @@ exports.createExam = async (req, res) => {
             await ExamShift.bulkCreate(shiftData, { transaction: t });
         }
 
-        if (Array.isArray(assigned_user_ids) && assigned_user_ids.length > 0) {
-            const rows = assigned_user_ids.map(uid => ({ user_id: uid, exam_id: exam.id }));
-            await query(
-                `INSERT IGNORE INTO user_exam_assignments (user_id, exam_id) VALUES ${rows.map(() => '(?,?)').join(',')}`,
-                rows.flatMap(r => [r.user_id, r.exam_id])
-            );
-        }
-
         return await Exam.findByPk(exam.id, {
             include: [{ model: ExamShift, as: "examShifts" }],
             transaction: t,
         });
     });
+
+    // Insert user assignments AFTER transaction completes (separate connection)
+    if (Array.isArray(assigned_user_ids) && assigned_user_ids.length > 0) {
+        const rows = assigned_user_ids.map(uid => ({ user_id: uid, exam_id: result.id }));
+        await query(
+            `INSERT IGNORE INTO user_exam_assignments (user_id, exam_id) VALUES ${rows.map(() => '(?,?)').join(',')}`,
+            rows.flatMap(r => [r.user_id, r.exam_id])
+        );
+    }
 
     res.status(201).json({
         success: true,
