@@ -73,19 +73,39 @@ def _compute_timeout(execution: dict) -> float | None:
             if remaining > 0:
                 return remaining
 
-            # end_at is in the past — overnight shift guard:
-            # if it's within 24 h behind us, add one day to get the real stop time.
-            if remaining > -86400:
+            # end_at is in the past. Two very different cases:
+            #  • GENUINE overnight shift: end_at wrapped past midnight, so it lands
+            #    MANY hours behind us (≈ 24h − shift_length, e.g. ~21h for a 3h
+            #    shift). Add one day to get the real next-day stop time.
+            #  • Same-day window that simply CLOSED: the worker started this pipeline
+            #    a little AFTER end_at (poll latency / grace catch-up), so end_at is
+            #    only seconds-to-minutes behind us. This must NOT be inflated by a
+            #    full day — that bug gave runaway pipelines a ~24h stop-timer and
+            #    kept them detecting for hours after the shift ended (e.g. a grouped
+            #    run that started at 18:00:21 ran until the next day).
+            #
+            # Require the gap to clearly exceed any same-day grace/latency (12h) and
+            # stay within a day before treating it as overnight.
+            OVERNIGHT_MIN_PAST_S = 12 * 3600
+            if -86400 < remaining < -OVERNIGHT_MIN_PAST_S:
                 overnight_end = end_at + timedelta(days=1)
                 remaining_overnight = (overnight_end - datetime.now(IST)).total_seconds()
                 if remaining_overnight > 0:
                     logger.info(
-                        f"Overnight shift detected: end_at {end_at_str} was in the past "
-                        f"— treating as next-day end at {overnight_end.isoformat()}"
+                        f"Overnight shift detected: end_at {end_at_str} was "
+                        f"{(-remaining)/3600:.1f}h in the past — treating as next-day "
+                        f"end at {overnight_end.isoformat()}"
                     )
                     return remaining_overnight
 
-            logger.warning(f"end_at {end_at_str} is more than 24h in the past — using duration fallback")
+            # Window already closed (just ended) — do NOT run a fresh long pipeline.
+            # Return a tiny timeout so the runner stops it immediately instead of
+            # leaving it ungoverned (None) for ~24h.
+            logger.warning(
+                f"end_at {end_at_str} already passed ({(-remaining):.0f}s ago) — "
+                f"shift window closed; stopping run immediately (no 24h extension)"
+            )
+            return 1.0
         except Exception as e:
             logger.warning(f"Could not parse end_at '{end_at_str}': {e}")
 

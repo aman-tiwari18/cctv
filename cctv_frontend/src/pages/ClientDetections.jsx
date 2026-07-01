@@ -238,7 +238,7 @@ function DetectionCard({ item, onClick, onRemove, onUndo, onAccept, isRemoving, 
             size="small"
             sx={{
               position: 'absolute', bottom: 8, left: 8,
-              bgcolor: '#16a34a', color: '#fff',
+              bgcolor: '#098466', color: '#fff',
               fontWeight: 700, fontSize: '0.65rem',
             }}
           />
@@ -361,15 +361,6 @@ function DetectionCard({ item, onClick, onRemove, onUndo, onAccept, isRemoving, 
             Conf: {(item.confidence * 100).toFixed(0)}%
           </Typography>
         )}
-
-        {item.gpu_id != null && (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.8 }}>
-            <Memory sx={{ fontSize: 13, color: '#64748b' }} />
-            <Typography sx={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>
-              GPU {item.gpu_id} — {item.gpu_id === 0 ? 'Master' : `Worker ${item.gpu_id}`}
-            </Typography>
-          </Box>
-        )}
       </CardContent>
 
       <Box sx={{ mx: { xs: 1.5, sm: 2 }, mb: { xs: 2, sm: 3 }, mt: 1 }}>
@@ -410,7 +401,7 @@ function DetectionCard({ item, onClick, onRemove, onUndo, onAccept, isRemoving, 
               }}
               disabled={isAccepting || isAccepted}
               sx={{
-                bgcolor: '#16a34a',
+                bgcolor: '#098466',
                 color: '#fff',
                 fontWeight: 900,
                 height: "40px",
@@ -421,8 +412,8 @@ function DetectionCard({ item, onClick, onRemove, onUndo, onAccept, isRemoving, 
                 textTransform: 'none',
                 fontSize: 12,
                 whiteSpace: 'nowrap',
-                '&:hover': { bgcolor: '#15803d' },
-                '&.Mui-disabled': { bgcolor: isAccepted ? '#16a34a' : '#cbd5e1', color: '#fff', opacity: isAccepted ? 0.9 : 0.7 },
+                '&:hover': { bgcolor: '#086e55' },
+                '&.Mui-disabled': { bgcolor: isAccepted ? '#098466' : '#cbd5e1', color: '#fff', opacity: isAccepted ? 0.9 : 0.7 },
               }}
             >
               {isAccepted ? 'Accepted' : isAccepting ? 'Accepting...' : 'Accept'}
@@ -436,7 +427,7 @@ function DetectionCard({ item, onClick, onRemove, onUndo, onAccept, isRemoving, 
               }}
               disabled={isRemoving}
               sx={{
-                bgcolor: '#c3282e',
+                bgcolor: '#f3404a',
                 color: '#fff',
                 fontWeight: 900,
                 height: "40px",
