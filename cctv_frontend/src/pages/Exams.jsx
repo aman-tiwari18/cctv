@@ -28,6 +28,7 @@ import {
   Paper,
   Radio,
   RadioGroup,
+  Autocomplete,
 } from '@mui/material';
 import {
   Add,
@@ -87,13 +88,18 @@ const Exams = () => {
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [newSkipDate, setNewSkipDate] = useState('');
   const [examCounts, setExamCounts] = useState({}); // Store script and detection counts
-  const [smsClientBodies, setSmsClientBodies] = useState([]); // exam_body clients with SMS config
+  const [smsClientBodies, setSmsClientBodies] = useState([]);
+  const [assignableUsers, setAssignableUsers] = useState([]);
+  const [assignedUserIds, setAssignedUserIds] = useState([]);
 
   useEffect(() => {
     loadExams();
     smsAPI.getClients()
       .then((res) => setSmsClientBodies(res?.data?.bodies || []))
       .catch(() => setSmsClientBodies([]));
+    examsAPI.getAssignableUsers()
+      .then((res) => setAssignableUsers(res?.data?.data || []))
+      .catch(() => setAssignableUsers([]));
   }, []);
 
   const examBodyHasSms = (body) =>
@@ -165,7 +171,7 @@ const Exams = () => {
     }
   };
 
-  const handleOpenDialog = (exam = null) => {
+  const handleOpenDialog = async (exam = null) => {
     if (exam) {
       setEditingExam(exam);
       setFormData({
@@ -186,6 +192,10 @@ const Exams = () => {
           _existing: true,                  // marks a saved shift (timing locked)
         })) || [],
       });
+      try {
+        const res = await examsAPI.getAssignedUsers(exam.id);
+        setAssignedUserIds((res?.data?.data || []).map(u => u.id));
+      } catch { setAssignedUserIds([]); }
     } else {
       setEditingExam(null);
       setFormData({
@@ -202,6 +212,7 @@ const Exams = () => {
           { shift_name: 'Shift 1', start_time: '09:00', end_time: '12:00' },
         ],
       });
+      setAssignedUserIds([]);
     }
     setOpenDialog(true);
     setError('');
@@ -360,6 +371,7 @@ const Exams = () => {
         ...formData,
         start_date: parseDDMMYYYYToISO(formData.start_date),
         end_date: parseDDMMYYYYToISO(formData.end_date),
+        assigned_user_ids: assignedUserIds,
       };
 
       if (editingExam) {
@@ -1095,6 +1107,44 @@ const Exams = () => {
               </IconButton>
             </Box>
           ))}
+          {/* ASSIGN USERS */}
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 2, mt: 4 }}>
+            <Box sx={{ width: 3, height: 14, bgcolor: '#3c81f6', mr: 1, borderRadius: 1 }} />
+            <Typography sx={{ fontWeight: 800, fontSize: '0.85rem', letterSpacing: '0.05em', color: '#1e293b' }}>
+              ASSIGN CLIENT USERS
+            </Typography>
+          </Box>
+          <Autocomplete
+            multiple
+            options={assignableUsers}
+            getOptionLabel={(u) => `${u.full_name || u.username} (${u.company_name || u.email})`}
+            value={assignableUsers.filter(u => assignedUserIds.includes(u.id))}
+            onChange={(_, selected) => setAssignedUserIds(selected.map(u => u.id))}
+            isOptionEqualToValue={(opt, val) => opt.id === val.id}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                size="small"
+                placeholder="Select verified client users..."
+                InputProps={{ ...params.InputProps, sx: { borderRadius: 2, bgcolor: '#f1f5f9', '& fieldset': { border: 'none' } } }}
+              />
+            )}
+            renderTags={(selected, getTagProps) =>
+              selected.map((u, i) => (
+                <Chip
+                  key={u.id}
+                  label={u.full_name || u.username}
+                  size="small"
+                  {...getTagProps({ index: i })}
+                  sx={{ bgcolor: '#dbeafe', color: '#1d4ed8', fontWeight: 600 }}
+                />
+              ))
+            }
+            sx={{ mb: 1 }}
+          />
+          <Typography sx={{ fontSize: 11, color: '#94a3b8', mb: 2 }}>
+            Only verified client users are shown. Selected users will see this exam on their dashboard.
+          </Typography>
         </DialogContent>
         <Box sx={{ p: 3, pt: 2, display: 'flex', justifyContent: 'flex-end', gap: 2, bgcolor: '#f8fafc', borderBottomLeftRadius: 12, borderBottomRightRadius: 12 }}>
           <Button onClick={handleCloseDialog} sx={{ color: '#475569', fontWeight: 700, textTransform: 'none', fontSize: 13 }}>

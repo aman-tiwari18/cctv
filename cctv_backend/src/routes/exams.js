@@ -47,4 +47,20 @@ router.get(
     asyncHandler(ExamController.getDetectionCount)
 );
 
+// Get all verified VIEWER users available for assignment
+router.get(
+    "/assignable/users",
+    authenticate,
+    authorize("ADMIN", "OPERATOR"),
+    asyncHandler(ExamController.getAssignableUsers)
+);
+
+// Get assigned users for a specific exam
+router.get(
+    "/:id/assigned-users",
+    authenticate,
+    authorize("ADMIN", "OPERATOR"),
+    asyncHandler(ExamController.getExamAssignedUsers)
+);
+
 module.exports = router;
