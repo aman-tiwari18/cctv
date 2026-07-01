@@ -401,6 +401,7 @@ const ShiftScriptManager = ({
         setCardSms((prev) => ({ ...prev, [scriptDbId]: checked }));
     };
 
+    
     const handleCardClick = (scriptDbId) => {
         setSelectedCards((prev) => {
             const next = new Set(prev);
