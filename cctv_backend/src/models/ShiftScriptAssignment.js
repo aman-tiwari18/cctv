@@ -66,6 +66,12 @@ const ShiftScriptAssignment = sequelize.define(
             allowNull: false,
         },
 
+        camera_classifications: {
+            type: DataTypes.JSON,
+            allowNull: true,
+            comment: 'Camera types this script runs on, e.g. ["inside classroom","entry/exit"]',
+        },
+
         notes: {
             type: DataTypes.TEXT,
             allowNull: true,

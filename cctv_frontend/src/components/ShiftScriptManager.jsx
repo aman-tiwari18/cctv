@@ -23,6 +23,7 @@ import {
     Select,
     MenuItem,
     Switch,
+    Autocomplete,
 } from '@mui/material';
 import {
     Add,
@@ -199,6 +200,16 @@ const CATEGORIES = [
 // client (exam_body) has an enabled SMS config (fetched from /sms/clients).
 const SMS_ELIGIBLE_SCRIPTS = new Set(['invigilator', 'proximity']);
 
+const DEFAULT_CLASSIFICATIONS = [
+    'Inside Classroom',
+    'Entry/Exit',
+    'Biometric',
+    'Strong Room',
+    'All Cameras',
+];
+// One-shot scripts — no cooldown loop, frequency field not applicable
+const NO_FREQUENCY_SCRIPTS = new Set(['vision', 'vision_neet']);
+
 const ShiftScriptManager = ({
     shift,
     examId,
@@ -221,6 +232,10 @@ const ShiftScriptManager = ({
 
     /* Per-script card times: { [scriptDbId]: { start, end } } */
     const [cardTimes, setCardTimes] = useState({});
+    /* Per-script frequency: { [scriptDbId]: string } in seconds */
+    const [cardFrequency, setCardFrequency] = useState({});
+    /* Per-script camera classifications: { [scriptDbId]: string[] } */
+    const [cardClassifications, setCardClassifications] = useState({});
     /* Per-script SMS toggle: { [scriptDbId]: bool } (NTA + eligible scripts only) */
     const [cardSms, setCardSms] = useState({});
     /* Which cards the user has clicked (show blue outline) */
@@ -283,6 +298,8 @@ const ShiftScriptManager = ({
     useEffect(() => {
         if (!isDialogOpen) {
             setCardTimes({});
+            setCardFrequency({});
+            setCardClassifications({});
             setCardSms({});
             setSelectedCards(new Set());
             setError('');
@@ -290,6 +307,8 @@ const ShiftScriptManager = ({
         }
 
         const newCardTimes = {};
+        const newCardFrequency = {};
+        const newCardClassifications = {};
         const newCardSms = {};
         const newSelectedCards = new Set();
 
@@ -300,11 +319,15 @@ const ShiftScriptManager = ({
                     start: a.custom_start_time ? a.custom_start_time.substring(0, 5) : '',
                     end: a.custom_end_time ? a.custom_end_time.substring(0, 5) : ''
                 };
+                newCardFrequency[a.script_id] = a.custom_frequency_minutes != null ? String(a.custom_frequency_minutes) : '';
+                newCardClassifications[a.script_id] = Array.isArray(a.camera_classifications) ? a.camera_classifications : [];
                 newCardSms[a.script_id] = !!a.sms_enabled;
             }
         });
 
         setCardTimes(newCardTimes);
+        setCardFrequency(newCardFrequency);
+        setCardClassifications(newCardClassifications);
         setCardSms(newCardSms);
         setSelectedCards(newSelectedCards);
         setError('');
@@ -362,12 +385,23 @@ const ShiftScriptManager = ({
         }));
     };
 
+    const handleClassificationsChange = (scriptDbId, value) => {
+        setSelectedCards((prev) => new Set([...prev, scriptDbId]));
+        setCardClassifications((prev) => ({ ...prev, [scriptDbId]: value }));
+    };
+
+    const handleFrequencyChange = (scriptDbId, value) => {
+        setSelectedCards((prev) => new Set([...prev, scriptDbId]));
+        setCardFrequency((prev) => ({ ...prev, [scriptDbId]: value }));
+    };
+
     const handleSmsToggle = (scriptDbId, checked) => {
         // Toggling SMS implies the card is selected for assignment.
         setSelectedCards((prev) => new Set([...prev, scriptDbId]));
         setCardSms((prev) => ({ ...prev, [scriptDbId]: checked }));
     };
 
+    
     const handleCardClick = (scriptDbId) => {
         setSelectedCards((prev) => {
             const next = new Set(prev);
@@ -388,13 +422,18 @@ const ShiftScriptManager = ({
     const handleBulkSubmit = async () => {
         const toAssign = scripts
             .filter((s) => isConfigured(s.id))
-            .map((s) => ({
-                script_id: s.id,
-                custom_start_time: cardTimes[s.id].start,
-                custom_end_time: cardTimes[s.id].end,
-                // Only send SMS toggle for eligible scripts on NTA exams.
-                ...(smsEligible(s) ? { sms_enabled: !!cardSms[s.id] } : {}),
-            }));
+            .map((s) => {
+                const freqVal = parseInt(cardFrequency[s.id], 10);
+                return {
+                    script_id: s.id,
+                    custom_start_time: cardTimes[s.id].start,
+                    custom_end_time: cardTimes[s.id].end,
+                    custom_frequency_minutes: Number.isFinite(freqVal) && freqVal > 0 ? freqVal : null, // stored in seconds
+                    camera_classifications: cardClassifications[s.id]?.length > 0 ? cardClassifications[s.id] : null,
+                    // Only send SMS toggle for eligible scripts on NTA exams.
+                    ...(smsEligible(s) ? { sms_enabled: !!cardSms[s.id] } : {}),
+                };
+            });
 
         if (!toAssign.length) {
             setError('Set START and END time for at least one script card.');
@@ -437,7 +476,7 @@ const ShiftScriptManager = ({
             PaperProps={{ sx: { borderRadius: 3, maxHeight: '90vh', bgcolor: '#f5f5f7', m: { xs: 1.5, sm: 4 }, width: { xs: 'calc(100% - 24px)', sm: 'auto' } } }}
         >
             <DialogTitle sx={{ pb: 0.5, pt: 3, px: { xs: 2, sm: 3 } }}>
-                <Typography variant="h5" fontWeight={800} color="#0f172a" gutterBottom>
+                <Typography variant="h5" component="div" fontWeight={800} color="#0f172a" gutterBottom>
                     Add Script
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
@@ -590,6 +629,71 @@ const ShiftScriptManager = ({
                                                 />
                                             </Box>
                                         </Box>
+
+                                        {/* Frequency input — hidden for one-shot scripts */}
+                                        {!NO_FREQUENCY_SCRIPTS.has(script.script_id) && (
+                                        <Box sx={{ mt: 1 }} onClick={(e) => e.stopPropagation()}>
+                                            <Typography sx={{ fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.06em', color: '#94a3b8', mb: 0.4 }}>
+                                                FREQUENCY (sec)
+                                            </Typography>
+                                            <TextField
+                                                type="number"
+                                                size="small"
+                                                fullWidth
+                                                placeholder="Default"
+                                                value={cardFrequency[script.id] || ''}
+                                                onChange={(e) => handleFrequencyChange(script.id, e.target.value)}
+                                                inputProps={{ min: 1, style: { fontSize: '0.82rem', padding: '7px 8px' } }}
+                                                sx={{
+                                                    '& .MuiOutlinedInput-root': {
+                                                        borderRadius: 1.5,
+                                                        bgcolor: '#f3f4f6',
+                                                        '& fieldset': { borderColor: '#fff' },
+                                                    },
+                                                }}
+                                            />
+                                        </Box>
+                                        )}
+
+                                        {/* Camera Classifications multi-select — hidden for one-shot scripts */}
+                                        {!NO_FREQUENCY_SCRIPTS.has(script.script_id) && <Box sx={{ mt: 1 }} onClick={(e) => e.stopPropagation()}>
+                                            <Typography sx={{ fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.06em', color: '#94a3b8', mb: 0.4 }}>
+                                                CAMERA TYPE
+                                            </Typography>
+                                            <Autocomplete
+                                                multiple
+                                                freeSolo
+                                                size="small"
+                                                options={DEFAULT_CLASSIFICATIONS}
+                                                value={cardClassifications[script.id] || []}
+                                                onChange={(_, newValue) => handleClassificationsChange(script.id, newValue)}
+                                                renderTags={(value, getTagProps) =>
+                                                    value.map((option, index) => (
+                                                        <Chip
+                                                            key={index}
+                                                            label={option}
+                                                            size="small"
+                                                            {...getTagProps({ index })}
+                                                            sx={{ fontSize: '0.68rem', height: 20 }}
+                                                        />
+                                                    ))
+                                                }
+                                                renderInput={(params) => (
+                                                    <TextField
+                                                        {...params}
+                                                        placeholder={cardClassifications[script.id]?.length ? '' : 'Default (all)'}
+                                                        sx={{
+                                                            '& .MuiOutlinedInput-root': {
+                                                                borderRadius: 1.5,
+                                                                bgcolor: '#f3f4f6',
+                                                                fontSize: '0.82rem',
+                                                                '& fieldset': { borderColor: '#fff' },
+                                                            },
+                                                        }}
+                                                    />
+                                                )}
+                                            />
+                                        </Box>}
 
                                         {/* SMS alert toggle — NTA + eligible scripts only */}
                                         {smsEligible(script) && (
@@ -750,6 +854,11 @@ const ShiftScriptManager = ({
                                             {(assignment.custom_start_time || assignment.custom_end_time) && (
                                                 <Typography variant="caption" color="text.secondary">
                                                     Custom Time: {assignment.custom_start_time || 'N/A'} – {assignment.custom_end_time || 'N/A'}
+                                                </Typography>
+                                            )}
+                                            {assignment.custom_frequency_minutes != null && (
+                                                <Typography variant="caption" display="block" color="text.secondary">
+                                                    Frequency: {assignment.custom_frequency_minutes} min
                                                 </Typography>
                                             )}
                                             {assignment.notes && (

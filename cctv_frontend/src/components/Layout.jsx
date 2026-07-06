@@ -431,9 +431,12 @@ function LayoutInner() {
           const list = res.data?.data || [];
           const now = new Date();
           const count = list.filter((exam) => {
-            const start = exam.start_date ? new Date(exam.start_date) : null;
-            const end = exam.end_date ? new Date(exam.end_date) : null;
-            return start && end && now >= start && now <= end;
+            if (!exam.start_date || !exam.end_date) return false;
+            const start = new Date(exam.start_date);
+            start.setHours(0, 0, 0, 0);
+            const end = new Date(exam.end_date);
+            end.setHours(23, 59, 59, 999);
+            return now >= start && now <= end;
           }).length;
           setLiveExamsCount(count);
         } catch (err) {

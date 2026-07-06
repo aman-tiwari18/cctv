@@ -55,6 +55,8 @@ export const examsAPI = {
     update: (id, examData) => api.put(`/exams/${id}`, examData),
     delete: (id) => api.delete(`/exams/${id}`),
     getDetectionCount: (id) => api.get(`/exams/${id}/detections/count`),
+    getAssignableUsers: () => api.get('/exams/assignable/users'),
+    getAssignedUsers: (id) => api.get(`/exams/${id}/assigned-users`),
 };
 
 export const camerasAPI = {

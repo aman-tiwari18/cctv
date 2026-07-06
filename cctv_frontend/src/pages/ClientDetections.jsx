@@ -1219,9 +1219,9 @@ const ClientDetections = () => {
       if (examFilter) params.append('exam_id', examFilter);
       if (shiftFilter) params.append('shift_id', shiftFilter);
       
-      // Pass user info for filtering
+      // Pass user info for filtering via user_exam_assignments
       if (user?.role) params.append('user_role', user.role);
-      if (user?.company_name) params.append('user_company', user.company_name);
+      if (user?.id) params.append('user_id', user.id);
 
       console.log('[ClientDetections] Fetching with params:', Object.fromEntries(params));
 
@@ -1345,7 +1345,7 @@ const ClientDetections = () => {
       if (examFilter) params.append('exam_id', examFilter);
       if (shiftFilter) params.append('shift_id', shiftFilter);
       if (user?.role) params.append('user_role', user.role);
-      if (user?.company_name) params.append('user_company', user.company_name);
+      if (user?.id) params.append('user_id', user.id);
       return params;
     };
 

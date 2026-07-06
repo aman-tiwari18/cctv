@@ -321,30 +321,15 @@ exports.getRemovedDetections = async (req, res) => {
         const examIdParam = req.query.exam_id;
 
         const userRole = req.user?.role;
-        const userCompany = req.user?.company_name;
 
-        // Resolve allowed exam_ids for non-ADMIN scoping. The 'service' role
-        // (script-server API key) bypasses scoping entirely.
-        let allowedExamIds = null;
-        if (userRole && userRole !== 'ADMIN' && userRole !== 'service') {
-            if (userCompany) {
-                let examSql = 'SELECT id FROM exams WHERE is_active = 1';
-                const examParams = [];
-                if (userCompany === 'EY') {
-                    examSql += " AND exam_body IN ('SSC','TCS','NTA')";
-                } else {
-                    examSql += ' AND exam_body = ?';
-                    examParams.push(userCompany);
-                }
-                const exams = await query(examSql, examParams);
-                allowedExamIds = exams.map(e => e.id);
-                if (allowedExamIds.length === 0) {
-                    return res.json({
-                        success: true, total: 0, page, limit,
-                        counts: emptyCounts(), data: [],
-                    });
-                }
-            }
+        // Resolve allowed exam_ids for non-ADMIN scoping via user_exam_assignments.
+        const { getAllowedExamIds } = require('../utils/examAccess');
+        let allowedExamIds = await getAllowedExamIds(req.user);
+        if (allowedExamIds !== null && allowedExamIds.length === 0) {
+            return res.json({
+                success: true, total: 0, page, limit,
+                counts: emptyCounts(), data: [],
+            });
         }
 
         // Build shared WHERE clause for both tables.

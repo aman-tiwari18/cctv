@@ -6,6 +6,7 @@
 'use strict';
 
 const { query } = require('../config/database');
+const { getAllowedExamIds } = require('../utils/examAccess');
 
 // ============================================================================
 // Helpers used by the new client dashboard endpoints (overview, live-exams).
@@ -109,6 +110,15 @@ const buildCompanyFilter = (userRole, userCompanyName, examColumnAlias = 'exam_b
     return { clause: ` AND ${examColumnAlias} = ?`, params: [userCompanyName] };
 };
 
+// Builds an exam_id IN (...) filter clause from user_exam_assignments.
+// idCol: the SQL column name to filter on (default 'id' for exams table, use 'exam_id' for report tables)
+async function buildAssignmentFilter(user, idCol = 'id') {
+    const ids = await getAllowedExamIds(user);
+    if (ids === null) return { clause: '', params: [], empty: false };
+    if (ids.length === 0) return { clause: ' AND 1=0', params: [], empty: true };
+    return { clause: ` AND ${idCol} IN (${ids.map(() => '?').join(',')})`, params: ids, empty: false };
+}
+
 /**
  * GET /api/client-dashboard/stats
  * Returns detection statistics for dashboard
@@ -153,14 +163,19 @@ exports.getClientDashboardStats = async (req, res) => {
         let examQuery = 'SELECT id, exam_name, exam_body, link_type, start_date, end_date FROM exams WHERE is_active = 1';
         let queryParams = [];
 
-        if (userRole !== 'ADMIN' && userCompanyName) {
-            if (userCompanyName === 'EY') {
-                examQuery += ` AND exam_body IN ('SSC', 'TCS', 'NTA')`;
-            } else {
-                examQuery += ` AND exam_body = ?`;
-                queryParams.push(userCompanyName);
-            }
+        const assignFilter = await buildAssignmentFilter(req.user);
+        if (assignFilter.empty) {
+            return res.json({
+                success: true,
+                data: {
+                    active_exams: 0, total_shifts: 0, total_cameras: 0, total_detections: 0,
+                    detection_distribution: [], exam_status: { completed: 0, in_progress: 0, failed: 0, pending: 0 },
+                    script_distribution: []
+                }
+            });
         }
+        examQuery += assignFilter.clause;
+        queryParams.push(...assignFilter.params);
 
         const exams = await query(examQuery, queryParams);
         
@@ -415,20 +430,15 @@ exports.getCameraAccessibility = async (req, res) => {
         const userCompanyName = req.user?.company_name;
         const userRole = req.user?.role;
 
-        console.log('[CameraAccessibility] Filters:', { exam_id, shift_id, exam_date, userCompanyName, userRole });
+        console.log('[CameraAccessibility] Filters:', { exam_id, shift_id, exam_date, userRole });
 
-        // Build exam filter based on user role
-        let examFilter = '';
-        let examParams = [];
-
-        if (userRole !== 'ADMIN' && userCompanyName) {
-            if (userCompanyName === 'EY') {
-                examFilter = ` AND e.exam_body IN ('SSC', 'TCS', 'NTA')`;
-            } else {
-                examFilter = ` AND e.exam_body = ?`;
-                examParams.push(userCompanyName);
-            }
+        // Build exam filter based on assignment
+        const camAccessFilter = await buildAssignmentFilter(req.user, 'e.id');
+        if (camAccessFilter.empty) {
+            return res.json({ success: true, data: { hls: [], rtsp: [] } });
         }
+        let examFilter = camAccessFilter.clause;
+        let examParams = [...camAccessFilter.params];
 
         // Build additional filters
         let hlsFilters = [];
@@ -575,20 +585,15 @@ exports.downloadCameraAccessibility = async (req, res) => {
         const userCompanyName = req.user?.company_name;
         const userRole = req.user?.role;
 
-        console.log('[CameraAccessibilityDownload] Filters:', { exam_id, shift_id, exam_date, type, userCompanyName, userRole });
+        console.log('[CameraAccessibilityDownload] Filters:', { exam_id, shift_id, exam_date, type, userRole });
 
-        // Build exam filter based on user role
-        let examFilter = '';
-        let examParams = [];
-
-        if (userRole !== 'ADMIN' && userCompanyName) {
-            if (userCompanyName === 'EY') {
-                examFilter = ` AND e.exam_body IN ('SSC', 'TCS', 'NTA')`;
-            } else {
-                examFilter = ` AND e.exam_body = ?`;
-                examParams.push(userCompanyName);
-            }
+        // Build exam filter based on assignment
+        const dlFilter = await buildAssignmentFilter(req.user, 'e.id');
+        if (dlFilter.empty) {
+            return res.json({ success: true, data: [] });
         }
+        let examFilter = dlFilter.clause;
+        let examParams = [...dlFilter.params];
 
         // Build additional filters
         let hlsFilters = [];
@@ -755,22 +760,19 @@ exports.getExamBodyDetails = async (req, res) => {
         const userRole = req.user?.role;
 
         // Check if non-admin user is trying to access unauthorized data
-        if (userRole !== 'ADMIN' && userCompanyName) {
-            // EY users can access SSC, TCS and NTA
-            if (userCompanyName === 'EY') {
-                if (!['SSC', 'TCS', 'NTA'].includes(examBody)) {
-                    return res.status(403).json({
-                        success: false,
-                        message: 'Access denied. You can only view SSC, TCS and NTA data.'
-                    });
+        if (userRole !== 'ADMIN') {
+            const allowedIds = await getAllowedExamIds(req.user);
+            if (allowedIds !== null) {
+                if (allowedIds.length === 0) {
+                    return res.status(403).json({ success: false, message: 'Access denied. No exams assigned.' });
                 }
-            } else {
-                // Other users can only access their own company data
-                if (examBody !== userCompanyName) {
-                    return res.status(403).json({
-                        success: false,
-                        message: 'Access denied. You can only view your company data.'
-                    });
+                const placeholders = allowedIds.map(() => '?').join(',');
+                const check = await query(
+                    `SELECT id FROM exams WHERE exam_body = ? AND id IN (${placeholders}) LIMIT 1`,
+                    [examBody, ...allowedIds]
+                );
+                if (!check.length) {
+                    return res.status(403).json({ success: false, message: 'Access denied.' });
                 }
             }
         }
@@ -911,7 +913,7 @@ exports.getOverview = async (req, res) => {
         }
         const { start: dateStart, end: dateEnd } = getRangeBounds(startDate, endDate);
 
-        const companyFilter = buildCompanyFilter(userRole, userCompanyName);
+        const overviewFilter = await buildAssignmentFilter(req.user);
 
         // V2.4: Advanced filter params from the dashboard's modal.
         const examIdParam = parseInt(req.query.exam_id, 10);
@@ -920,13 +922,17 @@ exports.getOverview = async (req, res) => {
             .split(',').map((s) => parseInt(s.trim(), 10))
             .filter((n) => Number.isFinite(n));
 
-        // Q1: Exams overlapping the queried range, scoped to the company filter.
+        if (overviewFilter.empty) {
+            return res.json({ success: true, data: { total_exams: 0, total_shifts: 0, total_detections: 0, flagged_cameras: 0, detection_distribution: [] } });
+        }
+
+        // Q1: Exams overlapping the queried range, scoped to the assignment filter.
         const allActiveExams = await query(
             `SELECT id, start_date, end_date FROM exams
              WHERE is_active = 1
                AND start_date IS NOT NULL AND end_date IS NOT NULL
-               AND start_date <= ? AND end_date >= ?${companyFilter.clause}`,
-            [endDate, startDate, ...companyFilter.params]
+               AND start_date <= ? AND end_date >= ?${overviewFilter.clause}`,
+            [endDate, startDate, ...overviewFilter.params]
         );
 
         // Apply exam_id filter: intersect with the activeExams set.
@@ -1165,19 +1171,22 @@ exports.getLiveExams = async (req, res) => {
         // V2.3: rows show "Shift N" where N is the shift's 1-based position within
         // its exam (ordered by start_time ASC). Bracket Morning/Afternoon/Evening removed.
 
-        // Company filter applied to the exams alias `e` in the row driver
-        const companyFilter = buildCompanyFilter(userRole, userCompanyName, 'e.exam_body');
+        // Assignment filter applied to the exams alias `e`
+        const liveFilter = await buildAssignmentFilter(req.user, 'e.id');
+        if (liveFilter.empty) {
+            return res.json({ success: true, data: [], total: 0, page, limit });
+        }
 
         const liveWhere = `
             WHERE e.is_active = 1 AND es.is_active = 1
               AND e.start_date IS NOT NULL AND e.end_date IS NOT NULL
               AND ? BETWEEN e.start_date AND e.end_date
               AND ? BETWEEN es.start_time AND es.end_time
-              ${companyFilter.clause}
+              ${liveFilter.clause}
               ${examIdFilter ? 'AND e.id = ?' : ''}
         `;
 
-        const baseParams = [todayDate, nowTime, ...companyFilter.params];
+        const baseParams = [todayDate, nowTime, ...liveFilter.params];
         if (examIdFilter) baseParams.push(examIdFilter);
 
         const countP = query(

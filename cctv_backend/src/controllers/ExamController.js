@@ -5,24 +5,23 @@ const CameraLinkRTSP = require("../models/CameraLinkRTSP");
 const ShiftScriptAssignment = require("../models/ShiftScriptAssignment");
 const ScriptExecution = require("../models/ScriptExecution");
 const { sequelize } = require("../config/db");
+const { query } = require("../config/database");
 const { Op } = require("sequelize");
 const { getAssignableDates, toDateOnly } = require("./ShiftScriptController");
+const { getAllowedExamIds } = require("../utils/examAccess");
 
 
 exports.createExam = async (req, res) => {
     const {
         exam_name, exam_body, link_type, description,
-        start_date, end_date, skip_days, skip_dates, observer_phone, shifts
+        start_date, end_date, skip_days, skip_dates, observer_phone, shifts,
+        assigned_user_ids,
     } = req.body;
 
     const result = await sequelize.transaction(async (t) => {
-        // Create the exam
         const exam = await Exam.create(
             {
-                exam_name,
-                exam_body,
-                link_type,
-                description,
+                exam_name, exam_body, link_type, description,
                 start_date: start_date || null,
                 end_date: end_date || null,
                 skip_days: skip_days || [],
@@ -32,7 +31,6 @@ exports.createExam = async (req, res) => {
             { transaction: t }
         );
 
-        // Create exam-level shifts if provided
         if (shifts && shifts.length > 0) {
             const shiftData = shifts.map((s) => ({
                 exam_id: exam.id,
@@ -43,12 +41,20 @@ exports.createExam = async (req, res) => {
             await ExamShift.bulkCreate(shiftData, { transaction: t });
         }
 
-        // Re-fetch with shifts
         return await Exam.findByPk(exam.id, {
             include: [{ model: ExamShift, as: "examShifts" }],
             transaction: t,
         });
     });
+
+    // Insert user assignments AFTER transaction completes (separate connection)
+    if (Array.isArray(assigned_user_ids) && assigned_user_ids.length > 0) {
+        const rows = assigned_user_ids.map(uid => ({ user_id: uid, exam_id: result.id }));
+        await query(
+            `INSERT IGNORE INTO user_exam_assignments (user_id, exam_id) VALUES ${rows.map(() => '(?,?)').join(',')}`,
+            rows.flatMap(r => [r.user_id, r.exam_id])
+        );
+    }
 
     res.status(201).json({
         success: true,
@@ -60,8 +66,6 @@ exports.createExam = async (req, res) => {
 
 exports.getAllExams = async (req, res) => {
     const { is_active, exam_body } = req.query;
-    const userCompanyName = req.user?.company_name;
-    const userRole = req.user?.role;
 
     const where = {};
 
@@ -71,18 +75,12 @@ exports.getAllExams = async (req, res) => {
     if (exam_body)
         where.exam_body = exam_body;
 
-    // Apply company-based filtering for client-style roles only.
-    // ADMIN and OPERATOR both get the full exam list — OPERATORs verify
-    // camera classifications across every exam, so scoping by company would
-    // hide cameras they're supposed to be reviewing.
-    if (userRole !== 'ADMIN' && userRole !== 'OPERATOR' && userCompanyName) {
-        if (userCompanyName === 'EY') {
-            // EY users see SSC, TCS and NTA exams
-            where.exam_body = ['SSC', 'TCS', 'NTA'];
-        } else {
-            // Other users see only their company's exams
-            where.exam_body = userCompanyName;
+    const allowedExamIds = await getAllowedExamIds(req.user);
+    if (allowedExamIds !== null) {
+        if (allowedExamIds.length === 0) {
+            return res.json({ success: true, count: 0, data: [] });
         }
+        where.id = allowedExamIds;
     }
 
     const exams = await Exam.findAll({
@@ -154,10 +152,40 @@ exports.getExamById = async (req, res) => {
         });
     }
 
+    const assignedUsers = await query(
+        `SELECT u.id, u.username, u.full_name, u.email, u.company_name
+         FROM user_exam_assignments uea
+         JOIN users u ON u.id = uea.user_id
+         WHERE uea.exam_id = ?`,
+        [id]
+    );
+
     res.json({
         success: true,
-        data: exam,
+        data: { ...exam.toJSON(), assigned_users: assignedUsers },
     });
+};
+
+exports.getAssignableUsers = async (req, res) => {
+    const users = await query(
+        `SELECT id, username, full_name, email, company_name
+         FROM users
+         WHERE verified = 1 AND role = 'VIEWER' AND is_active = 1
+         ORDER BY full_name, username`
+    );
+    res.json({ success: true, data: users });
+};
+
+exports.getExamAssignedUsers = async (req, res) => {
+    const id = req.params.id;
+    const users = await query(
+        `SELECT u.id, u.username, u.full_name, u.email, u.company_name
+         FROM user_exam_assignments uea
+         JOIN users u ON u.id = uea.user_id
+         WHERE uea.exam_id = ?`,
+        [id]
+    );
+    res.json({ success: true, data: users });
 };
 
 
@@ -189,7 +217,7 @@ const hhmm = (v) => String(v || "").substring(0, 5);
  */
 exports.updateExam = async (req, res) => {
     const id = req.params.id;
-    const { shifts, link_type, ...rest } = req.body;
+    const { shifts, link_type, assigned_user_ids, ...rest } = req.body;
 
     const exam = await Exam.findByPk(id, {
         include: [{ model: ExamShift, as: "examShifts" }],
@@ -349,6 +377,17 @@ exports.updateExam = async (req, res) => {
             transaction: t,
         });
     });
+
+    // Reconcile assigned users outside transaction (raw query)
+    if (Array.isArray(assigned_user_ids)) {
+        await query('DELETE FROM user_exam_assignments WHERE exam_id = ?', [id]);
+        if (assigned_user_ids.length > 0) {
+            await query(
+                `INSERT IGNORE INTO user_exam_assignments (user_id, exam_id) VALUES ${assigned_user_ids.map(() => '(?,?)').join(',')}`,
+                assigned_user_ids.flatMap(uid => [uid, id])
+            );
+        }
+    }
 
     res.json({
         success: true,
