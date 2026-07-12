@@ -26,6 +26,57 @@ const app = express();
 
 // Middleware
 app.use(cors());
+
+// ==========================
+// TC Video Upload Service — reverse proxy  (MUST be before body parsers!)
+// Forwards /video-upload/* → http://100.81.36.13:8080/*
+// Uses Node's built-in http module (no extra dependency) and
+// pipes request/response bodies so multi-GB uploads stream through
+// without being buffered in memory.
+// ==========================
+const http = require('http');
+const VIDEO_UPLOAD_TARGET = process.env.VIDEO_UPLOAD_TARGET || 'http://100.81.36.13:8080';
+const videoUploadUrl = new URL(VIDEO_UPLOAD_TARGET);
+
+app.all('/video-upload/*', (req, res) => {
+    // Strip the /video-upload prefix → upstream path
+    const upstreamPath = req.originalUrl.replace(/^\/video-upload\/?/, '/');
+
+    const proxyOpts = {
+        hostname: videoUploadUrl.hostname,
+        port: videoUploadUrl.port || 80,
+        path: upstreamPath,
+        method: req.method,
+        headers: {
+            ...req.headers,
+            host: videoUploadUrl.host,
+        },
+    };
+    // Remove headers that shouldn't be forwarded
+    delete proxyOpts.headers['host'];
+    proxyOpts.headers['host'] = videoUploadUrl.host;
+
+    const proxyReq = http.request(proxyOpts, (proxyRes) => {
+        res.writeHead(proxyRes.statusCode, proxyRes.headers);
+        proxyRes.pipe(res, { end: true });
+    });
+
+    proxyReq.on('error', (err) => {
+        logger.error('Video upload proxy error', { error: err.message, path: upstreamPath });
+        if (!res.headersSent) {
+            res.status(502).json({
+                ok: false,
+                error: 'Upload service unreachable',
+                detail: err.message,
+            });
+        }
+    });
+
+    // Pipe the incoming request body (multipart uploads) directly to upstream
+    req.pipe(proxyReq, { end: true });
+});
+
+// Body parsers — placed AFTER the upload proxy so multipart streams are not consumed
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 

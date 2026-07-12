@@ -21,12 +21,19 @@ import {
   Tooltip,
   IconButton,
   Button,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
   useMediaQuery,
   useTheme,
 } from '@mui/material';
 import {
   Search,
   Download,
+  Visibility as VisibilityIcon,
+  CheckCircle as CheckCircleIcon,
+  ImageNotSupported as ImageNotSupportedIcon,
 } from '@mui/icons-material';
 import { useSearchParams } from 'react-router-dom';
 import { examsAPI, camerasAPI, clientDashboardAPI, executionsAPI } from '../services/api';
@@ -135,6 +142,9 @@ const ClientCameras = () => {
   const [camFilterShiftId, setCamFilterShiftId] = useState('');
   const [camFilterExamDate, setCamFilterExamDate] = useState('');
   const [camVisionSummary, setCamVisionSummary] = useState(null);
+  // Frame-preview dialog (read-only; mirrors the admin Cameras page)
+  const [previewCamera, setPreviewCamera] = useState(null);
+  const [previewError, setPreviewError] = useState(false);
 
   // Update the default page size only when the viewport crosses the sm
   // boundary (mobile <-> desktop), so it stays responsive to resizing while a
@@ -525,6 +535,7 @@ const ClientCameras = () => {
                             ))}
                           </>
                         )}
+                        <TableCell align="center" sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b' }}>Frame</TableCell>
                         <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 200 }}>CCTV URL</TableCell>
                       </TableRow>
                     </TableHead>
@@ -539,7 +550,16 @@ const ClientCameras = () => {
                               <TableCell sx={{ fontSize: '0.85rem' }}>{cam.camera_name || '-'}</TableCell>
                               <TableCell>{cam.ch_code ? <Chip label={cam.ch_code} size="small" variant="outlined" /> : '-'}</TableCell>
                               <TableCell><Chip label={cam.camera_category || 'N/A'} size="small" /></TableCell>
-                              <TableCell sx={{ fontSize: '0.85rem' }}>{cam.classification || '-'}</TableCell>
+                              <TableCell sx={{ fontSize: '0.85rem' }}>
+                                <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
+                                  {cam.classification || '-'}
+                                  {cam.manually_verified ? (
+                                    <Tooltip title="Manually verified by an operator">
+                                      <CheckCircleIcon sx={{ fontSize: 14, color: '#16a34a' }} />
+                                    </Tooltip>
+                                  ) : null}
+                                </Box>
+                              </TableCell>
                               <TableCell>
                                 <Chip
                                   size="small"
@@ -560,7 +580,16 @@ const ClientCameras = () => {
                               <TableCell sx={{ fontSize: '0.85rem' }}>{cam.camera_name || '-'}</TableCell>
                               <TableCell sx={{ fontSize: '0.85rem' }}>{cam.centre_name || cam.tc_name || '-'}</TableCell>
                               <TableCell sx={{ fontSize: '0.85rem' }}>{cam.state || '-'}</TableCell>
-                              <TableCell sx={{ fontSize: '0.85rem' }}>{cam.classification || '-'}</TableCell>
+                              <TableCell sx={{ fontSize: '0.85rem' }}>
+                                <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
+                                  {cam.classification || '-'}
+                                  {cam.manually_verified ? (
+                                    <Tooltip title="Manually verified by an operator">
+                                      <CheckCircleIcon sx={{ fontSize: 14, color: '#16a34a' }} />
+                                    </Tooltip>
+                                  ) : null}
+                                </Box>
+                              </TableCell>
                               <TableCell>
                                 <Chip
                                   size="small"
@@ -570,6 +599,20 @@ const ClientCameras = () => {
                               </TableCell>
                             </>
                           )}
+                          <TableCell align="center">
+                            <Tooltip title={cam.frame_path ? `View frame (${cam.classification || 'unclassified'})` : 'No frame captured yet'}>
+                              <span>
+                                <IconButton
+                                  size="small"
+                                  disabled={!cam.frame_path}
+                                  onClick={() => { setPreviewError(false); setPreviewCamera(cam); }}
+                                  sx={{ color: cam.frame_path ? 'primary.main' : '#cbd5e1' }}
+                                >
+                                  <VisibilityIcon fontSize="small" />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                          </TableCell>
                           <TableCell sx={{ maxWidth: 200 }}>
                             <Tooltip title={cam.cctv_url || cam.url}>
                               <Typography variant="caption" sx={{ fontFamily: 'monospace', wordBreak: 'break-all', fontSize: '0.75rem' }}>
@@ -595,6 +638,74 @@ const ClientCameras = () => {
           </>
         )}
       </Box>
+
+      {/* ── Frame preview Dialog (read-only) ── */}
+      <Dialog
+        open={!!previewCamera}
+        onClose={() => setPreviewCamera(null)}
+        maxWidth="md"
+        fullWidth
+        fullScreen={isSmDown}
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1, pr: 6 }}>
+          <VisibilityIcon fontSize="small" />
+          <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+            <Typography sx={{ fontWeight: 700, fontSize: '1rem', color: '#0f172a', lineHeight: 1.3 }}>
+              {previewCamera?.camera_name || previewCamera?.ch_code || previewCamera?.device_id || 'Camera frame'}
+            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5, flexWrap: 'wrap' }}>
+              {previewCamera?.classification && (
+                <Chip
+                  icon={previewCamera?.manually_verified ? <CheckCircleIcon sx={{ fontSize: '14px !important', color: '#16a34a !important' }} /> : undefined}
+                  label={`Classification: ${previewCamera.classification}`}
+                  size="small"
+                  color="primary"
+                  variant="outlined"
+                  sx={{ fontWeight: 600, fontSize: '0.7rem' }}
+                />
+              )}
+              {previewCamera?.manually_verified && (
+                <Chip label="Manually verified" size="small" sx={{ fontWeight: 600, fontSize: '0.7rem', bgcolor: '#dcfce7', color: '#16a34a' }} />
+              )}
+              {previewCamera?.camera_category && (
+                <Chip label={`Category: ${previewCamera.camera_category}`} size="small" sx={{ fontWeight: 600, fontSize: '0.7rem' }} />
+              )}
+              {previewCamera?.centre_name && (
+                <Typography sx={{ fontSize: '0.75rem', color: '#64748b' }}>{previewCamera.centre_name}</Typography>
+              )}
+            </Box>
+          </Box>
+        </DialogTitle>
+        <DialogContent dividers sx={{ bgcolor: '#f8fafc', p: 2 }}>
+          {previewCamera && (
+            previewError || !buildFrameImageUrl(previewCamera.frame_path) ? (
+              <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', py: 6, color: '#94a3b8' }}>
+                <ImageNotSupportedIcon sx={{ fontSize: 48, mb: 1.5 }} />
+                <Typography sx={{ fontSize: '0.9rem', fontWeight: 600 }}>Image not available</Typography>
+                <Typography sx={{ fontSize: '0.78rem', mt: 0.5 }}>The captured frame could not be loaded.</Typography>
+              </Box>
+            ) : (
+              <Box sx={{ display: 'flex', justifyContent: 'center' }}>
+                <Box
+                  component="img"
+                  src={buildFrameImageUrl(previewCamera.frame_path)}
+                  alt={previewCamera.camera_name || 'frame'}
+                  onError={() => setPreviewError(true)}
+                  sx={{ maxWidth: '100%', maxHeight: { xs: '60vh', sm: '70vh' }, borderRadius: 1.5, boxShadow: '0 2px 12px rgba(15,23,42,0.12)', bgcolor: '#000' }}
+                />
+              </Box>
+            )
+          )}
+        </DialogContent>
+        <DialogActions sx={{ px: 2, py: 1.5, gap: 1 }}>
+          {previewCamera?.frame_path && !previewError && (
+            <Button onClick={() => window.open(buildFrameImageUrl(previewCamera.frame_path), '_blank', 'noopener')} size="small">
+              Open in new tab
+            </Button>
+          )}
+          <Button onClick={() => setPreviewCamera(null)} variant="contained" size="small">Close</Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

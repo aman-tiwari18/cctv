@@ -24,6 +24,7 @@ const RemovedDetections = lazy(() => import('./pages/RemovedDetections'));
 const ClientDetectionDashboard = lazy(() => import('./pages/ClientDetectionDashboard'));
 const ClientExams = lazy(() => import('./pages/ClientExams'));
 const ClientCameras = lazy(() => import('./pages/ClientCameras'));
+const ClientVideoUploads = lazy(() => import('./pages/ClientVideoUploads'));
 const UserVerification = lazy(() => import('./pages/UserVerification'));
 const GPUMonitor = lazy(() => import('./pages/GPUMonitor'));
 
@@ -190,6 +191,7 @@ function App() {
             <Route path="executions" element={<Suspense fallback={null}><RoleBasedRoute AdminComp={Executions} /></Suspense>} />
             <Route path="gpu-monitor" element={<Suspense fallback={null}><RoleBasedRoute AdminComp={GPUMonitor} /></Suspense>} />
             <Route path="detections" element={<Suspense fallback={null}><RoleBasedRoute AdminComp={Detections} ViewerComp={ClientDetections} OperatorComp={Detections} /></Suspense>} />
+            <Route path="video-uploads" element={<Suspense fallback={null}><ClientVideoUploads /></Suspense>} />
             <Route path="detections/removed" element={<Suspense fallback={null}><RemovedDetections /></Suspense>} />
             <Route path="user-verification" element={<Suspense fallback={null}><UserVerification /></Suspense>} />
           </Route>

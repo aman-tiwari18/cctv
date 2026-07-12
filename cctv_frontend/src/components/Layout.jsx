@@ -51,6 +51,7 @@ import {
   DeleteSweep,
 } from '@mui/icons-material';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
+import VideoLibraryIcon from '@mui/icons-material/VideoLibrary';
 import { useAuth } from '../contexts/AuthContext';
 import { useDetectionCounts } from '../contexts/DetectionCountsContext';
 import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
@@ -114,6 +115,7 @@ const viewerMenuItems = [
   { text: 'Exams', icon: <ExamsSvgIcon />, path: '/exams' },
   { text: 'Cameras', icon: <CameraAltIcon />, path: '/cameras' },
   { text: 'Detections', icon: <CustomSvgIcon />, path: '/detections', hasSubItems: true },
+  { text: 'Video Uploads', icon: <VideoLibraryIcon />, path: '/video-uploads' },
 ];
 
 // Menu items for OPERATOR role

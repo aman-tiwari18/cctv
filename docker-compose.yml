@@ -78,6 +78,10 @@ services:
       - "3001:80"
     depends_on:
       - backend
+    # Allow nginx inside the container to reach the TC Video Upload Service
+    # on p010's Tailscale IP (100.81.36.13) via the Docker host's network.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - cctv_network
 
