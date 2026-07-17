@@ -176,6 +176,10 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=60):
             cv2.imwrite(path, annotated_frame)
             logger.warning(f"[ServerRoom] 🚨 SAVED persons={person_count} camera={camera_key} → {path}")
 
+            # Same call detect_persons_batch used to decide `detected`, so the
+            # number reported here is the limit this detection actually crossed.
+            threshold = get_min_persons(str(item.get("tc_code", "") or ""))
+
             # Report to database
             if item.get("source_type") == "HLS":
                 try:
@@ -183,7 +187,9 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=60):
                     report_to_db_hls(
                         ch_code=str(ch_no),
                         image_name=fname,
-                        folder="server_room_detection"
+                        folder="server_room_detection",
+                        person_count=person_count,
+                        threshold=threshold
                     )
                 except Exception as e:
                     logger.error(f"[ServerRoom] HLS DB Reporting Error: {e}")
@@ -194,7 +200,9 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=60):
                         device_id=str(dev_id),
                         camera_no=str(ch_no),
                         image_name=fname,
-                        folder="server_room_detection"
+                        folder="server_room_detection",
+                        person_count=person_count,
+                        threshold=threshold
                     )
                 except Exception as e:
                     logger.error(f"[ServerRoom] RTSP DB Reporting Error: {e}")

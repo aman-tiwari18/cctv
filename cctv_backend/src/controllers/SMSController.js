@@ -41,7 +41,8 @@ class SMSController {
 
             // Query metadata from DB
             const sql = `SELECT exam_id, shift_id, center_name, tc_code, camera_name,
-                                detection_type, date_time, sms_sent
+                                detection_type, date_time, sms_sent,
+                                person_count, threshold
                    FROM ${tableName}
                    WHERE unique_id = ? LIMIT 1`;
 
@@ -119,6 +120,8 @@ class SMSController {
                 camera_name: metadata.camera_name,
                 time: metadata.date_time,
                 count: metadata.count,
+                person_count: metadata.person_count,
+                threshold: metadata.threshold,
             }, observerPhone);
 
             // Record sms_sent so the client image shows the badge (and we never resend).

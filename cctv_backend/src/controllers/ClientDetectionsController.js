@@ -187,7 +187,8 @@ exports.acceptDetection = async (req, res) => {
             try {
                 const r = await query(
                     `SELECT exam_id, shift_id, center_name, tc_code, camera_name,
-                            detection_type, date_time, sms_sent
+                            detection_type, date_time, sms_sent,
+                            person_count, threshold
                        FROM ${t} WHERE unique_id = ? LIMIT 1`,
                     [uid]
                 );
@@ -253,6 +254,8 @@ exports.acceptDetection = async (req, res) => {
                     tc_code: row.tc_code,
                     camera_name: row.camera_name,
                     time: row.date_time,
+                    person_count: row.person_count,
+                    threshold: row.threshold,
                 }, recipients);
 
                 if (alertResult.success && !alertResult.skipped) {

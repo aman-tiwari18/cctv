@@ -50,21 +50,51 @@ const SMS_TEMPLATES = {
 };
 
 /**
- * Render a DLT message body by substituting {camname}, {centername},
- * {timestamp}, {tccode}, {count} placeholders from the detection metadata.
+ * Values a DLT message body can interpolate. The ##var## names registered on the
+ * DLT portal map onto these keys — ##camname## → {camname}, ##pplcount## →
+ * {pplcount}, ##ppl## → {ppl} — and sms_configs.message_* stores the {…} form.
+ *
+ * camname/centername/tccode/timestamp always resolve because they fall back, so
+ * only the numeric ones can come back empty (a detection captured before the
+ * worker started reporting person_count). See missingPlaceholders().
  */
-function renderMessage(text, data = {}) {
-    if (!text) return '';
-    const map = {
+function buildPlaceholderMap(data = {}) {
+    return {
         camname: data.camera_name || data.cameraName || 'Camera',
         centername: data.center_name || data.centerName || 'Center',
         timestamp: formatTime(data.time),
         tccode: data.tc_code || data.tcCode || 'N/A',
         count: data.count != null ? String(data.count) : '',
+        pplcount: data.person_count != null ? String(data.person_count) : '',
+        ppl: data.threshold != null ? String(data.threshold) : '',
     };
+}
+
+/**
+ * Render a DLT message body by substituting {placeholder} names from the
+ * detection metadata.
+ */
+function renderMessage(text, data = {}) {
+    if (!text) return '';
+    const map = buildPlaceholderMap(data);
     return text.replace(/\{(\w+)\}/g, (m, key) =>
         Object.prototype.hasOwnProperty.call(map, key) ? map[key] : m
     );
+}
+
+/**
+ * Placeholders the template asks for that this detection cannot fill — either
+ * the value is absent or the name is not one we know.
+ *
+ * A body must leave here byte-identical to the registered DLT template with its
+ * variables filled. A blank {pplcount} or a literal, unsubstituted {ppl} makes
+ * it a different text, which the gateway rejects — so the caller skips the send
+ * instead of burning a request on a message that cannot deliver.
+ */
+function missingPlaceholders(text, data = {}) {
+    const map = buildPlaceholderMap(data);
+    const keys = [...String(text || '').matchAll(/\{(\w+)\}/g)].map((m) => m[1]);
+    return [...new Set(keys)].filter((key) => !map[key]);
 }
 
 /**
@@ -141,6 +171,15 @@ async function sendAlertWithConfig(config, typeKey, metadata, recipientList) {
 
         if (!templateId || !messageText) {
             logger.info(`SMS SKIPPED → client '${config.exam_body}' has no template for '${typeKey}'`);
+            return { success: true, skipped: true };
+        }
+
+        const missing = missingPlaceholders(messageText, metadata);
+        if (missing.length) {
+            logger.warn(
+                `SMS SKIPPED → '${typeKey}' template needs ` +
+                `${missing.map((k) => `{${k}}`).join(', ')} but this detection has no value for them`
+            );
             return { success: true, skipped: true };
         }
 
@@ -221,6 +260,7 @@ module.exports = {
     sendSMS,
     sendOTPSMS,
     renderMessage,
+    missingPlaceholders,
     SMS_TEMPLATES,
     TYPE_MAP
 };
