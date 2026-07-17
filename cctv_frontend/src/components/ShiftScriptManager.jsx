@@ -198,7 +198,7 @@ const CATEGORIES = [
 // Scripts whose pushed detections can trigger an SMS alert (DLT-approved
 // templates). SMS toggle is only shown for these, and only on exams whose
 // client (exam_body) has an enabled SMS config (fetched from /sms/clients).
-const SMS_ELIGIBLE_SCRIPTS = new Set(['invigilator', 'proximity']);
+const SMS_ELIGIBLE_SCRIPTS = new Set(['invigilator', 'proximity', 'server']);
 
 const DEFAULT_CLASSIFICATIONS = [
     'Inside Classroom',

@@ -132,13 +132,12 @@ async function sendAlertWithConfig(config, typeKey, metadata, recipientList) {
             return { success: true, skipped: true };
         }
 
-        // Resolve template id + message body for this detection type.
-        const templateId = typeKey === 'invigilator'
-            ? config.template_invigilator
-            : typeKey === 'proximity' ? config.template_proximity : null;
-        const messageText = typeKey === 'invigilator'
-            ? config.message_invigilator
-            : typeKey === 'proximity' ? config.message_proximity : null;
+        // Resolve template id + message body for this detection type. sms_configs
+        // stores these as template_<typeKey> / message_<typeKey> (invigilator,
+        // proximity, server), so a client that has no DLT template seeded for this
+        // type resolves to undefined and is skipped below.
+        const templateId = config[`template_${typeKey}`] || null;
+        const messageText = config[`message_${typeKey}`] || null;
 
         if (!templateId || !messageText) {
             logger.info(`SMS SKIPPED → client '${config.exam_body}' has no template for '${typeKey}'`);

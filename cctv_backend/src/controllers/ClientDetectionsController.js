@@ -16,7 +16,7 @@ const { sendAlertWithConfig, TYPE_MAP } = require('../services/smsService');
 const { getObserverNumbers } = require('../utils/observerList');
 
 // Detection types eligible for SMS (the only DLT-approved templates we have).
-const SMS_ELIGIBLE_TYPES = new Set(['invigilator', 'proximity']);
+const SMS_ELIGIBLE_TYPES = new Set(['invigilator', 'proximity', 'server']);
 
 // Reverse-mapping of script-server's DETECTION_FOLDERS. The detection_type
 // column stores the folder name (e.g. "proximity_detection"); the frontend

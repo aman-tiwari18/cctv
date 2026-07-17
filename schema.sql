@@ -291,6 +291,8 @@ CREATE TABLE `sms_configs` (
   `message_invigilator` text,
   `template_proximity` varchar(64) DEFAULT NULL,
   `message_proximity` text,
+  `template_server` varchar(64) DEFAULT NULL,
+  `message_server` text,
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
