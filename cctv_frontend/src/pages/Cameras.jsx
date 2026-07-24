@@ -347,6 +347,15 @@ const Cameras = () => {
       // so drop the Classification and View columns from that sheet.
       const dropClassView = statusKey === 'notAccessible';
 
+      // Per-camera classification timestamp when a specific run is selected
+      // (falls back to '-' for the live/latest view, or if this camera wasn't
+      // part of the selected run).
+      const runTimeLabel = (cam) => {
+        if (!cam.classification_run_at) return '-';
+        try { return format(new Date(cam.classification_run_at), 'dd MMM yyyy, HH:mm:ss'); }
+        catch { return '-'; }
+      };
+
       let sheetRows, viewCol, cols;
       if (hls) {
         sheetRows = rows.map((cam) => ({
@@ -357,6 +366,7 @@ const Cameras = () => {
           'Ch Code': cam.ch_code || '-',
           'Camera Category': cam.camera_category || 'N/A',
           ...(dropClassView ? {} : { 'Classification': cam.classification || '-' }),
+          'Classification Run': runTimeLabel(cam),
           'Status': cam.status || '-',
           'Exam Date': formatDateDDMMYYYY(cam.exam_date) || '-',
           'Shift': cam.shift_id
@@ -364,10 +374,10 @@ const Cameras = () => {
             : 'All shifts',
           ...(dropClassView ? {} : { 'View': toAbsFrame(cam.frame_path) }),
         }));
-        viewCol = dropClassView ? -1 : 10;
+        viewCol = dropClassView ? -1 : 11;
         cols = dropClassView
-          ? [{ wch: 30 }, { wch: 14 }, { wch: 18 }, { wch: 22 }, { wch: 12 }, { wch: 18 }, { wch: 16 }, { wch: 14 }, { wch: 16 }]
-          : [{ wch: 30 }, { wch: 14 }, { wch: 18 }, { wch: 22 }, { wch: 12 }, { wch: 18 }, { wch: 18 }, { wch: 16 }, { wch: 14 }, { wch: 16 }, { wch: 60 }];
+          ? [{ wch: 30 }, { wch: 14 }, { wch: 18 }, { wch: 22 }, { wch: 12 }, { wch: 18 }, { wch: 20 }, { wch: 16 }, { wch: 14 }, { wch: 16 }]
+          : [{ wch: 30 }, { wch: 14 }, { wch: 18 }, { wch: 22 }, { wch: 12 }, { wch: 18 }, { wch: 18 }, { wch: 20 }, { wch: 16 }, { wch: 14 }, { wch: 16 }, { wch: 60 }];
       } else {
         sheetRows = rows.map((cam) => ({
           'Device ID': cam.device_id || '-',
@@ -377,14 +387,15 @@ const Cameras = () => {
           'Centre Name': cam.centre_name || cam.tc_name || '-',
           'State': cam.state || '-',
           ...(dropClassView ? {} : { 'Classification': cam.classification || '-' }),
+          'Classification Run': runTimeLabel(cam),
           'Status': cam.status || '-',
           ...(dropClassView ? {} : { 'View': toAbsFrame(cam.frame_path) }),
           'CCTV URL': cam.cctv_url || cam.url || '-',
         }));
-        viewCol = dropClassView ? -1 : 8;
+        viewCol = dropClassView ? -1 : 9;
         cols = dropClassView
-          ? [{ wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 22 }, { wch: 34 }, { wch: 16 }, { wch: 16 }, { wch: 60 }]
-          : [{ wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 22 }, { wch: 34 }, { wch: 16 }, { wch: 18 }, { wch: 16 }, { wch: 12 }, { wch: 60 }];
+          ? [{ wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 22 }, { wch: 34 }, { wch: 16 }, { wch: 20 }, { wch: 16 }, { wch: 60 }]
+          : [{ wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 22 }, { wch: 34 }, { wch: 16 }, { wch: 18 }, { wch: 20 }, { wch: 16 }, { wch: 12 }, { wch: 60 }];
       }
 
       const ws = XLSX.utils.json_to_sheet(sheetRows);
@@ -407,7 +418,19 @@ const Cameras = () => {
       const label = statusKey === 'accessible' ? 'Accessible'
         : statusKey === 'notAccessible' ? 'Not_Accessible' : 'All';
       const examName = (selectedExamData?.exam_name || 'exam').replace(/[^\w]+/g, '_');
-      XLSX.writeFile(wb, `${examName}_${label}_cameras.xlsx`);
+
+      // Only append a timestamp when a specific classification run is selected;
+      // otherwise keep the original filename format unchanged.
+      let fileStamp = '';
+      if (selectedRunKey) {
+        const run = classificationRuns.find((r) => r.started_at === selectedRunKey);
+        if (run) {
+          try { fileStamp = '_' + format(new Date(run.started_at), 'ddMMMyyyy_HHmmss'); }
+          catch { fileStamp = ''; }
+        }
+      }
+
+      XLSX.writeFile(wb, `${examName}_${label}_cameras${fileStamp}.xlsx`);
     } catch (e) {
       console.error('Camera status download failed:', e);
     }
@@ -695,7 +718,7 @@ const Cameras = () => {
                   {/* Classification filter — applies to both HLS and RTSP */}
                   {SHOW_CLASSIFICATION_FILTER && (
                     <FormControl size="small" sx={{ minWidth: { xs: 0, sm: 160 }, flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' } }}>
-                      <InputLabel id="cam-classification-label">Classification</InputLabel>
+                      <InputLabel id="cam-classification-label" sx={{ fontSize: '0.85rem' }}>Classification</InputLabel>
                       <Select
                         labelId="cam-classification-label"
                         value={filterClassification}
@@ -715,37 +738,48 @@ const Cameras = () => {
                   )}
 
                   {/* Classification run picker — how many times classification has run;
-                      selecting one scopes the table to that run's results. */}
-                  {classificationRuns.length > 0 && (
-                    <FormControl size="small" sx={{ minWidth: { xs: 0, sm: 190 }, flex: { xs: '1 1 100%', sm: '0 0 auto' } }}>
-                      <InputLabel id="cam-run-label">Classification Run</InputLabel>
-                      <Select
-                        labelId="cam-run-label"
-                        value={selectedRunKey}
-                        label="Classification Run"
-                        onChange={(e) => { setSelectedRunKey(e.target.value); setPage(0); }}
-                        sx={{
-                          borderRadius: 2, fontSize: '0.85rem', bgcolor: '#f1f5f9',
-                          height: 40,
-                          '& fieldset': { border: '1px solid #e2e8f0' },
-                          '&:hover fieldset': { borderColor: '#cbd5e1 !important' },
-                        }}
-                      >
-                        <MenuItem value="">Latest (live)</MenuItem>
-                        {classificationRuns.map((r) => (
-                          <MenuItem key={r.started_at} value={r.started_at}>
-                            {format(new Date(r.started_at), 'dd MMM, HH:mm')} · {r.camera_count} cameras
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                  )}
+                      selecting one scopes the table to that run's results.
+                      Kept permanently mounted (visibility toggled via `display`,
+                      not conditional rendering) — MUI's outlined-label notch width
+                      is measured via a ResizeObserver that can miscalculate (border
+                      line cutting through the label) if the control only mounts
+                      once real data arrives; staying mounted from the start avoids
+                      that timing glitch. */}
+                  <FormControl
+                    size="small"
+                    sx={{
+                      minWidth: { xs: 0, sm: 190 },
+                      flex: { xs: '1 1 100%', sm: '0 0 auto' },
+                      display: classificationRuns.length > 0 ? 'flex' : 'none',
+                    }}
+                  >
+                    <InputLabel id="cam-run-label" sx={{ fontSize: '0.85rem' }}>Classification Run</InputLabel>
+                    <Select
+                      labelId="cam-run-label"
+                      value={selectedRunKey}
+                      label="Classification Run"
+                      onChange={(e) => { setSelectedRunKey(e.target.value); setPage(0); }}
+                      sx={{
+                        borderRadius: 2, fontSize: '0.85rem', bgcolor: '#f1f5f9',
+                        height: 40,
+                        '& fieldset': { border: '1px solid #e2e8f0' },
+                        '&:hover fieldset': { borderColor: '#cbd5e1 !important' },
+                      }}
+                    >
+                      <MenuItem value="">Latest (live)</MenuItem>
+                      {classificationRuns.map((r) => (
+                        <MenuItem key={r.started_at} value={r.started_at}>
+                          {format(new Date(r.started_at), 'dd MMM, HH:mm')} · {r.camera_count} cameras
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
 
                   {/* HLS filters */}
                   {isHLS && (
                     <>
                       <FormControl size="small" sx={{ minWidth: { xs: 0, sm: 140 }, flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' } }}>
-                        <InputLabel id="cam-shift-label">Shift</InputLabel>
+                        <InputLabel id="cam-shift-label" sx={{ fontSize: '0.85rem' }}>Shift</InputLabel>
                         <Select
                           labelId="cam-shift-label"
                           value={filterShiftId}

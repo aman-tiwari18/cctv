@@ -644,7 +644,7 @@ exports.getByExam = async (req, res) => {
     if (runCameraIds && data.length > 0) {
         const pageIds = data.map((c) => c.id);
         const historyRows = await query(
-            `SELECT camera_id, classification, frame_path FROM ${historyTable}
+            `SELECT camera_id, classification, frame_path, created_at FROM ${historyTable}
              WHERE camera_id IN (?) AND created_at BETWEEN ? AND ?`,
             [pageIds, run_start, run_end]
         );
@@ -656,6 +656,9 @@ exports.getByExam = async (req, res) => {
                 ...plain,
                 classification: runRow?.classification ?? null,
                 frame_path: runRow?.frame_path ?? plain.frame_path,
+                // Exact time this camera's classification was recorded within the
+                // selected run (may differ slightly per-camera inside the burst).
+                classification_run_at: runRow?.created_at ?? null,
             };
         });
     }
