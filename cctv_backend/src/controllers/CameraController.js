@@ -1,5 +1,6 @@
 const { CameraLinkHLS, CameraLinkRTSP, Exam, ExamShift, ShiftScriptAssignment, Script } = require("../models");
 const { Op } = require("sequelize");
+const { query } = require("../config/database");
 const xlsx = require("xlsx");
 const fs = require("fs");
 const path = require("path");
@@ -515,13 +516,32 @@ exports.createCamera = async (req, res) => {
  */
 exports.getByExam = async (req, res) => {
     const { examId } = req.params;
-    const { is_active = true, shift_id, exam_date, search, page = 1, limit = 50, sort_by, sort_order = 'asc' } = req.query;
+    const { is_active = true, shift_id, exam_date, search, classification, run_start, run_end, page = 1, limit = 50, sort_by, sort_order = 'asc' } = req.query;
     const { Model, linkType } = await getModelByExam(examId);
 
     const where = {
         exam_id: examId,
         is_active: is_active === "true" || is_active === true,
     };
+
+    if (classification && classification.trim()) {
+        where.classification = classification.trim();
+    }
+
+    // Scope to a specific classification "run" (see getClassificationRuns):
+    // only cameras that appear in the history table within [run_start, run_end]
+    // are included, and their classification/frame_path get overridden below
+    // to reflect that run's value rather than the current/latest one.
+    const historyTable = linkType === "RTSP" ? "camera_classification_rtsp" : "camera_classification_hls";
+    let runCameraIds = null;
+    if (run_start && run_end) {
+        const runRows = await query(
+            `SELECT DISTINCT camera_id FROM ${historyTable} WHERE created_at BETWEEN ? AND ?`,
+            [run_start, run_end]
+        );
+        runCameraIds = runRows.map((r) => r.camera_id);
+        where.id = { [Op.in]: runCameraIds.length > 0 ? runCameraIds : [-1] };
+    }
 
     if (linkType === "HLS") {
         const hlsScope = buildHlsCameraScope({ shiftId: shift_id, examDate: exam_date });
@@ -581,6 +601,10 @@ exports.getByExam = async (req, res) => {
         is_active: is_active === "true" || is_active === true,
     };
 
+    if (runCameraIds) {
+        statusCountsWhere.id = { [Op.in]: runCameraIds.length > 0 ? runCameraIds : [-1] };
+    }
+
     if (linkType === "HLS") {
         const hlsScope = buildHlsCameraScope({ shiftId: shift_id, examDate: exam_date });
         if (hlsScope.length > 0) {
@@ -613,6 +637,29 @@ exports.getByExam = async (req, res) => {
         }
     });
 
+    // When scoped to a run, replace classification/frame_path on this page's
+    // rows with the values that run actually produced (the live table may
+    // have since been overwritten by a later run).
+    let data = result.rows;
+    if (runCameraIds && data.length > 0) {
+        const pageIds = data.map((c) => c.id);
+        const historyRows = await query(
+            `SELECT camera_id, classification, frame_path FROM ${historyTable}
+             WHERE camera_id IN (?) AND created_at BETWEEN ? AND ?`,
+            [pageIds, run_start, run_end]
+        );
+        const byCameraId = new Map(historyRows.map((r) => [r.camera_id, r]));
+        data = data.map((c) => {
+            const plain = c.get({ plain: true });
+            const runRow = byCameraId.get(plain.id);
+            return {
+                ...plain,
+                classification: runRow?.classification ?? null,
+                frame_path: runRow?.frame_path ?? plain.frame_path,
+            };
+        });
+    }
+
     res.json({
         success: true,
         totalCount: result.count,
@@ -625,7 +672,7 @@ exports.getByExam = async (req, res) => {
             notAccessible: notAccessibleCount,
             unknown: unknownCount
         },
-        data: result.rows
+        data
     });
 };
 
@@ -746,6 +793,71 @@ exports.getClassificationOptions = async (req, res) => {
         .map((v) => String(v).trim())
         .sort((a, b) => a.localeCompare(b));
     res.json({ success: true, data: Array.from(new Set(options)) });
+};
+
+// A single vision-classification execution writes one row per camera into
+// camera_classification_hls/rtsp, all within a tight burst (workers process
+// cameras a few seconds apart). Consecutive rows more than RUN_GAP_SECONDS
+// apart are treated as separate runs (script re-triggered later, e.g. per the
+// shift's frequency_minutes).
+const RUN_GAP_SECONDS = 90;
+
+/**
+ * Distinct classification "runs" for a given exam — groups rows in the
+ * classification-history table (camera_classification_hls/rtsp) into bursts
+ * so the frontend can offer "how many times has classification run" as a
+ * dropdown, each option scoping the camera list to that run's results.
+ */
+exports.getClassificationRuns = async (req, res) => {
+    const { examId } = req.params;
+    const { linkType } = await getModelByExam(examId);
+    const historyTable = linkType === "RTSP" ? "camera_classification_rtsp" : "camera_classification_hls";
+    const linksTable = linkType === "RTSP" ? "camera_links_rtsp" : "camera_links_hls";
+
+    const rows = await query(
+        `
+        WITH ordered AS (
+            SELECT DISTINCT cc.created_at AS ts
+            FROM ${historyTable} cc
+            JOIN ${linksTable} cl ON cl.id = cc.camera_id
+            WHERE cl.exam_id = ?
+        ),
+        gapped AS (
+            SELECT ts,
+                CASE
+                    WHEN LAG(ts) OVER (ORDER BY ts) IS NULL
+                      OR TIMESTAMPDIFF(SECOND, LAG(ts) OVER (ORDER BY ts), ts) > ?
+                    THEN 1 ELSE 0
+                END AS is_new_run
+            FROM ordered
+        ),
+        runs AS (
+            SELECT ts, SUM(is_new_run) OVER (ORDER BY ts) AS run_seq
+            FROM gapped
+        ),
+        bounds AS (
+            SELECT run_seq, MIN(ts) AS started_at, MAX(ts) AS ended_at
+            FROM runs
+            GROUP BY run_seq
+        )
+        SELECT b.started_at, b.ended_at, COUNT(DISTINCT cc.camera_id) AS camera_count
+        FROM bounds b
+        JOIN ${historyTable} cc ON cc.created_at BETWEEN b.started_at AND b.ended_at
+        JOIN ${linksTable} cl ON cl.id = cc.camera_id AND cl.exam_id = ?
+        GROUP BY b.started_at, b.ended_at
+        ORDER BY b.started_at DESC
+        `,
+        [examId, RUN_GAP_SECONDS, examId]
+    );
+
+    res.json({
+        success: true,
+        data: rows.map((r) => ({
+            started_at: r.started_at,
+            ended_at: r.ended_at,
+            camera_count: Number(r.camera_count),
+        })),
+    });
 };
 
 /**

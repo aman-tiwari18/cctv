@@ -107,6 +107,10 @@ const getStatusChipProps = (status) => {
   };
 };
 
+// Temporarily hidden per request — flip to true to bring the Classification
+// filter dropdown back.
+const SHOW_CLASSIFICATION_FILTER = false;
+
 const HLS_EMPTY = {
   centre_name: '', tc_code: '', city: '', state: '',
   camera_name: '', ch_code: '', cctv_url: '', camera_category: '',
@@ -147,6 +151,11 @@ const Cameras = () => {
 
   const [filterShiftId, setFilterShiftId] = useState('');
   const [filterExamDate, setFilterExamDate] = useState('');
+  const [filterClassification, setFilterClassification] = useState('');
+
+  /* ── Classification run picker ── */
+  const [classificationRuns, setClassificationRuns] = useState([]);
+  const [selectedRunKey, setSelectedRunKey] = useState(''); // started_at ISO string, or '' = latest/live
 
 
   const [page, setPage] = useState(0);
@@ -232,16 +241,27 @@ const Cameras = () => {
     if (selectedExamId) {
       loadCameras();
       loadVisionSummary();
+      loadClassificationRuns();
     } else {
       setCameras([]);
       setTotalCount(0);
       setVisionSummary(null);
+      setClassificationRuns([]);
     }
     setFilterShiftId('');
     setFilterExamDate('');
+    setFilterClassification('');
+    setSelectedRunKey('');
     setSearchQuery('');
     setDebouncedSearchQuery('');
     setPage(0);
+  }, [selectedExamId]);
+
+  const loadClassificationRuns = useCallback(() => {
+    if (!selectedExamId) return;
+    camerasAPI.getClassificationRuns(selectedExamId)
+      .then((res) => setClassificationRuns(Array.isArray(res?.data?.data) ? res.data.data : []))
+      .catch(() => setClassificationRuns([]));
   }, [selectedExamId]);
 
   /* Re-fetch vision summary every 60s if started today and workers may still be active */
@@ -257,7 +277,7 @@ const Cameras = () => {
 
   useEffect(() => {
     if (selectedExamId) loadCameras();
-  }, [page, rowsPerPage, filterShiftId, filterExamDate, debouncedSearchQuery, orderBy, order]);
+  }, [page, rowsPerPage, filterShiftId, filterExamDate, filterClassification, selectedRunKey, debouncedSearchQuery, orderBy, order]);
 
   const loadCameras = useCallback(async () => {
     if (!selectedExamId) return;
@@ -266,6 +286,11 @@ const Cameras = () => {
       const params = { is_active: true, page: page + 1, limit: rowsPerPage };
       if (filterShiftId) params.shift_id = filterShiftId;
       if (filterExamDate) params.exam_date = parseDDMMYYYYToISO(filterExamDate);
+      if (filterClassification) params.classification = filterClassification;
+      if (selectedRunKey) {
+        const run = classificationRuns.find((r) => r.started_at === selectedRunKey);
+        if (run) { params.run_start = run.started_at; params.run_end = run.ended_at; }
+      }
       if (debouncedSearchQuery.trim()) params.search = debouncedSearchQuery.trim();
       if (orderBy) { params.sort_by = orderBy; params.sort_order = order; }
       const res = await camerasAPI.getByExam(selectedExamId, params);
@@ -275,7 +300,7 @@ const Cameras = () => {
       setStatusCounts(res.data.statusCounts || { accessible: 0, notAccessible: 0, unknown: 0 });
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }, [selectedExamId, page, rowsPerPage, filterShiftId, filterExamDate, debouncedSearchQuery, orderBy, order]);
+  }, [selectedExamId, page, rowsPerPage, filterShiftId, filterExamDate, filterClassification, selectedRunKey, classificationRuns, debouncedSearchQuery, orderBy, order]);
 
   /* ── Derived ── */
   const selectedExamData = exams.find((e) => String(e.id) === String(selectedExamId));
@@ -293,6 +318,11 @@ const Cameras = () => {
       const params = { is_active: true, page: 1, limit: 1000000 };
       if (filterShiftId) params.shift_id = filterShiftId;
       if (filterExamDate) params.exam_date = parseDDMMYYYYToISO(filterExamDate);
+      if (filterClassification) params.classification = filterClassification;
+      if (selectedRunKey) {
+        const run = classificationRuns.find((r) => r.started_at === selectedRunKey);
+        if (run) { params.run_start = run.started_at; params.run_end = run.ended_at; }
+      }
       const res = await camerasAPI.getByExam(selectedExamId, params);
       let rows = res.data.data || [];
       const hls = (res.data.linkType === 'HLS') || isHLS;
@@ -661,6 +691,55 @@ const Cameras = () => {
                     }}
                     sx={{ flex: { xs: '1 1 100%', sm: '0 0 auto' }, minWidth: { xs: '100%', sm: 260 }, maxWidth: { xs: '100%', sm: 300 } }}
                   />
+
+                  {/* Classification filter — applies to both HLS and RTSP */}
+                  {SHOW_CLASSIFICATION_FILTER && (
+                    <FormControl size="small" sx={{ minWidth: { xs: 0, sm: 160 }, flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' } }}>
+                      <InputLabel id="cam-classification-label">Classification</InputLabel>
+                      <Select
+                        labelId="cam-classification-label"
+                        value={filterClassification}
+                        label="Classification"
+                        onChange={(e) => { setFilterClassification(e.target.value); setPage(0); }}
+                        sx={{
+                          borderRadius: 2, fontSize: '0.85rem', bgcolor: '#f1f5f9',
+                          height: 40,
+                          '& fieldset': { border: '1px solid #e2e8f0' },
+                          '&:hover fieldset': { borderColor: '#cbd5e1 !important' },
+                        }}
+                      >
+                        <MenuItem value="">All classifications</MenuItem>
+                        {classOptions.map((c) => <MenuItem key={c} value={c}>{c}</MenuItem>)}
+                      </Select>
+                    </FormControl>
+                  )}
+
+                  {/* Classification run picker — how many times classification has run;
+                      selecting one scopes the table to that run's results. */}
+                  {classificationRuns.length > 0 && (
+                    <FormControl size="small" sx={{ minWidth: { xs: 0, sm: 190 }, flex: { xs: '1 1 100%', sm: '0 0 auto' } }}>
+                      <InputLabel id="cam-run-label">Classification Run</InputLabel>
+                      <Select
+                        labelId="cam-run-label"
+                        value={selectedRunKey}
+                        label="Classification Run"
+                        onChange={(e) => { setSelectedRunKey(e.target.value); setPage(0); }}
+                        sx={{
+                          borderRadius: 2, fontSize: '0.85rem', bgcolor: '#f1f5f9',
+                          height: 40,
+                          '& fieldset': { border: '1px solid #e2e8f0' },
+                          '&:hover fieldset': { borderColor: '#cbd5e1 !important' },
+                        }}
+                      >
+                        <MenuItem value="">Latest (live)</MenuItem>
+                        {classificationRuns.map((r) => (
+                          <MenuItem key={r.started_at} value={r.started_at}>
+                            {format(new Date(r.started_at), 'dd MMM, HH:mm')} · {r.camera_count} cameras
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  )}
 
                   {/* HLS filters */}
                   {isHLS && (

@@ -65,6 +65,14 @@ router.get(
     asyncHandler(CameraController.getClassificationOptions)
 );
 
+// Distinct classification "runs" (vision-classification executions), grouped
+// from the classification-history tables by burst gap, for the run-picker dropdown.
+router.get(
+    "/exams/:examId/cameras/classification-runs",
+    authenticate,
+    asyncHandler(CameraController.getClassificationRuns)
+);
+
 // Operator-driven manual verification of a camera's classification.
 // Sets classification + manually_verified=1 + verified_by=<user.id>.
 router.post(

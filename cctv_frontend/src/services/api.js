@@ -95,6 +95,9 @@ export const camerasAPI = {
     // Distinct classification values for the verify-dropdown.
     getClassifications: (examId) =>
         api.get(`/exams/${examId}/cameras/classifications`),
+    // Distinct classification "runs" (vision-classification executions) for the run-picker dropdown.
+    getClassificationRuns: (examId) =>
+        api.get(`/exams/${examId}/cameras/classification-runs`),
     // Operator-only: confirm/override a camera's classification.
     // Backend sets manually_verified=1 + verified_by=<current user id>.
     verifyClassification: (examId, id, classification) =>
