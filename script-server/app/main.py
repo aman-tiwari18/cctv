@@ -1363,6 +1363,7 @@ DETECTION_FOLDERS = {
     "tampering":        "camera_tampering_detection",
     "strongroom":       "strongroom_detection",
     "qp_box":           "qp_box_missing",
+    "furniture":        "improper_furniture_detection",
     "vision":           "scene_classification",
 }
 
@@ -1382,6 +1383,7 @@ DETECTION_LABELS = {
     "inversion":        "Camera Inversion",
     "strongroom":       "Strong Room Movement",
     "qp_box":           "QP Box Detection",
+    "furniture":        "Improper Furniture",
     "vision":           "Scene Classification",
 }
 

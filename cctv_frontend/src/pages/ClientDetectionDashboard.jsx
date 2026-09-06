@@ -41,6 +41,7 @@ import FlipCameraAndroid from '@mui/icons-material/FlipCameraAndroid';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import Visibility from '@mui/icons-material/Visibility';
 import Extension from '@mui/icons-material/Extension';
+import EventSeat from '@mui/icons-material/EventSeat';
 import SecurityUpdateWarning from '@mui/icons-material/SecurityUpdateWarning';
 import { clientDashboardAPI, examsAPI } from '../services/api';
 import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
@@ -75,6 +76,7 @@ const SCRIPT_DEFS = [
     // Movement & Alert
     { key: 'entry_exit',      label: 'Entry Exit',        icon: MeetingRoom,           iconColor: '#1d7a7d', bg: '#e0f0f0' },
     { key: 'qp_box',          label: 'QP Box',            icon: Extension,             iconColor: '#dc2626', bg: '#fee2e2' },
+    { key: 'furniture',       label: 'Improper Furniture', icon: EventSeat,            iconColor: '#c2410c', bg: '#fff1e6' },
     { key: 'strongroom',      label: 'Strong Room',       icon: SecurityUpdateWarning, iconColor: '#b91c1c', bg: '#fef2f2' },
     // Camera & System
     { key: 'inversion',       label: 'Camera Inversion',  icon: FlipCameraAndroid,     iconColor: '#7a86b4', bg: '#eceef5' },

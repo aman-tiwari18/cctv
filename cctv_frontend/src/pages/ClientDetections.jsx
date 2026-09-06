@@ -41,6 +41,7 @@ import {
   Visibility,
   FlipCameraAndroid,
   SecurityUpdateWarning,
+  EventSeat,
   ChevronLeft,
   ChevronRight,
   KeyboardArrowDown,
@@ -72,6 +73,7 @@ const TYPE_META = {
   intruder: { label: 'Intruder', color: '#d94466', bg: '#fce4ea' },
   strongroom: { label: 'Strong Room Movement', color: '#b91c1c', bg: '#fef2f2' },
   qp_box: { label: 'QP Box Not Visible In Strong Room', color: '#dc2626', bg: '#fee2e2' },
+  furniture: { label: 'Improper Furniture', color: '#c2410c', bg: '#fff1e6' },
   entry_exit: { label: 'Entry/Exit', color: '#1d7a7d', bg: '#e0f0f0' },
   phone: { label: 'Phone', color: '#465a38', bg: '#e8ece5' },
   blind_spot: { label: 'Blind Spot', color: '#b0a850', bg: '#f3f2e4' },
@@ -91,6 +93,7 @@ const TYPE_ICONS = {
   intruder: DirectionsWalk,
   strongroom: SecurityUpdateWarning,
   qp_box: SecurityUpdateWarning,
+  furniture: EventSeat,
   entry_exit: MeetingRoom,
   phone: Smartphone,
   blind_spot: VisibilityOff,
@@ -1364,7 +1367,7 @@ const ClientDetections = () => {
     const TYPE_LABELS = {
       proximity: 'Close Proximity', crowd: 'Crowd Detection', crowd_five: 'Crowd < 5',
       crowd_zero: 'Zero Person', server: 'Server Room', intruder: 'Intruder',
-      entry_exit: 'Entry/Exit', phone: 'Phone', blind_spot: 'Blind Spot',
+      entry_exit: 'Entry/Exit', phone: 'Phone', blind_spot: 'Blind Spot', furniture: 'Improper Furniture',
       invigilator: 'Invigilator', inversion: 'Camera Inversion', tamper: 'Camera Tampering',
     };
 

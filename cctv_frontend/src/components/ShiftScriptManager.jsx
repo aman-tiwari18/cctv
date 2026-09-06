@@ -41,6 +41,7 @@ import {
     Visibility,
     FlipCameraAndroid,
     SecurityUpdateWarning,
+    EventSeat,
 } from '@mui/icons-material';
 import { shiftScriptsAPI, scriptsAPI, executionsAPI, smsAPI } from '../services/api';
 import ExecutionStatusBadge from './ExecutionStatusBadge';
@@ -168,6 +169,14 @@ const SCRIPT_META = {
         iconColor: '#b0a850',
         bg: '#f3f2e4',
         color: '#b0a850',
+        category: 'camera',
+    },
+    furniture: {
+        label: 'Improper furniture',
+        icon: EventSeat,
+        iconColor: '#c2410c',
+        bg: '#fff1e6',
+        color: '#c2410c',
         category: 'camera',
     },
     vision: {

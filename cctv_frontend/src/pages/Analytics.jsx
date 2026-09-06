@@ -46,6 +46,7 @@ const SCRIPT_COLORS = {
   entry_exit: { bg: '#e0f0f0', color: '#1d7a7d' },
   phone: { bg: '#e8ece5', color: '#465a38' },
   blind_spot: { bg: '#f3f2e4', color: '#b0a850' },
+  furniture: { bg: '#fff1e6', color: '#c2410c' },
   invigilator: { bg: '#cce8fcff', color: '#00bfcf' },
   inversion: { bg: '#eceef5', color: '#7a86b4' },
   tampering: { bg: '#e9f9ffff', color: '#00c8d4' },

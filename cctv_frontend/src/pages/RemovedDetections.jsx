@@ -39,6 +39,7 @@ import {
   SecurityUpdateWarning,
   Warning,
   GridView, LocationCity, Close, Memory, ArrowBack, Event,
+  EventSeat,
 } from '@mui/icons-material';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { API_BASE_1 } from '../constants/data';
@@ -56,6 +57,7 @@ const TYPE_META = {
   entry_exit: { label: 'Entry/Exit', color: '#1d7a7d', bg: '#e0f0f0' },
   phone: { label: 'Phone', color: '#465a38', bg: '#e8ece5' },
   blind_spot: { label: 'Blind Spot', color: '#b0a850', bg: '#f3f2e4' },
+  furniture: { label: 'Improper Furniture', color: '#c2410c', bg: '#fff1e6' },
   invigilator: { label: 'Invigilator', color: '#00bfcf', bg: '#e0f7fa' },
   inversion: { label: 'Camera Inversion', color: '#7a86b4', bg: '#eceef5' },
   tamper: { label: 'Camera Tampering', color: '#00c8d4', bg: '#e0f8fa' },
@@ -79,6 +81,7 @@ const TYPE_ICONS = {
   entry_exit: MeetingRoom,
   phone: Smartphone,
   blind_spot: VisibilityOff,
+  furniture: EventSeat,
   invigilator: Visibility,
   inversion: FlipCameraAndroid,
   tamper: SecurityUpdateWarning,

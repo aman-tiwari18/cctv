@@ -44,6 +44,7 @@ import {
   VisibilityOff,
   FlipCameraAndroid,
   SecurityUpdateWarning,
+  EventSeat,
   Download,
   TrendingUp,
   VerifiedUser,
@@ -94,6 +95,7 @@ const TYPE_META = {
   // tampering: { label: 'Camera Tampering', icon: SecurityUpdateWarning, iconColor: '#00c8d4' },
   strongroom: { label: 'Strong Room Movement', icon: SecurityUpdateWarning, iconColor: '#b91c1c' },
   qp_box: { label: 'QP Box Not Visible In Strong Room', icon: SecurityUpdateWarning, iconColor: '#dc2626' },
+  furniture: { label: 'Improper Furniture', icon: EventSeat, iconColor: '#c2410c' },
   vision: { label: 'Vision Detection', icon: Visibility, iconColor: '#3b82f6' },
 };
 

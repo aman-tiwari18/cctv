@@ -123,4 +123,11 @@ module.exports = {
         default_frequency: 5,
         default_duration: 1,
     },
+    furniture: {
+        name: 'Improper Furniture Detection',
+        description: 'Detects broken, overturned or missing furniture in exam room camera feeds.',
+        script_path: 'scripts/detection/pipeline/master_pipeline.py',
+        default_frequency: 15,
+        default_duration: 1,
+    },
 };

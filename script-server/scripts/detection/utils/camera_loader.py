@@ -78,6 +78,9 @@ SCRIPT_CLASSIFICATION_MAP = {
     # Strong room / QP-box not visible -> Strong Room / Server Room
     "strongroom":      ["strong room", "server room"],
     "qp_box":          ["strong room", "server room"],
+
+    # Broken / overturned / missing furniture -> Inside Lab
+    "furniture":       ["computer lab", "inside classroom"],
 }
 
 # The "Camera Type" dropdown on the Add Script dialog offers the SOP group names
