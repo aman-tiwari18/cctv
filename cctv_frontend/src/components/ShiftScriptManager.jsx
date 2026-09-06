@@ -200,11 +200,25 @@ const CATEGORIES = [
 // client (exam_body) has an enabled SMS config (fetched from /sms/clients).
 const SMS_ELIGIBLE_SCRIPTS = new Set(['invigilator', 'proximity', 'server']);
 
+// Camera Type suggestions for the per-script filter. The first four are the SOP
+// group names — they are not stored on any camera, the worker expands them into
+// the DB classification values they cover (CLASSIFICATION_ALIASES in
+// script-server/scripts/detection/utils/camera_loader.py — keep the two in sync):
+//   Inside Lab   -> Computer Lab, Inside Classroom
+//   Server Room  -> Server Room, Strong Room
+//   Entry/Exit   -> Entry, Entry/Exit
+//   Outside      -> Outside Area, Outdoor Scene, Parking Lot
+// The rest are literal classification values. The field is freeSolo, so any
+// other value present in the exam's cameras can still be typed in.
 const DEFAULT_CLASSIFICATIONS = [
-    'Inside Classroom',
+    'Inside Lab',
+    'Server Room',
     'Entry/Exit',
-    'Biometric',
+    'Outside',
+    'Inside Classroom',
+    'Computer Lab',
     'Strong Room',
+    'Biometric',
     'All Cameras',
 ];
 // One-shot scripts — no cooldown loop, frequency field not applicable
