@@ -2,11 +2,30 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { query } = require("../config/database");
 const { generateOTP, storeOTP, verifyOTP, clearOTP, markVerified, isRecentlyVerified, clearVerified } = require("../services/otpService");
-const { sendOTPEmail, sendRegistrationNotification, sendVerificationNotification } = require("../services/emailService");
+const { sendOTPEmail, sendRegistrationNotification, sendVerifiedCredentialsEmail } = require("../services/emailService");
 const { sendOTPSMS } = require("../services/smsService");
 const logger = require("../utils/logger");
-const { EXAM_BODIES, COMPANY_CODES } = require("../constants/examBodies");
+const { EXAM_BODIES, COMPANY_CODES, labelForCode } = require("../constants/examBodies");
+const crypto = require("crypto");
 const { getUserCompanyRows, addUserCompany, hasUserCompany, setUserCompaniesVerified } = require("../utils/userCompanies");
+
+/**
+ * Password quoted in the "account verified" email.
+ *
+ * users.password_hash is bcrypt and no plaintext copy is kept anywhere, so the
+ * password the user chose at signup cannot be read back. Verification therefore
+ * issues a fresh password: it is mailed in full and only its bcrypt hash is
+ * stored. Ambiguous characters (0/O, 1/l/I) are left out so it can be retyped.
+ */
+function generateLoginPassword(length = 10) {
+    const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+    const bytes = crypto.randomBytes(length);
+    let out = "";
+    for (let i = 0; i < length; i += 1) out += alphabet[bytes[i] % alphabet.length];
+    // Guarantee a symbol so the value still passes any "strong password" rule.
+    return `${out}@${crypto.randomInt(10, 100)}`;
+}
+
 /**
  * Login
  */
@@ -228,6 +247,11 @@ exports.verifyUser = async (req, res) => {
         values
     );
 
+    // Read the memberships before they are approved: a pending one becoming
+    // approved is what makes this a real verification rather than, say, the
+    // admin reopening the same dialog to change an existing user's role.
+    const hadPendingCompany = (await getUserCompanyRows(userId)).some((r) => !r.verified);
+
     // Verifying the account approves every company it has asked for (and
     // unverifying revokes them), so the admin's single action stays sufficient
     // for a multi-company user.
@@ -241,13 +265,52 @@ exports.verifyUser = async (req, res) => {
         [userId]
     );
 
-    // Notify the user by email when their account is newly verified/approved.
+    // Mail the user their login credentials once the account is verified:
+    // username, password, the dashboard URL and the exam body/bodies they are
+    // now approved for. Only an actual approval mails — the account going from
+    // unverified to verified, or a pending exam of an already-verified account
+    // being approved — so re-saving a verified user's role sends nothing.
     // Best-effort: a mail failure must not fail the verification request.
-    if ((verified === true || verified === 'true') && updatedUsers[0]?.email) {
+    const isApproval = (verified === true || verified === 'true') && (!users[0].verified || hadPendingCompany);
+
+    if (isApproval && updatedUsers[0]?.email) {
         const u = updatedUsers[0];
-        sendVerificationNotification(u.email, u.full_name).catch((e) =>
-            logger.error(`Failed to send verification notification to ${u.email}: ${e.message}`)
-        );
+
+        // Approved memberships are the exams the account is registered for; fall
+        // back to the primary company for rows created before user_companies.
+        const companyRows = await getUserCompanyRows(userId);
+        const codes = companyRows.filter((r) => r.verified).map((r) => r.company_name);
+        if (!codes.length && u.company_name) codes.push(u.company_name);
+        const exams = [...new Set(codes.map(labelForCode).filter(Boolean))];
+
+        // Only the first approval issues a password. An account that was already
+        // verified (e.g. a second company being approved) keeps the password it
+        // is already using — it just gets told which exam it now has access to.
+        const newPassword = users[0].verified ? null : generateLoginPassword();
+
+        sendVerifiedCredentialsEmail(u.email, {
+            name: u.full_name,
+            username: u.username,
+            password: newPassword,
+            exams,
+        })
+            .then(async (result) => {
+                if (!newPassword) return;
+                if (!result?.success || result.skipped) {
+                    // The mail never left, so the account keeps its old password
+                    // rather than being locked out by one nobody received.
+                    logger.warn(`Verification mail not delivered to ${u.email} - password left unchanged`);
+                    return;
+                }
+                // Store only the bcrypt hash; the plaintext lives solely in that email.
+                const salt = await bcrypt.genSalt(10);
+                const password_hash = await bcrypt.hash(newPassword, salt);
+                await query("UPDATE users SET password_hash = ? WHERE id = ?", [password_hash, userId]);
+                logger.info(`Login credentials mailed to verified user ${u.email}`);
+            })
+            .catch((e) =>
+                logger.error(`Failed to send verification credentials to ${u.email}: ${e.message}`)
+            );
     }
 
     res.json({

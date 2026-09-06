@@ -19,4 +19,12 @@ const EXAM_BODIES = [
 const COMPANY_CODES = EXAM_BODIES.filter((b) => b.company).map((b) => b.code);
 const EXAM_BODY_CODES = EXAM_BODIES.filter((b) => b.examBody).map((b) => b.code);
 
-module.exports = { EXAM_BODIES, COMPANY_CODES, EXAM_BODY_CODES };
+/** Human-readable name for a stored company/exam-body code (falls back to the code). */
+const labelForCode = (code) => {
+    const key = String(code || "").trim();
+    if (!key) return "";
+    const match = EXAM_BODIES.find((b) => b.code.toLowerCase() === key.toLowerCase());
+    return match ? match.label : key;
+};
+
+module.exports = { EXAM_BODIES, COMPANY_CODES, EXAM_BODY_CODES, labelForCode };

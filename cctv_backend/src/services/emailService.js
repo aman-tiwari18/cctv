@@ -60,6 +60,16 @@ async function sendEmail(to, subject, html) {
     }
 }
 
+/** Escape user-supplied values so they cannot break out of the HTML body. */
+function escapeHtml(value) {
+    return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 /** Shared layout wrapper so every email looks consistent. */
 function layout(title, bodyHtml) {
     return `
@@ -152,6 +162,51 @@ async function sendVerificationNotification(email, name) {
     return sendEmail(email, 'Your Account Has Been Verified - CCTV Analysis System', html);
 }
 
+/** Login page the credentials in the verification mail point at. */
+const DASHBOARD_URL = () =>
+    process.env.DASHBOARD_URL || 'http://www.examscctvmonitoring.com/cctv_analytics/login';
+
+/**
+ * Send the "you are verified — here are your credentials" email.
+ *
+ * Quotes the username, the password to sign in with, the dashboard login URL
+ * and the exam body/bodies the account has been approved for. `password` is null
+ * when no new one was issued (an already-verified account gaining another exam)
+ * — the mail then points the user at the password they already use.
+ */
+async function sendVerifiedCredentialsEmail(email, { name, username, password, exams = [] } = {}) {
+    const list = (Array.isArray(exams) ? exams : [exams]).filter(Boolean);
+    const examText = list.length ? list.join(', ') : 'the CCTV Analysis System';
+    const url = DASHBOARD_URL();
+
+    const passwordCell = password
+        ? `<code style="font-size: 15px;">${escapeHtml(password)}</code>`
+        : 'your existing password for this account';
+
+    const html = layout('Account Verified', `
+        <p>Hello ${escapeHtml(name || 'there')},</p>
+        <p><span class="badge">&#10003; Verified</span></p>
+        <p>You have been successfully registered for <strong>${escapeHtml(examText)}</strong>.</p>
+        <p>Your account has been verified by an administrator. Use the credentials below to sign in:</p>
+        <div class="otp-box" style="text-align: left; border-style: solid;">
+            <table style="border-collapse: collapse;">
+                <tr>
+                    <td style="padding: 6px 0; width: 110px;"><strong>Username:</strong></td>
+                    <td style="padding: 6px 0;">${escapeHtml(username || email)}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 6px 0;"><strong>Password:</strong></td>
+                    <td style="padding: 6px 0;">${passwordCell}</td>
+                </tr>
+            </table>
+        </div>
+        <p><strong>Dashboard:</strong> <a href="${url}">${url}</a></p>
+        <p class="warning">&#9888;&#65039; For your security, change your password after the first login and never share these credentials.</p>
+    `);
+
+    return sendEmail(email, `Account Verified - ${examText}`, html);
+}
+
 /**
  * Verify email configuration (used at startup for a readiness log).
  */
@@ -168,6 +223,7 @@ module.exports = {
     sendOTPEmail,
     sendRegistrationNotification,
     sendVerificationNotification,
+    sendVerifiedCredentialsEmail,
     verifyEmailConfig,
     isEmailConfigured,
 };
