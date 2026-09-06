@@ -1,11 +1,12 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { query } = require("../config/database");
-const { generateOTP, storeOTP, verifyOTP, clearOTP } = require("../services/otpService");
+const { generateOTP, storeOTP, verifyOTP, clearOTP, markVerified, isRecentlyVerified, clearVerified } = require("../services/otpService");
 const { sendOTPEmail, sendRegistrationNotification, sendVerificationNotification } = require("../services/emailService");
 const { sendOTPSMS } = require("../services/smsService");
 const logger = require("../utils/logger");
 const { EXAM_BODIES, COMPANY_CODES } = require("../constants/examBodies");
+const { getUserCompanyRows, addUserCompany, hasUserCompany, setUserCompaniesVerified } = require("../utils/userCompanies");
 /**
  * Login
  */
@@ -227,6 +228,13 @@ exports.verifyUser = async (req, res) => {
         values
     );
 
+    // Verifying the account approves every company it has asked for (and
+    // unverifying revokes them), so the admin's single action stays sufficient
+    // for a multi-company user.
+    if (verified !== undefined) {
+        await setUserCompaniesVerified(userId, verified === true || verified === 'true');
+    }
+
     // Fetch updated user
     const updatedUsers = await query(
         "SELECT id, username, email, full_name, phone, company_name, verified, verified_date, role, gpu_id FROM users WHERE id = ?",
@@ -390,16 +398,70 @@ exports.signup = async (req, res) => {
             }
         }
 
-        // Check if user already exists (email always; phone only when provided)
-        const existing = phone
-            ? await query("SELECT id FROM users WHERE email = ? OR phone = ?", [email, phone])
-            : await query("SELECT id FROM users WHERE email = ?", [email]);
+        // An account already on this email is not a duplicate: the same person can
+        // work for more than one company, and users.email/username are UNIQUE so
+        // they cannot hold a second row. Attach the company to the account they
+        // already have instead — but only after they prove the address is theirs
+        // by completing the email OTP, since this widens an existing account.
+        const existingByEmail = await query("SELECT id, full_name, verified FROM users WHERE email = ?", [email]);
 
-        if (existing.length > 0) {
-            return res.status(409).json({
-                success: false,
-                message: "Email or phone number already registered",
+        if (existingByEmail.length > 0) {
+            const existingUser = existingByEmail[0];
+
+            if (!companyName) {
+                return res.status(409).json({
+                    success: false,
+                    message: "This email is already registered. Select a company to add it to that account.",
+                });
+            }
+
+            if (!isRecentlyVerified(email, "registration_email")) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Please verify your email with the OTP before adding another company.",
+                });
+            }
+
+            if (await hasUserCompany(existingUser.id, companyName)) {
+                return res.status(409).json({
+                    success: false,
+                    message: `This email is already registered for ${companyName}.`,
+                });
+            }
+
+            // Pending until an admin approves it, exactly like a fresh signup —
+            // the account keeps working for the companies it already has.
+            await addUserCompany(existingUser.id, companyName, false);
+            clearVerified(email, "registration_email");
+
+            logger.info(`Company '${companyName}' requested for existing user: ${email}`);
+
+            sendRegistrationNotification(email, existingUser.full_name || name).catch((e) =>
+                logger.error(`Failed to send registration notification to ${email}: ${e.message}`)
+            );
+
+            return res.status(200).json({
+                success: true,
+                message: `${companyName} added to your existing account. Sign in with your current password once an admin approves it.`,
+                data: {
+                    id: existingUser.id,
+                    email,
+                    company_name: companyName,
+                    company_added: true,
+                    verified: false,
+                },
             });
+        }
+
+        // A phone collision on a NEW account is still a genuine duplicate.
+        if (phone) {
+            const existingByPhone = await query("SELECT id FROM users WHERE phone = ?", [phone]);
+            if (existingByPhone.length > 0) {
+                return res.status(409).json({
+                    success: false,
+                    message: "Phone number already registered",
+                });
+            }
         }
 
         // Use email as username
@@ -415,6 +477,17 @@ exports.signup = async (req, res) => {
             [username, email, password_hash, name, phone || null, companyName || null, "VIEWER", false]
         );
 
+        // config/database.js unwraps sequelize's [insertId, affectedRows] to the
+        // first element, so an INSERT resolves to the id itself, not an object.
+        const newUserId = typeof result === 'number' ? result : result?.insertId;
+
+        // Mirror the primary company into user_companies so multi-company logic
+        // has a single place to read from.
+        if (companyName && newUserId) {
+            await addUserCompany(newUserId, companyName, false);
+        }
+        clearVerified(email, "registration_email");
+
         logger.info(`New user signed up: ${email}`);
 
         // Best-effort registration notification (must not block signup on mail failure)
@@ -426,7 +499,7 @@ exports.signup = async (req, res) => {
             success: true,
             message: "Account created successfully. Please verify your email.",
             data: {
-                id: result.insertId,
+                id: newUserId,
                 email,
                 phone,
                 full_name: name,
@@ -554,18 +627,23 @@ exports.sendRegistrationOTP = async (req, res) => {
             }
         }
 
-        // Check if already registered
-        const field = type === 'email' ? 'email' : 'phone';
-        const existing = await query(
-            `SELECT id FROM users WHERE ${field} = ?`,
-            [identifier]
-        );
+        // An email that already has an account is allowed through: the person may
+        // be registering the same account for a second company, and verifying the
+        // OTP is exactly how they prove the address is theirs before signup
+        // attaches that company. Phone stays blocked — it is not the login
+        // identity, so a collision there is a genuine duplicate.
+        if (type === 'phone') {
+            const existing = await query(
+                'SELECT id FROM users WHERE phone = ?',
+                [identifier]
+            );
 
-        if (existing.length > 0) {
-            return res.status(409).json({
-                success: false,
-                message: `This ${type} is already registered`,
-            });
+            if (existing.length > 0) {
+                return res.status(409).json({
+                    success: false,
+                    message: 'This phone is already registered',
+                });
+            }
         }
 
         // Generate and store OTP
@@ -638,6 +716,10 @@ exports.verifyRegistrationOTP = async (req, res) => {
         if (!result.success) {
             return res.status(400).json(result);
         }
+
+        // Remember the proof so signup can trust it when attaching another
+        // company to an account this address already owns.
+        markVerified(identifier, `registration_${type}`);
 
         logger.info(`Registration ${type} verified for: ${identifier}`);
 
@@ -876,9 +958,18 @@ exports.getAllUsers = async (req, res) => {
             params
         );
 
+        // Attach each account's companies so the admin sees a multi-company user
+        // as one row with several chips, including any still awaiting approval.
+        const withCompanies = await Promise.all(
+            users.map(async (u) => ({
+                ...u,
+                companies: await getUserCompanyRows(u.id),
+            }))
+        );
+
         res.json({
             success: true,
-            data: users,
+            data: withCompanies,
         });
     } catch (error) {
         logger.error("Get all users error:", error);

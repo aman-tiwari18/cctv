@@ -170,7 +170,7 @@ const Register = () => {
 
     try {
       // Create account with the actual password
-      await authAPI.signup({
+      const res = await authAPI.signup({
         name: formData.name,
         email: formData.email,
         phone: formData.phone,
@@ -178,7 +178,10 @@ const Register = () => {
         password: formData.password, // Use actual password
       });
 
-      setSuccess('Registration complete! Redirecting to login...');
+      // An email that already has an account gets the company attached to it
+      // instead of a new account, and the server says so — show that message
+      // rather than claiming a fresh registration.
+      setSuccess(res?.data?.message || 'Registration complete! Redirecting to login...');
       setTimeout(() => {
         navigate('/login');
       }, 2000);

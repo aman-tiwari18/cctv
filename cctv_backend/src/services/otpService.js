@@ -9,6 +9,13 @@ const logger = require('../utils/logger');
 // Store OTPs in memory (for production, use Redis or database)
 const otpStore = new Map();
 
+// Identifiers whose OTP was entered correctly, kept briefly after the OTP
+// itself is consumed. Signup uses this to prove the person completing the form
+// actually owns an email that already has an account, before attaching another
+// company to it.
+const verifiedStore = new Map();
+const VERIFIED_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
 /**
  * Generate 6-digit OTP
  */
@@ -80,6 +87,35 @@ function verifyOTP(identifier, otp, type = 'email') {
 }
 
 /**
+ * Remember that `identifier` passed OTP verification just now.
+ */
+function markVerified(identifier, type = 'email') {
+    const key = `${type}:${identifier}`;
+    verifiedStore.set(key, Date.now() + VERIFIED_TTL_MS);
+    setTimeout(() => verifiedStore.delete(key), VERIFIED_TTL_MS);
+    logger.info(`Verification marked for ${key}`);
+}
+
+/**
+ * True when `identifier` passed OTP verification within the last 30 minutes.
+ */
+function isRecentlyVerified(identifier, type = 'email') {
+    const key = `${type}:${identifier}`;
+    const expiresAt = verifiedStore.get(key);
+    if (!expiresAt) return false;
+    if (Date.now() > expiresAt) {
+        verifiedStore.delete(key);
+        return false;
+    }
+    return true;
+}
+
+/** Drop the marker once it has been spent (one signup per verification). */
+function clearVerified(identifier, type = 'email') {
+    verifiedStore.delete(`${type}:${identifier}`);
+}
+
+/**
  * Clear OTP
  */
 function clearOTP(identifier, type = 'email') {
@@ -109,5 +145,8 @@ module.exports = {
     storeOTP,
     verifyOTP,
     clearOTP,
-    hasValidOTP
+    hasValidOTP,
+    markVerified,
+    isRecentlyVerified,
+    clearVerified
 };

@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const logger = require('../utils/logger');
 const { query } = require('../config/database');
+const { getUserCompanies } = require('../utils/userCompanies');
 const dotenv = require('dotenv')
 require('dotenv').config();
 /**
@@ -48,12 +49,17 @@ const authenticate = async (req, res, next) => {
             });
         }
 
-        // Attach full user info to request
+        // Attach full user info to request. company_name stays the primary
+        // company (every existing caller reads it); company_names carries every
+        // admin-approved membership so multi-company accounts see all of them.
+        const companyNames = await getUserCompanies(users[0].id, users[0].company_name);
+
         req.user = {
             id: users[0].id,
             username: users[0].username,
             role: users[0].role,
-            company_name: users[0].company_name
+            company_name: users[0].company_name,
+            company_names: companyNames
         };
 
         next();

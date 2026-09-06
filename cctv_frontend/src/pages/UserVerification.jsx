@@ -164,11 +164,22 @@ const UserVerification = () => {
     }
   };
 
-  const filteredUsers = users.filter(user =>
-    (user.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-     user.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-     user.company_name?.toLowerCase().includes(searchTerm.toLowerCase())) ?? false
+  // An account can belong to several companies; `companies` comes from
+  // user_companies and falls back to the single legacy column.
+  const companiesOf = (user) => (
+    user.companies?.length
+      ? user.companies
+      : (user.company_name ? [{ company_name: user.company_name, verified: user.verified }] : [])
   );
+
+  const filteredUsers = users.filter(user => {
+    const q = searchTerm.toLowerCase();
+    return (
+      user.full_name?.toLowerCase().includes(q) ||
+      user.email?.toLowerCase().includes(q) ||
+      companiesOf(user).some((c) => c.company_name?.toLowerCase().includes(q))
+    ) ?? false;
+  });
 
   const handleRequestSort = () => {
     const isAsc = orderBy === 'gpu_id' && order === 'asc';
@@ -337,11 +348,26 @@ const UserVerification = () => {
                           </Box>
                         </TableCell>
                         <TableCell>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
                             <Business sx={{ color: '#94a3b8', fontSize: 16 }} />
-                            <Typography variant="body2">
-                              {user.company_name || 'N/A'}
-                            </Typography>
+                            {companiesOf(user).length === 0 ? (
+                              <Typography variant="body2">N/A</Typography>
+                            ) : (
+                              companiesOf(user).map((c) => (
+                                <Chip
+                                  key={c.company_name}
+                                  label={c.verified ? c.company_name : `${c.company_name} (pending)`}
+                                  size="small"
+                                  sx={{
+                                    height: 22,
+                                    fontSize: '0.72rem',
+                                    fontWeight: 600,
+                                    backgroundColor: c.verified ? '#eef2ff' : '#fef3c7',
+                                    color: c.verified ? '#4338ca' : '#b45309',
+                                  }}
+                                />
+                              ))
+                            )}
                           </Box>
                         </TableCell>
                         <TableCell>

@@ -89,10 +89,11 @@ const bracketForTime = (time) => {
  * Build the company filter clause + params, mirroring the existing pattern used
  * in getClientDashboardStats / getCameraAccessibility / etc.
  *
- * - ADMIN or missing company_name: no filter (sees all). NULL/empty company_name
+ * - ADMIN or no company at all: no filter (sees all). NULL/empty company_name
  *   case mirrors existing behavior — flagged for separate hardening.
  * - 'EY' company: special-cased to see SSC + TCS + NTA exam bodies.
  * - Other companies: exact match on exam_body.
+ * - Multi-company accounts pass an array; the allowed bodies are the union.
  *
  * @param {string} userRole
  * @param {string} userCompanyName
@@ -101,13 +102,29 @@ const bracketForTime = (time) => {
  * @returns {{ clause: string, params: any[] }}
  */
 const buildCompanyFilter = (userRole, userCompanyName, examColumnAlias = 'exam_body') => {
-    if (userRole === 'ADMIN' || !userCompanyName) {
+    // userCompanyName may be a single company (legacy callers) or the list of
+    // companies a multi-company account belongs to (req.user.company_names).
+    const companies = (Array.isArray(userCompanyName) ? userCompanyName : [userCompanyName])
+        .map((c) => String(c || '').trim())
+        .filter(Boolean);
+
+    if (userRole === 'ADMIN' || companies.length === 0) {
         return { clause: '', params: [] };
     }
-    if (userCompanyName === 'EY') {
-        return { clause: ` AND ${examColumnAlias} IN ('SSC','TCS','NTA')`, params: [] };
+
+    // 'EY' stands for the set of exam bodies it audits rather than for itself.
+    const bodies = [];
+    for (const company of companies) {
+        const expanded = company === 'EY' ? ['SSC', 'TCS', 'NTA'] : [company];
+        for (const body of expanded) {
+            if (!bodies.includes(body)) bodies.push(body);
+        }
     }
-    return { clause: ` AND ${examColumnAlias} = ?`, params: [userCompanyName] };
+
+    return {
+        clause: ` AND ${examColumnAlias} IN (${bodies.map(() => '?').join(',')})`,
+        params: bodies,
+    };
 };
 
 // Builds an exam_id IN (...) filter clause from user_exam_assignments.
@@ -125,7 +142,7 @@ async function buildAssignmentFilter(user, idCol = 'id') {
  */
 exports.getClientDashboardStats = async (req, res) => {
     try {
-        const userCompanyName = req.user?.company_name;
+        const userCompanyName = req.user?.company_names || req.user?.company_name;
         const userRole = req.user?.role;
         const { timeRange = '24h' } = req.query;
 
@@ -427,7 +444,7 @@ exports.getClientDashboardStats = async (req, res) => {
 exports.getCameraAccessibility = async (req, res) => {
     try {
         const { exam_id, shift_id, exam_date } = req.query;
-        const userCompanyName = req.user?.company_name;
+        const userCompanyName = req.user?.company_names || req.user?.company_name;
         const userRole = req.user?.role;
 
         console.log('[CameraAccessibility] Filters:', { exam_id, shift_id, exam_date, userRole });
@@ -582,7 +599,7 @@ exports.getCameraAccessibility = async (req, res) => {
 exports.downloadCameraAccessibility = async (req, res) => {
     try {
         const { exam_id, shift_id, exam_date, type = 'all' } = req.query;
-        const userCompanyName = req.user?.company_name;
+        const userCompanyName = req.user?.company_names || req.user?.company_name;
         const userRole = req.user?.role;
 
         console.log('[CameraAccessibilityDownload] Filters:', { exam_id, shift_id, exam_date, type, userRole });
@@ -756,7 +773,7 @@ exports.getExamBodyDetails = async (req, res) => {
         const { date } = req.query; // Optional date filter (yyyy-mm-dd)
         
         // Get user's company_name and role
-        const userCompanyName = req.user?.company_name;
+        const userCompanyName = req.user?.company_names || req.user?.company_name;
         const userRole = req.user?.role;
 
         // Check if non-admin user is trying to access unauthorized data
@@ -890,7 +907,7 @@ exports.getExamBodyDetails = async (req, res) => {
  */
 exports.getOverview = async (req, res) => {
     try {
-        const userCompanyName = req.user?.company_name;
+        const userCompanyName = req.user?.company_names || req.user?.company_name;
         const userRole = req.user?.role;
         // V2.3: resolve a [startDate, endDate] window (both inclusive YYYY-MM-DD).
         // Priority: start_date+end_date → date → today.
@@ -1156,7 +1173,7 @@ exports.getOverview = async (req, res) => {
  */
 exports.getLiveExams = async (req, res) => {
     try {
-        const userCompanyName = req.user?.company_name;
+        const userCompanyName = req.user?.company_names || req.user?.company_name;
         const userRole = req.user?.role;
 
         const page = Math.max(1, parseInt(req.query.page, 10) || 1);
