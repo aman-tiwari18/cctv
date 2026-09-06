@@ -282,13 +282,21 @@ exports.uploadCameras = async (req, res) => {
         let recordsToInsert = [];
         let recordsToUpdate = [];
         let skipped = 0;
+        const sheetDuplicates = []; // ch_codes repeated inside the uploaded sheet
 
         if (linkType === "HLS") {
-            // HLS unique key: tc_code + ch_code
+            // HLS unique key: tc_code + ch_code, WITHIN the shift being uploaded.
+            // The same physical camera is filmed in every shift its centre hosts,
+            // so a camera already listed under shift 1 is not a duplicate of the
+            // shift 2 row — camera_links_hls is unique on (exam, ch_code, shift)
+            // for exactly that reason. Comparing across shifts made every later
+            // shift's sheet look like duplicates and silently dropped it.
+            const targetShiftId = shiftId || null;
             const existingCameras = await Model.findAll({
-                where: { 
+                where: {
                     exam_id: examId,
-                    is_active: true
+                    is_active: true,
+                    shift_id: targetShiftId
                 },
                 attributes: ['id', 'tc_code', 'ch_code', 'classification']
             });
@@ -306,16 +314,28 @@ exports.uploadCameras = async (req, res) => {
             
             console.log(`[DUPLICATE CHECK] Existing unique keys:`, Array.from(existingMap.keys()).slice(0, 5));
             
+            // A ch_code repeated inside the sheet itself would break the
+            // (exam_id, ch_code, shift_id) unique index and fail the whole
+            // bulkCreate, so keep the first row and report the rest.
+            const seenInSheet = new Map();
+
             // Separate records into insert vs update
             for (const record of validRecords) {
                 if (!record.tc_code || !record.ch_code) {
                     recordsToInsert.push(record);
                     continue;
                 }
-                
-                const uniqueKey = `${String(record.tc_code).trim()}_${String(record.ch_code).trim()}`;
+
+                const chKey = String(record.ch_code).trim();
+                if (seenInSheet.has(chKey)) {
+                    sheetDuplicates.push(chKey);
+                    continue;
+                }
+                seenInSheet.set(chKey, true);
+
+                const uniqueKey = `${String(record.tc_code).trim()}_${chKey}`;
                 const existingCamera = existingMap.get(uniqueKey);
-                
+
                 if (existingCamera) {
                     // Update classification if provided in Excel (regardless of existing value)
                     if (record.classification) {
@@ -437,10 +457,15 @@ exports.uploadCameras = async (req, res) => {
         }
 
         if (skipped > 0) {
-            message += ` ${skipped} duplicate${skipped !== 1 ? 's' : ''} skipped (no classification provided in Excel).`;
+            message += ` ${skipped} duplicate${skipped !== 1 ? 's' : ''} skipped (already in this shift, no classification provided in Excel).`;
         }
 
-        console.log(`[UPLOAD SUMMARY] Inserted: ${recordsToInsert.length}, Updated: ${recordsToUpdate.length} (${newClassifications} new, ${overwrittenClassifications} overwritten), Skipped: ${skipped}`);
+        if (sheetDuplicates.length > 0) {
+            const sample = sheetDuplicates.slice(0, 5).join(', ');
+            message += ` ${sheetDuplicates.length} row${sheetDuplicates.length !== 1 ? 's' : ''} in the Excel repeat a CH NO already listed in the same file (e.g. ${sample}) - only the first was kept.`;
+        }
+
+        console.log(`[UPLOAD SUMMARY] Inserted: ${recordsToInsert.length}, Updated: ${recordsToUpdate.length} (${newClassifications} new, ${overwrittenClassifications} overwritten), Skipped: ${skipped}, In-sheet duplicates: ${sheetDuplicates.length}`);
 
         res.status(200).json({
             success: true,
@@ -448,6 +473,7 @@ exports.uploadCameras = async (req, res) => {
             details: {
                 inserted: recordsToInsert.length,
                 updated: recordsToUpdate.length,
+                sheetDuplicates: sheetDuplicates.length,
                 newClassifications,
                 overwrittenClassifications,
                 skipped
