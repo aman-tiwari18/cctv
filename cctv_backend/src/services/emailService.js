@@ -33,16 +33,19 @@ if (isEmailConfigured()) {
  * throws — callers treat email as best-effort so a mail failure can't break the
  * surrounding auth flow.
  */
-async function sendEmail(to, subject, html) {
+async function sendEmail(to, subject, html, { cc = [] } = {}) {
     if (!isEmailConfigured()) {
         logger.warn(`Email service not configured - email to ${to} skipped (subject: ${subject})`);
         return { success: true, skipped: true, message: 'Email service not configured (RESEND_API_KEY missing).' };
     }
 
+    const ccList = (Array.isArray(cc) ? cc : [cc]).filter(Boolean);
+
     try {
         const { data, error } = await resend.emails.send({
             from: FROM(),
             to: Array.isArray(to) ? to : [to],
+            ...(ccList.length ? { cc: ccList } : {}),
             subject,
             html,
         });
@@ -52,7 +55,7 @@ async function sendEmail(to, subject, html) {
             return { success: false, message: error.message || 'Failed to send email' };
         }
 
-        logger.info(`Email sent to ${to} (subject: ${subject}, id: ${data?.id})`);
+        logger.info(`Email sent to ${to}${ccList.length ? ` (cc: ${ccList.join(', ')})` : ''} (subject: ${subject}, id: ${data?.id})`);
         return { success: true, messageId: data?.id };
     } catch (err) {
         logger.error(`Error sending email to ${to}: ${err.message}`);
@@ -167,6 +170,17 @@ const DASHBOARD_URL = () =>
     process.env.DASHBOARD_URL || 'http://www.examscctvmonitoring.com/cctv_analytics/login';
 
 /**
+ * Who is copied on the verification mail, comma-separated.
+ * Set VERIFICATION_EMAIL_CC to a different list, or to an empty value to copy
+ * nobody. Note that the mail carries the user's password, so anyone listed here
+ * receives it too.
+ */
+const VERIFICATION_CC = () => {
+    const raw = process.env.VERIFICATION_EMAIL_CC ?? 'akpathak@iitk.ac.in';
+    return raw.split(',').map((a) => a.trim()).filter(Boolean);
+};
+
+/**
  * Send the "you are verified — here are your credentials" email.
  *
  * Quotes the username, the password to sign in with, the dashboard login URL
@@ -204,7 +218,7 @@ async function sendVerifiedCredentialsEmail(email, { name, username, password, e
         <p class="warning">&#9888;&#65039; For your security, change your password after the first login and never share these credentials.</p>
     `);
 
-    return sendEmail(email, `Account Verified - ${examText}`, html);
+    return sendEmail(email, `Account Verified - ${examText}`, html, { cc: VERIFICATION_CC() });
 }
 
 /**
