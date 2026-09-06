@@ -5,6 +5,7 @@ const { generateOTP, storeOTP, verifyOTP, clearOTP } = require("../services/otpS
 const { sendOTPEmail, sendRegistrationNotification, sendVerificationNotification } = require("../services/emailService");
 const { sendOTPSMS } = require("../services/smsService");
 const logger = require("../utils/logger");
+const { EXAM_BODIES, COMPANY_CODES } = require("../constants/examBodies");
 /**
  * Login
  */
@@ -894,12 +895,11 @@ exports.getAllUsers = async (req, res) => {
  */
 exports.getAvailableCompanies = async (req, res) => {
     try {
-        // Fixed list of available companies
-        const companyList = ['EY', 'SSC', 'TCS', 'CDIS'];
-
+        // Single source of truth: src/constants/examBodies.js
         res.json({
             success: true,
-            data: companyList,
+            data: COMPANY_CODES,
+            bodies: EXAM_BODIES,
         });
     } catch (error) {
         logger.error("Get available companies error:", error);

@@ -52,7 +52,7 @@ import { ShiftSvgIcon } from '../components/ShiftSvgIcon';
 import ExamScheduleCalendar from '../components/ExamScheduleCalendar';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { examsAPI, shiftScriptsAPI, smsAPI } from '../services/api';
+import { authAPI, examsAPI, shiftScriptsAPI, smsAPI } from '../services/api';
 
 const ALL_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -65,6 +65,16 @@ const examDefaultDate = (exam) => {
   const p = (n) => String(n).padStart(2, '0');
   return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()}`;
 };
+
+// Fallback used only if /auth/companies is unreachable; backend
+// src/constants/examBodies.js is the source of truth.
+const FALLBACK_EXAM_BODIES = [
+  { code: 'EY', label: 'EY(Ernst & Young)' },
+  { code: 'SSC', label: 'SSC(Staff Selection Commission)' },
+  { code: 'TCS', label: 'TCS(Tata Consultancy Services)' },
+  { code: 'NTA', label: 'NTA(National Testing Agency)' },
+  { code: 'UPCISB', label: 'UPCISB' },
+];
 
 const Exams = () => {
   const navigate = useNavigate();
@@ -89,6 +99,7 @@ const Exams = () => {
   const [newSkipDate, setNewSkipDate] = useState('');
   const [examCounts, setExamCounts] = useState({}); // Store script and detection counts
   const [smsClientBodies, setSmsClientBodies] = useState([]);
+  const [examBodies, setExamBodies] = useState(FALLBACK_EXAM_BODIES);
   const [assignableUsers, setAssignableUsers] = useState([]);
   const [assignedUserIds, setAssignedUserIds] = useState([]);
 
@@ -100,6 +111,12 @@ const Exams = () => {
     examsAPI.getAssignableUsers()
       .then((res) => setAssignableUsers(res?.data?.data || []))
       .catch(() => setAssignableUsers([]));
+    authAPI.getAvailableCompanies()
+      .then((res) => {
+        const bodies = (res?.data?.bodies || []).filter((b) => b.examBody);
+        if (bodies.length) setExamBodies(bodies);
+      })
+      .catch(() => { /* keep fallback list */ });
   }, []);
 
   const examBodyHasSms = (body) =>
@@ -755,12 +772,10 @@ const Exams = () => {
                 select
                 InputProps={{ sx: { borderRadius: 2, bgcolor: '#f1f5f9', '& fieldset': { border: 'none' } } }}
               >
-                <MenuItem value="EY">EY(Ernst & Young)</MenuItem>
-                <MenuItem value="SSC">SSC(Staff Selection Commission)</MenuItem>
-                <MenuItem value="TCS">TCS(Tata Consultancy Services)</MenuItem>
-                <MenuItem value="NTA">NTA(National Testing Agency)</MenuItem>
-                {/* <MenuItem value="CDIS">CDIS</MenuItem> */}
-                {formData.exam_body && !['EY', 'SSC', 'TCS', 'NTA', 'CDIS'].includes(formData.exam_body) && <MenuItem value={formData.exam_body}>{formData.exam_body}</MenuItem>}
+                {examBodies.map((b) => (
+                  <MenuItem key={b.code} value={b.code}>{b.label || b.code}</MenuItem>
+                ))}
+                {formData.exam_body && !examBodies.some((b) => b.code === formData.exam_body) && <MenuItem value={formData.exam_body}>{formData.exam_body}</MenuItem>}
               </TextField>
             </Grid>
 
