@@ -35,7 +35,44 @@ const TYPE_MAP = {
     // ✅ Server
     server: 'server',
     server_room_detection: 'server',
+
+    // ✅ Intruder
+    intruder: 'intruder',
+    intruder_detection: 'intruder',
+
+    // ✅ Crowd — only the entry-gate crowd analytic has a DLT template.
+    // The crowd variants (biometric / <5 / zero-person) deliberately have no
+    // mapping, so they resolve to their own key, miss SMS_ELIGIBLE_TYPES and
+    // are skipped rather than sent under the wrong registered body.
+    crowd: 'crowd',
+    crowd_detection: 'crowd',
+
+    // ✅ Blind spot
+    blind_spot: 'blind_spot',
+    blind_spot_detection: 'blind_spot',
 };
+
+/**
+ * Detection types that can trigger an SMS alert. A type belongs here once a
+ * DLT-registered template exists for it; whether a given CLIENT can actually
+ * send it still depends on that client's sms_configs row having
+ * template_<type> / message_<type> filled in (see sendAlertWithConfig).
+ *
+ * Single source of truth — SMSController (push path) and
+ * ClientDetectionsController (accept path) both import this set. The frontend
+ * keeps its own copy in ShiftScriptManager.jsx (SMS_ELIGIBLE_SCRIPTS) to gate
+ * the per-assignment toggle; keep the two in sync.
+ */
+const SMS_ELIGIBLE_TYPES = new Set([
+    'invigilator',
+    'proximity',
+    'server',
+    'intruder',
+    'crowd',
+    'phone',
+    'entry_exit',
+    'blind_spot',
+]);
 
 /**
  * 📩 OTP template (env-based, on the default/SSC account). Alert templates are
@@ -262,5 +299,6 @@ module.exports = {
     renderMessage,
     missingPlaceholders,
     SMS_TEMPLATES,
-    TYPE_MAP
+    TYPE_MAP,
+    SMS_ELIGIBLE_TYPES
 };

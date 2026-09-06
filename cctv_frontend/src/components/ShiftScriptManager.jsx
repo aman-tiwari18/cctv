@@ -198,7 +198,19 @@ const CATEGORIES = [
 // Scripts whose pushed detections can trigger an SMS alert (DLT-approved
 // templates). SMS toggle is only shown for these, and only on exams whose
 // client (exam_body) has an enabled SMS config (fetched from /sms/clients).
-const SMS_ELIGIBLE_SCRIPTS = new Set(['invigilator', 'proximity', 'server']);
+// Mirrors SMS_ELIGIBLE_TYPES in cctv_backend/src/services/smsService.js — keep
+// the two in sync. A client that has no DLT template for one of these types
+// simply skips the send (see sendAlertWithConfig), so listing it here is safe.
+const SMS_ELIGIBLE_SCRIPTS = new Set([
+    'invigilator',
+    'proximity',
+    'server',
+    'intruder',
+    'crowd',
+    'phone',
+    'entry_exit',
+    'blind_spot',
+]);
 
 // Camera Type suggestions for the per-script filter. The first four are the SOP
 // group names — they are not stored on any camera, the worker expands them into

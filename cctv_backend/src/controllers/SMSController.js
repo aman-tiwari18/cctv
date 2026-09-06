@@ -1,9 +1,6 @@
 const { query } = require('../config/database');
-const { sendAlertWithConfig, TYPE_MAP } = require('../services/smsService');
+const { sendAlertWithConfig, TYPE_MAP, SMS_ELIGIBLE_TYPES } = require('../services/smsService');
 const logger = require('../utils/logger');
-
-// Detection types eligible for SMS (DLT-approved templates only).
-const SMS_ELIGIBLE_TYPES = new Set(['invigilator', 'proximity', 'server']);
 
 /**
  * SMS Controller handles triggering alerts based on database reports.

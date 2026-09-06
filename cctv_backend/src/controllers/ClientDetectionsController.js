@@ -12,11 +12,8 @@
 'use strict';
 
 const { query } = require('../config/database');
-const { sendAlertWithConfig, TYPE_MAP } = require('../services/smsService');
+const { sendAlertWithConfig, TYPE_MAP, SMS_ELIGIBLE_TYPES } = require('../services/smsService');
 const { getObserverNumbers } = require('../utils/observerList');
-
-// Detection types eligible for SMS (the only DLT-approved templates we have).
-const SMS_ELIGIBLE_TYPES = new Set(['invigilator', 'proximity', 'server']);
 
 // Reverse-mapping of script-server's DETECTION_FOLDERS. The detection_type
 // column stores the folder name (e.g. "proximity_detection"); the frontend
@@ -242,7 +239,18 @@ exports.acceptDetection = async (req, res) => {
             const clientConfig = configRows && configRows[0];
 
             // Recipient(s): the observer number(s) mapped to THIS detection's tc_code.
-            const recipients = getObserverNumbers(row.tc_code);
+            // The observer sheet only covers the NTA centres it was built from, so
+            // for any other client every tc_code misses and the alert was dropped
+            // outright. Fall back to that client's sms_configs.default_recipients —
+            // the column's documented purpose — so a client without a per-centre
+            // observer list still gets its alerts. tc_code mapping still wins.
+            const observerNumbers = getObserverNumbers(row.tc_code);
+            const recipients = observerNumbers.length
+                ? observerNumbers
+                : String(clientConfig?.default_recipients || '')
+                      .split(',')
+                      .map((n) => n.trim())
+                      .filter(Boolean);
 
             if (!clientConfig) {
                 smsReason = 'no_client_config';
