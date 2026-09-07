@@ -7,7 +7,7 @@ import shutil
 import openpyxl
 from openpyxl.styles import Font
 from pydantic import BaseModel
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time as dt_time
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import quote
@@ -284,6 +284,27 @@ def _user_names_for_ids(user_ids) -> dict:
             conn.close()
 
 
+def _to_hm(value):
+    """Normalise an exam_shifts time column to zero-padded 'HH:MM'.
+
+    MySQL TIME comes back from PyMySQL as a datetime.timedelta, whose str() is
+    NOT zero-padded ('8:30:00' for 08:30). Slicing that to 5 chars yielded
+    '8:30:', which compares lexicographically ABOVE every real 'HH:MM' stamp, so
+    a morning shift's window rejected all of its own detections."""
+    if value is None:
+        return None
+    if isinstance(value, timedelta):
+        total = int(value.total_seconds()) % 86400
+        return f"{total // 3600:02d}:{(total % 3600) // 60:02d}"
+    if isinstance(value, (dt_time, datetime)):
+        return f"{value.hour:02d}:{value.minute:02d}"
+    text = str(value).strip()
+    match = re.match(r'^(\d{1,2}):(\d{2})', text)
+    if not match:
+        return None
+    return f"{int(match.group(1)):02d}:{match.group(2)}"
+
+
 @lru_cache(maxsize=2048)
 def _resolve_shift_window(shift_id):
     """Return (start_hm, end_hm) as 'HH:MM' for an exam_shifts row, or (None,None).
@@ -305,11 +326,7 @@ def _resolve_shift_window(shift_id):
         if not row:
             return (None, None)
 
-        def _hm(t):
-            s = str(t) if t is not None else ""
-            return s[:5] if len(s) >= 5 else None  # 'HH:MM:SS' -> 'HH:MM'
-
-        return (_hm(row.get("start_time")), _hm(row.get("end_time")))
+        return (_to_hm(row.get("start_time")), _to_hm(row.get("end_time")))
     except Exception as e:
         logger.error(f"Shift window lookup failed for shift_id={shift_id}: {e}")
         return (None, None)
