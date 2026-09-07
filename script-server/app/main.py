@@ -441,7 +441,7 @@ _RTSP_SCRIPT_PREFIXES = {
     "invigilator", "tamper", "inversion", "blind", "zero", "five",
     "tampering", "violation", "entry_exit", "server_room", "blind_spot",
     "zero_person", "detection", "crowd_zero", "crowd_five", "blindspot",
-    "crowd_biometric", "strongroom", "qp_box",
+    "crowd_biometric", "strongroom", "qp_box", "improper_furniture",
 }
 
 

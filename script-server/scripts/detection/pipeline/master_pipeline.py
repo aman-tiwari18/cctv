@@ -343,6 +343,7 @@ def handle_sigterm(sig, frame):
         "workers.camera_inversion_worker",
         "workers.strongroom_worker",
         "workers.qp_box_det_worker",
+        "workers.improper_furniture_worker",
     ]:
         try:
             mod = sys.modules.get(mod_name)

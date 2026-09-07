@@ -413,6 +413,7 @@ class ScriptRunner:
         "blind_spot",
         "strongroom",
         "qp_box",
+        "furniture",
     }
 
     # Script codes that are classification/vision passes (one-shot per worker
