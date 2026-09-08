@@ -92,11 +92,12 @@ const CameraLinkHLS = sequelize.define(
         underscored: true,
         indexes: [
             {
-                // Per-shift uniqueness: the same physical camera (ch_code) can be
-                // listed once per shift (shift_id differs between shift rows).
+                // Per-shift, per-date uniqueness: the same physical camera
+                // (ch_code) is listed once per shift AND once per exam date, so
+                // a multi-day exam can carry its own row for each day's run.
                 unique: true,
-                fields: ['exam_id', 'ch_code', 'shift_id'],
-                name: 'unique_exam_ch_shift'
+                fields: ['exam_id', 'ch_code', 'shift_id', 'exam_date'],
+                name: 'unique_exam_ch_shift_date'
             }
         ]
     }

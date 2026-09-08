@@ -285,23 +285,28 @@ exports.uploadCameras = async (req, res) => {
         const sheetDuplicates = []; // ch_codes repeated inside the uploaded sheet
 
         if (linkType === "HLS") {
-            // HLS unique key: tc_code + ch_code, WITHIN the shift being uploaded.
-            // The same physical camera is filmed in every shift its centre hosts,
-            // so a camera already listed under shift 1 is not a duplicate of the
-            // shift 2 row — camera_links_hls is unique on (exam, ch_code, shift)
-            // for exactly that reason. Comparing across shifts made every later
-            // shift's sheet look like duplicates and silently dropped it.
+            // HLS unique key: tc_code + ch_code, WITHIN the shift AND the exam
+            // date being uploaded. The same physical camera is filmed in every
+            // shift its centre hosts, and again on every day a multi-day exam
+            // runs, so a camera already listed under shift 1 — or under this
+            // same shift on an earlier date — is not a duplicate of the row
+            // being uploaded now. camera_links_hls is unique on
+            // (exam, ch_code, shift, exam_date) for exactly that reason.
+            // Ignoring the date made day 2's sheet look like duplicates of
+            // day 1 and silently dropped every camera that already existed.
             const targetShiftId = shiftId || null;
+            const targetExamDate = examDate || null;
             const existingCameras = await Model.findAll({
                 where: {
                     exam_id: examId,
                     is_active: true,
-                    shift_id: targetShiftId
+                    shift_id: targetShiftId,
+                    exam_date: targetExamDate
                 },
                 attributes: ['id', 'tc_code', 'ch_code', 'classification']
             });
             
-            console.log(`[DUPLICATE CHECK] Found ${existingCameras.length} existing HLS cameras for exam ${examId}`);
+            console.log(`[DUPLICATE CHECK] Found ${existingCameras.length} existing HLS cameras for exam ${examId}, shift ${targetShiftId}, date ${targetExamDate}`);
             
             // Create map of unique keys to camera records
             const existingMap = new Map();
@@ -457,7 +462,7 @@ exports.uploadCameras = async (req, res) => {
         }
 
         if (skipped > 0) {
-            message += ` ${skipped} duplicate${skipped !== 1 ? 's' : ''} skipped (already in this shift, no classification provided in Excel).`;
+            message += ` ${skipped} duplicate${skipped !== 1 ? 's' : ''} skipped (already in this shift on this exam date, no classification provided in Excel).`;
         }
 
         if (sheetDuplicates.length > 0) {
