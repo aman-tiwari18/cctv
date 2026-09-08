@@ -513,7 +513,12 @@ exports.downloadReport = async (req, res) => {
  *      derived from `detections` (shift aggregation, Detections List rows,
  *      Analysis totals, top-5) is therefore over the client-visible set only.
  *
- *   2. In the shift sheets, the "Rejected Events" column for each camera is
+ *   2. The Detections List carries a per-row "Status" column (Accepted /
+ *      Rejected / Not Verified) in place of the admin export's plain
+ *      "Rejected" 0/1 flag, resolved from accepted_by_client +
+ *      remove_from_client.
+ *
+ *   3. In the shift sheets, the "Rejected Events" column for each camera is
  *      driven by `remove_from_client = 1` rather than the row's stored
  *      `rejected_events` value. A detection with remove_from_client=1
  *      contributes its `events` count to the camera's Rejected total; a
@@ -589,13 +594,14 @@ exports.downloadClientReport = async (req, res) => {
         const searchDate = `${d}/${m}/${y}`;
 
         // ── 4. Client-only detection set: pushed_to_client = 1 ───────────────
-        // Carry remove_from_client through so the per-row "Rejected" column
-        // and the aggregated "Rejected Events" count can both use it.
+        // Carry remove_from_client through so the aggregated "Rejected Events"
+        // count can use it, and accepted_by_client so the Detections List can
+        // resolve the per-row Status (Accepted / Rejected / Not Verified).
         const detections = isRTSP ? await query(
             `SELECT id, shift_id, city, center_name, camera_id, camera_name, camera_no,
                     '' as camera_category, tc_code, device_id, state, camera_status,
                     events, rejected_events, date_time, imageurl, detection_type,
-                    unique_id, pushed_to_client, remove_from_client
+                    unique_id, pushed_to_client, remove_from_client, accepted_by_client
              FROM camera_report_rtsp
              WHERE exam_id = ?
                AND date_time LIKE CONCAT(?, '%')
@@ -606,7 +612,7 @@ exports.downloadClientReport = async (req, res) => {
             `SELECT id, shift_id, city, center_name, camera_id, camera_name,
                     camera_category, tc_code, ch_code, state, camera_status,
                     events, rejected_events, date_time, imageurl, detection_type,
-                    unique_id, created_at, pushed_to_client, remove_from_client
+                    unique_id, created_at, pushed_to_client, remove_from_client, accepted_by_client
              FROM camera_report_hls
              WHERE exam_id = ?
                AND date_time LIKE CONCAT(?, '%')
@@ -748,16 +754,28 @@ exports.downloadClientReport = async (req, res) => {
             XLSX.utils.book_append_sheet(wb, ws, sheetName);
         });
 
-        // ── 7. Detections List — admin layout + per-row "Rejected" flag ─────
-        // Each row is one pushed detection. The Rejected column is 1 when
-        // the admin later pulled this detection back from the client UI
-        // (remove_from_client = 1), 0 when it's still active on the client.
+        // ── 7. Detections List — admin layout + per-row "Status" ────────────
+        // Each row is one pushed detection. Status collapses the client's two
+        // review actions into one column:
+        //   Accepted      accepted_by_client = 1 (client confirmed it; the SMS
+        //                 alert to the tc_code observer fired on that click)
+        //   Rejected      remove_from_client = 1 (pulled off the client view)
+        //   Not Verified  neither — still sitting unreviewed on the client page
+        // Accept wins when a row carries both flags: accepting is the terminal,
+        // irreversible action (an SMS went out), whereas a later Remove only
+        // tidies the feed. Flip the order in detectionStatus to reverse that.
         const DET_HEADERS = [
             'Shift', 'Device ID', 'Camera No', 'Cam ID', 'TC Code', 'Camera Name',
             'Center Name', 'City', 'Server Address', 'Detection Type', 'Detection Time',
-            'Rejected', 'Image URL', 'View'
+            'Status', 'Image URL', 'View'
         ];
-        const DET_WIDTHS = [10, 15, 12, 15, 14, 35, 30, 15, 28, 20, 22, 10, 70, 8];
+        const DET_WIDTHS = [10, 15, 12, 15, 14, 35, 30, 15, 28, 20, 22, 14, 70, 8];
+
+        const detectionStatus = (d) => {
+            if (Number(d.accepted_by_client) === 1) return 'Accepted';
+            if (Number(d.remove_from_client) === 1) return 'Rejected';
+            return 'Not Verified';
+        };
 
         const detSheetData = detections.map(d => {
             const resolvedSid = (d.shift_id != null) ? d.shift_id : determineShiftId(d.date_time, shifts);
@@ -773,7 +791,7 @@ exports.downloadClientReport = async (req, res) => {
                 'Server Address': serverByKey[isRTSP ? `${d.device_id}_${d.camera_no}` : String(d.ch_code)] || '',
                 'Detection Type': d.detection_type || '',
                 'Detection Time': d.date_time || '',
-                'Rejected': Number(d.remove_from_client) === 1 ? 1 : 0,
+                'Status': detectionStatus(d),
                 'Image URL': d.imageurl || '',
                 'View': d.imageurl ? 'View' : '',
             };
@@ -781,8 +799,8 @@ exports.downloadClientReport = async (req, res) => {
 
         const detWs = makeSheet(DET_HEADERS, detSheetData, DET_WIDTHS);
 
-        // Hyperlinks on the "View" column — index 11 because Rejected was
-        // inserted between Detection Time and Image URL.
+        // Hyperlinks on the "View" column — resolved by header name, since
+        // Status sits between Detection Time and Image URL.
         const range = XLSX.utils.decode_range(detWs['!ref'] || 'A1');
         for (let R = range.s.r + 1; R <= range.e.r; R++) {
             const cellAddr = XLSX.utils.encode_cell({ r: R, c: DET_HEADERS.indexOf('View') });
