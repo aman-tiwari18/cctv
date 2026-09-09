@@ -106,6 +106,52 @@ function determineShiftId(dateTimeStr, shifts) {
     return closest.id;
 }
 
+/**
+ * Normalise a camera_links exam_date to "yyyy-mm-dd".
+ * Sequelize hands DATE columns back as strings, but tolerate Date objects and
+ * datetime strings too so the comparison never silently fails.
+ */
+function normalizeExamDate(value) {
+    if (value == null || value === '') return null;
+    if (value instanceof Date) {
+        const pad = n => String(n).padStart(2, '0');
+        return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
+    }
+    const s = String(value);
+    return s.length >= 10 ? s.slice(0, 10) : s;
+}
+
+/**
+ * Cameras belonging to a given shift on the report's date.
+ *
+ * Both dimensions are scoped per camera, and NULL always means "applies to
+ * everything" — so narrowing only ever happens where the upload was explicit:
+ *
+ *   shift_id  = <id>    uploaded against one shift  → counted in that shift only
+ *   shift_id  = NULL    uploaded for the whole exam → counted in every shift
+ *   exam_date = <date>  uploaded for one date       → counted on that date only
+ *   exam_date = NULL    no date on the upload       → counted on every date
+ *
+ * An exam whose cameras carry neither field therefore keeps the original
+ * behaviour (every camera on every shift sheet). RTSP is untouched for the same
+ * reason: camera_links_rtsp has no shift_id or exam_date column, so its rows are
+ * selected as NULL and always apply to all shifts and all dates.
+ *
+ * @param {string|null} examDate the report's date as "yyyy-mm-dd" (mysqlDate)
+ */
+function camerasForShiftAndDate(masterCameras, shiftId, examDate) {
+    return masterCameras.filter(cam => {
+        const shiftMatches = cam.shift_id == null
+            || Number(cam.shift_id) === Number(shiftId);
+
+        const camDate = normalizeExamDate(cam.exam_date);
+        const dateMatches = camDate === null || examDate == null
+            || camDate === examDate;
+
+        return shiftMatches && dateMatches;
+    });
+}
+
 // ─── Controller ───────────────────────────────────────────────────────────────
 
 exports.downloadReport = async (req, res) => {
@@ -156,14 +202,15 @@ exports.downloadReport = async (req, res) => {
         // ── 3. Fetch Master Camera List ───────────────────────────────────────
         const masterCameras = isRTSP ? await query(
             `SELECT id, device_id, camera_no, camera_name, classification, tc_code,
-                    centre_name, city, state, null as shift_id, status
+                    centre_name, city, state, null as shift_id,
+                    null as exam_date, status
              FROM camera_links_rtsp
              WHERE exam_id = ? AND is_active = 1
              ORDER BY device_id ASC, camera_no ASC`,
             [examId]
         ) : await query(
             `SELECT id, ch_code, camera_name, camera_category, tc_code,
-                    centre_name, city, state, shift_id, status
+                    centre_name, city, state, shift_id, exam_date, status
              FROM camera_links_hls
              WHERE exam_id = ? AND is_active = 1
              ORDER BY shift_id ASC, ch_code ASC`,
@@ -263,6 +310,7 @@ exports.downloadReport = async (req, res) => {
         shifts.forEach((shiftMeta, idx) => {
             const shiftId = shiftMeta.id;
             const sheetName = `Shift ${idx + 1}`;
+            const shiftCams = camerasForShiftAndDate(masterCameras, shiftId, mysqlDate);
 
             let sheetData = [];
 
@@ -271,7 +319,7 @@ exports.downloadReport = async (req, res) => {
                 // So we always show all shifts scheduled for this exam.
 
                 // Show ALL master cameras for RTSP in this shift
-                sheetData = masterCameras.map(cam => {
+                sheetData = shiftCams.map(cam => {
                     const key = `${cam.device_id}_${cam.camera_no}`;
                     const agg = (aggregated[shiftId] || {})[key];
                     const camType = cam.classification || 'Failed to Classify';
@@ -311,10 +359,10 @@ exports.downloadReport = async (req, res) => {
                 });
 
             } else {
-                // HLS: load ALL master cameras for this exam in every generated shift sheet
-                // Matching the RTSP pattern ("jaise rtsp m ho rha h")
-                const shiftCams = masterCameras;
-
+                // HLS: shift- and date-scoped list (see camerasForShiftAndDate) —
+                // a camera uploaded against a specific shift/date appears only on
+                // that shift's sheet for that date; a camera uploaded without them
+                // (NULL) still appears everywhere, as before.
                 sheetData = shiftCams.map(cam => {
                     const agg = (aggregated[shiftId] || {})[cam.ch_code];
                     const camIdDisplay = formatHlsCamId(cam.camera_name, cam.ch_code);
@@ -424,9 +472,11 @@ exports.downloadReport = async (req, res) => {
                 totalDurationMinutes += diff;
             }
 
-            // In analysis, we show stats for every scheduled shift
-            // Show all master cameras for the exam in every shift (RTSP parity)
-            const shiftCams = masterCameras;
+            // In analysis, we show stats for every scheduled shift. Camera
+            // totals are scoped to this shift AND the report's date: a camera
+            // uploaded against them is counted here, one uploaded without them
+            // (NULL) is counted in every shift and on every date.
+            const shiftCams = camerasForShiftAndDate(masterCameras, shiftId, mysqlDate);
             const shiftDets = detections.filter(d => {
                 const resolvedSid = (d.shift_id != null) ? d.shift_id : determineShiftId(d.date_time, shifts);
                 return resolvedSid === shiftId;
@@ -576,14 +626,15 @@ exports.downloadClientReport = async (req, res) => {
         // ── 3. Master camera list ────────────────────────────────────────────
         const masterCameras = isRTSP ? await query(
             `SELECT id, device_id, camera_no, camera_name, classification, tc_code,
-                    centre_name, city, state, null as shift_id, status
+                    centre_name, city, state, null as shift_id,
+                    null as exam_date, status
              FROM camera_links_rtsp
              WHERE exam_id = ? AND is_active = 1
              ORDER BY device_id ASC, camera_no ASC`,
             [examId]
         ) : await query(
             `SELECT id, ch_code, camera_name, camera_category, tc_code,
-                    centre_name, city, state, shift_id, status
+                    centre_name, city, state, shift_id, exam_date, status
              FROM camera_links_hls
              WHERE exam_id = ? AND is_active = 1
              ORDER BY shift_id ASC, ch_code ASC`,
@@ -675,11 +726,12 @@ exports.downloadClientReport = async (req, res) => {
         shifts.forEach((shiftMeta, idx) => {
             const shiftId = shiftMeta.id;
             const sheetName = `Shift ${idx + 1}`;
+            const shiftCams = camerasForShiftAndDate(masterCameras, shiftId, mysqlDate);
 
             let sheetData = [];
 
             if (isRTSP) {
-                sheetData = masterCameras.map(cam => {
+                sheetData = shiftCams.map(cam => {
                     const key = `${cam.device_id}_${cam.camera_no}`;
                     const agg = (aggregated[shiftId] || {})[key];
                     const camType = cam.classification || 'Failed to Classify';
@@ -714,7 +766,6 @@ exports.downloadClientReport = async (req, res) => {
                     }
                 });
             } else {
-                const shiftCams = masterCameras;
                 sheetData = shiftCams.map(cam => {
                     const agg = (aggregated[shiftId] || {})[cam.ch_code];
                     const camIdDisplay = formatHlsCamId(cam.camera_name, cam.ch_code);
@@ -832,7 +883,7 @@ exports.downloadClientReport = async (req, res) => {
                 totalDurationMinutes += diff;
             }
 
-            const shiftCams = masterCameras;
+            const shiftCams = camerasForShiftAndDate(masterCameras, shiftId, mysqlDate);
             const shiftDets = detections.filter(d => {
                 const resolvedSid = (d.shift_id != null) ? d.shift_id : determineShiftId(d.date_time, shifts);
                 return resolvedSid === shiftId;

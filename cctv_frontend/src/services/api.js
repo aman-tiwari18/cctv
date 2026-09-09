@@ -57,6 +57,20 @@ export const examsAPI = {
     getDetectionCount: (id) => api.get(`/exams/${id}/detections/count`),
     getAssignableUsers: () => api.get('/exams/assignable/users'),
     getAssignedUsers: (id) => api.get(`/exams/${id}/assigned-users`),
+
+    // Per-exam TC code -> observer mobile mapping. The uploaded sheet decides who
+    // the SMS alert reaches when a client accepts a detection at that centre.
+    getObservers: (id) => api.get(`/exams/${id}/observers`),
+    uploadObservers: (id, file) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        return api.post(`/exams/${id}/observers/upload`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        });
+    },
+    deleteObservers: (id) => api.delete(`/exams/${id}/observers`),
+    downloadObserverTemplate: () =>
+        api.get('/exams/observers/template', { responseType: 'blob' }),
 };
 
 export const camerasAPI = {

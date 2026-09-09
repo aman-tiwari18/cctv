@@ -51,6 +51,40 @@ const getAssignableDates = (exam) => {
     return dates;
 };
 
+// Config fields a caller may set on an assignment. Anything outside this list
+// (status, timestamps, is_active, ...) is owned by the runtime, not the UI.
+const CONFIG_FIELDS = [
+    "custom_start_time",
+    "custom_end_time",
+    "custom_frequency_minutes",
+    "camera_classifications",
+    "notes",
+    "sms_enabled",
+];
+
+const normalizeConfigValue = (field, value) => {
+    if (field === "sms_enabled") return !!value;
+    if (field === "custom_frequency_minutes") {
+        const parsed = parseInt(value, 10);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    }
+    if (field === "camera_classifications") {
+        const list = safeArray(value);
+        return list.length > 0 ? list : null;
+    }
+    return value === undefined || value === "" ? null : value;
+};
+
+// Only the keys the caller actually sent, so a partial payload never blanks out
+// settings it did not mention.
+const pickConfigFields = (source) =>
+    CONFIG_FIELDS.reduce((acc, field) => {
+        if (Object.prototype.hasOwnProperty.call(source, field)) {
+            acc[field] = normalizeConfigValue(field, source[field]);
+        }
+        return acc;
+    }, {});
+
 // Re-exported so ExamController can reuse the exact same date-expansion logic
 // when an exam's date range / skip schedule changes.
 exports.getAssignableDates = getAssignableDates;
@@ -259,26 +293,36 @@ exports.bulkAssign = async (req, res) => {
         raw: true,
     });
 
-    const existingKeySet = new Set(
-        existingAssignments.map((row) => `${row.script_id}::${row.assignment_date}`)
-    );
+    // Dates that already have a row, per script — those get updated in place
+    // instead of skipped, so re-submitting the dialog edits the schedule.
+    const existingDatesByScript = new Map();
+    for (const row of existingAssignments) {
+        const date = toDateOnly(row.assignment_date);
+        if (!date) continue;
+        if (!existingDatesByScript.has(row.script_id)) {
+            existingDatesByScript.set(row.script_id, new Set());
+        }
+        existingDatesByScript.get(row.script_id).add(date);
+    }
 
     const assignments = [];
     for (const s of prepared) {
+        const fields = pickConfigFields(s);
+        const existingDates = existingDatesByScript.get(s.script_id) || new Set();
         for (const date of targetDates) {
-            const key = `${s.script_id}::${date}`;
-            if (existingKeySet.has(key)) continue;
+            if (existingDates.has(date)) continue;
 
             assignments.push({
                 shift_id,
                 script_id: s.script_id,
                 assignment_date: date,
-                custom_start_time: s.custom_start_time || null,
-                custom_end_time: s.custom_end_time || null,
-                custom_frequency_minutes: s.custom_frequency_minutes || null,
-                camera_classifications: s.camera_classifications || null,
-                notes: s.notes || null,
-                sms_enabled: !!s.sms_enabled,
+                custom_start_time: null,
+                custom_end_time: null,
+                custom_frequency_minutes: null,
+                camera_classifications: null,
+                notes: null,
+                sms_enabled: false,
+                ...fields,
             });
         }
     }
@@ -287,29 +331,33 @@ exports.bulkAssign = async (req, res) => {
         await ShiftScriptAssignment.bulkCreate(assignments);
     }
 
-    // Apply each script's SMS toggle to all matching assignments (covers dates
-    // that already existed and were skipped above).
+    // Push the submitted config onto the rows that already existed.
+    let updatedCount = 0;
     for (const s of prepared) {
-        if (s.sms_enabled === undefined) continue;
-        await ShiftScriptAssignment.update(
-            { sms_enabled: !!s.sms_enabled },
-            {
-                where: {
-                    shift_id,
-                    script_id: s.script_id,
-                    assignment_date: { [Op.in]: targetDates },
-                },
-            }
-        );
+        const fields = pickConfigFields(s);
+        if (Object.keys(fields).length === 0) continue;
+
+        const existingDates = [...(existingDatesByScript.get(s.script_id) || [])];
+        if (existingDates.length === 0) continue;
+
+        await ShiftScriptAssignment.update(fields, {
+            where: {
+                shift_id,
+                script_id: s.script_id,
+                assignment_date: { [Op.in]: existingDates },
+            },
+        });
+        updatedCount += existingDates.length;
     }
 
     res.status(201).json({
         success: true,
-        message: `Successfully created ${assignments.length} assignment(s) across ${targetDates.length} date(s).`,
-        count: assignments.length,
+        message: `Successfully created ${assignments.length} and updated ${updatedCount} assignment(s) across ${targetDates.length} date(s).`,
+        count: assignments.length + updatedCount,
         data: {
             created: assignments.length,
-            skippedExisting: existingAssignments.length,
+            updated: updatedCount,
+            skippedExisting: 0,
             validDates: targetDates.length,
             validScripts: prepared.length,
         },

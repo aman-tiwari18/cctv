@@ -155,6 +155,7 @@ exports.uploadCameras = async (req, res) => {
         }
 
         const validRecords = [];
+        let missingChCode = 0; // HLS rows whose channel id header could not be resolved
 
         for (const row of data) {
             if (linkType === "HLS") {
@@ -175,10 +176,25 @@ exports.uploadCameras = async (req, res) => {
                         "channel number",
                         "ch_code",
                         "CH Code",
+                        "Channel ID(key)",
+                        "Channel ID",
+                        "channel id key",
                         "unique key",
                         "unique key value"
                     ) ||
-                    pickByHeaderTokens(row, "ch", "no");
+                    pickByHeaderTokens(row, "ch", "no") ||
+                    pickByHeaderTokens(row, "channel", "id");
+
+                // A row with no channel id is unusable: ch_code is the key the
+                // detection workers look the camera up by, and an unresolved
+                // header yields "" — which, unlike NULL, is a real value to
+                // MySQL and collides on unique_exam_ch_shift_date as soon as a
+                // second such row is inserted. Drop these here so the upload
+                // reports the header problem instead of a constraint error.
+                if (chCode === undefined || chCode === null || String(chCode).trim() === "") {
+                    missingChCode++;
+                    continue;
+                }
 
                 validRecords.push({
                     exam_id: examId,
@@ -261,7 +277,9 @@ exports.uploadCameras = async (req, res) => {
             const missingColumnsMessage =
                 linkType === "RTSP"
                     ? `No valid records found. Required RTSP columns: Device ID, Server Address (or CCTV URL). Optional: Camera No, TC Code, Camera Name, Centre/Center Name, City, State, Classification (or Scene Classification / Room Classification). Detected headers: ${detectedHeaders.join(", ")}`
-                    : "No valid records found. Make sure the Excel contains a 'CCTV URL' column.";
+                    : missingChCode > 0
+                        ? `No valid records found. ${missingChCode} row(s) have no readable channel id — rename that column to 'ch_no' (accepted: ch_no, ch_code, Channel ID(key), unique key value). Detected headers: ${detectedHeaders.join(", ")}`
+                        : "No valid records found. Make sure the Excel contains a 'CCTV URL' column.";
 
             return res.status(400).json({
                 success: false,
@@ -465,6 +483,10 @@ exports.uploadCameras = async (req, res) => {
             message += ` ${skipped} duplicate${skipped !== 1 ? 's' : ''} skipped (already in this shift on this exam date, no classification provided in Excel).`;
         }
 
+        if (missingChCode > 0) {
+            message += ` ${missingChCode} row${missingChCode !== 1 ? 's' : ''} skipped for having no readable channel id (expected a 'ch_no' column).`;
+        }
+
         if (sheetDuplicates.length > 0) {
             const sample = sheetDuplicates.slice(0, 5).join(', ');
             message += ` ${sheetDuplicates.length} row${sheetDuplicates.length !== 1 ? 's' : ''} in the Excel repeat a CH NO already listed in the same file (e.g. ${sample}) - only the first was kept.`;
@@ -479,6 +501,7 @@ exports.uploadCameras = async (req, res) => {
                 inserted: recordsToInsert.length,
                 updated: recordsToUpdate.length,
                 sheetDuplicates: sheetDuplicates.length,
+                missingChCode,
                 newClassifications,
                 overwrittenClassifications,
                 skipped

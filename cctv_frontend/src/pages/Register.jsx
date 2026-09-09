@@ -29,7 +29,7 @@ const Register = () => {
     confirmPassword: '',
   });
   const [otpData, setOtpData] = useState({
-    emailOtp: '000000',
+    emailOtp: '',
   });
   const [verification, setVerification] = useState({
     emailVerified: false,

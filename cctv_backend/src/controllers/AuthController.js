@@ -620,7 +620,15 @@ exports.sendOTP = async (req, res) => {
 
         // Send OTP
         if (type === 'email') {
-            await sendOTPEmail(identifier, otp, 'verification');
+            const mail = await sendOTPEmail(identifier, otp, 'verification');
+            if (!mail.success || mail.skipped) {
+                // Nothing was delivered, so there is no OTP the user could enter.
+                clearOTP(identifier, type);
+                return res.status(200).json({
+                    success: false,
+                    message: mail.message || 'Failed to send OTP email',
+                });
+            }
         } else {
             const result = await sendOTPSMS(identifier, otp);
             if (!result.success && !result.skipped) {
@@ -711,12 +719,19 @@ exports.sendRegistrationOTP = async (req, res) => {
 
         // Generate and store OTP
         const otp = generateOTP();
-        console.log("otppppppppppppppppppppppppppppppppppppppppppppppppppppp", otp)
         storeOTP(identifier, otp, `registration_${type}`);
 
         // Send OTP
         if (type === 'email') {
-            await sendOTPEmail(identifier, otp, 'verification');
+            const mail = await sendOTPEmail(identifier, otp, 'verification');
+            if (!mail.success || mail.skipped) {
+                // Nothing was delivered, so there is no OTP the user could enter.
+                clearOTP(identifier, `registration_${type}`);
+                return res.status(200).json({
+                    success: false,
+                    message: mail.message || 'Failed to send OTP email',
+                });
+            }
         } else {
             const result = await sendOTPSMS(identifier, otp);
             if (!result.success && !result.skipped) {
@@ -768,13 +783,7 @@ exports.verifyRegistrationOTP = async (req, res) => {
         }
 
         // Verify OTP with registration prefix
-        let result;
-        if (otp === '000000') {
-            logger.info(`Bypass OTP used for registration ${type}: ${identifier}`);
-            result = { success: true };
-        } else {
-            result = verifyOTP(identifier, otp, `registration_${type}`);
-        }
+        const result = verifyOTP(identifier, otp, `registration_${type}`);
 
         if (!result.success) {
             return res.status(400).json(result);
@@ -821,13 +830,7 @@ exports.verifyOTPEndpoint = async (req, res) => {
         }
 
         // Verify OTP
-        let result;
-        if (otp === '000000') {
-            logger.info(`Bypass OTP used for ${type}: ${identifier}`);
-            result = { success: true };
-        } else {
-            result = verifyOTP(identifier, otp, type);
-        }
+        const result = verifyOTP(identifier, otp, type);
 
         if (!result.success) {
             return res.status(400).json(result);
@@ -928,13 +931,7 @@ exports.resetPassword = async (req, res) => {
         }
 
         // Verify OTP
-        let result;
-        if (otp === '000000') {
-            logger.info(`Bypass OTP used for reset: ${email}`);
-            result = { success: true };
-        } else {
-            result = verifyOTP(email, otp, 'reset');
-        }
+        const result = verifyOTP(email, otp, 'reset');
 
         if (!result.success) {
             return res.status(400).json(result);

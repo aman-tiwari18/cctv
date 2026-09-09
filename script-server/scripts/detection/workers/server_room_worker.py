@@ -112,6 +112,9 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=60):
                 'ch_no':     item['ch_no'],
                 'camera_id': item.get('device_id') or item.get('camera_id'),
                 'tc_code':   item.get('tc_code', ''),
+                # Thresholds are per exam, not global — a centre code can appear
+                # in two exams with different limits (see server_room_constants).
+                'exam_id':   item.get('exam_id'),
                 'state':     item.get('state', {}),
             }
             for item in batch
@@ -178,7 +181,10 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=60):
 
             # Same call detect_persons_batch used to decide `detected`, so the
             # number reported here is the limit this detection actually crossed.
-            threshold = get_min_persons(str(item.get("tc_code", "") or ""))
+            threshold = get_min_persons(
+                str(item.get("tc_code", "") or ""),
+                exam_id=item.get("exam_id"),
+            )
 
             # Report to database
             if item.get("source_type") == "HLS":

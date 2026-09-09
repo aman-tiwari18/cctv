@@ -45,6 +45,9 @@ import {
   AccessTime,
   StayPrimaryLandscape,
   Close,
+  UploadFile,
+  Download,
+  Sms,
 } from '@mui/icons-material';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import ReportProblemIcon from '@mui/icons-material/ReportProblem';
@@ -102,6 +105,12 @@ const Exams = () => {
   const [examBodies, setExamBodies] = useState(FALLBACK_EXAM_BODIES);
   const [assignableUsers, setAssignableUsers] = useState([]);
   const [assignedUserIds, setAssignedUserIds] = useState([]);
+  // Observer sheet (TC code -> SMS number). On an existing exam the file uploads
+  // straight away; while CREATING there is no exam id yet, so the file is held
+  // here and posted right after the exam is created.
+  const [observerFile, setObserverFile] = useState(null);
+  const [observerSummary, setObserverSummary] = useState(null);
+  const [observerBusy, setObserverBusy] = useState(false);
 
   useEffect(() => {
     loadExams();
@@ -213,6 +222,11 @@ const Exams = () => {
         const res = await examsAPI.getAssignedUsers(exam.id);
         setAssignedUserIds((res?.data?.data || []).map(u => u.id));
       } catch { setAssignedUserIds([]); }
+      setObserverFile(null);
+      try {
+        const res = await examsAPI.getObservers(exam.id);
+        setObserverSummary({ numbers: res?.data?.numbers || 0, tcCodes: res?.data?.tcCodes || 0 });
+      } catch { setObserverSummary(null); }
     } else {
       setEditingExam(null);
       setFormData({
@@ -230,6 +244,8 @@ const Exams = () => {
         ],
       });
       setAssignedUserIds([]);
+      setObserverFile(null);
+      setObserverSummary(null);
     }
     setOpenDialog(true);
     setError('');
@@ -240,6 +256,82 @@ const Exams = () => {
     setEditingExam(null);
     setError('');
     setNewSkipDate('');
+    setObserverFile(null);
+    setObserverSummary(null);
+  };
+
+  /* ── Observer sheet (TC code -> mobile) ──────────────────────────────────
+     The mapping decides who the SMS alert reaches when a client accepts a
+     detection: only the number(s) listed against that detection's TC code are
+     texted, so a centre absent from the sheet raises no SMS. */
+
+  const uploadObserverSheet = async (examId, file) => {
+    const res = await examsAPI.uploadObservers(examId, file);
+    const d = res?.data?.data || {};
+    setObserverSummary({ numbers: d.numbers || 0, tcCodes: d.tcCodes || 0 });
+    return d;
+  };
+
+  const handleObserverFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';           // let the same file be re-picked after a failure
+    if (!file) return;
+
+    // No exam id yet on the create form — stage it for handleSubmit.
+    if (!editingExam) {
+      setObserverFile(file);
+      setObserverSummary(null);
+      return;
+    }
+
+    setObserverBusy(true);
+    try {
+      const d = await uploadObserverSheet(editingExam.id, file);
+      setSnackbar({
+        open: true,
+        message: `Observer numbers updated — ${d.numbers} number(s) across ${d.tcCodes} TC code(s)`,
+        severity: 'success',
+      });
+    } catch (err) {
+      setSnackbar({
+        open: true,
+        message: err.response?.data?.message || 'Failed to upload observer sheet',
+        severity: 'error',
+      });
+    } finally {
+      setObserverBusy(false);
+    }
+  };
+
+  const handleClearObservers = async () => {
+    if (!editingExam) { setObserverFile(null); return; }
+    setObserverBusy(true);
+    try {
+      await examsAPI.deleteObservers(editingExam.id);
+      setObserverSummary({ numbers: 0, tcCodes: 0 });
+      setObserverFile(null);
+      setSnackbar({ open: true, message: 'Observer numbers cleared for this exam', severity: 'success' });
+    } catch (err) {
+      setSnackbar({ open: true, message: 'Failed to clear observer numbers', severity: 'error' });
+    } finally {
+      setObserverBusy(false);
+    }
+  };
+
+  const handleDownloadObserverTemplate = async () => {
+    try {
+      const res = await examsAPI.downloadObserverTemplate();
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'observer_numbers_template.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      setSnackbar({ open: true, message: 'Failed to download template', severity: 'error' });
+    }
   };
 
   const handleChange = (e) => {
@@ -391,17 +483,28 @@ const Exams = () => {
         assigned_user_ids: assignedUserIds,
       };
 
+      let observerWarning = '';
       if (editingExam) {
         await examsAPI.update(editingExam.id, payload);
       } else {
-        await examsAPI.create(payload);
+        const created = await examsAPI.create(payload);
+        // The staged observer sheet needs the new exam's id. A failure here must
+        // not read as "the exam wasn't created" — it was; only the sheet missed.
+        const newExamId = created?.data?.data?.id;
+        if (observerFile && newExamId) {
+          try {
+            await uploadObserverSheet(newExamId, observerFile);
+          } catch (err) {
+            observerWarning = ` — but the observer sheet failed to import (${err.response?.data?.message || err.message}). Re-upload it by editing the exam.`;
+          }
+        }
       }
       handleCloseDialog();
       loadExams();
       setSnackbar({
         open: true,
-        message: editingExam ? 'Exam updated successfully' : 'Exam created successfully',
-        severity: 'success',
+        message: (editingExam ? 'Exam updated successfully' : 'Exam created successfully') + observerWarning,
+        severity: observerWarning ? 'warning' : 'success',
       });
     } catch (error) {
       setError(error.response?.data?.message || 'Operation failed');
@@ -1122,6 +1225,87 @@ const Exams = () => {
               </IconButton>
             </Box>
           ))}
+          {/* SMS OBSERVER NUMBERS — TC code -> mobile mapping, uploaded as Excel.
+              Only the numbers listed against a detection's TC code are texted. */}
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, mt: 4 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+              <Box sx={{ width: 3, height: 14, bgcolor: '#3c81f6', mr: 1, borderRadius: 1 }} />
+              <Typography sx={{ fontWeight: 800, fontSize: '0.85rem', letterSpacing: '0.05em', color: '#1e293b' }}>
+                SMS OBSERVER NUMBERS
+              </Typography>
+            </Box>
+            <Button
+              onClick={handleDownloadObserverTemplate}
+              startIcon={<Download sx={{ fontSize: 16 }} />}
+              sx={{ color: '#3c81f6', fontWeight: 700, fontSize: '0.75rem', textTransform: 'none' }}
+            >
+              Template
+            </Button>
+          </Box>
+
+          <Box sx={{ p: 2, bgcolor: '#f8fafc', borderRadius: 3, mb: 1 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+              <Button
+                component="label"
+                disabled={observerBusy}
+                startIcon={observerBusy ? <CircularProgress size={14} /> : <UploadFile sx={{ fontSize: 16 }} />}
+                sx={{
+                  bgcolor: '#ffffff', color: '#3c81f6', fontWeight: 700, fontSize: '0.75rem',
+                  textTransform: 'none', borderRadius: 2, px: 2, border: '1px solid #e2e8f0',
+                  '&:hover': { bgcolor: '#f1f5f9' },
+                }}
+              >
+                {observerBusy ? 'Uploading...' : 'Upload Excel'}
+                <input type="file" hidden accept=".xlsx,.xls,.ods" onChange={handleObserverFile} />
+              </Button>
+
+              {/* Staged (create flow) — nothing is on the server until Create. */}
+              {observerFile && (
+                <Chip
+                  icon={<UploadFile sx={{ fontSize: 14 }} />}
+                  label={`${observerFile.name} — imports on Create`}
+                  size="small"
+                  onDelete={() => setObserverFile(null)}
+                  deleteIcon={<Close sx={{ fontSize: '14px !important' }} />}
+                  sx={{ bgcolor: '#fef3c7', color: '#92400e', fontWeight: 600, borderRadius: '8px' }}
+                />
+              )}
+
+              {/* Loaded (edit flow) */}
+              {!observerFile && observerSummary && observerSummary.numbers > 0 && (
+                <>
+                  <Chip
+                    icon={<Sms sx={{ fontSize: 14, color: '#15803d !important' }} />}
+                    label={`${observerSummary.numbers} number(s) · ${observerSummary.tcCodes} TC code(s)`}
+                    size="small"
+                    sx={{ bgcolor: '#dcfce7', color: '#15803d', fontWeight: 600, borderRadius: '8px' }}
+                  />
+                  <Button
+                    onClick={handleClearObservers}
+                    disabled={observerBusy}
+                    startIcon={<DeleteOutline sx={{ fontSize: 15 }} />}
+                    sx={{ color: '#ef4444', fontWeight: 700, fontSize: '0.72rem', textTransform: 'none' }}
+                  >
+                    Clear
+                  </Button>
+                </>
+              )}
+
+              {!observerFile && observerSummary && observerSummary.numbers === 0 && (
+                <Chip
+                  label="No numbers uploaded"
+                  size="small"
+                  sx={{ bgcolor: '#f1f5f9', color: '#64748b', fontWeight: 600, borderRadius: '8px' }}
+                />
+              )}
+            </Box>
+            <Typography sx={{ fontSize: 11, color: '#94a3b8', mt: 1.5 }}>
+              Two columns — <strong>TC Code</strong> and <strong>Mobile Number</strong>. When a client accepts a
+              detection, the alert SMS goes only to the number(s) listed against that detection's TC code; a centre
+              missing from the sheet raises no SMS. Re-uploading replaces the whole list for this exam.
+            </Typography>
+          </Box>
+
           {/* ASSIGN USERS */}
           <Box sx={{ display: 'flex', alignItems: 'center', mb: 2, mt: 4 }}>
             <Box sx={{ width: 3, height: 14, bgcolor: '#3c81f6', mr: 1, borderRadius: 1 }} />

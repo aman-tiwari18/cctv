@@ -133,8 +133,7 @@ async function sendOTPEmail(email, otp, purpose = 'verification') {
 
     const result = await sendEmail(email, subject, html);
     if (!result.success) {
-        // Keep behaviour graceful: log the OTP so flows can still be tested if mail fails.
-        logger.info(`OTP for ${email}: ${otp} (email send failed)`);
+        logger.warn(`OTP email to ${email} failed to send`);
     }
     return result;
 }

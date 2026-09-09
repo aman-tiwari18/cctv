@@ -1,5 +1,6 @@
 const { query } = require('../config/database');
 const { sendAlertWithConfig, TYPE_MAP, SMS_ELIGIBLE_TYPES } = require('../services/smsService');
+const { getExamObserverNumbers } = require('../utils/examObservers');
 const logger = require('../utils/logger');
 
 /**
@@ -109,8 +110,15 @@ class SMSController {
                 return res.json({ success: true, skipped: true, reason: 'toggle_off' });
             }
 
-            // Recipient: per-exam observer_phone wins; else client default_recipients
-            // (resolved inside the service).
+            // Recipient, most specific first: the number(s) mapped to THIS centre
+            // in the exam's uploaded observer sheet (exam_observer_numbers), else
+            // the single per-exam observer_phone, else the client's
+            // default_recipients (resolved inside the service). The per-centre
+            // mapping matches what the accept path in ClientDetectionsController
+            // uses, so both send routes reach the same people.
+            const centreNumbers = await getExamObserverNumbers(metadata.exam_id, metadata.tc_code);
+            const recipients = centreNumbers.length ? centreNumbers : observerPhone;
+
             const alertResult = await sendAlertWithConfig(clientConfig, typeKey, {
                 center_name: metadata.center_name,
                 tc_code: metadata.tc_code,
@@ -119,7 +127,7 @@ class SMSController {
                 count: metadata.count,
                 person_count: metadata.person_count,
                 threshold: metadata.threshold,
-            }, observerPhone);
+            }, recipients);
 
             // Record sms_sent so the client image shows the badge (and we never resend).
             if (alertResult.success && !alertResult.skipped) {

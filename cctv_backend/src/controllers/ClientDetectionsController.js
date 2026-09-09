@@ -14,6 +14,7 @@
 const { query } = require('../config/database');
 const { sendAlertWithConfig, TYPE_MAP, SMS_ELIGIBLE_TYPES } = require('../services/smsService');
 const { getObserverNumbers } = require('../utils/observerList');
+const { getExamObserverNumbers } = require('../utils/examObservers');
 
 // Reverse-mapping of script-server's DETECTION_FOLDERS. The detection_type
 // column stores the folder name (e.g. "proximity_detection"); the frontend
@@ -240,12 +241,17 @@ exports.acceptDetection = async (req, res) => {
             const clientConfig = configRows && configRows[0];
 
             // Recipient(s): the observer number(s) mapped to THIS detection's tc_code.
-            // The observer sheet only covers the NTA centres it was built from, so
-            // for any other client every tc_code misses and the alert was dropped
-            // outright. Fall back to that client's sms_configs.default_recipients —
-            // the column's documented purpose — so a client without a per-centre
-            // observer list still gets its alerts. tc_code mapping still wins.
-            const observerNumbers = getObserverNumbers(row.tc_code);
+            // Three sources, most specific first:
+            //   1. exam_observer_numbers — the sheet uploaded on this exam's form.
+            //   2. The static NTA Observer List on disk (utils/observerList), which
+            //      predates the upload and still covers the exams built around it.
+            //   3. sms_configs.default_recipients — the column's documented purpose,
+            //      so a client with no per-centre list at all still gets its alerts.
+            // Without (1) every exam shared one committed spreadsheet, so a client
+            // whose centres were not in it had every tc_code miss and the alert
+            // dropped outright.
+            const examNumbers = await getExamObserverNumbers(row.exam_id, row.tc_code);
+            const observerNumbers = examNumbers.length ? examNumbers : getObserverNumbers(row.tc_code);
             const recipients = observerNumbers.length
                 ? observerNumbers
                 : String(clientConfig?.default_recipients || '')
