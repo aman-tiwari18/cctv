@@ -718,10 +718,10 @@ exports.downloadClientReport = async (req, res) => {
         const wb = XLSX.utils.book_new();
 
         const SHIFT_HEADERS = [
-            'City', 'Center', 'Cam ID', 'Camera Name',
+            'City', 'Center', 'Cam ID', 'CH Code', 'Camera Name',
             'Cam Type', 'TC Code', 'Events (Excluding Rejected)', 'Rejected Events', 'Camera Status'
         ];
-        const SHIFT_WIDTHS = [15, 30, 15, 35, 15, 12, 28, 16, 15];
+        const SHIFT_WIDTHS = [15, 30, 15, 18, 35, 15, 12, 28, 16, 15];
 
         shifts.forEach((shiftMeta, idx) => {
             const shiftId = shiftMeta.id;
@@ -741,6 +741,7 @@ exports.downloadClientReport = async (req, res) => {
                             'City': cam.city || agg.details.city || '',
                             'Center': cam.centre_name || agg.details.center || '',
                             'Cam ID': key,
+                            'CH Code': '',
                             'Camera Name': cam.camera_name || agg.details.camera_name || '',
                             'Cam Type': camType,
                             'TC Code': cam.tc_code || agg.details.tc_code || '',
@@ -756,6 +757,7 @@ exports.downloadClientReport = async (req, res) => {
                             'City': cam.city || '',
                             'Center': cam.centre_name || '',
                             'Cam ID': key,
+                            'CH Code': '',
                             'Camera Name': cam.camera_name || '',
                             'Cam Type': camType,
                             'TC Code': cam.tc_code || '',
@@ -775,6 +777,7 @@ exports.downloadClientReport = async (req, res) => {
                             'City': cam.city || '',
                             'Center': cam.centre_name || '',
                             'Cam ID': camIdDisplay,
+                            'CH Code': cam.ch_code || '',
                             'Camera Name': cam.camera_name || '',
                             'Cam Type': cam.camera_category || '',
                             'TC Code': cam.tc_code || '',
@@ -790,6 +793,7 @@ exports.downloadClientReport = async (req, res) => {
                             'City': cam.city || '',
                             'Center': cam.centre_name || '',
                             'Cam ID': camIdDisplay,
+                            'CH Code': cam.ch_code || '',
                             'Camera Name': cam.camera_name || '',
                             'Cam Type': cam.camera_category || '',
                             'TC Code': cam.tc_code || '',
@@ -816,11 +820,11 @@ exports.downloadClientReport = async (req, res) => {
         // irreversible action (an SMS went out), whereas a later Remove only
         // tidies the feed. Flip the order in detectionStatus to reverse that.
         const DET_HEADERS = [
-            'Shift', 'Device ID', 'Camera No', 'Cam ID', 'TC Code', 'Camera Name',
+            'Shift', 'Device ID', 'Camera No', 'Cam ID', 'CH Code', 'TC Code', 'Camera Name',
             'Center Name', 'City', 'Server Address', 'Detection Type', 'Detection Time',
             'Status', 'Image URL', 'View'
         ];
-        const DET_WIDTHS = [10, 15, 12, 15, 14, 35, 30, 15, 28, 20, 22, 14, 70, 8];
+        const DET_WIDTHS = [10, 15, 12, 15, 18, 14, 35, 30, 15, 28, 20, 22, 14, 70, 8];
 
         const detectionStatus = (d) => {
             if (Number(d.accepted_by_client) === 1) return 'Accepted';
@@ -835,6 +839,7 @@ exports.downloadClientReport = async (req, res) => {
                 'Device ID': d.device_id || '',
                 'Camera No': d.camera_no || '',
                 'Cam ID': isRTSP ? `${d.device_id}_${d.camera_no}` : formatHlsCamId(d.camera_name, d.ch_code),
+                'CH Code': isRTSP ? '' : (d.ch_code || ''),
                 'TC Code': d.tc_code || '',
                 'Camera Name': d.camera_name || '',
                 'Center Name': d.center_name || '',
