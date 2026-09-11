@@ -152,6 +152,55 @@ function camerasForShiftAndDate(masterCameras, shiftId, examDate) {
     });
 }
 
+/**
+ * Live online/offline state of a camera, read from its camera_links row.
+ *
+ * This is the single rule used everywhere a camera's status is reported — the
+ * shift sheets, the Analysis sheet and the Cameras tab in the UI: a camera is
+ * Online when it has been classified AND its link status is "Accessible".
+ *
+ * It deliberately does NOT use `camera_report_*.camera_status`. That column is
+ * a snapshot taken at the moment a detection row was written, so a camera that
+ * blipped offline once during the shift stayed "Offline" in the sheet for the
+ * rest of the day even after it came back — which is why the sheet's Online
+ * count came out lower than the Cameras tab's.
+ */
+function cameraIsOnline(cam, isRTSP) {
+    const classification = isRTSP ? cam.classification : cam.camera_category;
+    const hasClassification = !!classification && String(classification).trim() !== '';
+    const isAccessible = String(cam.status || '').toLowerCase() === 'accessible';
+    return hasClassification && isAccessible;
+}
+
+/**
+ * Device ID + Camera No for an HLS row.
+ *
+ * The HLS tables carry neither column — an HLS camera is identified by
+ * ch_code plus a composite camera_name like "11394/L-002/C04" (DVR/room/channel)
+ * or "28839_REGISTRATION_BIOMETRIC". That is why the Detections List showed
+ * these two columns blank on every HLS export: there was nothing to read.
+ * Both parts are recoverable from the name (camera_id, stored as
+ * "<device>_<camera>", is the fallback when the name has no separator).
+ */
+function hlsDeviceAndCameraNo(row) {
+    const name = String(row.camera_name || '').trim();
+    if (name.includes('/')) {
+        const parts = name.split('/').map(x => x.trim()).filter(Boolean);
+        return {
+            device: parts[0] || '',
+            cameraNo: parts.length > 1 ? parts[parts.length - 1] : '',
+        };
+    }
+    const camId = String(row.camera_id || name || '').trim();
+    const sep = camId.indexOf('_');
+    if (sep > 0) return { device: camId.slice(0, sep), cameraNo: camId.slice(sep + 1) };
+    // Names with neither separator ("2090 Centre-III cam1", "15803-DSP LAB CAM 1")
+    // still lead with the numeric DVR id, so split off that first token.
+    const leadingId = camId.match(/^(\d+)[\s-]+(.*)$/);
+    if (leadingId) return { device: leadingId[1], cameraNo: leadingId[2].trim() };
+    return { device: '', cameraNo: camId };
+}
+
 // ─── Controller ───────────────────────────────────────────────────────────────
 
 exports.downloadReport = async (req, res) => {
@@ -184,7 +233,7 @@ exports.downloadReport = async (req, res) => {
             `SELECT id, shift_name, start_time, end_time
              FROM exam_shifts
              WHERE exam_id = ? AND is_active = 1
-             ORDER BY id ASC`,
+             ORDER BY start_time ASC, id ASC`,
             [examId]
         );
         // shiftMap[shiftId] = { index: 1, name: 'Shift 1 (Shift_Name)' }
@@ -234,7 +283,7 @@ exports.downloadReport = async (req, res) => {
             `SELECT id, shift_id, city, center_name, camera_id, camera_name,
                     camera_category, tc_code, ch_code, state, camera_status,
                     events, rejected_events, date_time, imageurl, detection_type,
-                    unique_id, created_at, pushed_to_client, remove_from_client  -- ✅ add these
+                    unique_id, created_at, pushed_to_client, remove_from_client
             FROM camera_report_hls
             WHERE exam_id = ? AND date_time LIKE CONCAT(?, '%')
             ORDER BY shift_id ASC, created_at ASC`,
@@ -335,13 +384,11 @@ exports.downloadReport = async (req, res) => {
                             'Events (Excluding Rejected)': agg.events,
                             'Rejected Events': agg.rejected,
                             'False Positive': agg.falsePositive,  // ✅
-                            'Camera Status': agg.status,
+                            'Camera Status': cameraIsOnline(cam, isRTSP) ? 'Online' : 'Offline',
                         };
                     } else {
                         // Camera is online if: classification IS NOT NULL AND status = 'Accessible' (case-insensitive)
-                        const hasClassification = cam.classification && cam.classification.trim() !== '';
-                        const isAccessible = (cam.status || '').toLowerCase() === 'accessible';
-                        const isOnline = hasClassification && isAccessible;
+                        const isOnline = cameraIsOnline(cam, isRTSP);
                         
                         return {
                             'City': cam.city || '',
@@ -378,13 +425,11 @@ exports.downloadReport = async (req, res) => {
                             'Events (Excluding Rejected)': agg.events,
                             'Rejected Events': agg.rejected,
                             'False Positive': agg.falsePositive,  // ✅
-                            'Camera Status': agg.status,
+                            'Camera Status': cameraIsOnline(cam, isRTSP) ? 'Online' : 'Offline',
                         };
                     } else {
                         // Camera is online if: classification IS NOT NULL AND status = 'Accessible' (case-insensitive)
-                        const hasClassification = cam.camera_category && cam.camera_category.trim() !== '';
-                        const isAccessible = (cam.status || '').toLowerCase() === 'accessible';
-                        const isOnline = hasClassification && isAccessible;
+                        const isOnline = cameraIsOnline(cam, isRTSP);
                         
                         return {
                             'City': cam.city || '',
@@ -407,19 +452,23 @@ exports.downloadReport = async (req, res) => {
         });
 
         // ── 8. Detections List Sheet ──────────────────────────────────────────
-        const DET_HEADERS = [
+        const DET_HEADERS = isRTSP ? [
+            'Shift', 'Device ID', 'Camera No', 'Cam ID', 'TC Code', 'Camera Name',
+            'Center Name', 'City', 'Server Address', 'Detection Type', 'Detection Time',
+            'Rejected', 'Image URL', 'View'
+        ] : [
             'Shift', 'Device ID', 'Camera No', 'Cam ID', 'TC Code', 'Camera Name',
             'Center Name', 'City', 'Server Address', 'Detection Type', 'Detection Time',
             'Rejected', 'Image URL', 'View'
         ];
-        const DET_WIDTHS = [10, 15, 12, 15, 14, 35, 30, 15, 28, 20, 22, 10, 70, 8];
+        const DET_WIDTHS = isRTSP
+            ? [10, 15, 12, 15, 14, 35, 30, 15, 28, 20, 22, 10, 70, 8]
+            : [10, 15, 12, 15, 14, 35, 30, 15, 28, 20, 22, 10, 70, 8];
 
         const detSheetData = detections.map(d => {
             const resolvedSid = (d.shift_id != null) ? d.shift_id : determineShiftId(d.date_time, shifts);
-            return {
+            const row = {
                 'Shift': (shiftMap[resolvedSid] || {}).label || `Shift ${resolvedSid}`,
-                'Device ID': d.device_id || '',
-                'Camera No': d.camera_no || '',
                 'Cam ID': isRTSP ? `${d.device_id}_${d.camera_no}` : formatHlsCamId(d.camera_name, d.ch_code),
                 'TC Code': d.tc_code || '',
                 'Camera Name': d.camera_name || '',
@@ -432,6 +481,15 @@ exports.downloadReport = async (req, res) => {
                 'Image URL': d.imageurl || '',
                 'View': d.imageurl ? 'View' : '',
             };
+            if (isRTSP) {
+                row['Device ID'] = d.device_id || '';
+                row['Camera No'] = d.camera_no || '';
+            } else {
+                const { device, cameraNo } = hlsDeviceAndCameraNo(d);
+                row['Device ID'] = device;
+                row['Camera No'] = cameraNo;
+            }
+            return row;
         });
 
         const detWs = makeSheet(DET_HEADERS, detSheetData, DET_WIDTHS);
@@ -484,13 +542,7 @@ exports.downloadReport = async (req, res) => {
 
             const total = shiftCams.length;
             // Camera is online if: classification IS NOT NULL AND status = 'Accessible' (case-insensitive)
-            const online = shiftCams.filter(c => {
-                const hasClassification = isRTSP 
-                    ? (c.classification && c.classification.trim() !== '')
-                    : (c.camera_category && c.camera_category.trim() !== '');
-                const isAccessible = (c.status || '').toLowerCase() === 'accessible';
-                return hasClassification && isAccessible;
-            }).length;
+            const online = shiftCams.filter(c => cameraIsOnline(c, isRTSP)).length;
             const offline = total - online;
             const detCount = shiftDets.length;
             const rate = total > 0 ? ((online / total) * 100).toFixed(2) + '%' : '0%';
@@ -609,7 +661,7 @@ exports.downloadClientReport = async (req, res) => {
             `SELECT id, shift_name, start_time, end_time
              FROM exam_shifts
              WHERE exam_id = ? AND is_active = 1
-             ORDER BY id ASC`,
+             ORDER BY start_time ASC, id ASC`,
             [examId]
         );
         const shiftMap = {};
@@ -747,12 +799,10 @@ exports.downloadClientReport = async (req, res) => {
                             'TC Code': cam.tc_code || agg.details.tc_code || '',
                             'Events (Excluding Rejected)': agg.events,
                             'Rejected Events': agg.rejected,
-                            'Camera Status': agg.status,
+                            'Camera Status': cameraIsOnline(cam, isRTSP) ? 'Online' : 'Offline',
                         };
                     } else {
-                        const hasClassification = cam.classification && cam.classification.trim() !== '';
-                        const isAccessible = (cam.status || '').toLowerCase() === 'accessible';
-                        const isOnline = hasClassification && isAccessible;
+                        const isOnline = cameraIsOnline(cam, isRTSP);
                         return {
                             'City': cam.city || '',
                             'Center': cam.centre_name || '',
@@ -783,12 +833,10 @@ exports.downloadClientReport = async (req, res) => {
                             'TC Code': cam.tc_code || '',
                             'Events (Excluding Rejected)': agg.events,
                             'Rejected Events': agg.rejected,
-                            'Camera Status': agg.status,
+                            'Camera Status': cameraIsOnline(cam, isRTSP) ? 'Online' : 'Offline',
                         };
                     } else {
-                        const hasClassification = cam.camera_category && cam.camera_category.trim() !== '';
-                        const isAccessible = (cam.status || '').toLowerCase() === 'accessible';
-                        const isOnline = hasClassification && isAccessible;
+                        const isOnline = cameraIsOnline(cam, isRTSP);
                         return {
                             'City': cam.city || '',
                             'Center': cam.centre_name || '',
@@ -819,12 +867,18 @@ exports.downloadClientReport = async (req, res) => {
         // Accept wins when a row carries both flags: accepting is the terminal,
         // irreversible action (an SMS went out), whereas a later Remove only
         // tidies the feed. Flip the order in detectionStatus to reverse that.
-        const DET_HEADERS = [
+        const DET_HEADERS = isRTSP ? [
+            'Shift', 'Device ID', 'Camera No', 'Cam ID', 'TC Code', 'Camera Name',
+            'Center Name', 'City', 'Server Address', 'Detection Type', 'Detection Time',
+            'Status', 'Image URL', 'View'
+        ] : [
             'Shift', 'Device ID', 'Camera No', 'Cam ID', 'CH Code', 'TC Code', 'Camera Name',
             'Center Name', 'City', 'Server Address', 'Detection Type', 'Detection Time',
             'Status', 'Image URL', 'View'
         ];
-        const DET_WIDTHS = [10, 15, 12, 15, 18, 14, 35, 30, 15, 28, 20, 22, 14, 70, 8];
+        const DET_WIDTHS = isRTSP
+            ? [10, 15, 12, 15, 14, 35, 30, 15, 28, 20, 22, 14, 70, 8]
+            : [10, 15, 12, 15, 18, 14, 35, 30, 15, 28, 20, 22, 14, 70, 8];
 
         const detectionStatus = (d) => {
             if (Number(d.accepted_by_client) === 1) return 'Accepted';
@@ -834,12 +888,9 @@ exports.downloadClientReport = async (req, res) => {
 
         const detSheetData = detections.map(d => {
             const resolvedSid = (d.shift_id != null) ? d.shift_id : determineShiftId(d.date_time, shifts);
-            return {
+            const row = {
                 'Shift': (shiftMap[resolvedSid] || {}).label || `Shift ${resolvedSid}`,
-                'Device ID': d.device_id || '',
-                'Camera No': d.camera_no || '',
                 'Cam ID': isRTSP ? `${d.device_id}_${d.camera_no}` : formatHlsCamId(d.camera_name, d.ch_code),
-                'CH Code': isRTSP ? '' : (d.ch_code || ''),
                 'TC Code': d.tc_code || '',
                 'Camera Name': d.camera_name || '',
                 'Center Name': d.center_name || '',
@@ -851,6 +902,16 @@ exports.downloadClientReport = async (req, res) => {
                 'Image URL': d.imageurl || '',
                 'View': d.imageurl ? 'View' : '',
             };
+            if (isRTSP) {
+                row['Device ID'] = d.device_id || '';
+                row['Camera No'] = d.camera_no || '';
+            } else {
+                const { device, cameraNo } = hlsDeviceAndCameraNo(d);
+                row['Device ID'] = device;
+                row['Camera No'] = cameraNo;
+                row['CH Code'] = d.ch_code || '';
+            }
+            return row;
         });
 
         const detWs = makeSheet(DET_HEADERS, detSheetData, DET_WIDTHS);
@@ -895,13 +956,7 @@ exports.downloadClientReport = async (req, res) => {
             });
 
             const total = shiftCams.length;
-            const online = shiftCams.filter(c => {
-                const hasClassification = isRTSP
-                    ? (c.classification && c.classification.trim() !== '')
-                    : (c.camera_category && c.camera_category.trim() !== '');
-                const isAccessible = (c.status || '').toLowerCase() === 'accessible';
-                return hasClassification && isAccessible;
-            }).length;
+            const online = shiftCams.filter(c => cameraIsOnline(c, isRTSP)).length;
             const offline = total - online;
             const detCount = shiftDets.length;
             const rate = total > 0 ? ((online / total) * 100).toFixed(2) + '%' : '0%';
