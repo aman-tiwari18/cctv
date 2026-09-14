@@ -172,6 +172,10 @@ const Analytics = () => {
       await shiftScriptsAPI.bulkDelete({
         shift_id,
         script_id: numericScriptId,
+        // Scope to this exact time window so removing one chip doesn't delete
+        // every window assigned for this script on the shift.
+        custom_start_time: deleteDialog.assignment.custom_start_time || null,
+        custom_end_time: deleteDialog.assignment.custom_end_time || null,
         ...dateOptions
       });
 
@@ -739,13 +743,13 @@ const Analytics = () => {
                         </Button>
                       </Box>
 
-                      {/* Script chips — deduplicated by script_id */}
+                      {/* Script chips — deduplicated by script_id + time window, so the
+                          same script assigned twice with different windows shows as two chips */}
                       {filteredAssignments.length > 0 && (() => {
-                        // Show only unique scripts (first occurrence per script root ID)
                         const seen = new Set();
                         const unique = filteredAssignments.filter((a) => {
-                          // Use the numeric database ID as the unique key
-                          const key = a.script_id || a.script?.id || a.id;
+                          const scriptKey = a.script_id || a.script?.id || a.id;
+                          const key = `${scriptKey}|${a.custom_start_time || ''}|${a.custom_end_time || ''}`;
                           if (seen.has(key)) return false;
                           seen.add(key);
                           return true;
@@ -777,7 +781,7 @@ const Analytics = () => {
 
                               return (
                                 <Chip
-                                  key={technicalId || i}
+                                  key={assignment.id ?? `${technicalId}-${i}`}
                                   label={
                                     <Box sx={{ textAlign: 'left', lineHeight: 1.3, minWidth: 80 }}>
                                       <Box sx={{ fontWeight: 700, fontSize: '0.8rem' }}>{name}</Box>

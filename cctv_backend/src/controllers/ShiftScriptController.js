@@ -139,12 +139,20 @@ exports.assignScript = async (req, res) => {
         });
     }
 
+    // A script can be assigned more than once on the same date as long as the
+    // time window differs, so "already assigned" is keyed by date + time window,
+    // not just date.
+    const windowStart = custom_start_time || null;
+    const windowEnd = custom_end_time || null;
+
     const existingAssignments = await ShiftScriptAssignment.findAll({
         attributes: ["assignment_date"],
         where: {
             shift_id,
             script_id,
             assignment_date: { [Op.in]: assignableDates },
+            custom_start_time: windowStart,
+            custom_end_time: windowEnd,
         },
         raw: true,
     });
@@ -156,8 +164,8 @@ exports.assignScript = async (req, res) => {
             shift_id,
             script_id,
             assignment_date: date,
-            custom_start_time: custom_start_time || null,
-            custom_end_time: custom_end_time || null,
+            custom_start_time: windowStart,
+            custom_end_time: windowEnd,
             notes: notes || null,
             sms_enabled: !!sms_enabled,
         }));
@@ -166,8 +174,9 @@ exports.assignScript = async (req, res) => {
         await ShiftScriptAssignment.bulkCreate(newRecords);
     }
 
-    // If SMS toggle was provided, apply it to ALL matching assignments (including
-    // ones that already existed for some dates) so the switch reflects intent.
+    // If SMS toggle was provided, apply it to ALL matching assignments for this
+    // exact time window (including ones that already existed for some dates) so
+    // the switch reflects intent.
     if (sms_enabled !== undefined) {
         await ShiftScriptAssignment.update(
             { sms_enabled: !!sms_enabled },
@@ -176,6 +185,8 @@ exports.assignScript = async (req, res) => {
                     shift_id,
                     script_id,
                     assignment_date: { [Op.in]: assignableDates },
+                    custom_start_time: windowStart,
+                    custom_end_time: windowEnd,
                 },
             }
         );
@@ -284,7 +295,7 @@ exports.bulkAssign = async (req, res) => {
     }
 
     const existingAssignments = await ShiftScriptAssignment.findAll({
-        attributes: ["script_id", "assignment_date"],
+        attributes: ["script_id", "assignment_date", "custom_start_time", "custom_end_time"],
         where: {
             shift_id,
             script_id: { [Op.in]: prepared.map((s) => s.script_id) },
@@ -293,24 +304,25 @@ exports.bulkAssign = async (req, res) => {
         raw: true,
     });
 
-    // Dates that already have a row, per script — those get updated in place
-    // instead of skipped, so re-submitting the dialog edits the schedule.
-    const existingDatesByScript = new Map();
-    for (const row of existingAssignments) {
-        const date = toDateOnly(row.assignment_date);
-        if (!date) continue;
-        if (!existingDatesByScript.has(row.script_id)) {
-            existingDatesByScript.set(row.script_id, new Set());
-        }
-        existingDatesByScript.get(row.script_id).add(date);
-    }
+    // A script can appear more than once on the same date as long as the time
+    // window differs, so "already exists" is keyed by date + time window, not
+    // just date — otherwise a second window for the same script would either be
+    // rejected or silently overwrite the first one's time.
+    const timeKey = (start, end) => `${start || ""}|${end || ""}`;
+    const rowKey = (scriptId, date, start, end) => `${scriptId}|${date}|${timeKey(start, end)}`;
+
+    const existingRowKeys = new Set(
+        existingAssignments.map((row) =>
+            rowKey(row.script_id, toDateOnly(row.assignment_date), row.custom_start_time, row.custom_end_time)
+        )
+    );
 
     const assignments = [];
     for (const s of prepared) {
         const fields = pickConfigFields(s);
-        const existingDates = existingDatesByScript.get(s.script_id) || new Set();
+        const tKey = timeKey(fields.custom_start_time, fields.custom_end_time);
         for (const date of targetDates) {
-            if (existingDates.has(date)) continue;
+            if (existingRowKeys.has(`${s.script_id}|${date}|${tKey}`)) continue;
 
             assignments.push({
                 shift_id,
@@ -331,23 +343,29 @@ exports.bulkAssign = async (req, res) => {
         await ShiftScriptAssignment.bulkCreate(assignments);
     }
 
-    // Push the submitted config onto the rows that already existed.
+    // Push the submitted config onto rows that already existed with the exact
+    // same time window (idempotent resubmission of the same window).
     let updatedCount = 0;
     for (const s of prepared) {
         const fields = pickConfigFields(s);
         if (Object.keys(fields).length === 0) continue;
 
-        const existingDates = [...(existingDatesByScript.get(s.script_id) || [])];
-        if (existingDates.length === 0) continue;
+        const tKey = timeKey(fields.custom_start_time, fields.custom_end_time);
+        const matchingDates = targetDates.filter((date) =>
+            existingRowKeys.has(`${s.script_id}|${date}|${tKey}`)
+        );
+        if (matchingDates.length === 0) continue;
 
         await ShiftScriptAssignment.update(fields, {
             where: {
                 shift_id,
                 script_id: s.script_id,
-                assignment_date: { [Op.in]: existingDates },
+                assignment_date: { [Op.in]: matchingDates },
+                custom_start_time: fields.custom_start_time ?? null,
+                custom_end_time: fields.custom_end_time ?? null,
             },
         });
-        updatedCount += existingDates.length;
+        updatedCount += matchingDates.length;
     }
 
     res.status(201).json({
@@ -496,7 +514,7 @@ exports.deleteAssignment = async (req, res) => {
  * Body: { script_id, shift_id, all_days?, date_from?, date_to? }
  */
 exports.bulkDelete = async (req, res) => {
-    let { script_id, shift_id, all_days, date_from, date_to } = req.body;
+    let { script_id, shift_id, all_days, date_from, date_to, custom_start_time, custom_end_time } = req.body;
 
     if (!script_id || !shift_id) {
         return res.status(400).json({
@@ -517,6 +535,12 @@ exports.bulkDelete = async (req, res) => {
     }
 
     const where = { script_id, shift_id };
+
+    // A script can have more than one time window on a shift now — when the
+    // caller identifies a specific window, scope the delete to just that one
+    // instead of removing every window for the script.
+    if (custom_start_time !== undefined) where.custom_start_time = custom_start_time || null;
+    if (custom_end_time !== undefined) where.custom_end_time = custom_end_time || null;
 
     if (!all_days && (date_from || date_to)) {
         const from = toDateOnly(date_from);
