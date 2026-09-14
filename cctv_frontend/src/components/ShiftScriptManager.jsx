@@ -369,9 +369,11 @@ const ShiftScriptManager = ({
             });
         });
 
+        // A script with no windows yet gets one blank slot to type straight into.
+        // A script that already has a window does NOT get an extra blank one —
+        // that only appears when the user clicks "Add another time window".
         scripts.forEach((s) => {
-            if (!newCardSlots[s.id]) newCardSlots[s.id] = [];
-            newCardSlots[s.id].push(emptySlot());
+            if (!newCardSlots[s.id]) newCardSlots[s.id] = [emptySlot()];
         });
 
         setCardSlots(newCardSlots);
