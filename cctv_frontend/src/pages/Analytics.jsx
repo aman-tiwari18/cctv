@@ -137,7 +137,11 @@ const Analytics = () => {
       const shiftList = Array.isArray(response?.data?.data?.examShifts)
         ? response.data.data.examShifts
         : [];
-      setShifts(shiftList);
+      // Earliest-starting shift on top
+      const sortedShiftList = [...shiftList].sort((a, b) =>
+        (a.start_time || '').localeCompare(b.start_time || '')
+      );
+      setShifts(sortedShiftList);
     } catch (err) {
       console.error('Error loading shifts:', err);
       setError('Failed to load shifts');
