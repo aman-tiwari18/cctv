@@ -54,6 +54,30 @@ const SCRIPT_COLORS = {
 };
 const DEFAULT_CHIP_COLOR = { bg: '#dbeafe', color: '#3b82f6' };
 
+// One-shot scripts — no cooldown loop, frequency/camera-type fields not applicable
+// (mirrors NO_FREQUENCY_SCRIPTS in ShiftScriptManager.jsx)
+const NO_FREQUENCY_SCRIPTS = new Set(['vision', 'vision_neet']);
+
+// Fallback cooldown (seconds) used by each script when no custom frequency is set —
+// mirrors COOLDOWN_TIME in each detection script / COOLDOWNS in unified_detector.py
+const DEFAULT_FREQUENCY_BY_SCRIPT = {
+  crowd: 120,
+  crowd_zero: 360,
+  crowd_five: 120,
+  proximity: 120,
+  intruder: 0,
+  entry_exit: 120,
+  server: 60,
+  phone: 90,
+  strongroom: 180,
+  qp_box: 240,
+  blind_spot: 180,
+  furniture: 300,
+  invigilator: 420,
+  inversion: 240,
+  tampering: 60,
+};
+
 const formatDateLabel = (value) => {
   if (!value) return 'No date';
   const parts = String(value).split('-');
@@ -790,10 +814,16 @@ const Analytics = () => {
                                 ? assignment.custom_end_time.substring(0, 5)
                                 : null;
                               const timeLabel = startT && endT ? `${startT} – ${endT}` : '';
-                              const frequencySec = assignment.custom_frequency_minutes;
-                              const cameraTypes = Array.isArray(assignment.camera_classifications)
+                              const hasFrequencyField = !NO_FREQUENCY_SCRIPTS.has(technicalId);
+                              const isCustomFrequency = assignment.custom_frequency_minutes != null;
+                              const frequencySec = isCustomFrequency
+                                ? assignment.custom_frequency_minutes
+                                : DEFAULT_FREQUENCY_BY_SCRIPT[technicalId];
+                              const customCameraTypes = Array.isArray(assignment.camera_classifications)
                                 ? assignment.camera_classifications.filter(Boolean)
                                 : (assignment.camera_classifications ? [assignment.camera_classifications] : []);
+                              const isCustomCameraTypes = customCameraTypes.length > 0;
+                              const cameraTypes = isCustomCameraTypes ? customCameraTypes : ['All Cameras'];
 
                               return (
                                 <Box
@@ -833,20 +863,29 @@ const Analytics = () => {
                                     </Box>
                                   )}
 
-                                  {frequencySec && (
+                                  {hasFrequencyField && frequencySec != null && (
                                     <Box sx={{ mt: 1.5 }}>
                                       <Box sx={{ fontSize: '0.6rem', fontWeight: 700, opacity: 0.55, letterSpacing: '0.03em', color: '#334155', whiteSpace: 'nowrap' }}>
                                         FREQUENCY (sec)
                                       </Box>
                                       <Box sx={{ fontSize: '0.85rem', fontWeight: 700, color: '#0f172a', mt: '2px' }}>
                                         {frequencySec}
+                                        {!isCustomFrequency && (
+                                          <Box component="span" sx={{ fontSize: '0.68rem', fontWeight: 500, opacity: 0.6, ml: '4px' }}>
+                                            (default)
+                                          </Box>
+                                        )}
                                       </Box>
                                     </Box>
                                   )}
-                                  {cameraTypes.length > 0 && (
+                                  {hasFrequencyField && (
                                     <Box sx={{ mt: 1.2 }}>
                                       <Box sx={{ fontSize: '0.6rem', fontWeight: 700, opacity: 0.55, letterSpacing: '0.03em', color: '#334155', whiteSpace: 'nowrap' }}>
-                                        CAMERA TYPE
+                                        CAMERA TYPE{!isCustomCameraTypes && (
+                                          <Box component="span" sx={{ fontWeight: 500, opacity: 0.85, ml: '4px' }}>
+                                            (default)
+                                          </Box>
+                                        )}
                                       </Box>
                                       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: '4px', mt: '4px' }}>
                                         {cameraTypes.map((ct) => (
