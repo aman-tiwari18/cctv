@@ -54,6 +54,30 @@ const SCRIPT_COLORS = {
 };
 const DEFAULT_CHIP_COLOR = { bg: '#dbeafe', color: '#3b82f6' };
 
+// One-shot scripts — no cooldown loop, frequency/camera-type fields not applicable
+// (mirrors NO_FREQUENCY_SCRIPTS in ShiftScriptManager.jsx)
+const NO_FREQUENCY_SCRIPTS = new Set(['vision', 'vision_neet']);
+
+// Fallback cooldown (seconds) used by each script when no custom frequency is set —
+// mirrors COOLDOWN_TIME in each detection script / COOLDOWNS in unified_detector.py
+const DEFAULT_FREQUENCY_BY_SCRIPT = {
+  crowd: 120,
+  crowd_zero: 360,
+  crowd_five: 120,
+  proximity: 120,
+  intruder: 0,
+  entry_exit: 120,
+  server: 60,
+  phone: 90,
+  strongroom: 180,
+  qp_box: 240,
+  blind_spot: 180,
+  furniture: 300,
+  invigilator: 420,
+  inversion: 240,
+  tampering: 60,
+};
+
 const formatDateLabel = (value) => {
   if (!value) return 'No date';
   const parts = String(value).split('-');
@@ -137,7 +161,11 @@ const Analytics = () => {
       const shiftList = Array.isArray(response?.data?.data?.examShifts)
         ? response.data.data.examShifts
         : [];
-      setShifts(shiftList);
+      // Earliest-starting shift on top
+      const sortedShiftList = [...shiftList].sort((a, b) =>
+        (a.start_time || '').localeCompare(b.start_time || '')
+      );
+      setShifts(sortedShiftList);
     } catch (err) {
       console.error('Error loading shifts:', err);
       setError('Failed to load shifts');
@@ -168,6 +196,10 @@ const Analytics = () => {
       await shiftScriptsAPI.bulkDelete({
         shift_id,
         script_id: numericScriptId,
+        // Scope to this exact time window so removing one chip doesn't delete
+        // every window assigned for this script on the shift.
+        custom_start_time: deleteDialog.assignment.custom_start_time || null,
+        custom_end_time: deleteDialog.assignment.custom_end_time || null,
         ...dateOptions
       });
 
@@ -735,17 +767,29 @@ const Analytics = () => {
                         </Button>
                       </Box>
 
-                      {/* Script chips — deduplicated by script_id */}
+                      {/* Script chips — deduplicated by script_id + time window, so the
+                          same script assigned twice with different windows shows as two chips */}
                       {filteredAssignments.length > 0 && (() => {
-                        // Show only unique scripts (first occurrence per script root ID)
-                        const seen = new Set();
-                        const unique = filteredAssignments.filter((a) => {
-                          // Use the numeric database ID as the unique key
-                          const key = a.script_id || a.script?.id || a.id;
-                          if (seen.has(key)) return false;
-                          seen.add(key);
-                          return true;
+                        // When duplicate rows exist for the same script + time window, keep the
+                        // one with the most info (frequency/camera type) rather than just the first seen.
+                        const byKey = new Map();
+                        filteredAssignments.forEach((a) => {
+                          const scriptKey = a.script_id || a.script?.id || a.id;
+                          const key = `${scriptKey}|${a.custom_start_time || ''}|${a.custom_end_time || ''}`;
+                          const existing = byKey.get(key);
+                          if (!existing) {
+                            byKey.set(key, a);
+                            return;
+                          }
+                          const existingHasData = existing.custom_frequency_minutes || existing.camera_classifications;
+                          const currentHasData = a.custom_frequency_minutes || a.camera_classifications;
+                          if (currentHasData && !existingHasData) {
+                            byKey.set(key, a);
+                          } else if (Boolean(currentHasData) === Boolean(existingHasData) && a.id > existing.id) {
+                            byKey.set(key, a);
+                          }
                         });
+                        const unique = Array.from(byKey.values());
                         
                         // Sort by start time
                         const sorted = unique.sort((a, b) => {
@@ -755,12 +799,12 @@ const Analytics = () => {
                         });
                         
                         return (
-                          <Box sx={{ display: 'flex', gap: 1, mt: 2, flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'flex-start' }}>
+                          <Box sx={{ display: 'flex', gap: 2, mt: 2, flexWrap: 'wrap', alignItems: 'stretch', justifyContent: 'flex-start' }}>
                             {sorted.map((assignment, i) => {
                               // Remove "detection" keyword from name
                               const rawName = assignment.script?.name || 'Unknown';
                               const name = rawName.replace(/\s*detection\s*/gi, '').trim();
-                              
+
                               const technicalId = assignment.script?.script_id || '';
                               const chipColor = SCRIPT_COLORS[technicalId] || DEFAULT_CHIP_COLOR;
                               const startT = assignment.custom_start_time
@@ -770,45 +814,101 @@ const Analytics = () => {
                                 ? assignment.custom_end_time.substring(0, 5)
                                 : null;
                               const timeLabel = startT && endT ? `${startT} – ${endT}` : '';
+                              const hasFrequencyField = !NO_FREQUENCY_SCRIPTS.has(technicalId);
+                              const isCustomFrequency = assignment.custom_frequency_minutes != null;
+                              const frequencySec = isCustomFrequency
+                                ? assignment.custom_frequency_minutes
+                                : DEFAULT_FREQUENCY_BY_SCRIPT[technicalId];
+                              const customCameraTypes = Array.isArray(assignment.camera_classifications)
+                                ? assignment.camera_classifications.filter(Boolean)
+                                : (assignment.camera_classifications ? [assignment.camera_classifications] : []);
+                              const isCustomCameraTypes = customCameraTypes.length > 0;
+                              const cameraTypes = isCustomCameraTypes ? customCameraTypes : ['All Cameras'];
 
                               return (
-                                <Chip
-                                  key={technicalId || i}
-                                  label={
-                                    <Box sx={{ textAlign: 'left', lineHeight: 1.3, minWidth: 80 }}>
-                                      <Box sx={{ fontWeight: 700, fontSize: '0.8rem' }}>{name}</Box>
-                                      {timeLabel && (
-                                        <Box sx={{ fontWeight: 500, fontSize: '0.68rem', opacity: 0.85, mt: '2px', color: '#333' }}>
-                                          {timeLabel}
-                                        </Box>
-                                      )}
-                                    </Box>
-                                  }
-                                  size="medium"
-                                  onDelete={() => setDeleteDialog({ open: true, assignment })}
+                                <Box
+                                  key={assignment.id ?? `${technicalId}-${i}`}
                                   sx={{
                                     position: 'relative',
                                     bgcolor: chipColor.bg,
-                                    color: '#777',
-                                    height: 'auto',
-                                    minWidth: { xs: 140, sm: 180 },
-                                    py: 0.8,
-                                    alignItems : 'start',
-                                    display : 'flex',
-                                    borderRadius: '16px',
-                                    '& .MuiChip-label': { pl: 2, pr: 3.5, width: '100%' },
-                                    '& .MuiChip-deleteIcon': {
-                                      position: 'absolute',
-                                      top: '8px',
-                                      right: '8px',
-                                      margin: 0,
-                                      color: '#777',
-                                      fontSize: 16,
-                                      '&:hover': { color: chipColor.color, filter: 'brightness(0.8)' }
-                                    },
-                                    mt: 1.5,
+                                    borderRadius: '14px',
+                                    p: 2,
+                                    pr: 4.5,
+                                    width: { xs: '100%', sm: 240 },
                                   }}
-                                />
+                                >
+                                  <IconButton
+                                    size="small"
+                                    onClick={() => setDeleteDialog({ open: true, assignment })}
+                                    sx={{
+                                      position: 'absolute',
+                                      top: 10,
+                                      right: 10,
+                                      width: 22,
+                                      height: 22,
+                                      bgcolor: 'rgba(0,0,0,0.35)',
+                                      color: '#fff',
+                                      '&:hover': { bgcolor: 'rgba(0,0,0,0.55)' },
+                                    }}
+                                  >
+                                    <Close sx={{ fontSize: 14 }} />
+                                  </IconButton>
+
+                                  <Box sx={{ fontWeight: 700, fontSize: '0.9rem', color: '#0f172a' }}>
+                                    {name}
+                                  </Box>
+                                  {timeLabel && (
+                                    <Box sx={{ fontWeight: 500, fontSize: '0.75rem', opacity: 0.75, mt: '2px', color: '#334155' }}>
+                                      {timeLabel}
+                                    </Box>
+                                  )}
+
+                                  {hasFrequencyField && frequencySec != null && (
+                                    <Box sx={{ mt: 1.5 }}>
+                                      <Box sx={{ fontSize: '0.6rem', fontWeight: 700, opacity: 0.55, letterSpacing: '0.03em', color: '#334155', whiteSpace: 'nowrap' }}>
+                                        FREQUENCY (sec)
+                                      </Box>
+                                      <Box sx={{ fontSize: '0.85rem', fontWeight: 700, color: '#0f172a', mt: '2px' }}>
+                                        {frequencySec}
+                                        {!isCustomFrequency && (
+                                          <Box component="span" sx={{ fontSize: '0.68rem', fontWeight: 500, opacity: 0.6, ml: '4px' }}>
+                                            (default)
+                                          </Box>
+                                        )}
+                                      </Box>
+                                    </Box>
+                                  )}
+                                  {hasFrequencyField && (
+                                    <Box sx={{ mt: 1.2 }}>
+                                      <Box sx={{ fontSize: '0.6rem', fontWeight: 700, opacity: 0.55, letterSpacing: '0.03em', color: '#334155', whiteSpace: 'nowrap' }}>
+                                        CAMERA TYPE{!isCustomCameraTypes && (
+                                          <Box component="span" sx={{ fontWeight: 500, opacity: 0.85, ml: '4px' }}>
+                                            (default)
+                                          </Box>
+                                        )}
+                                      </Box>
+                                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: '4px', mt: '4px' }}>
+                                        {cameraTypes.map((ct) => (
+                                          <Box
+                                            key={ct}
+                                            sx={{
+                                              px: 1.1,
+                                              py: '2px',
+                                              borderRadius: '10px',
+                                              bgcolor: 'rgba(255,255,255,0.6)',
+                                              fontSize: '0.72rem',
+                                              fontWeight: 600,
+                                              color: chipColor.color,
+                                              whiteSpace: 'nowrap',
+                                            }}
+                                          >
+                                            {ct}
+                                          </Box>
+                                        ))}
+                                      </Box>
+                                    </Box>
+                                  )}
+                                </Box>
                               );
                             })}
                           </Box>

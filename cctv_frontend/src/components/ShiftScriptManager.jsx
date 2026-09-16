@@ -245,6 +245,17 @@ const DEFAULT_CLASSIFICATIONS = [
 // One-shot scripts — no cooldown loop, frequency field not applicable
 const NO_FREQUENCY_SCRIPTS = new Set(['vision', 'vision_neet']);
 
+let slotKeySeq = 0;
+const emptySlot = () => ({
+    key: `new-${++slotKeySeq}`,
+    assignmentId: null,
+    start: '',
+    end: '',
+    frequency: '',
+    classifications: [],
+    sms: false,
+});
+
 const ShiftScriptManager = ({
     shift,
     examId,
@@ -265,14 +276,12 @@ const ShiftScriptManager = ({
     const [internalOpenDialog, setInternalOpenDialog] = useState(false);
     const [error, setError] = useState('');
 
-    /* Per-script card times: { [scriptDbId]: { start, end } } */
-    const [cardTimes, setCardTimes] = useState({});
-    /* Per-script frequency: { [scriptDbId]: string } in seconds */
-    const [cardFrequency, setCardFrequency] = useState({});
-    /* Per-script camera classifications: { [scriptDbId]: string[] } */
-    const [cardClassifications, setCardClassifications] = useState({});
-    /* Per-script SMS toggle: { [scriptDbId]: bool } (NTA + eligible scripts only) */
-    const [cardSms, setCardSms] = useState({});
+    /* Per-script time windows: { [scriptDbId]: Slot[] }. A script can have more
+       than one window on the same shift/date, each with its own time range,
+       frequency, camera filter and SMS setting.
+       Slot = { key, assignmentId (null for a not-yet-saved window), start, end,
+                frequency, classifications, sms } */
+    const [cardSlots, setCardSlots] = useState({});
     /* Which cards the user has clicked (show blue outline) */
     const [selectedCards, setSelectedCards] = useState(new Set());
 
@@ -329,45 +338,49 @@ const ShiftScriptManager = ({
         ? activeAssignments.filter((a) => a.assignment_date === selectedDate)
         : activeAssignments;
 
-    /* Pre-fill card times + selection when dialog opens or date changes */
+    /* Pre-fill card slots + selection when dialog opens or date changes.
+       Each existing assignment becomes its own editable slot (carrying its
+       assignmentId), and every script also gets one trailing blank slot so a
+       new — possibly additional — time window can be typed straight into the
+       card, same as before. */
     useEffect(() => {
         if (!isDialogOpen) {
-            setCardTimes({});
-            setCardFrequency({});
-            setCardClassifications({});
-            setCardSms({});
+            setCardSlots({});
             setSelectedCards(new Set());
             setError('');
             return;
         }
 
-        const newCardTimes = {};
-        const newCardFrequency = {};
-        const newCardClassifications = {};
-        const newCardSms = {};
+        const newCardSlots = {};
         const newSelectedCards = new Set();
 
         visibleAssignments.forEach((a) => {
-            if (a.script_id) {
-                newSelectedCards.add(a.script_id);
-                newCardTimes[a.script_id] = {
-                    start: a.custom_start_time ? a.custom_start_time.substring(0, 5) : '',
-                    end: a.custom_end_time ? a.custom_end_time.substring(0, 5) : ''
-                };
-                newCardFrequency[a.script_id] = a.custom_frequency_minutes != null ? String(a.custom_frequency_minutes) : '';
-                newCardClassifications[a.script_id] = Array.isArray(a.camera_classifications) ? a.camera_classifications : [];
-                newCardSms[a.script_id] = !!a.sms_enabled;
-            }
+            if (!a.script_id) return;
+            newSelectedCards.add(a.script_id);
+            if (!newCardSlots[a.script_id]) newCardSlots[a.script_id] = [];
+            newCardSlots[a.script_id].push({
+                key: `existing-${a.id}`,
+                assignmentId: a.id,
+                start: a.custom_start_time ? a.custom_start_time.substring(0, 5) : '',
+                end: a.custom_end_time ? a.custom_end_time.substring(0, 5) : '',
+                frequency: a.custom_frequency_minutes != null ? String(a.custom_frequency_minutes) : '',
+                classifications: Array.isArray(a.camera_classifications) ? a.camera_classifications : [],
+                sms: !!a.sms_enabled,
+            });
         });
 
-        setCardTimes(newCardTimes);
-        setCardFrequency(newCardFrequency);
-        setCardClassifications(newCardClassifications);
-        setCardSms(newCardSms);
+        // A script with no windows yet gets one blank slot to type straight into.
+        // A script that already has a window does NOT get an extra blank one —
+        // that only appears when the user clicks "Add another time window".
+        scripts.forEach((s) => {
+            if (!newCardSlots[s.id]) newCardSlots[s.id] = [emptySlot()];
+        });
+
+        setCardSlots(newCardSlots);
         setSelectedCards(newSelectedCards);
         setError('');
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isDialogOpen, assignments, selectedDate]);
+    }, [isDialogOpen, assignments, selectedDate, scripts]);
 
     const formatDate = (v) => {
         if (!v) return 'No date';
@@ -408,35 +421,53 @@ const ShiftScriptManager = ({
     const handleCloseDialog = () => {
         if (renderInline) setInternalOpenDialog(false);
         else if (externalOnCloseDialog) externalOnCloseDialog();
-        setCardTimes({}); setCardSms({}); setError('');
+        setCardSlots({}); setError('');
     };
 
-    const handleTimeChange = (scriptDbId, field, value) => {
-        // Also mark card as selected when user starts typing a time
+    const updateSlot = (scriptDbId, slotKey, patch) => {
         setSelectedCards((prev) => new Set([...prev, scriptDbId]));
-        setCardTimes((prev) => ({
+        setCardSlots((prev) => ({
             ...prev,
-            [scriptDbId]: { ...prev[scriptDbId], [field]: value },
+            [scriptDbId]: (prev[scriptDbId] || []).map((slot) =>
+                slot.key === slotKey ? { ...slot, ...patch } : slot
+            ),
         }));
     };
 
-    const handleClassificationsChange = (scriptDbId, value) => {
-        setSelectedCards((prev) => new Set([...prev, scriptDbId]));
-        setCardClassifications((prev) => ({ ...prev, [scriptDbId]: value }));
+    const handleTimeChange = (scriptDbId, slotKey, field, value) => {
+        updateSlot(scriptDbId, slotKey, { [field]: value });
     };
 
-    const handleFrequencyChange = (scriptDbId, value) => {
-        setSelectedCards((prev) => new Set([...prev, scriptDbId]));
-        setCardFrequency((prev) => ({ ...prev, [scriptDbId]: value }));
+    const handleClassificationsChange = (scriptDbId, slotKey, value) => {
+        updateSlot(scriptDbId, slotKey, { classifications: value });
     };
 
-    const handleSmsToggle = (scriptDbId, checked) => {
-        // Toggling SMS implies the card is selected for assignment.
-        setSelectedCards((prev) => new Set([...prev, scriptDbId]));
-        setCardSms((prev) => ({ ...prev, [scriptDbId]: checked }));
+    const handleFrequencyChange = (scriptDbId, slotKey, value) => {
+        updateSlot(scriptDbId, slotKey, { frequency: value });
     };
 
-    
+    const handleSmsToggle = (scriptDbId, slotKey, checked) => {
+        updateSlot(scriptDbId, slotKey, { sms: checked });
+    };
+
+    /* Add another (blank) time window to a script card */
+    const handleAddSlot = (scriptDbId) => {
+        setSelectedCards((prev) => new Set([...prev, scriptDbId]));
+        setCardSlots((prev) => ({
+            ...prev,
+            [scriptDbId]: [...(prev[scriptDbId] || []), emptySlot()],
+        }));
+    };
+
+    /* Remove a not-yet-saved slot. Saved assignments are removed from the shift
+       card's chips instead, so deleting one window never touches the others. */
+    const handleRemoveSlot = (scriptDbId, slotKey) => {
+        setCardSlots((prev) => ({
+            ...prev,
+            [scriptDbId]: (prev[scriptDbId] || []).filter((slot) => slot.key !== slotKey),
+        }));
+    };
+
     const handleCardClick = (scriptDbId) => {
         setSelectedCards((prev) => {
             const next = new Set(prev);
@@ -446,42 +477,56 @@ const ShiftScriptManager = ({
         });
     };
 
-    /* Configured = BOTH start AND end are non-empty */
-    const isConfigured = (scriptDbId) => {
-        const t = cardTimes[scriptDbId];
-        return !!(t?.start && t?.end);
-    };
+    /* A slot is configured once BOTH start AND end are set */
+    const isSlotConfigured = (slot) => !!(slot?.start && slot?.end);
+    const isConfigured = (scriptDbId) => (cardSlots[scriptDbId] || []).some(isSlotConfigured);
 
-    const configuredCount = scripts.filter((s) => isConfigured(s.id)).length;
+    const configuredCount = scripts.reduce(
+        (count, s) => count + (cardSlots[s.id] || []).filter(isSlotConfigured).length,
+        0
+    );
 
     const handleBulkSubmit = async () => {
-        const toAssign = scripts
-            .filter((s) => isConfigured(s.id))
-            .map((s) => {
-                const freqVal = parseInt(cardFrequency[s.id], 10);
-                return {
-                    script_id: s.id,
-                    custom_start_time: cardTimes[s.id].start,
-                    custom_end_time: cardTimes[s.id].end,
-                    custom_frequency_minutes: Number.isFinite(freqVal) && freqVal > 0 ? freqVal : null, // stored in seconds
-                    camera_classifications: cardClassifications[s.id]?.length > 0 ? cardClassifications[s.id] : null,
-                    // Only send SMS toggle for eligible scripts on NTA exams.
-                    ...(smsEligible(s) ? { sms_enabled: !!cardSms[s.id] } : {}),
-                };
-            });
+        const toCreate = [];
+        const toUpdate = [];
 
-        if (!toAssign.length) {
-            setError('Set START and END time for at least one script card.');
+        scripts.forEach((s) => {
+            (cardSlots[s.id] || []).forEach((slot) => {
+                if (!isSlotConfigured(slot)) return;
+                const freqVal = parseInt(slot.frequency, 10);
+                const fields = {
+                    custom_start_time: slot.start,
+                    custom_end_time: slot.end,
+                    custom_frequency_minutes: Number.isFinite(freqVal) && freqVal > 0 ? freqVal : null, // stored in seconds
+                    camera_classifications: slot.classifications?.length > 0 ? slot.classifications : null,
+                    // Only send SMS toggle for eligible scripts on NTA exams.
+                    ...(smsEligible(s) ? { sms_enabled: !!slot.sms } : {}),
+                };
+                if (slot.assignmentId) {
+                    toUpdate.push({ id: slot.assignmentId, fields });
+                } else {
+                    toCreate.push({ script_id: s.id, ...fields });
+                }
+            });
+        });
+
+        if (!toCreate.length && !toUpdate.length) {
+            setError('Set START and END time for at least one script window.');
             return;
         }
         setSubmitting(true); setError('');
         try {
-            await shiftScriptsAPI.bulkAssign(shift.id, toAssign, dateOptions);
+            if (toUpdate.length) {
+                await Promise.all(toUpdate.map(({ id, fields }) => shiftScriptsAPI.update(id, fields)));
+            }
+            if (toCreate.length) {
+                await shiftScriptsAPI.bulkAssign(shift.id, toCreate, dateOptions);
+            }
             handleCloseDialog();
             loadAssignments();
             if (onUpdate) onUpdate();
         } catch (e) {
-            setError(e?.response?.data?.message || 'Bulk assign failed. Please try again.');
+            setError(e?.response?.data?.message || 'Save failed. Please try again.');
         } finally { setSubmitting(false); }
     };
 
@@ -544,23 +589,27 @@ const ShiftScriptManager = ({
                             sx={{
                                 display: 'grid',
                                 gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', md: 'repeat(3, 1fr)' },
+                                alignItems: 'start',
                                 gap: 1.5,
                             }}
                         >
                             {catScripts.map((script) => {
                                 const configured = isConfigured(script.id);
                                 const isSelected = selectedCards.has(script.id) || configured;
-                                const times = cardTimes[script.id] || {};
+                                const slots = cardSlots[script.id] || [];
                                 const meta = SCRIPT_META[script.script_id] || {};
                                 const IconComp = meta.icon || Extension;
                                 const iconColor = meta.iconColor
                                 const bgcolor = meta.bg
+
+                                const isExpanded = slots.length > 1;
 
                                 return (
                                     <Box
                                         key={script.id}
                                         onClick={() => handleCardClick(script.id)}
                                         sx={{
+                                            gridColumn: isExpanded ? '1 / -1' : 'auto',
                                             border: isSelected
                                                 ? '2px solid #3b82f6'
                                                 : 'none',
@@ -619,146 +668,215 @@ const ShiftScriptManager = ({
                                             </Typography>
                                         </Box>
 
-                                        {/* Time pickers — stop card-click propagation */}
-                                        <Box sx={{ display: 'flex', gap: 1 }} onClick={(e) => e.stopPropagation()}>
-                                            <Box sx={{ flex: 1, minWidth: 0 }}>
-                                                <Typography sx={{ fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.06em', color: '#94a3b8', mb: 0.4 }}>
-                                                    START TIME
-                                                </Typography>
-                                                <TextField
-                                                    type="time"
-                                                    size="small"
-                                                    fullWidth
-                                                    value={times.start || ''}
-                                                    onChange={(e) => handleTimeChange(script.id, 'start', e.target.value)}
-                                                    InputLabelProps={{ shrink: true }}
-                                                    inputProps={{ style: { fontSize: '0.82rem', padding: '7px 8px' } }}
-                                                    sx={{
-                                                        '& .MuiOutlinedInput-root': {
-                                                            borderRadius: 1.5,
-                                                            bgcolor: '#f3f4f6',
-                                                            '& fieldset': { borderColor: '#fff' },
-                                                        },
-                                                    }}
-                                                />
-                                            </Box>
-                                            <Box sx={{ flex: 1, minWidth: 0 }}>
-                                                <Typography sx={{ fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.06em', color: '#94a3b8', mb: 0.4 }}>
-                                                    END TIME
-                                                </Typography>
-                                                <TextField
-                                                    type="time"
-                                                    size="small"
-                                                    fullWidth
-                                                    value={times.end || ''}
-                                                    onChange={(e) => handleTimeChange(script.id, 'end', e.target.value)}
-                                                    InputLabelProps={{ shrink: true }}
-                                                    inputProps={{ style: { fontSize: '0.82rem', padding: '7px 8px' } }}
-                                                    sx={{
-                                                        '& .MuiOutlinedInput-root': {
-                                                            borderRadius: 1.5,
-                                                            bgcolor: '#f3f4f6',
-                                                            '& fieldset': { borderColor: '#fff' },
-                                                        },
-                                                    }}
-                                                />
-                                            </Box>
-                                        </Box>
-
-                                        {/* Frequency input — hidden for one-shot scripts */}
-                                        {!NO_FREQUENCY_SCRIPTS.has(script.script_id) && (
-                                        <Box sx={{ mt: 1 }} onClick={(e) => e.stopPropagation()}>
-                                            <Typography sx={{ fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.06em', color: '#94a3b8', mb: 0.4 }}>
-                                                FREQUENCY (sec)
-                                            </Typography>
-                                            <TextField
-                                                type="number"
-                                                size="small"
-                                                fullWidth
-                                                placeholder="Default"
-                                                value={cardFrequency[script.id] || ''}
-                                                onChange={(e) => handleFrequencyChange(script.id, e.target.value)}
-                                                inputProps={{ min: 1, style: { fontSize: '0.82rem', padding: '7px 8px' } }}
-                                                sx={{
-                                                    '& .MuiOutlinedInput-root': {
-                                                        borderRadius: 1.5,
-                                                        bgcolor: '#f3f4f6',
-                                                        '& fieldset': { borderColor: '#fff' },
-                                                    },
-                                                }}
-                                            />
-                                        </Box>
-                                        )}
-
-                                        {/* Camera Classifications multi-select — hidden for one-shot scripts */}
-                                        {!NO_FREQUENCY_SCRIPTS.has(script.script_id) && <Box sx={{ mt: 1 }} onClick={(e) => e.stopPropagation()}>
-                                            <Typography sx={{ fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.06em', color: '#94a3b8', mb: 0.4 }}>
-                                                CAMERA TYPE
-                                            </Typography>
-                                            <Autocomplete
-                                                multiple
-                                                freeSolo
-                                                size="small"
-                                                options={DEFAULT_CLASSIFICATIONS}
-                                                value={cardClassifications[script.id] || []}
-                                                onChange={(_, newValue) => handleClassificationsChange(script.id, newValue)}
-                                                renderTags={(value, getTagProps) =>
-                                                    value.map((option, index) => (
-                                                        <Chip
-                                                            key={index}
-                                                            label={option}
-                                                            size="small"
-                                                            {...getTagProps({ index })}
-                                                            sx={{ fontSize: '0.68rem', height: 20 }}
-                                                        />
-                                                    ))
+                                        <Box
+                                            sx={
+                                                isExpanded
+                                                    ? {
+                                                          display: 'grid',
+                                                          gridTemplateColumns: {
+                                                              xs: '1fr',
+                                                              sm: 'repeat(auto-fit, minmax(210px, 1fr))',
+                                                          },
+                                                          gap: 1.25,
+                                                      }
+                                                    : undefined
+                                            }
+                                        >
+                                        {slots.map((slot, slotIdx) => (
+                                            <Box
+                                                key={slot.key}
+                                                onClick={(e) => e.stopPropagation()}
+                                                sx={
+                                                    isExpanded
+                                                        ? {
+                                                              p: 1.25,
+                                                              bgcolor: '#f8fafc',
+                                                              border: '1px solid #eef2f7',
+                                                              borderRadius: 2,
+                                                          }
+                                                        : undefined
                                                 }
-                                                renderInput={(params) => (
+                                            >
+                                                {isExpanded && (
+                                                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+                                                        <Typography sx={{ fontSize: '0.64rem', fontWeight: 800, letterSpacing: '0.06em', color: '#64748b' }}>
+                                                            WINDOW {slotIdx + 1}
+                                                        </Typography>
+                                                        {!slot.assignmentId && (
+                                                            <IconButton
+                                                                size="small"
+                                                                onClick={() => handleRemoveSlot(script.id, slot.key)}
+                                                                sx={{ p: 0.4, '&:hover': { bgcolor: '#fee2e2' } }}
+                                                            >
+                                                                <Delete sx={{ fontSize: 14, color: '#94a3b8' }} />
+                                                            </IconButton>
+                                                        )}
+                                                    </Box>
+                                                )}
+
+                                                {/* Time pickers */}
+                                                <Box sx={{ display: 'flex', gap: 1 }}>
+                                                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                                                        <Typography sx={{ fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.06em', color: '#94a3b8', mb: 0.4 }}>
+                                                            START TIME
+                                                        </Typography>
+                                                        <TextField
+                                                            type="time"
+                                                            size="small"
+                                                            fullWidth
+                                                            value={slot.start || ''}
+                                                            onChange={(e) => handleTimeChange(script.id, slot.key, 'start', e.target.value)}
+                                                            InputLabelProps={{ shrink: true }}
+                                                            inputProps={{ style: { fontSize: '0.82rem', padding: '7px 8px' } }}
+                                                            sx={{
+                                                                '& .MuiOutlinedInput-root': {
+                                                                    borderRadius: 1.5,
+                                                                    bgcolor: '#f3f4f6',
+                                                                    '& fieldset': { borderColor: '#fff' },
+                                                                },
+                                                            }}
+                                                        />
+                                                    </Box>
+                                                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                                                        <Typography sx={{ fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.06em', color: '#94a3b8', mb: 0.4 }}>
+                                                            END TIME
+                                                        </Typography>
+                                                        <TextField
+                                                            type="time"
+                                                            size="small"
+                                                            fullWidth
+                                                            value={slot.end || ''}
+                                                            onChange={(e) => handleTimeChange(script.id, slot.key, 'end', e.target.value)}
+                                                            InputLabelProps={{ shrink: true }}
+                                                            inputProps={{ style: { fontSize: '0.82rem', padding: '7px 8px' } }}
+                                                            sx={{
+                                                                '& .MuiOutlinedInput-root': {
+                                                                    borderRadius: 1.5,
+                                                                    bgcolor: '#f3f4f6',
+                                                                    '& fieldset': { borderColor: '#fff' },
+                                                                },
+                                                            }}
+                                                        />
+                                                    </Box>
+                                                </Box>
+
+                                                {/* Frequency input — hidden for one-shot scripts */}
+                                                {!NO_FREQUENCY_SCRIPTS.has(script.script_id) && (
+                                                <Box sx={{ mt: 1 }}>
+                                                    <Typography sx={{ fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.06em', color: '#94a3b8', mb: 0.4 }}>
+                                                        FREQUENCY (sec)
+                                                    </Typography>
                                                     <TextField
-                                                        {...params}
-                                                        placeholder={cardClassifications[script.id]?.length ? '' : 'Default (all)'}
+                                                        type="number"
+                                                        size="small"
+                                                        fullWidth
+                                                        placeholder="Default"
+                                                        value={slot.frequency || ''}
+                                                        onChange={(e) => handleFrequencyChange(script.id, slot.key, e.target.value)}
+                                                        inputProps={{ min: 1, style: { fontSize: '0.82rem', padding: '7px 8px' } }}
                                                         sx={{
                                                             '& .MuiOutlinedInput-root': {
                                                                 borderRadius: 1.5,
                                                                 bgcolor: '#f3f4f6',
-                                                                fontSize: '0.82rem',
                                                                 '& fieldset': { borderColor: '#fff' },
                                                             },
                                                         }}
                                                     />
-                                                )}
-                                            />
-                                        </Box>}
-
-                                        {/* SMS alert toggle — NTA + eligible scripts only */}
-                                        {smsEligible(script) && (
-                                            <Box
-                                                onClick={(e) => e.stopPropagation()}
-                                                sx={{
-                                                    mt: 1.25,
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    justifyContent: 'space-between',
-                                                    bgcolor: '#f8fafc',
-                                                    border: '1px solid #eef2f7',
-                                                    borderRadius: 1.5,
-                                                    px: 1,
-                                                    py: 0.25,
-                                                }}
-                                            >
-                                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-                                                    <Smartphone sx={{ fontSize: 16, color: '#64748b' }} />
-                                                    <Typography sx={{ fontSize: '0.7rem', fontWeight: 700, color: '#475569' }}>
-                                                        SMS alert
-                                                    </Typography>
                                                 </Box>
-                                                <Switch
-                                                    size="small"
-                                                    checked={!!cardSms[script.id]}
-                                                    onChange={(e) => handleSmsToggle(script.id, e.target.checked)}
-                                                />
+                                                )}
+
+                                                {/* Camera Classifications multi-select — hidden for one-shot scripts */}
+                                                {!NO_FREQUENCY_SCRIPTS.has(script.script_id) && <Box sx={{ mt: 1 }}>
+                                                    <Typography sx={{ fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.06em', color: '#94a3b8', mb: 0.4 }}>
+                                                        CAMERA TYPE
+                                                    </Typography>
+                                                    <Autocomplete
+                                                        multiple
+                                                        freeSolo
+                                                        size="small"
+                                                        options={DEFAULT_CLASSIFICATIONS}
+                                                        value={slot.classifications || []}
+                                                        onChange={(_, newValue) => handleClassificationsChange(script.id, slot.key, newValue)}
+                                                        renderTags={(value, getTagProps) =>
+                                                            value.map((option, index) => (
+                                                                <Chip
+                                                                    key={index}
+                                                                    label={option}
+                                                                    size="small"
+                                                                    {...getTagProps({ index })}
+                                                                    sx={{ fontSize: '0.68rem', height: 20 }}
+                                                                />
+                                                            ))
+                                                        }
+                                                        renderInput={(params) => (
+                                                            <TextField
+                                                                {...params}
+                                                                placeholder={slot.classifications?.length ? '' : 'Default (all)'}
+                                                                sx={{
+                                                                    '& .MuiOutlinedInput-root': {
+                                                                        borderRadius: 1.5,
+                                                                        bgcolor: '#f3f4f6',
+                                                                        fontSize: '0.82rem',
+                                                                        '& fieldset': { borderColor: '#fff' },
+                                                                    },
+                                                                }}
+                                                            />
+                                                        )}
+                                                    />
+                                                </Box>}
+
+                                                {/* SMS alert toggle — NTA + eligible scripts only */}
+                                                {smsEligible(script) && (
+                                                    <Box
+                                                        sx={{
+                                                            mt: 1.25,
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'space-between',
+                                                            bgcolor: '#f8fafc',
+                                                            border: '1px solid #eef2f7',
+                                                            borderRadius: 1.5,
+                                                            px: 1,
+                                                            py: 0.25,
+                                                        }}
+                                                    >
+                                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                                                            <Smartphone sx={{ fontSize: 16, color: '#64748b' }} />
+                                                            <Typography sx={{ fontSize: '0.7rem', fontWeight: 700, color: '#475569' }}>
+                                                                SMS alert
+                                                            </Typography>
+                                                        </Box>
+                                                        <Switch
+                                                            size="small"
+                                                            checked={!!slot.sms}
+                                                            onChange={(e) => handleSmsToggle(script.id, slot.key, e.target.checked)}
+                                                        />
+                                                    </Box>
+                                                )}
                                             </Box>
-                                        )}
+                                        ))}
+                                        </Box>
+
+                                        {/* Add another independent time window for this script */}
+                                        <Button
+                                            fullWidth
+                                            size="small"
+                                            startIcon={<Add sx={{ fontSize: 16 }} />}
+                                            onClick={(e) => { e.stopPropagation(); handleAddSlot(script.id); }}
+                                            sx={{
+                                                mt: 1.25,
+                                                py: 0.7,
+                                                fontSize: '0.7rem',
+                                                fontWeight: 700,
+                                                color: '#3b82f6',
+                                                textTransform: 'none',
+                                                borderRadius: 1.5,
+                                                border: '1px dashed #bfdbfe',
+                                                '&:hover': { bgcolor: '#eff6ff', borderColor: '#93c5fd' },
+                                            }}
+                                        >
+                                            Add another time window
+                                        </Button>
                                     </Box>
                                 );
                             })}
@@ -781,7 +899,7 @@ const ShiftScriptManager = ({
             <DialogActions sx={{ px: { xs: 2, sm: 3 }, py: 2, gap: 1, flexWrap: 'wrap', borderTop: '1px solid #f1f5f9' }}>
                 {configuredCount > 0 && (
                     <Typography sx={{ flex: 1, fontSize: '0.82rem', color: '#3b82f6', fontWeight: 600 }}>
-                        {configuredCount} script{configuredCount > 1 ? 's' : ''} ready to assign
+                        {configuredCount} time window{configuredCount > 1 ? 's' : ''} ready to save
                     </Typography>
                 )}
                 <Button onClick={handleCloseDialog} sx={{ color: '#64748b', fontWeight: 600 }}>

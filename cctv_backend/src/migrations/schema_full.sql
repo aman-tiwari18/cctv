@@ -402,7 +402,7 @@ CREATE TABLE `shift_script_assignments` (
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `unique_shift_task_date` (`shift_id`,`script_id`,`assignment_date`),
+  UNIQUE KEY `unique_shift_task_date_time` (`shift_id`,`script_id`,`assignment_date`,`custom_start_time`,`custom_end_time`),
   KEY `idx_shift_id` (`shift_id`),
   KEY `idx_script_id` (`script_id`),
   KEY `idx_status` (`status`),
