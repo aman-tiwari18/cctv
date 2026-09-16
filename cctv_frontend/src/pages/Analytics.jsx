@@ -746,14 +746,26 @@ const Analytics = () => {
                       {/* Script chips — deduplicated by script_id + time window, so the
                           same script assigned twice with different windows shows as two chips */}
                       {filteredAssignments.length > 0 && (() => {
-                        const seen = new Set();
-                        const unique = filteredAssignments.filter((a) => {
+                        // When duplicate rows exist for the same script + time window, keep the
+                        // one with the most info (frequency/camera type) rather than just the first seen.
+                        const byKey = new Map();
+                        filteredAssignments.forEach((a) => {
                           const scriptKey = a.script_id || a.script?.id || a.id;
                           const key = `${scriptKey}|${a.custom_start_time || ''}|${a.custom_end_time || ''}`;
-                          if (seen.has(key)) return false;
-                          seen.add(key);
-                          return true;
+                          const existing = byKey.get(key);
+                          if (!existing) {
+                            byKey.set(key, a);
+                            return;
+                          }
+                          const existingHasData = existing.custom_frequency_minutes || existing.camera_classifications;
+                          const currentHasData = a.custom_frequency_minutes || a.camera_classifications;
+                          if (currentHasData && !existingHasData) {
+                            byKey.set(key, a);
+                          } else if (Boolean(currentHasData) === Boolean(existingHasData) && a.id > existing.id) {
+                            byKey.set(key, a);
+                          }
                         });
+                        const unique = Array.from(byKey.values());
                         
                         // Sort by start time
                         const sorted = unique.sort((a, b) => {
@@ -763,12 +775,12 @@ const Analytics = () => {
                         });
                         
                         return (
-                          <Box sx={{ display: 'flex', gap: 1, mt: 2, flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'flex-start' }}>
+                          <Box sx={{ display: 'flex', gap: 2, mt: 2, flexWrap: 'wrap', alignItems: 'stretch', justifyContent: 'flex-start' }}>
                             {sorted.map((assignment, i) => {
                               // Remove "detection" keyword from name
                               const rawName = assignment.script?.name || 'Unknown';
                               const name = rawName.replace(/\s*detection\s*/gi, '').trim();
-                              
+
                               const technicalId = assignment.script?.script_id || '';
                               const chipColor = SCRIPT_COLORS[technicalId] || DEFAULT_CHIP_COLOR;
                               const startT = assignment.custom_start_time
@@ -778,45 +790,86 @@ const Analytics = () => {
                                 ? assignment.custom_end_time.substring(0, 5)
                                 : null;
                               const timeLabel = startT && endT ? `${startT} – ${endT}` : '';
+                              const frequencySec = assignment.custom_frequency_minutes;
+                              const cameraTypes = Array.isArray(assignment.camera_classifications)
+                                ? assignment.camera_classifications.filter(Boolean)
+                                : (assignment.camera_classifications ? [assignment.camera_classifications] : []);
 
                               return (
-                                <Chip
+                                <Box
                                   key={assignment.id ?? `${technicalId}-${i}`}
-                                  label={
-                                    <Box sx={{ textAlign: 'left', lineHeight: 1.3, minWidth: 80 }}>
-                                      <Box sx={{ fontWeight: 700, fontSize: '0.8rem' }}>{name}</Box>
-                                      {timeLabel && (
-                                        <Box sx={{ fontWeight: 500, fontSize: '0.68rem', opacity: 0.85, mt: '2px', color: '#333' }}>
-                                          {timeLabel}
-                                        </Box>
-                                      )}
-                                    </Box>
-                                  }
-                                  size="medium"
-                                  onDelete={() => setDeleteDialog({ open: true, assignment })}
                                   sx={{
                                     position: 'relative',
                                     bgcolor: chipColor.bg,
-                                    color: '#777',
-                                    height: 'auto',
-                                    minWidth: { xs: 140, sm: 180 },
-                                    py: 0.8,
-                                    alignItems : 'start',
-                                    display : 'flex',
-                                    borderRadius: '16px',
-                                    '& .MuiChip-label': { pl: 2, pr: 3.5, width: '100%' },
-                                    '& .MuiChip-deleteIcon': {
-                                      position: 'absolute',
-                                      top: '8px',
-                                      right: '8px',
-                                      margin: 0,
-                                      color: '#777',
-                                      fontSize: 16,
-                                      '&:hover': { color: chipColor.color, filter: 'brightness(0.8)' }
-                                    },
-                                    mt: 1.5,
+                                    borderRadius: '14px',
+                                    p: 2,
+                                    pr: 4.5,
+                                    width: { xs: '100%', sm: 240 },
                                   }}
-                                />
+                                >
+                                  <IconButton
+                                    size="small"
+                                    onClick={() => setDeleteDialog({ open: true, assignment })}
+                                    sx={{
+                                      position: 'absolute',
+                                      top: 10,
+                                      right: 10,
+                                      width: 22,
+                                      height: 22,
+                                      bgcolor: 'rgba(0,0,0,0.35)',
+                                      color: '#fff',
+                                      '&:hover': { bgcolor: 'rgba(0,0,0,0.55)' },
+                                    }}
+                                  >
+                                    <Close sx={{ fontSize: 14 }} />
+                                  </IconButton>
+
+                                  <Box sx={{ fontWeight: 700, fontSize: '0.9rem', color: '#0f172a' }}>
+                                    {name}
+                                  </Box>
+                                  {timeLabel && (
+                                    <Box sx={{ fontWeight: 500, fontSize: '0.75rem', opacity: 0.75, mt: '2px', color: '#334155' }}>
+                                      {timeLabel}
+                                    </Box>
+                                  )}
+
+                                  {frequencySec && (
+                                    <Box sx={{ mt: 1.5 }}>
+                                      <Box sx={{ fontSize: '0.6rem', fontWeight: 700, opacity: 0.55, letterSpacing: '0.03em', color: '#334155', whiteSpace: 'nowrap' }}>
+                                        FREQUENCY (sec)
+                                      </Box>
+                                      <Box sx={{ fontSize: '0.85rem', fontWeight: 700, color: '#0f172a', mt: '2px' }}>
+                                        {frequencySec}
+                                      </Box>
+                                    </Box>
+                                  )}
+                                  {cameraTypes.length > 0 && (
+                                    <Box sx={{ mt: 1.2 }}>
+                                      <Box sx={{ fontSize: '0.6rem', fontWeight: 700, opacity: 0.55, letterSpacing: '0.03em', color: '#334155', whiteSpace: 'nowrap' }}>
+                                        CAMERA TYPE
+                                      </Box>
+                                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: '4px', mt: '4px' }}>
+                                        {cameraTypes.map((ct) => (
+                                          <Box
+                                            key={ct}
+                                            sx={{
+                                              px: 1.1,
+                                              py: '2px',
+                                              borderRadius: '10px',
+                                              bgcolor: 'rgba(255,255,255,0.6)',
+                                              fontSize: '0.72rem',
+                                              fontWeight: 600,
+                                              color: chipColor.color,
+                                              whiteSpace: 'nowrap',
+                                            }}
+                                          >
+                                            {ct}
+                                          </Box>
+                                        ))}
+                                      </Box>
+                                    </Box>
+                                  )}
+                                </Box>
                               );
                             })}
                           </Box>
