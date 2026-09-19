@@ -43,7 +43,7 @@ SCRIPT_CLASSIFICATION_MAP = {
 
     # 3. Crowd — >10 people at entry gate -> Outside / Entry Exit
     "crowd":           ["entry", "outside area", "outdoor scene", "parking lot"],
-    "crowd_biometric": ["entry", "outside area", "outdoor scene", "parking lot", "biometric"],
+    "crowd_biometric": ["computer lab", "inside classroom"],
 
     # 4. Invigilator not moving in exam room -> Inside Lab
     "invigilator":     ["computer lab", "inside classroom"],
