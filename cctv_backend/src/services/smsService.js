@@ -168,18 +168,34 @@ async function sendSMS(phoneNumber, message, templateId, creds = {}) {
         logger.info(`Sending SMS → ${phoneNumber} (Template: ${templateId})`);
 
         const response = await axios.post(smsUrl, null, { params });
+        const errorCode = response.data?.ErrorCode;
+        const errorMessage = response.data?.ErrorMessage;
 
-        if (response.data?.ErrorCode === '000') {
-            logger.info(`SMS sent → ${phoneNumber}`);
+        if (errorCode === '000') {
+            logger.info(`SMS sent → ${phoneNumber} (DLT ${templateId})`);
             return { success: true };
         }
 
-        logger.warn(`SMS failed → ${response.data?.ErrorMessage}`);
-        return { success: false, response: response.data };
+        // Gateway/DLT rejected the send — errorCode is SMSGatewayHub's own code
+        // (not an HTTP status), e.g. mismatched template text, unregistered
+        // sender/entity, DND-blocked number. Log both so a failure is
+        // diagnosable from the log alone, without re-querying the gateway.
+        logger.warn(
+            `SMS failed → ${phoneNumber} (DLT ${templateId}) | ` +
+            `ErrorCode: ${errorCode ?? 'unknown'} | ErrorMessage: ${errorMessage ?? 'none'}`
+        );
+        return { success: false, errorCode, errorMessage, response: response.data };
 
     } catch (error) {
-        logger.error(`SMS error → ${phoneNumber}: ${error.message}`);
-        return { success: false };
+        // Network/HTTP-level failure (timeout, DNS, non-2xx) — distinct from a
+        // gateway-level rejection above, which still returns 200 with an
+        // ErrorCode. Surface the gateway's response body when axios has one.
+        const gatewayBody = error.response?.data;
+        logger.error(
+            `SMS error → ${phoneNumber} (DLT ${templateId}): ${error.message}` +
+            (gatewayBody ? ` | gateway response: ${JSON.stringify(gatewayBody)}` : '')
+        );
+        return { success: false, errorCode: gatewayBody?.ErrorCode, errorMessage: gatewayBody?.ErrorMessage || error.message };
     }
 }
 

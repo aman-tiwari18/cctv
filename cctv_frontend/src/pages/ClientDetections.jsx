@@ -67,7 +67,7 @@ const TYPE_META = {
   proximity: { label: 'Close Proximity', color: '#5cb88a', bg: '#e5f5ed' },
   crowd: { label: 'Crowd Detection (Entry/Exit)', color: '#e24d7b', bg: '#fce4ec' },
   crowd_biometric: { label: 'Crowd Detection (Biometric)', color: '#9333ea', bg: '#f3e8ff' },
-  crowd_five: { label: 'Crowd < 5', color: '#e06050', bg: '#fce8e6' },
+  crowd_five: { label: 'Less Than 5 People In a Lab', color: '#e06050', bg: '#fce8e6' },
   crowd_zero: { label: 'Zero Person', color: '#6b5b95', bg: '#edeaf3' },
   server: { label: 'Server Room', color: '#a0623d', bg: '#f3ebe4' },
   intruder: { label: 'Intruder', color: '#d94466', bg: '#fce4ea' },
@@ -198,9 +198,9 @@ function DetectionCard({ item, onClick, onRemove, onUndo, onAccept, isRemoving, 
         border: '1px solid #e2e8f0',
       }}
     >
-      <Box sx={{ position: 'relative', bgcolor: '#0f172a' }}>
+      <Box sx={{ position: 'relative', bgcolor: '#f1f5f9' }}>
         {imgError ? (
-          <Box sx={{ height: { xs: 200, md: 220 }, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#1e293b' }}>
+          <Box sx={{ height: { xs: 260, md: 380 }, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#1e293b' }}>
             <CameraAlt sx={{ fontSize: 48, color: '#475569' }} />
           </Box>
         ) : (
@@ -209,7 +209,7 @@ function DetectionCard({ item, onClick, onRemove, onUndo, onAccept, isRemoving, 
             image={item.image_url}
             alt={item.camera_id}
             onError={() => setImgError(true)}
-            sx={{ height: { xs: 200, md: 220 }, objectFit: 'cover', filter: isPendingRemoval ? 'grayscale(0.4) brightness(0.85)' : 'none', transition: 'filter 0.2s ease' }}
+            sx={{ height: { xs: 260, md: 380 }, width: '100%', objectFit: 'contain', bgcolor: '#f1f5f9', filter: isPendingRemoval ? 'grayscale(0.4) brightness(0.85)' : 'none', transition: 'filter 0.2s ease' }}
           />
         )}
         {/* When pending removal, overlay a trash glyph on the image — matches
@@ -1197,6 +1197,9 @@ const ClientDetections = () => {
   // removalTimersRef: per-uid setTimeout handles so Undo can cancel them.
   const [pendingRemovals, setPendingRemovals] = useState(new Set());
   const [confirmedRemoved, setConfirmedRemoved] = useState(new Set());
+  // Accepted detections leave this live list immediately (no undo window) —
+  // they now live on the "Accepted Detections" page instead.
+  const [confirmedAccepted, setConfirmedAccepted] = useState(new Set());
   const removalTimersRef = useRef(new Map());
   // Mirror of pendingRemovals readable from inside callbacks that close over
   // stale state — namely the socket handler, which can't depend on the Set
@@ -1365,7 +1368,7 @@ const ClientDetections = () => {
     if (exportItems.length === 0) return;
 
     const TYPE_LABELS = {
-      proximity: 'Close Proximity', crowd: 'Crowd Detection', crowd_five: 'Crowd < 5',
+      proximity: 'Close Proximity', crowd: 'Crowd Detection', crowd_five: 'Less Than 5 People In a Lab',
       crowd_zero: 'Zero Person', server: 'Server Room', intruder: 'Intruder',
       entry_exit: 'Entry/Exit', phone: 'Phone', blind_spot: 'Blind Spot', furniture: 'Improper Furniture',
       invigilator: 'Invigilator', inversion: 'Camera Inversion', tamper: 'Camera Tampering',
@@ -1566,8 +1569,8 @@ const ClientDetections = () => {
   // only confirmedRemoved are filtered out so the grid layout doesn't reflow
   // until the undo window closes.
   const filteredImages = useMemo(() => {
-    return images.filter(item => !confirmedRemoved.has(item.uid));
-  }, [images, confirmedRemoved]);
+    return images.filter(item => !confirmedRemoved.has(item.uid) && !confirmedAccepted.has(item.uid));
+  }, [images, confirmedRemoved, confirmedAccepted]);
 
   // Clear any in-flight removal timers on unmount so we don't setState on a
   // dead component after the user navigates away mid-undo-window.
@@ -1674,6 +1677,13 @@ const ClientDetections = () => {
           ? { ...i, accepted: 1, accepted_by_client: 1, sms_sent: smsSent ? 1 : i.sms_sent }
           : i
       )));
+      // Card leaves this live list right away — it now lives on the
+      // "Accepted Detections" page instead of sitting here as a disabled badge.
+      setConfirmedAccepted(prev => {
+        const next = new Set(prev);
+        next.add(uid);
+        return next;
+      });
       setSnackbar({
         open: true,
         message: smsSent
@@ -2021,7 +2031,7 @@ const ClientDetections = () => {
       ) : (view === 'grid' || isMobile) ? (
         <Grid container spacing={2}>
           {filteredImages.map((item, i) => (
-            <Grid item xs={12} sm={6} md={4} lg={3} key={`${item.filename}-${i}`}>
+            <Grid item xs={12} sm={6} key={`${item.filename}-${i}`}>
               <DetectionCard
                 item={item}
                 onClick={setSelected}

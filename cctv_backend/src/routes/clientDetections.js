@@ -24,6 +24,20 @@ router.get(
 );
 
 /**
+ * @route   GET /cctv_analytics/api/client-detections/accepted
+ * @query   page, limit, source, type, date, start_time, end_time, search, exam_id
+ * @access  Authenticated
+ * @returns { success, total, page, limit, counts, data } — rows where
+ *          pushed_to_client = 1 AND accepted_by_client = 1 AND NOT removed,
+ *          scoped to the caller's company (VIEWER) or unrestricted (ADMIN).
+ */
+router.get(
+    '/accepted',
+    authenticate,
+    asyncHandler(ClientDetectionsController.getAcceptedDetections)
+);
+
+/**
  * @route   POST /cctv_analytics/api/client-detections/undo
  * @body    { uid: string }
  * @access  Authenticated

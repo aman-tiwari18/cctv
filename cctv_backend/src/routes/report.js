@@ -7,7 +7,7 @@ const express = require('express');
 const router = express.Router();
 const ReportController = require('../controllers/ReportController');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, authorize } = require('../middleware/auth');
 
 /**
  * @route   GET /cctv_analytics/api/report/download
@@ -32,6 +32,19 @@ router.get(
     '/download/client',
     authenticate,
     asyncHandler(ReportController.downloadClientReport)
+);
+
+/**
+ * @route   GET /cctv_analytics/api/report/summary
+ * @query   exam_id
+ * @access  ADMIN
+ * @returns Excel file (.xlsx) — per-date online cameras per shift + detections
+ */
+router.get(
+    '/summary',
+    authenticate,
+    authorize('ADMIN'),
+    asyncHandler(ReportController.downloadSummaryReport)
 );
 
 module.exports = router;

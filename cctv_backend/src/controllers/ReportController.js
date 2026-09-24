@@ -13,6 +13,7 @@
 'use strict';
 
 const XLSX = require('xlsx');
+const ExcelJS = require('exceljs');
 const { query } = require('../config/database');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -171,6 +172,15 @@ function cameraIsOnline(cam, isRTSP) {
     const isAccessible = String(cam.status || '').toLowerCase() === 'accessible';
     return hasClassification && isAccessible;
 }
+
+/**
+ * Identity of a physical camera across shifts: device_id + camera_no for RTSP,
+ * ch_code for HLS. Used to count a camera once when it appears in several shifts.
+ */
+function cameraUniqueKey(cam, isRTSP) {
+    return isRTSP ? `${cam.device_id}_${cam.camera_no}` : String(cam.ch_code);
+}
+
 
 /**
  * Device ID + Camera No for an HLS row.
@@ -512,6 +522,7 @@ exports.downloadReport = async (req, res) => {
         // ── 9. Analysis Sheet ─────────────────────────────────────────────────
         const analysisData = [];
         let cumulativeOnline = 0;
+        const uniqueOnlineKeys = new Set();
         let totalDurationMinutes = 0;
 
         const parseTimeToMinutes = (t) => {
@@ -548,6 +559,8 @@ exports.downloadReport = async (req, res) => {
             const rate = total > 0 ? ((online / total) * 100).toFixed(2) + '%' : '0%';
 
             cumulativeOnline += online;
+            shiftCams.filter(c => cameraIsOnline(c, isRTSP))
+                .forEach(c => uniqueOnlineKeys.add(cameraUniqueKey(c, isRTSP)));
 
             analysisData.push([`Shift ${idx + 1} ANALYSIS`, '']);
             analysisData.push(['Total Cameras Monitored', total]);
@@ -570,9 +583,9 @@ exports.downloadReport = async (req, res) => {
         });
 
         // Overall summary
-        const uniqueOnline = new Set(
-            detections.filter(d => (d.camera_status || '').toLowerCase() === 'online').map(d => d.ch_code)
-        ).size;
+        // Unique online cameras across all shifts, from the master camera list
+        // (same rule as the per-shift "Online Cameras"), independent of detections.
+        const uniqueOnline = uniqueOnlineKeys.size;
 
         const totalHours = (totalDurationMinutes / 60).toFixed(1);
 
@@ -770,7 +783,7 @@ exports.downloadClientReport = async (req, res) => {
         const wb = XLSX.utils.book_new();
 
         const SHIFT_HEADERS = [
-            'City', 'Center', 'Cam ID', 'CH Code', 'Camera Name',
+            'City', 'Center', 'Cam ID', 'Channel Id', 'Camera Name',
             'Cam Type', 'TC Code', 'Events (Excluding Rejected)', 'Rejected Events', 'Camera Status'
         ];
         const SHIFT_WIDTHS = [15, 30, 15, 18, 35, 15, 12, 28, 16, 15];
@@ -793,7 +806,7 @@ exports.downloadClientReport = async (req, res) => {
                             'City': cam.city || agg.details.city || '',
                             'Center': cam.centre_name || agg.details.center || '',
                             'Cam ID': key,
-                            'CH Code': '',
+                            'Channel Id': '',
                             'Camera Name': cam.camera_name || agg.details.camera_name || '',
                             'Cam Type': camType,
                             'TC Code': cam.tc_code || agg.details.tc_code || '',
@@ -807,7 +820,7 @@ exports.downloadClientReport = async (req, res) => {
                             'City': cam.city || '',
                             'Center': cam.centre_name || '',
                             'Cam ID': key,
-                            'CH Code': '',
+                            'Channel Id': '',
                             'Camera Name': cam.camera_name || '',
                             'Cam Type': camType,
                             'TC Code': cam.tc_code || '',
@@ -827,7 +840,7 @@ exports.downloadClientReport = async (req, res) => {
                             'City': cam.city || '',
                             'Center': cam.centre_name || '',
                             'Cam ID': camIdDisplay,
-                            'CH Code': cam.ch_code || '',
+                            'Channel Id': cam.ch_code || '',
                             'Camera Name': cam.camera_name || '',
                             'Cam Type': cam.camera_category || '',
                             'TC Code': cam.tc_code || '',
@@ -841,7 +854,7 @@ exports.downloadClientReport = async (req, res) => {
                             'City': cam.city || '',
                             'Center': cam.centre_name || '',
                             'Cam ID': camIdDisplay,
-                            'CH Code': cam.ch_code || '',
+                            'Channel Id': cam.ch_code || '',
                             'Camera Name': cam.camera_name || '',
                             'Cam Type': cam.camera_category || '',
                             'TC Code': cam.tc_code || '',
@@ -872,7 +885,7 @@ exports.downloadClientReport = async (req, res) => {
             'Center Name', 'City', 'Server Address', 'Detection Type', 'Detection Time',
             'Status', 'Image URL', 'View'
         ] : [
-            'Shift', 'Device ID', 'Camera No', 'Cam ID', 'CH Code', 'TC Code', 'Camera Name',
+            'Shift', 'Device ID', 'Camera No', 'Cam ID', 'Channel Id', 'TC Code', 'Camera Name',
             'Center Name', 'City', 'Server Address', 'Detection Type', 'Detection Time',
             'Status', 'Image URL', 'View'
         ];
@@ -909,7 +922,7 @@ exports.downloadClientReport = async (req, res) => {
                 const { device, cameraNo } = hlsDeviceAndCameraNo(d);
                 row['Device ID'] = device;
                 row['Camera No'] = cameraNo;
-                row['CH Code'] = d.ch_code || '';
+                row['Channel Id'] = d.ch_code || '';
             }
             return row;
         });
@@ -932,6 +945,7 @@ exports.downloadClientReport = async (req, res) => {
         // ── 8. Analysis sheet ────────────────────────────────────────────────
         const analysisData = [];
         let cumulativeOnline = 0;
+        const uniqueOnlineKeys = new Set();
         let totalDurationMinutes = 0;
 
         const parseTimeToMinutes = (t) => {
@@ -962,6 +976,8 @@ exports.downloadClientReport = async (req, res) => {
             const rate = total > 0 ? ((online / total) * 100).toFixed(2) + '%' : '0%';
 
             cumulativeOnline += online;
+            shiftCams.filter(c => cameraIsOnline(c, isRTSP))
+                .forEach(c => uniqueOnlineKeys.add(cameraUniqueKey(c, isRTSP)));
 
             analysisData.push([`Shift ${idx + 1} ANALYSIS`, '']);
             analysisData.push(['Total Cameras Monitored', total]);
@@ -983,9 +999,9 @@ exports.downloadClientReport = async (req, res) => {
             analysisData.push(['']);
         });
 
-        const uniqueOnline = new Set(
-            detections.filter(d => (d.camera_status || '').toLowerCase() === 'online').map(d => d.ch_code)
-        ).size;
+        // Unique online cameras across all shifts, from the master camera list
+        // (same rule as the per-shift "Online Cameras"), independent of detections.
+        const uniqueOnline = uniqueOnlineKeys.size;
         const totalHours = (totalDurationMinutes / 60).toFixed(1);
 
         analysisData.push(['OVERALL SUMMARY', '']);
@@ -1014,6 +1030,127 @@ exports.downloadClientReport = async (req, res) => {
 };
 
 
+/**
+ * Per-exam summary report (admin).
+ *
+ * GET /api/report/summary?exam_id=<id>
+ *
+ * One row per exam date that has detections, plus a final bold "Total :" row
+ * summing each column across all dates:
+ *   Date | Shift N (Online) ... | Total Online | Total Detections
+ * Total Detections counts only client-side detections (pushed_to_client = 1),
+ * same set as the client consolidated report.
+ * "Online" per shift uses the same rule as the consolidated report's Analysis
+ * sheet (cameraIsOnline over camerasForShiftAndDate).
+ */
+exports.downloadSummaryReport = async (req, res) => {
+    const examId = req.query.exam_id;
+    if (!examId) {
+        return res.status(400).json({ success: false, message: 'Missing parameter: exam_id' });
+    }
 
+    try {
+        const examRows = await query(
+            `SELECT id, exam_name, link_type FROM exams WHERE id = ? LIMIT 1`,
+            [examId]
+        );
+        if (!examRows || examRows.length === 0) {
+            return res.status(404).json({ success: false, message: `Exam with id=${examId} not found.` });
+        }
+        const examName = examRows[0].exam_name || `Exam_${examId}`;
+        const isRTSP = (examRows[0].link_type || '').toLowerCase() === 'rtsp';
 
+        const shifts = await query(
+            `SELECT id, shift_name, start_time, end_time
+             FROM exam_shifts
+             WHERE exam_id = ? AND is_active = 1
+             ORDER BY start_time ASC, id ASC`,
+            [examId]
+        );
 
+        const masterCameras = isRTSP ? await query(
+            `SELECT id, classification, null as shift_id, null as exam_date, status
+             FROM camera_links_rtsp
+             WHERE exam_id = ? AND is_active = 1`,
+            [examId]
+        ) : await query(
+            `SELECT id, camera_category, shift_id, exam_date, status
+             FROM camera_links_hls
+             WHERE exam_id = ? AND is_active = 1`,
+            [examId]
+        );
+
+        // date_time is stored as "dd/mm/yyyy hh:mm:ss" — group on the date prefix.
+        const table = isRTSP ? 'camera_report_rtsp' : 'camera_report_hls';
+        const dayRows = await query(
+            `SELECT LEFT(date_time, 10) AS d, COUNT(*) AS cnt
+             FROM ${table}
+             WHERE exam_id = ? AND pushed_to_client = 1
+               AND date_time REGEXP '^[0-9]{2}/[0-9]{2}/[0-9]{4}'
+             GROUP BY LEFT(date_time, 10)`,
+            [examId]
+        );
+        const days = dayRows
+            .map(r => {
+                const [dd, mm, yyyy] = String(r.d).split('/');
+                return { iso: `${yyyy}-${mm}-${dd}`, count: Number(r.cnt) };
+            })
+            .sort((a, b) => a.iso.localeCompare(b.iso));
+
+        const headers = [
+            'Date',
+            ...shifts.map((_, i) => `Shift${i + 1}(Online)`),
+            'Total Online',
+            'Total Detections',
+        ];
+        const rows = days.map(day => {
+            const row = { 'Date': day.iso };
+            let totalOnline = 0;
+            shifts.forEach((sh, i) => {
+                const online = camerasForShiftAndDate(masterCameras, sh.id, day.iso)
+                    .filter(c => cameraIsOnline(c, isRTSP)).length;
+                row[`Shift${i + 1}(Online)`] = online;
+                totalOnline += online;
+            });
+            row['Total Online'] = totalOnline;
+            row['Total Detections'] = day.count;
+            return row;
+        });
+
+        // exceljs (not SheetJS) so the header row can be styled.
+        const wb = new ExcelJS.Workbook();
+        const ws = wb.addWorksheet('Sheet1');
+        ws.columns = headers.map(h => ({ header: h, key: h, width: Math.max(14, h.length + 2) }));
+        rows.forEach(r => ws.addRow(r));
+        ws.getRow(1).eachCell(cell => {
+            cell.font = { bold: true };
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
+        });
+
+        if (rows.length > 0) {
+            const totalRow = { 'Date': 'Total :' };
+            shifts.forEach((_, i) => {
+                const key = `Shift${i + 1}(Online)`;
+                totalRow[key] = rows.reduce((sum, r) => sum + r[key], 0);
+            });
+            totalRow['Total Online'] = rows.reduce((sum, r) => sum + r['Total Online'], 0);
+            totalRow['Total Detections'] = rows.reduce((sum, r) => sum + r['Total Detections'], 0);
+            const addedTotalRow = ws.addRow(totalRow);
+            addedTotalRow.eachCell(cell => {
+                cell.font = { bold: true };
+                cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFCCFF66' } };
+            });
+        }
+
+        const buffer = Buffer.from(await wb.xlsx.writeBuffer());
+        const filename = `Summary_${sanitizeFilename(examName)}.xlsx`;
+
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.setHeader('Content-Length', buffer.length);
+        return res.send(buffer);
+    } catch (error) {
+        console.error('[ReportController] Summary error:', error);
+        return res.status(500).json({ success: false, message: 'Internal Server Error while generating summary report.' });
+    }
+};

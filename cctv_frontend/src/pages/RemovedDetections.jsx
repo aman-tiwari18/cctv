@@ -50,7 +50,7 @@ import { useAuth } from '../contexts/AuthContext';
 const TYPE_META = {
   proximity: { label: 'Close Proximity', color: '#5cb88a', bg: '#e5f5ed' },
   crowd: { label: 'Crowd Detection', color: '#e24d7b', bg: '#fce4ec' },
-  crowd_five: { label: 'Crowd < 5', color: '#e06050', bg: '#fce8e6' },
+  crowd_five: { label: 'Less Than 5 People In a Lab', color: '#e06050', bg: '#fce8e6' },
   crowd_zero: { label: 'Zero Person', color: '#6b5b95', bg: '#edeaf3' },
   server: { label: 'Server Room', color: '#a0623d', bg: '#f3ebe4' },
   intruder: { label: 'Intruder', color: '#d94466', bg: '#fce4ea' },
@@ -156,19 +156,19 @@ function DetectionCard({ item, onClick }) {
         border: '1px solid #e2e8f0',
       }}
     >
-      <Box sx={{ position: 'relative', bgcolor: '#0f172a' }}>
+      <Box sx={{ position: 'relative', bgcolor: '#f1f5f9' }}>
         {imgError ? (
-          <Box sx={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#1e293b' }}>
+          <Box sx={{ height: 380, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#1e293b' }}>
             <CameraAlt sx={{ fontSize: 48, color: '#475569' }} />
           </Box>
         ) : (
           <CardMedia
             component="img"
-            height={220}
+            height={380}
             image={item.image_url}
             alt={item.camera_id}
             onError={() => setImgError(true)}
-            sx={{ objectFit: 'cover' }}
+            sx={{ objectFit: 'contain', bgcolor: '#f1f5f9' }}
           />
         )}
         {invigilatorEventLabel && (
@@ -987,7 +987,7 @@ const RemovedDetections = () => {
       ) : view === 'grid' ? (
         <Grid container spacing={2}>
           {filteredImages.map((item, i) => (
-            <Grid item xs={12} sm={6} md={4} lg={3} key={`${item.filename}-${i}`}>
+            <Grid item xs={12} sm={6} key={`${item.filename}-${i}`}>
               <DetectionCard item={item} onClick={setSelected} />
             </Grid>
           ))}

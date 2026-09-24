@@ -99,6 +99,7 @@ const Analytics = () => {
 
   /* ── Dialog state lifted ── */
   const [openShiftDialogId, setOpenShiftDialogId] = useState(null);
+  const [selectedShiftId, setSelectedShiftId] = useState(null);
   /* Track full assignment objects per shift */
   const [shiftAssignments, setShiftAssignments] = useState({});
   /* ── Global date filter ── */
@@ -135,6 +136,7 @@ const Analytics = () => {
       setShifts([]);
       setShiftAssignments({});
       setSelectedDate('');
+      setSelectedShiftId(null);
     }
   }, [selectedExamId]);
 
@@ -166,6 +168,9 @@ const Analytics = () => {
         (a.start_time || '').localeCompare(b.start_time || '')
       );
       setShifts(sortedShiftList);
+      setSelectedShiftId((prev) =>
+        sortedShiftList.some((s) => s.id === prev) ? prev : (sortedShiftList[0]?.id ?? null)
+      );
     } catch (err) {
       console.error('Error loading shifts:', err);
       setError('Failed to load shifts');
@@ -701,75 +706,86 @@ const Analytics = () => {
             </Dialog>
 
             {/* Shift cards */}
-            {shifts.length > 0 ? (
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-                {shifts.map((shift) => {
-                  const filteredAssignments = getFilteredAssignments(shift.id);
+            {shifts.length > 0 ? (() => {
+              const activeShift = shifts.find((s) => s.id === selectedShiftId) || shifts[0];
+              const filteredAssignments = getFilteredAssignments(activeShift.id);
 
-                  return (
-                    <Box
-                      key={shift.id}
-                      sx={{
-                        bgcolor: '#ffffff',
-                        borderRadius: 3,
-                        border: '1px solid #e8ecf1',
-                        p: 2.5,
-                        transition: 'box-shadow 0.2s ease',
-                        '&:hover': { boxShadow: '0 4px 16px rgba(0,0,0,0.06)' },
-                      }}
-                    >
-                      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1.5 }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              return (
+                <Box>
+                  {/* Shift tabs — only one shift's scripts are shown at a time */}
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1.5, mb: 2.5 }}>
+                    <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                      {shifts.map((shift) => {
+                        const isActive = shift.id === activeShift.id;
+                        return (
                           <Box
+                            key={shift.id}
+                            onClick={() => setSelectedShiftId(shift.id)}
                             sx={{
-                              width: 48,
-                              height: 48,
-                              borderRadius: '50%',
-                              bgcolor: '#f1f5f9',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              flexShrink: 0,
+                              cursor: 'pointer',
+                              px: 2.5,
+                              py: 1.2,
+                              borderRadius: 2.5,
+                              minWidth: 150,
+                              bgcolor: isActive ? '#ffffff' : 'transparent',
+                              border: isActive ? '1px solid #e8ecf1' : '1px solid transparent',
+                              boxShadow: isActive ? '0 1px 6px rgba(0,0,0,0.06)' : 'none',
+                              transition: 'all 0.15s ease',
+                              '&:hover': { bgcolor: isActive ? '#ffffff' : '#f1f5f9' },
                             }}
                           >
-                            <ShiftSvgIcon sx={{ fontSize: 28, color: '#64748b' }} />
-                          </Box>
-
-                          <Box>
-                            <Typography sx={{ fontWeight: 700, fontSize: '1rem', color: '#0f172a' }}>
+                            <Typography sx={{ fontWeight: 700, fontSize: '0.9rem', color: isActive ? '#0f172a' : '#94a3b8' }}>
                               {shift.shift_name}
                             </Typography>
-                            <Typography sx={{ fontSize: '0.85rem', color: '#64748b' }}>
+                            <Typography sx={{ fontSize: '0.78rem', color: isActive ? '#64748b' : '#cbd5e1' }}>
                               {shift.start_time?.substring(0, 5)} - {shift.end_time?.substring(0, 5)}
                             </Typography>
                           </Box>
-                        </Box>
+                        );
+                      })}
+                    </Box>
 
-                        <Button
-                          variant="contained"
-                          startIcon={<Add />}
-                          onClick={() => setOpenShiftDialogId(shift.id)}
-                          disableElevation
-                          sx={{
-                            bgcolor: 'primary.main',
-                            color: '#fff',
-                            fontWeight: 700,
-                            fontSize: '0.75rem',
-                            borderRadius: 2,
-                            textTransform: 'uppercase',
-                            letterSpacing: '0.03em',
-                            px: 2.5,
-                            py: 0.8,
-                            '&:hover': { bgcolor: 'primary.dark' },
-                          }}
-                        >
-                          Add Script
-                        </Button>
-                      </Box>
+                    <Button
+                      variant="contained"
+                      startIcon={<Add />}
+                      onClick={() => setOpenShiftDialogId(activeShift.id)}
+                      disableElevation
+                      sx={{
+                        bgcolor: 'primary.main',
+                        color: '#fff',
+                        fontWeight: 700,
+                        fontSize: '0.75rem',
+                        borderRadius: 2,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.03em',
+                        px: 2.5,
+                        py: 0.8,
+                        '&:hover': { bgcolor: 'primary.dark' },
+                      }}
+                    >
+                      Add Script
+                    </Button>
+                  </Box>
 
-                      {/* Script chips — deduplicated by script_id + time window, so the
-                          same script assigned twice with different windows shows as two chips */}
-                      {filteredAssignments.length > 0 && (() => {
+                  {/* Hidden mounts — keep every shift's manager alive for prefetch + its own dialog */}
+                  {shifts.map((shift) => (
+                    <ShiftScriptManager
+                      key={shift.id}
+                      shift={shift}
+                      examId={selectedExamId}
+                      examBody={selectedExam?.exam_body}
+                      onUpdate={handleRefresh}
+                      openDialog={openShiftDialogId === shift.id}
+                      onCloseDialog={() => setOpenShiftDialogId(null)}
+                      onScriptNamesReady={(assignments) => handleAssignmentsReady(shift.id, assignments)}
+                      renderInline={false}
+                      dateOptions={dateOptions}
+                    />
+                  ))}
+
+                  {/* Script chips — deduplicated by script_id + time window, so the
+                      same script assigned twice with different windows shows as two chips */}
+                  {filteredAssignments.length > 0 && (() => {
                         // When duplicate rows exist for the same script + time window, keep the
                         // one with the most info (frequency/camera type) rather than just the first seen.
                         const byKey = new Map();
@@ -793,8 +809,8 @@ const Analytics = () => {
                         
                         // Sort by start time
                         const sorted = unique.sort((a, b) => {
-                          const timeA = a.custom_start_time || shift.start_time || '';
-                          const timeB = b.custom_start_time || shift.start_time || '';
+                          const timeA = a.custom_start_time || activeShift.start_time || '';
+                          const timeB = b.custom_start_time || activeShift.start_time || '';
                           return timeA.localeCompare(timeB);
                         });
                         
@@ -834,7 +850,7 @@ const Analytics = () => {
                                     borderRadius: '14px',
                                     p: 2,
                                     pr: 4.5,
-                                    width: { xs: '100%', sm: 240 },
+                                    width: { xs: '100%', sm: 280 },
                                   }}
                                 >
                                   <IconButton
@@ -863,48 +879,50 @@ const Analytics = () => {
                                     </Box>
                                   )}
 
-                                  {hasFrequencyField && frequencySec != null && (
-                                    <Box sx={{ mt: 1.5 }}>
-                                      <Box sx={{ fontSize: '0.6rem', fontWeight: 700, opacity: 0.55, letterSpacing: '0.03em', color: '#334155', whiteSpace: 'nowrap' }}>
-                                        FREQUENCY (sec)
-                                      </Box>
-                                      <Box sx={{ fontSize: '0.85rem', fontWeight: 700, color: '#0f172a', mt: '2px' }}>
-                                        {frequencySec}
-                                        {!isCustomFrequency && (
-                                          <Box component="span" sx={{ fontSize: '0.68rem', fontWeight: 500, opacity: 0.6, ml: '4px' }}>
-                                            (default)
-                                          </Box>
-                                        )}
-                                      </Box>
-                                    </Box>
-                                  )}
                                   {hasFrequencyField && (
-                                    <Box sx={{ mt: 1.2 }}>
-                                      <Box sx={{ fontSize: '0.6rem', fontWeight: 700, opacity: 0.55, letterSpacing: '0.03em', color: '#334155', whiteSpace: 'nowrap' }}>
-                                        CAMERA TYPE{!isCustomCameraTypes && (
-                                          <Box component="span" sx={{ fontWeight: 500, opacity: 0.85, ml: '4px' }}>
-                                            (default)
+                                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mt: 1.5 }}>
+                                      {frequencySec != null && (
+                                        <Box>
+                                          <Box sx={{ fontSize: '0.6rem', fontWeight: 700, opacity: 0.55, letterSpacing: '0.03em', color: '#334155', whiteSpace: 'nowrap' }}>
+                                            FREQUENCY (sec)
                                           </Box>
-                                        )}
-                                      </Box>
-                                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: '4px', mt: '4px' }}>
-                                        {cameraTypes.map((ct) => (
-                                          <Box
-                                            key={ct}
-                                            sx={{
-                                              px: 1.1,
-                                              py: '2px',
-                                              borderRadius: '10px',
-                                              bgcolor: 'rgba(255,255,255,0.6)',
-                                              fontSize: '0.72rem',
-                                              fontWeight: 600,
-                                              color: chipColor.color,
-                                              whiteSpace: 'nowrap',
-                                            }}
-                                          >
-                                            {ct}
+                                          <Box sx={{ fontSize: '0.85rem', fontWeight: 700, color: '#0f172a', mt: '2px' }}>
+                                            {frequencySec}
+                                            {!isCustomFrequency && (
+                                              <Box component="span" sx={{ fontSize: '0.68rem', fontWeight: 500, opacity: 0.6, ml: '4px' }}>
+                                                (default)
+                                              </Box>
+                                            )}
                                           </Box>
-                                        ))}
+                                        </Box>
+                                      )}
+                                      <Box>
+                                        <Box sx={{ fontSize: '0.6rem', fontWeight: 700, opacity: 0.55, letterSpacing: '0.03em', color: '#334155', whiteSpace: 'nowrap' }}>
+                                          CAMERA TYPE{!isCustomCameraTypes && (
+                                            <Box component="span" sx={{ fontWeight: 500, opacity: 0.85, ml: '4px' }}>
+                                              (default)
+                                            </Box>
+                                          )}
+                                        </Box>
+                                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: '4px', mt: '4px' }}>
+                                          {cameraTypes.map((ct) => (
+                                            <Box
+                                              key={ct}
+                                              sx={{
+                                                px: 1.1,
+                                                py: '2px',
+                                                borderRadius: '10px',
+                                                bgcolor: 'rgba(255,255,255,0.6)',
+                                                fontSize: '0.72rem',
+                                                fontWeight: 600,
+                                                color: chipColor.color,
+                                                whiteSpace: 'nowrap',
+                                              }}
+                                            >
+                                              {ct}
+                                            </Box>
+                                          ))}
+                                        </Box>
                                       </Box>
                                     </Box>
                                   )}
@@ -914,24 +932,9 @@ const Analytics = () => {
                           </Box>
                         );
                       })()}
-
-                      {/* ShiftScriptManager — dialog-only mode */}
-                      <ShiftScriptManager
-                        shift={shift}
-                        examId={selectedExamId}
-                        examBody={selectedExam?.exam_body}
-                        onUpdate={handleRefresh}
-                        openDialog={openShiftDialogId === shift.id}
-                        onCloseDialog={() => setOpenShiftDialogId(null)}
-                        onScriptNamesReady={(assignments) => handleAssignmentsReady(shift.id, assignments)}
-                        renderInline={false}
-                        dateOptions={dateOptions}
-                      />
-                    </Box>
-                  );
-                })}
-              </Box>
-            ) : (
+                </Box>
+              );
+            })() : (
               <Box
                 sx={{
                   textAlign: 'center',

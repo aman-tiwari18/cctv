@@ -52,9 +52,9 @@ const Exam = sequelize.define(
         },
 
         observer_phone: {
-            type: DataTypes.STRING,
+            type: DataTypes.STRING(512),
             allowNull: true,
-            comment: 'NTA observer phone for SMS alerts, falls back to ALERT_PHONE_NUMBERS env',
+            comment: 'Comma-separated NTA observer phone(s) for SMS alerts, falls back to ALERT_PHONE_NUMBERS env',
         },
 
         is_active: {

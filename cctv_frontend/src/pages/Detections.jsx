@@ -107,7 +107,7 @@ const TYPE_META = {
   proximity: { label: 'Close Proximity', color: '#5cb88a', bg: '#e5f5ed', iconKey: 'proximity' },
   crowd: { label: 'Crowd Detection (Entry/Exit)', color: '#e24d7b', bg: '#fce4ec', iconKey: 'crowd' },
   crowd_biometric: { label: 'Crowd Detection (Biometric)', color: '#9333ea', bg: '#f3e8ff', iconKey: 'crowd_biometric' },
-  crowd_five: { label: 'Crowd < 5', color: '#e06050', bg: '#fce8e6', iconKey: 'crowd_five' },
+  crowd_five: { label: 'Less Than 5 People In a Lab', color: '#e06050', bg: '#fce8e6', iconKey: 'crowd_five' },
   crowd_zero: { label: 'Zero Person', color: '#6b5b95', bg: '#edeaf3', iconKey: 'crowd_zero' },
   server: { label: 'Server Room', color: '#a0623d', bg: '#f3ebe4', iconKey: 'server' },
   intruder: { label: 'Intruder', color: '#d94466', bg: '#fce4ea', iconKey: 'intruder' },
@@ -441,7 +441,7 @@ function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onS
   );
 }
 
-function Lightbox({ item, onClose }) {
+function Lightbox({ item, onClose, onPushToClient, isPushing, isPushed }) {
   const theme = useTheme();
   const isSmDown = useMediaQuery(theme.breakpoints.down('sm'));
   if (!item) return null;
@@ -489,6 +489,29 @@ function Lightbox({ item, onClose }) {
           {item.tcCode && <Typography variant="body2" color="#94a3b8">TC: {item.tcCode}</Typography>}
           {(item.shiftName || item.shift_name || item.shift_id) && (
             <Typography variant="body2" color="#94a3b8">Shift: {getDetectionShiftName(item)}</Typography>
+          )}
+          {onPushToClient && (
+            <Button
+              variant="contained"
+              disableElevation
+              onClick={() => { if (!isPushing && !isPushed) onPushToClient([item]); }}
+              disabled={isPushing || isPushed}
+              sx={{
+                mt: 1.5,
+                bgcolor: isPushed ? '#94a3b8' : '#3c81f6',
+                color: '#fff',
+                fontWeight: 900,
+                height: 40,
+                px: 3,
+                borderRadius: 2,
+                textTransform: 'none',
+                width: { xs: '100%', sm: 'auto' },
+                '&:hover': { bgcolor: isPushed ? '#94a3b8' : '#1e40af' },
+                '&.Mui-disabled': { bgcolor: '#94a3b8', color: '#ffffff' },
+              }}
+            >
+              {isPushing ? 'Pushing...' : (isPushed ? 'Pushed to client' : 'Push to client')}
+            </Button>
           )}
         </Box>
       </DialogContent>
@@ -1385,7 +1408,7 @@ export default function Detections() {
     if (exportItems.length === 0) return;
 
     const TYPE_LABELS = {
-      proximity: 'Close Proximity', crowd: 'Crowd Detection', crowd_five: 'Crowd < 5',
+      proximity: 'Close Proximity', crowd: 'Crowd Detection', crowd_five: 'Less Than 5 People In a Lab',
       crowd_zero: 'Zero Person', server: 'Server Room', intruder: 'Intruder',
       entry_exit: 'Entry/Exit', phone: 'Phone', blind_spot: 'Blind Spot', furniture: 'Improper Furniture',
       invigilator: 'Invigilator', inversion: 'Camera Inversion', tamper: 'Camera Tampering',
@@ -1888,7 +1911,13 @@ export default function Detections() {
       )}
 
 
-      <Lightbox item={selected} onClose={() => setSelected(null)} />
+      <Lightbox
+        item={selected}
+        onClose={() => setSelected(null)}
+        onPushToClient={pushToClient}
+        isPushing={selected ? copyingId === (selected.uid || selected.id || selected.image_url) : false}
+        isPushed={selected ? (pushedUids.has(selected.uid || selected.id || selected.image_url) || selected.pushed_to_client === 1 || selected.pushed_to_client === true) : false}
+      />
 
       <Snackbar
         open={Boolean(liveAlert)}

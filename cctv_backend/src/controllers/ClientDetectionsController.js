@@ -543,3 +543,226 @@ exports.getRemovedDetections = async (req, res) => {
         });
     }
 };
+
+exports.getAcceptedDetections = async (req, res) => {
+    try {
+        const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+        const limit = Math.max(1, Math.min(500, parseInt(req.query.limit, 10) || 100));
+        const source = (req.query.source || '').toLowerCase();
+        const typeParam = req.query.type || '';
+        const rawDate = req.query.date || '';
+        const startTime = req.query.start_time || '';
+        const endTime = req.query.end_time || '';
+        const search = (req.query.search || '').trim().toLowerCase();
+        const examIdParam = req.query.exam_id;
+
+        const userRole = req.user?.role;
+
+        // Resolve allowed exam_ids for non-ADMIN scoping via user_exam_assignments.
+        const { getAllowedExamIds } = require('../utils/examAccess');
+        let allowedExamIds = await getAllowedExamIds(req.user);
+        if (allowedExamIds !== null && allowedExamIds.length === 0) {
+            return res.json({
+                success: true, total: 0, page, limit,
+                counts: emptyCounts(), data: [],
+            });
+        }
+
+        // Build shared WHERE clause for both tables. A detection later removed
+        // by an admin should drop out of "Accepted" (mirrors script-server's
+        // live-feed convention of excluding remove_from_client=1 rows).
+        const whereConds = ['pushed_to_client = 1', 'accepted_by_client = 1', '(remove_from_client IS NULL OR remove_from_client = 0)'];
+        const whereParams = [];
+        if (examIdParam) {
+            whereConds.push('exam_id = ?');
+            whereParams.push(examIdParam);
+        } else if (allowedExamIds) {
+            whereConds.push(`exam_id IN (${allowedExamIds.map(() => '?').join(',')})`);
+            whereParams.push(...allowedExamIds);
+        }
+
+        // Date/time/search filter on created_at (indexed TIMESTAMP ~= detection time)
+        // so total / per-type counts / pagination are computed exactly in SQL
+        // (COUNT, GROUP BY, LIMIT/OFFSET) instead of capping the fetch at 5000 and
+        // counting in JS (which under-reported the true total).
+        if (rawDate) {
+            let y, m, d;
+            const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(rawDate);
+            const dmy = /^(\d{2})-(\d{2})-(\d{4})$/.exec(rawDate);
+            if (iso) { [, y, m, d] = iso; }
+            else if (dmy) { [, d, m, y] = dmy; }
+            if (y && m && d) {
+                whereConds.push('created_at >= ? AND created_at < (? + INTERVAL 1 DAY)');
+                whereParams.push(`${y}-${m}-${d} 00:00:00`, `${y}-${m}-${d} 00:00:00`);
+            }
+        }
+        if (startTime) { whereConds.push('TIME(created_at) >= ?'); whereParams.push(`${startTime}:00`); }
+        if (endTime)   { whereConds.push('TIME(created_at) <= ?'); whereParams.push(`${endTime}:59`); }
+        if (search) {
+            whereConds.push('(LOWER(camera_name) LIKE ? OR LOWER(center_name) LIKE ? OR LOWER(city) LIKE ? OR LOWER(state) LIKE ? OR LOWER(tc_code) LIKE ? OR LOWER(imageurl) LIKE ?)');
+            const lk = `%${search}%`; whereParams.push(lk, lk, lk, lk, lk, lk);
+        }
+
+        const whereClause = whereConds.join(' AND ');
+
+        const tables = [];
+        if (source !== 'rtsp') tables.push({ name: 'camera_report_hls', source: 'hls' });
+        if (source !== 'hls') tables.push({ name: 'camera_report_rtsp', source: 'rtsp' });
+
+        // Type filter (SQL) applies to total + page data; the counts query omits it
+        // so the sidebar stays full when the user toggles a type.
+        const typeKeys = typeParam ? typeParam.split(',').map(s => s.trim()).filter(Boolean) : [];
+        const folderNames = typeKeys.map(k => DETECTION_FOLDERS[k]).filter(Boolean);
+        let whereData = whereClause, paramsData = whereParams;
+        if (folderNames.length > 0) {
+            whereData = `${whereClause} AND detection_type IN (${folderNames.map(() => '?').join(',')})`;
+            paramsData = whereParams.concat(folderNames);
+        }
+
+        // ── Accurate total: SQL COUNT(*) summed across active tables ──
+        let total = 0;
+        for (const tbl of tables) {
+            try {
+                const r = await query(`SELECT COUNT(*) AS c FROM ${tbl.name} WHERE ${whereData}`, paramsData);
+                total += Number((r[0] && r[0].c) || 0);
+            } catch (err) {
+                console.error(`[getAcceptedDetections] count failed for ${tbl.name}:`, err.message);
+            }
+        }
+
+        // ── Per-type sidebar counts: SQL GROUP BY (type filter excluded) ──
+        const counts = emptyCounts();
+        for (const tbl of tables) {
+            try {
+                const grp = await query(
+                    `SELECT detection_type, COUNT(*) AS c FROM ${tbl.name} WHERE ${whereClause} GROUP BY detection_type`,
+                    whereParams,
+                );
+                for (const g of grp) {
+                    const key = FOLDER_TO_KEY[g.detection_type] || g.detection_type;
+                    if (key in counts) counts[key] += Number(g.c || 0);
+                }
+            } catch (err) {
+                console.error(`[getAcceptedDetections] counts failed for ${tbl.name}:`, err.message);
+            }
+        }
+
+        // ── Page data: SQL ORDER BY created_at DESC, fetch up to this page, merge,
+        //    slice. No 5000 cap — any page is reachable. ──
+        const need = Math.max(1, page * limit);
+        let rows = [];
+        for (const tbl of tables) {
+            const sql = `SELECT id, exam_id, shift_id, city, center_name, camera_id,
+                                camera_name, ${tbl.source === 'rtsp' ? 'device_id, camera_no,' : 'camera_category, ch_code,'}
+                                tc_code, state, camera_status, events, date_time,
+                                imageurl, detection_type, unique_id, created_at,
+                                pushed_to_client, remove_from_client, accepted_by_client, accepted_at,
+                                sms_sent, sms_sent_at, updated_at
+                         FROM ${tbl.name}
+                         WHERE ${whereData}
+                         ORDER BY created_at DESC
+                         LIMIT ${need}`;
+            try {
+                const fetched = await query(sql, paramsData);
+                fetched.forEach(r => { r._source = tbl.source; });
+                rows = rows.concat(fetched);
+            } catch (err) {
+                console.error(`[getAcceptedDetections] fetch failed for ${tbl.name}:`, err.message);
+            }
+        }
+        rows.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+
+        const startIdx = (page - 1) * limit;
+        const slice = rows.slice(startIdx, startIdx + limit).map(row => {
+            const imageUrlRaw = String(row.imageurl || '');
+            const filename = imageUrlRaw.includes('/')
+                ? imageUrlRaw.slice(imageUrlRaw.lastIndexOf('/') + 1)
+                : imageUrlRaw;
+            const typeKey = FOLDER_TO_KEY[row.detection_type || ''] || (row.detection_type || '');
+            const meta = parseFilename(filename, typeKey);
+            return { row, filename, typeKey, meta, source: row._source };
+        });
+
+        const data = slice.map(({ row, filename, typeKey, meta, source: src }) => {
+            const detectedAt = meta.date && meta.time
+                ? formatDetectedAt(meta.date, meta.time)
+                : (row.date_time || '');
+            const dateDisplay = meta.date
+                ? `${meta.date.slice(6, 8)}-${meta.date.slice(4, 6)}-${meta.date.slice(0, 4)}`
+                : '';
+            return {
+                filename,
+                relativePath: filename,
+                image_url: normalizeImageUrl(row.imageurl),
+                imageUrl: normalizeImageUrl(row.imageurl),
+                type: typeKey,
+                source: src,
+                camera_id: row.camera_id || filename.split('_')[0] || '',
+                cameraName: row.camera_name || '',
+                camera_name: row.camera_name || '',
+                centerName: row.center_name || '',
+                centre_name: row.center_name || '',
+                city: row.city || '',
+                state: row.state || '',
+                tcCode: row.tc_code || '',
+                category: row.camera_category || '',
+                exam_id: row.exam_id,
+                shift_id: row.shift_id || meta.shiftId || null,
+                uid: row.unique_id || null,
+                detected_at: detectedAt,
+                date: dateDisplay,
+                examDate: dateDisplay,
+                count: meta.count,
+                confidence: meta.confidence,
+                issueType: meta.issueType,
+                issueLabel: meta.issueLabel,
+                updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : null,
+                updated_at: row.updated_at ? new Date(row.updated_at).getTime() : null,
+                created_at: row.created_at,
+                pushed_to_client: row.pushed_to_client,
+                remove_from_client: row.remove_from_client,
+                accepted_by_client: row.accepted_by_client,
+                accepted_at: row.accepted_at,
+                sms_sent: row.sms_sent,
+                sms_sent_at: row.sms_sent_at,
+            };
+        });
+
+        // Resolve shift names (exam_shifts) for the page in ONE query so the
+        // accepted-detection cards (grid + list) show the shift, mirroring the
+        // script-server /detections + /client-detections endpoints.
+        const shiftIds = [...new Set(data.map(d => d.shift_id).filter(Boolean))];
+        if (shiftIds.length > 0) {
+            try {
+                const ph = shiftIds.map(() => '?').join(',');
+                const shiftRows = await query(
+                    `SELECT id, shift_name FROM exam_shifts WHERE id IN (${ph})`,
+                    shiftIds,
+                );
+                const nameMap = new Map(shiftRows.map(r => [r.id, r.shift_name]));
+                data.forEach(d => {
+                    const nm = d.shift_id ? nameMap.get(d.shift_id) : null;
+                    if (nm) { d.shiftName = nm; d.shift_name = nm; }
+                });
+            } catch (err) {
+                console.error('[getAcceptedDetections] shift name resolve failed:', err.message);
+            }
+        }
+
+        return res.json({
+            success: true,
+            total,
+            page,
+            limit,
+            counts,
+            data,
+        });
+    } catch (err) {
+        console.error('[getAcceptedDetections] error:', err);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to fetch accepted detections',
+            error: err.message,
+        });
+    }
+};

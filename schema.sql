@@ -263,7 +263,7 @@ CREATE TABLE `exams` (
   `end_date` date DEFAULT NULL COMMENT 'Exam end date',
   `skip_days` json DEFAULT NULL COMMENT 'Array of day names to skip, e.g. ["Saturday","Sunday"]',
   `skip_dates` json DEFAULT NULL COMMENT 'Array of specific dates to skip, e.g. ["2026-03-15","2026-03-20"]',
-  `observer_phone` varchar(64) DEFAULT NULL COMMENT 'NTA observer phone for SMS alerts; falls back to ALERT_PHONE_NUMBERS env',
+  `observer_phone` varchar(512) DEFAULT NULL COMMENT 'Comma-separated NTA observer phone(s) for SMS alerts; falls back to ALERT_PHONE_NUMBERS env',
   `is_active` tinyint(1) DEFAULT '1',
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

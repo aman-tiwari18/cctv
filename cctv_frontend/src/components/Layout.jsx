@@ -50,9 +50,11 @@ import {
   VerifiedUser,
   Memory,
   DeleteSweep,
+  CheckCircle,
 } from '@mui/icons-material';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import VideoLibraryIcon from '@mui/icons-material/VideoLibrary';
+import SummarizeIcon from '@mui/icons-material/Summarize';
 import { useAuth } from '../contexts/AuthContext';
 import { useDetectionCounts } from '../contexts/DetectionCountsContext';
 import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
@@ -82,7 +84,7 @@ const TYPE_META = {
   proximity: { label: 'Close Proximity', icon: WarningAmber, iconColor: '#5cb88a' },
   crowd: { label: 'Crowd Detection (Entry/Exit)', icon: Groups, iconColor: '#e24d7b' },
   crowd_biometric: { label: 'Crowd Detection (Biometric)', icon: Groups, iconColor: '#9333ea' },
-  crowd_five: { label: 'Crowd < 5', icon: Groups, iconColor: '#e06050' },
+  crowd_five: { label: 'Less Than 5 People In a Lab', icon: Groups, iconColor: '#e06050' },
   crowd_zero: { label: 'Zero Person', icon: PersonOff, iconColor: '#6b5b95' },
   server: { label: 'Server Room', icon: Dns, iconColor: '#a0623d' },
   intruder: { label: 'Intruder', icon: DirectionsWalk, iconColor: '#d94466' },
@@ -108,6 +110,7 @@ const menuItems = [
   { text: 'Detections', icon: <CustomSvgIcon />, path: '/detections', hasSubItems: true },
   { text: 'Client Detections', icon: <Visibility />, path: '/client-detections', hasSubItems: true },
   { text: 'Client Dashboard', icon: <Dashboard />, path: '/client-dashboard' },
+  { text: 'Summary Report', icon: <SummarizeIcon />, path: '/summary-report' },
 ];
 
 // Menu items for VIEWER role (reordered with Client Dashboard first)
@@ -141,7 +144,7 @@ function DetectionSubItems({ counts, typeFilter, onTypeSelect }) {
         const IconComp = meta.icon;
 
         return (
-          <ListItem key={key} disablePadding sx={{ px: 1 }}>
+          <ListItem key={key} disablePadding sx={{ px: 1, mb: 0.5 }}>
             <ListItemButton
               selected={isActive}
               onClick={() => {
@@ -153,10 +156,12 @@ function DetectionSubItems({ counts, typeFilter, onTypeSelect }) {
               }}
               sx={{
                 minHeight: 34,
+                py: 1,
                 pl: 5,
                 pr: 1.5,
                 borderRadius: 1,
                 position: 'relative',
+                alignItems: 'flex-start',
                 ...(isActive && {
                   bgcolor: sidebarPalette.subItemActiveBg,
                   '&::before': {
@@ -178,19 +183,20 @@ function DetectionSubItems({ counts, typeFilter, onTypeSelect }) {
                 '&:hover': { bgcolor: sidebarPalette.itemHoverBg },
               }}
             >
-              <ListItemIcon sx={{ minWidth: 28 }}>
+              <ListItemIcon sx={{ minWidth: 28, mt: '2px' }}>
                 <IconComp sx={{ fontSize: 16, color: isActive ? sidebarPalette.subItemActiveText : (meta.iconColor || sidebarPalette.itemIcon) }} />
               </ListItemIcon>
               <ListItemText
                 primary={meta.label}
+                sx={{ my: 0, mr: 1 }}
                 primaryTypographyProps={{
                   fontSize: '0.8rem',
                   fontWeight: isActive ? 700 : 500,
                   color: isActive ? sidebarPalette.subItemActiveText : sidebarPalette.subItemText,
-                  noWrap: true,
+                  sx: { whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.3 },
                 }}
               />
-              <Typography variant="caption" fontWeight={700} color={isActive ? sidebarPalette.subItemActiveText : 'text.secondary'}>
+              <Typography variant="caption" fontWeight={700} sx={{ mt: '2px', flexShrink: 0 }} color={isActive ? sidebarPalette.subItemActiveText : 'text.secondary'}>
                 {count}
               </Typography>
             </ListItemButton>
@@ -211,7 +217,7 @@ function SidebarContent({ items, currentPath, onNavigate, user }) {
   const { unfilteredCounts, typeFilter, setTypeFilter, } = useDetectionCounts();
   const [detectionsOpen, setDetectionsOpen] = useState(false);
 
-  const isDetectionPage = currentPath === '/detections' || currentPath === '/client-detections' || currentPath === '/detections/removed';
+  const isDetectionPage = currentPath === '/detections' || currentPath === '/client-detections' || currentPath === '/detections/removed' || currentPath === '/detections/accepted';
 
   useEffect(() => {
     if (isDetectionPage) setDetectionsOpen(true);
@@ -261,7 +267,7 @@ function SidebarContent({ items, currentPath, onNavigate, user }) {
           // the Detections sidebar item active so the user has visual anchor
           // and the type sub-items stay accessible.
           const isActive = currentPath === item.path
-            || (item.path === '/detections' && currentPath === '/detections/removed');
+            || (item.path === '/detections' && (currentPath === '/detections/removed' || currentPath === '/detections/accepted'));
           const isDetectionItem = item.hasSubItems;
 
           return (
@@ -458,7 +464,7 @@ function LayoutInner() {
       : menuItems.filter(item => item.text !== 'Client Detections' && item.text !== 'Client Dashboard');
 
   // Allow certain paths that are not in the main menu (footer items)
-  const allowedPaths = ['/user-verification', '/gpu-monitor', '/detections/removed'];
+  const allowedPaths = ['/user-verification', '/gpu-monitor', '/detections/removed', '/detections/accepted'];
 
   useEffect(() => {
     const isAllowedPath = allowedPaths.includes(location.pathname);
@@ -499,7 +505,8 @@ function LayoutInner() {
   const currentPageTitle =
     adminFooterItems.find((item) => item.path === location.pathname)?.text ||
     filteredMenuItems.find((item) => item.path === location.pathname)?.text ||
-    (location.pathname === '/detections/removed' ? 'Removed Detections' : '');
+    (location.pathname === '/detections/removed' ? 'Removed Detections' : '') ||
+    (location.pathname === '/detections/accepted' ? 'Accepted Detections' : '');
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh' }}>
@@ -584,6 +591,33 @@ function LayoutInner() {
                 }}
               >
                 <Box component="span" sx={{ display: { xs: 'none', md: 'inline' } }}>Removed Detections</Box>
+              </Button>
+            )}
+
+            {/* Accepted Detections shortcut — only shown to VIEWER on /detections.
+                Mirrors the Removed Detections pill above. */}
+            {location.pathname === '/detections' && user?.role === 'VIEWER' && (
+              <Button
+                variant="outlined"
+                startIcon={<CheckCircle sx={{ fontSize: 16 }} />}
+                disableElevation
+                onClick={() => navigate('/detections/accepted')}
+                sx={{
+                  height: 34,
+                  borderRadius: '8px',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  textTransform: 'none',
+                  borderColor: '#bbf7d0',
+                  color: '#15803d',
+                  bgcolor: '#f0fdf4',
+                  px: { xs: 1, md: 2 },
+                  minWidth: { xs: 40, md: 'auto' },
+                  '& .MuiButton-startIcon': { mr: { xs: 0, md: 1 }, ml: { xs: 0, md: -0.5 } },
+                  '&:hover': { bgcolor: '#dcfce7', borderColor: '#86efac' },
+                }}
+              >
+                <Box component="span" sx={{ display: { xs: 'none', md: 'inline' } }}>Accepted Detections</Box>
               </Button>
             )}
 

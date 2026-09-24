@@ -156,6 +156,11 @@ export const smsAPI = {
 };
 
 export const reportAPI = {
+    // ADMIN-only per-exam summary (date x shift online cameras + detections)
+    downloadSummaryReport: (params) => api.get('/report/summary', {
+        params: params,
+        responseType: 'blob'
+    }),
     downloadReport: (params) => api.get('/report/download', {
         params: params,
         responseType: 'blob'
@@ -173,6 +178,9 @@ export const clientDetectionsAPI = {
     // Lives on cctv_backend (not script-server) so company-scoping uses the JWT
     // and the auth interceptor on this axios instance.
     getRemoved: (params) => api.get('/client-detections/removed', { params }),
+    // VIEWER "Accepted Detections" page — pushed_to_client=1 AND accepted_by_client=1
+    // (and not since removed). Mirrors getRemoved above.
+    getAccepted: (params) => api.get('/client-detections/accepted', { params }),
     // Reverts a /client-detections/remove (script-server) by flipping
     // remove_from_client back to 0. Hits cctv_backend so undo is JWT-scoped.
     undoRemove: (uid) => api.post('/client-detections/undo', { uid }),

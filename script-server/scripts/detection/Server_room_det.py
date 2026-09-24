@@ -23,7 +23,7 @@ SAVE_FOLDER = os.path.join(PROJECT_ROOT, "results/tcs_detections/server_room_det
 # This detection runs on cameras classified as:
 # - Server Room / Strong Room
 
-COOLDOWN_TIME = 60        # Seconds between saves per camera (1 minute - reduced for faster alerts)
+COOLDOWN_TIME = int(os.environ.get("COOLDOWN_TIME", 60))        # Seconds between saves per camera (1 minute - reduced for faster alerts)
 CONF_THRESHOLD = 0.50     # Confidence for person detection (increased for accuracy)
 
 # Per-TC-code thresholds loaded from server_room_constants.py
@@ -137,7 +137,7 @@ def detect_persons_batch(items, results=None):
         # any single person as a breach for every centre missing from the
         # threshold sheet — false-flagging normal staff.)
         no_threshold = min_persons is None
-        server_detected = (not no_threshold) and person_count >= min_persons
+        server_detected = (not no_threshold) and person_count > min_persons
 
         for box in person_boxes:
             x1, y1, x2, y2 = map(int, box.xyxy[0])
