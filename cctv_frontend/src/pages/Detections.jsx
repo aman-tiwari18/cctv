@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Box, Card, CardMedia, CardContent, Typography, Chip,
@@ -15,7 +15,7 @@ import {
   WarningAmber, ImageNotSupported, FlipCameraAndroid, SecurityUpdateWarning, EventSeat,
   VisibilityOff, PersonOff,
   ChevronLeft, ChevronRight, ViewList,
-  Check, Close as CloseIcon, Memory, LocalOffer
+  Check, Close as CloseIcon, Memory, LocalOffer, ArrowUpward
 } from '@mui/icons-material';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
@@ -144,6 +144,9 @@ const TYPE_ICONS = {
   default: CameraAlt,
 };
 
+// How long the NEW tag shows on a card after it arrives or is revealed.
+const NEW_BADGE_MS = 6000;
+
 const NewBadge = ({ addedAt, sx }) => {
   const [visible, setVisible] = useState(false);
 
@@ -156,9 +159,9 @@ const NewBadge = ({ addedAt, sx }) => {
 
     const diff = Math.max(0, Date.now() - parsedTime);
 
-    if (diff < 5000) {
+    if (diff < NEW_BADGE_MS) {
       setVisible(true);
-      const timer = setTimeout(() => setVisible(false), 5000 - diff);
+      const timer = setTimeout(() => setVisible(false), NEW_BADGE_MS - diff);
       return () => clearTimeout(timer);
     } else {
       setVisible(false);
@@ -243,6 +246,8 @@ function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onS
             component="img"
             image={`${IMG_BASE}${item.image_url}`}
             alt={item.camera_id}
+            loading="lazy"
+            decoding="async"
             onError={() => setImgError(true)}
             sx={{ height: { xs: 200, md: 220 }, objectFit: 'cover' }}
           />
@@ -441,7 +446,7 @@ function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onS
   );
 }
 
-function Lightbox({ item, onClose, onPushToClient, isPushing, isPushed }) {
+function Lightbox({ item, onClose, onPushToClient, isPushing, isPushed, pendingLiveCount = 0 }) {
   const theme = useTheme();
   const isSmDown = useMediaQuery(theme.breakpoints.down('sm'));
   if (!item) return null;
@@ -462,6 +467,13 @@ function Lightbox({ item, onClose, onPushToClient, isPushing, isPushed }) {
         >
           <Close sx={{ fontSize: { xs: 26, sm: 24 } }} />
         </IconButton>
+        {pendingLiveCount > 0 && (
+          <Chip
+            label={`${pendingLiveCount} new detection${pendingLiveCount > 1 ? 's' : ''} waiting`}
+            size="small"
+            sx={{ position: 'absolute', top: 8, left: 8, zIndex: 10, bgcolor: '#f59e0b', color: '#fff', fontWeight: 700 }}
+          />
+        )}
         <Box
           component="img"
           src={`${IMG_BASE}${item.image_url}`}
@@ -568,10 +580,28 @@ const timeStringToSeconds = (t) => {
 
 const todayDate = formatDateDDMMYYYY(new Date());
 
+// A detection's position in the feed order: (created_at, source, id), matching
+// the backend's tie-break. created_at is whole seconds and a burst puts many
+// detections in one second, so time alone can't say which one is "the 50th".
+const SOURCE_RANK = { hls: 0, rtsp: 1 };
+const feedPosition = (it) => ({ ts: it.created_at || new Date().toISOString(), source: it.source, id: Number(it.id) || 0 });
+const compareFeedPosition = (a, b) => (Date.parse(a.ts) - Date.parse(b.ts))
+  || ((SOURCE_RANK[a.source] ?? 0) - (SOURCE_RANK[b.source] ?? 0))
+  || (a.id - b.id);
+
+// Live socket events are applied in batches this often — a 100-item burst
+// becomes a handful of renders instead of one full-page render per detection.
+const LIVE_BATCH_MS = 250;
+
+// The page re-renders on every live batch/count change; memoized so cards and
+// list rows whose props didn't change skip re-rendering.
+const MemoDetectionCard = memo(DetectionCard);
+const MemoListViewPanel = memo(ListViewPanel);
 
 
 
-function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingToClient, pushedUids }) {
+
+function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingToClient, pushedUids, onSkip, jumpToTopKey }) {
   const item = data[selectedIndex];
   const isPushed = item ? (pushedUids.has(item.uid || item.id || item.image_url) || item.pushed_to_client === 1 || item.pushed_to_client === true) : false;
   const tcCode = item ? getDetectionTcCode(item) : '-';
@@ -581,10 +611,16 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
 
   const goNext = useCallback(() => onSelect(Math.min(data.length - 1, selectedIndex + 1)), [data.length, selectedIndex, onSelect]);
 
+  // Skipping removes the row, so the next item slides into this index —
+  // advancing as well would silently jump over it.
   const handleSkip = useCallback(() => {
-    console.log('Skip clicked');
-    goNext();
-  }, [goNext]);
+    if (item && onSkip) onSkip(item);
+    else goNext();
+  }, [item, onSkip, goNext]);
+
+  useEffect(() => {
+    if (data.length > 0 && selectedIndex > data.length - 1) onSelect(data.length - 1);
+  }, [data.length, selectedIndex, onSelect]);
 
   const handlePush = useCallback(async () => {
     if (!item || copyingToClient || !onPushToClient) return;
@@ -609,10 +645,19 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, [selectedIndex]);
 
+  // selectedIndex may already be 0 when the pill is clicked, so the effect
+  // above won't fire — scroll the list container explicitly.
+  const listContainerRef = useRef(null);
+  useEffect(() => {
+    if (jumpToTopKey && listContainerRef.current) {
+      listContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [jumpToTopKey]);
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2, height: { xs: 'auto', md: 'calc(100vh - 310px)' }, minHeight: { xs: 0, md: 500 } }}>
-        <Box sx={{
+        <Box ref={listContainerRef} sx={{
         width: { xs: '100%', md: '30%', lg: 300 }, flexShrink: 0, overflowY: 'auto',
         maxHeight: { xs: 280, md: 'none' },
         borderRight: { xs: 'none', md: '1px solid #e2e8f0' },
@@ -628,7 +673,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
 
           return (
             <Box
-              key={`${listItem.filename}-${idx}`}
+              key={listItem.uid || listItem.id || listItem.image_url || idx}
               ref={(el) => (itemRefs.current[idx] = el)} // ✅ direct DOM ref
               onClick={() => onSelect(idx)}
               sx={{
@@ -650,6 +695,8 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
                   component="img"
                   src={`${IMG_BASE}${listItem.image_url}`}
                   alt={listItem.camera_id}
+                  loading="lazy"
+                  decoding="async"
                   sx={{
                     width: { xs: 62, sm: 70, md: 70 },
                     height: { xs: 62, sm: 70, md: 70 },
@@ -706,7 +753,10 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
                 minHeight: { xs: 240, md: 0 },
                 bgcolor: '#fff'
               }}>
+                {/* Keyed per detection: onError hides the element, so reusing one
+                    <img> across selections would keep every later image hidden. */}
                 <Box
+                  key={item.uid || item.id || item.image_url}
                   component="img"
                   src={`${IMG_BASE}${item.image_url}`}
                   alt={item.camera_id}
@@ -821,7 +871,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
                     <Typography
                       variant="caption"
                       sx={{ display: 'block', mt: 0.8, lineHeight: 1.5 }}
-                      color={meta.color}
+                      color={(TYPE_META[item.type] || {}).color}
                       fontWeight={500}
                     >
                       Conf: {(item.confidence * 100).toFixed(0)}%
@@ -975,6 +1025,8 @@ export default function Detections() {
   const [total, setTotal] = useState(0);
   const [clientTotal, setClientTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const loadingRef = useRef(true);
+  useEffect(() => { loadingRef.current = loading; }, [loading]);
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(50);
   const [view, setView] = useState('grid');
@@ -1002,6 +1054,42 @@ export default function Detections() {
   const [selected, setSelected] = useState(null);
   const [selectedPaths, setSelectedPaths] = useState([]);
 
+  // While an operator has a detection open for review, don't let the list
+  // reflow under them — buffer incoming live detections instead of merging,
+  // and flush the buffer the moment the dialog closes.
+  const selectedRef = useRef(null);
+  // Toggle: OFF (default) = the original live-stream page — every new
+  // detection prepends immediately and the oldest falls off past rowsPerPage.
+  // ON = the queued/anchored review mode (the "N new" pill, step-by-page).
+  const [queuedMode, setQueuedMode] = useState(false);
+  const queuedModeRef = useRef(queuedMode);
+  useEffect(() => { queuedModeRef.current = queuedMode; }, [queuedMode]);
+  // The paged view is anchored at one detection's feed position: pages 1, 2,
+  // 3… are detections at-or-before it (server-side `until`), so they stay
+  // stable while new ones arrive. Anything after it waits in `pendingRef`
+  // (key -> feed position) behind the "N new" pill; each click steps the
+  // anchor forward by exactly one page. null = not anchored yet (set by the
+  // first page-1 fetch, or reset on any filter change).
+  const anchorRef = useRef(null);
+  const pendingRef = useRef(new Map());
+  // key -> when it was revealed (pill click or direct live placement). The
+  // reveal fetch rebuilds every card from the server, so the NEW tag's start
+  // time has to be carried over from here or revealed cards never get one.
+  const revealedAtRef = useRef(new Map());
+  const [pendingLiveCount, setPendingLiveCount] = useState(0);
+  // Live socket events queued between batch applications (see LIVE_BATCH_MS).
+  const incomingRef = useRef([]);
+  const countsDeltaRef = useRef({});
+  const batchTimerRef = useRef(null);
+  const [listJumpKey, setListJumpKey] = useState(0);
+  const liveAlertTimerRef = useRef(null);
+  useEffect(() => () => clearTimeout(liveAlertTimerRef.current), []);
+  // Other "operator is reviewing" signals — any of them holds new items behind
+  // the "↑ N new detections" pill instead of reflowing the feed.
+  const viewRef = useRef(view);
+  const pageRef = useRef(page);
+  const hoverRef = useRef(false);
+  const scrolledRef = useRef(false);
   // Performance optimization: Use refs to prevent unnecessary re-renders
   const abortControllerRef = useRef(null);
   const fetchTimeoutRef = useRef(null);
@@ -1016,9 +1104,11 @@ export default function Detections() {
     || item.filename
   ), []);
   const dataKeysRef = useRef(new Set());
+  const dataRef = useRef(data);
 
   useEffect(() => {
     dataKeysRef.current = new Set(data.map(getDetectionKey).filter(Boolean));
+    dataRef.current = data;
   }, [data, getDetectionKey]);
 
   const toggleSelection = (item) => {
@@ -1030,6 +1120,13 @@ export default function Detections() {
 
   const handleSkipLocally = useCallback((itemToRemove) => {
     setData((prev) => prev.filter(i => getDetectionKey(i) !== getDetectionKey(itemToRemove)));
+    // Persist so the skip survives a reload / shows for other operators, same
+    // as push/accept/remove already do on the client side.
+    if (itemToRemove?.uid) {
+      axios.post(`${API_BASE_1}/detections/skip`, { uid: itemToRemove.uid }).catch((err) => {
+        console.error('Failed to persist skip:', err);
+      });
+    }
   }, [getDetectionKey]);
 
   const loadExams = useCallback(async () => {
@@ -1099,6 +1196,11 @@ export default function Detections() {
     abortControllerRef.current = new AbortController();
 
     const params = buildDetectionParams(pg, rpp);
+    if (anchorRef.current) {
+      params.append('until', anchorRef.current.ts);
+      if (anchorRef.current.source) params.append('until_source', anchorRef.current.source);
+      params.append('until_id', String(anchorRef.current.id));
+    }
     const paramsString = params.toString();
 
     // Prevent duplicate requests
@@ -1122,11 +1224,23 @@ export default function Detections() {
 
       if (detectionsRes.data.success) {
         const fetchedItems = Array.isArray(detectionsRes.data.data)
-          ? detectionsRes.data.data.map((item) => ({ ...item, newBadgeAt: undefined }))
+          ? detectionsRes.data.data.map((item) => ({
+            ...item,
+            newBadgeAt: revealedAtRef.current.get(getDetectionKey(item)),
+          }))
           : [];
         
         setData(fetchedItems);
         setTotal(detectionsRes.data.total);
+        // First unanchored page-1 load: anchor at the newest row we were shown,
+        // so every later page and the pill agree on where "new" starts.
+        if (!anchorRef.current && pg === 1) {
+          anchorRef.current = fetchedItems.reduce((max, it) => {
+            if (!it.created_at) return max;
+            const pos = feedPosition(it);
+            return !max || compareFeedPosition(pos, max) > 0 ? pos : max;
+          }, null);
+        }
         setCounts(detectionsRes.data.counts || {});
         setAllCounts(detectionsRes.data.counts || {});
         // Backend now always returns counts for ALL types (not just the
@@ -1144,56 +1258,152 @@ export default function Detections() {
     } finally {
       setLoading(false);
     }
-  }, [buildDetectionParams, rowsPerPage, setAllCounts, setUnfilteredCounts]);
+  }, [buildDetectionParams, rowsPerPage, setAllCounts, setUnfilteredCounts, getDetectionKey]);
 
   // Optimized: Only filter on server-side, remove client-side filtering
   const filteredData = useMemo(() => data, [data]); // Server already filtered
 
-  const mergeLiveDetections = useCallback((items, { incrementTotal = false } = {}) => {
-    const incoming = (Array.isArray(items) ? items : [items]).filter(Boolean);
-    if (incoming.length === 0) return;
+  // List view is a one-by-one review workflow, so it always holds new items;
+  // off page 1, prepending live items would put them on the wrong page.
+  const isReviewing = useCallback(() => (
+    Boolean(selectedRef.current)
+    || viewRef.current === 'list'
+    || pageRef.current !== 1
+    || hoverRef.current
+    || scrolledRef.current
+  ), []);
 
-    const now = Date.now();
-    const seen = new Set(dataKeysRef.current);
-    const freshItems = [];
+  // Client-side mirror of the non-type filters GET /detections applies, so a
+  // live item only reaches this view (and the pill count) if a reload would
+  // show it. The socket broadcasts every detection to everyone.
+  const matchesNonTypeFilters = useCallback((item) => {
+    const filterDateIso = parseDateForQuery(dateFilter);
+    if (filterDateIso && item.date && item.date !== filterDateIso) return false;
+    if (examFilter && item.exam_id != null && String(item.exam_id) !== String(examFilter)) return false;
+    if (shiftFilter && item.shift_id != null && String(item.shift_id) !== String(shiftFilter)) return false;
+    if (user?.role === 'OPERATOR' && user?.gpu_id != null && item.gpu_id != null
+      && String(item.gpu_id) !== String(user.gpu_id)) return false;
 
-    incoming.forEach((item) => {
-      const liveItem = {
-        ...item,
-        newBadgeAt: now,
-      };
-
-      const key = getDetectionKey(liveItem);
-      if (!key || seen.has(key)) return;
-
-      seen.add(key);
-      freshItems.push(liveItem);
-    });
-
-    if (freshItems.length === 0) return;
-
-    dataKeysRef.current = seen;
-
-    setData(prev => {
-      const prevKeys = new Set(prev.map(getDetectionKey).filter(Boolean));
-      const uniqueFreshItems = freshItems.filter((item) => {
-        const key = getDetectionKey(item);
-        if (!key || prevKeys.has(key)) return false;
-        prevKeys.add(key);
-        return true;
-      });
-
-      if (uniqueFreshItems.length === 0) return prev;
-      return [...uniqueFreshItems, ...prev].slice(0, rowsPerPage);
-    });
-
-    if (incrementTotal) {
-      setTotal(prev => prev + freshItems.length);
+    const q = debouncedSearch.trim().toLowerCase();
+    if (q) {
+      const haystack = [item.center_name, item.camera_name, item.tc_code, item.ch_code, item.device_id]
+        .filter(Boolean).join(' ').toLowerCase();
+      if (!haystack.includes(q)) return false;
     }
 
-    setLiveAlert(freshItems[0]);
-    setTimeout(() => setLiveAlert(null), 5000);
-  }, [getDetectionKey, rowsPerPage]);
+    if (appliedStartTime || appliedEndTime) {
+      const t = new Date(item.detected_at);
+      const d = Number.isNaN(t.getTime()) ? new Date() : t;
+      const hhmm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      if (appliedStartTime && hhmm < appliedStartTime) return false;
+      if (appliedEndTime && hhmm > appliedEndTime) return false;
+    }
+    return true;
+  }, [dateFilter, examFilter, shiftFilter, debouncedSearch, appliedStartTime, appliedEndTime, user]);
+
+  // Buffered items were matched against the old filters; the refetch that a
+  // filter change triggers pulls the real ones from the DB anyway.
+  useEffect(() => {
+    // New filters = a new view: re-anchor from the next page-1 fetch.
+    anchorRef.current = null;
+    pendingRef.current.clear();
+    revealedAtRef.current = new Map();
+    incomingRef.current = [];
+    setPendingLiveCount(0);
+  }, [buildDetectionParams]);
+
+  // Live events are filtered on arrival (pure, no state) and queued; the
+  // queue is applied once per LIVE_BATCH_MS so a burst costs a few renders.
+
+  const applyIncomingBatch = useCallback(() => {
+    batchTimerRef.current = null;
+    const batch = incomingRef.current;
+    const delta = countsDeltaRef.current;
+    incomingRef.current = [];
+    countsDeltaRef.current = {};
+
+    if (Object.keys(delta).length > 0) {
+      setUnfilteredCounts((prev) => {
+        const next = { ...prev };
+        Object.entries(delta).forEach(([type, n]) => { next[type] = (next[type] || 0) + n; });
+        return next;
+      });
+    }
+    if (batch.length === 0) return;
+
+    if (!queuedModeRef.current) {
+      // Legacy live-stream behavior: everything merges straight onto the
+      // page immediately, oldest cards fall off past rowsPerPage. No pill,
+      // no anchor, no "reviewing" gate.
+      setTotal((prev) => prev + batch.length);
+      const seen = new Set(dataRef.current.map(getDetectionKey).filter(Boolean));
+      const fresh = [];
+      for (const item of batch) {
+        const key = getDetectionKey(item);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        fresh.push(item);
+      }
+      if (fresh.length > 0) {
+        const now = Date.now();
+        const stampedNewestFirst = fresh.map((it) => ({ ...it, newBadgeAt: now })).reverse();
+        setData((prev) => [...stampedNewestFirst, ...prev].slice(0, rowsPerPage));
+        setLiveAlert(stampedNewestFirst[0]);
+        clearTimeout(liveAlertTimerRef.current);
+        liveAlertTimerRef.current = setTimeout(() => setLiveAlert(null), 5000);
+      }
+      return;
+    }
+
+    // Split by the anchor: at-or-before it already belongs to the paged view
+    // (pages 1..N); after it is "new" and waits behind the pill. Oldest first.
+    const anchor = anchorRef.current;
+    const pageKeys = new Set(dataRef.current.map(getDetectionKey).filter(Boolean));
+    const newer = [];
+    let olderCount = 0;
+    for (const item of batch) {
+      const key = getDetectionKey(item);
+      if (!key || pageKeys.has(key) || pendingRef.current.has(key)) continue;
+      const pos = feedPosition(item);
+      if (anchor && compareFeedPosition(pos, anchor) <= 0) { olderCount += 1; continue; }
+      newer.push({ item, key, pos });
+    }
+    newer.sort((a, b) => compareFeedPosition(a.pos, b.pos));
+
+    // Idle on page 1 with room and nothing already queued: place the oldest
+    // new ones straight onto the page (the quiet-trickle case — no click
+    // needed) and move the anchor up to cover them. Everything else queues.
+    // Not while a page load is in flight — its response would overwrite them.
+    let placed = [];
+    const room = rowsPerPage - dataRef.current.length;
+    if (!isReviewing() && !loadingRef.current && pendingRef.current.size === 0 && room > 0) {
+      placed = newer.slice(0, room);
+    }
+    const queued = newer.slice(placed.length);
+
+    if (placed.length > 0) {
+      anchorRef.current = placed[placed.length - 1].pos;
+      const now = Date.now();
+      placed.forEach(({ key }) => revealedAtRef.current.set(key, now));
+      const stampedNewestFirst = placed.map(({ item }) => ({ ...item, newBadgeAt: now })).reverse();
+      setData((prev) => [...stampedNewestFirst, ...prev]);
+      setLiveAlert(stampedNewestFirst[0]);
+      clearTimeout(liveAlertTimerRef.current);
+      liveAlertTimerRef.current = setTimeout(() => setLiveAlert(null), 5000);
+    }
+    // Pagination total counts the anchored view only (what pages 1..N hold);
+    // the pill counts everything past the anchor. Together they're the total.
+    if (placed.length + olderCount > 0) setTotal((prev) => prev + placed.length + olderCount);
+
+    if (queued.length > 0) {
+      queued.forEach(({ key, pos }) => pendingRef.current.set(key, pos));
+      setPendingLiveCount(pendingRef.current.size);
+    }
+  }, [setUnfilteredCounts, isReviewing, getDetectionKey, rowsPerPage]); // queuedMode read via ref — doesn't need a resubscribe
+
+  const applyIncomingBatchRef = useRef(applyIncomingBatch);
+  useEffect(() => { applyIncomingBatchRef.current = applyIncomingBatch; }, [applyIncomingBatch]);
+  useEffect(() => () => clearTimeout(batchTimerRef.current), []);
 
   // Handle live updates for the data list
   const { socket, connected } = useSocket();
@@ -1201,25 +1411,41 @@ export default function Detections() {
     if (!socket) return;
 
     const handleNewDetection = (item) => {
-      if (typeFilter.length > 0 && !typeFilter.includes(item.type)) {
-        return;
+      if (!matchesNonTypeFilters(item)) return;
+
+      // Sidebar counts are per-type totals ignoring the type filter, so count
+      // them before the type check.
+      countsDeltaRef.current[item.type] = (countsDeltaRef.current[item.type] || 0) + 1;
+      if (typeFilter.length === 0 || typeFilter.includes(item.type)) {
+        incomingRef.current.push(item);
       }
 
-      // Bump sidebar counts only when this detection belongs to the currently
-      // viewed date. New detections are always "today", so they only apply
-      // when dateFilter is today or empty (all dates).
-      const itemDateIso = item?.date;
-      const filterDateIso = parseDateForQuery(dateFilter);
-      if (!filterDateIso || itemDateIso === filterDateIso) {
-        setUnfilteredCounts(prev => ({ ...prev, [item.type]: (prev[item.type] || 0) + 1 }));
+      if (!batchTimerRef.current) {
+        batchTimerRef.current = setTimeout(() => applyIncomingBatchRef.current(), LIVE_BATCH_MS);
       }
-
-      mergeLiveDetections(item, { incrementTotal: true });
     };
 
     socket.on('detection:new', handleNewDetection);
     return () => socket.off('detection:new', handleNewDetection);
-  }, [socket, mergeLiveDetections, typeFilter, dateFilter, setUnfilteredCounts]);
+  }, [socket, typeFilter, matchesNonTypeFilters]);
+
+  // "Reviewing" signals only decide whether a quiet trickle may land directly
+  // on page 1. They never reveal the backlog on their own — that only
+  // happens when the operator clicks the pill.
+  useEffect(() => { selectedRef.current = selected; }, [selected]);
+  useEffect(() => {
+    viewRef.current = (view === 'grid' || isMobile) ? 'grid' : 'list';
+  }, [view, isMobile]);
+  useEffect(() => { pageRef.current = page; }, [page]);
+
+  useEffect(() => {
+    const onScroll = () => { scrolledRef.current = window.scrollY > 200; };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  const handleFeedMouseEnter = () => { hoverRef.current = true; };
+  const handleFeedMouseLeave = () => { hoverRef.current = false; };
 
   // Optimized polling: Only when NOT connected and on page 1
   useEffect(() => {
@@ -1240,7 +1466,6 @@ export default function Detections() {
         
         if (cancelled || !res.data.success) return;
 
-        setTotal(res.data.total || 0);
         setCounts(res.data.counts || {});
         setAllCounts(res.data.counts || {});
         setUnfilteredCounts(res.data.counts || {});
@@ -1252,7 +1477,24 @@ export default function Detections() {
           }
           return true;
         });
-        mergeLiveDetections(filteredData);
+        // Socket is down, so this unanchored poll stands in for live events.
+        // Legacy mode (or not anchored yet): adopt it as page 1. Queued mode,
+        // anchored: rows newer than the anchor go behind the pill like any
+        // live arrival — the paged view itself doesn't move until the click.
+        if (!queuedModeRef.current || !anchorRef.current) {
+          if (!isReviewing()) {
+            setData(filteredData);
+            setTotal(res.data.total || 0);
+          }
+        } else {
+          filteredData.forEach((item) => {
+            const key = getDetectionKey(item);
+            if (!key || !item.created_at) return;
+            const pos = feedPosition(item);
+            if (compareFeedPosition(pos, anchorRef.current) > 0) pendingRef.current.set(key, pos);
+          });
+          setPendingLiveCount(pendingRef.current.size);
+        }
       } catch (err) {
         if (err.name !== 'CanceledError') {
           console.error('Failed to poll latest detections:', err);
@@ -1267,7 +1509,7 @@ export default function Detections() {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [loading, page, connected, rowsPerPage, buildDetectionParams, mergeLiveDetections, setAllCounts, setUnfilteredCounts, typeFilter]);
+  }, [loading, page, connected, rowsPerPage, buildDetectionParams, isReviewing, getDetectionKey, setAllCounts, setUnfilteredCounts, typeFilter]);
 
   // Debounced fetch on filter changes
   useEffect(() => {
@@ -1331,6 +1573,43 @@ export default function Detections() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  // Switching modes mid-session shouldn't leave a hybrid view (e.g. an old
+  // anchor lingering under legacy mode) — clear queue state and reload page 1
+  // fresh under whichever mode was just selected.
+  const handleQueuedModeChange = (_, next) => {
+    setQueuedMode(next);
+    queuedModeRef.current = next;
+    anchorRef.current = null;
+    pendingRef.current.clear();
+    revealedAtRef.current = new Map();
+    setPendingLiveCount(0);
+    setPage(1);
+    setListSelectedIndex(0);
+    fetchDetections(1);
+  };
+
+  // Reveal the next page's worth of new detections, oldest first: step the
+  // anchor forward to the rowsPerPage-th pending one and re-fetch page 1.
+  // Those become page 1, the previous page 1 becomes page 2 (and so on), and
+  // the rest stay behind the pill for the next click.
+  const handleShowNewDetections = () => {
+    const pendingOldestFirst = [...pendingRef.current.entries()]
+      .sort((a, b) => compareFeedPosition(a[1], b[1]));
+    const chunk = pendingOldestFirst.slice(0, rowsPerPage);
+    if (chunk.length === 0) return;
+
+    // Anchor on the exact rowsPerPage-th detection (not just its second), so
+    // precisely this chunk moves into the paged view and the rest stay queued.
+    anchorRef.current = chunk[chunk.length - 1][1];
+    chunk.forEach(([key]) => pendingRef.current.delete(key));
+    setPendingLiveCount(pendingRef.current.size);
+    const revealedAt = Date.now();
+    revealedAtRef.current = new Map(chunk.map(([key]) => [key, revealedAt]));
+
+    handlePageChange(null, 1);
+    setListJumpKey((k) => k + 1);
+  };
+
   // Optimized push to client with queue and optimistic updates
   const pushToClient = async (items) => {
     if (items.length === 0) return;
@@ -1382,6 +1661,11 @@ export default function Detections() {
       setCopyingId(null);
     }
   };
+
+  // Stable identity for memoized cards/list; always calls the latest pushToClient.
+  const pushToClientRef = useRef(pushToClient);
+  pushToClientRef.current = pushToClient;
+  const handlePushToClient = useCallback((items) => pushToClientRef.current(items), []);
   const totalAll = Object.values(counts).reduce((a, b) => a + b, 0);
 
   const exportToExcel = async () => {
@@ -1824,8 +2108,24 @@ export default function Detections() {
           <Typography sx={{ fontSize: { xs: 11, sm: 13 }, fontWeight: 500, color: '#64748b', whiteSpace: 'nowrap' }}>
             Pushed {clientTotal} · Skipped {Math.max(0, total - clientTotal)}
           </Typography>
+          <ToggleButton
+            size="small"
+            value="queued"
+            selected={queuedMode}
+            onChange={() => handleQueuedModeChange(null, !queuedMode)}
+            title={queuedMode
+              ? 'Queued review mode: new detections wait behind the "N new" pill.'
+              : 'Live mode: new detections appear immediately, oldest fall off the page.'}
+            sx={{
+              height: 36, borderRadius: '8px !important', textTransform: 'none', fontSize: 12, fontWeight: 600,
+              px: 1.5, color: '#64748b', border: '1px solid #e2e8f0',
+              '&.Mui-selected': { bgcolor: '#eff6ff', color: '#1e40af', borderColor: '#93c5fd', '&:hover': { bgcolor: '#dbeafe' } },
+            }}
+          >
+            {queuedMode ? 'Queued review: ON' : 'Live mode'}
+          </ToggleButton>
           <ToggleButtonGroup
-            value={view} 
+            value={view}
             exclusive 
             onChange={(_, v) => {
               if (v) {
@@ -1866,6 +2166,22 @@ export default function Detections() {
         </Box>
       </Box>
 
+      {pendingLiveCount > 0 && (
+        <Box sx={{ position: 'fixed', top: 76, left: 0, right: 0, zIndex: 1200, display: 'flex', justifyContent: 'center', pointerEvents: 'none' }}>
+          <Chip
+            icon={<ArrowUpward />}
+            label={`${pendingLiveCount} new detection${pendingLiveCount > 1 ? 's' : ''}`}
+            onClick={handleShowNewDetections}
+            sx={{
+              pointerEvents: 'auto', bgcolor: '#3c81f6', color: '#fff', fontWeight: 700,
+              height: 36, px: 1, borderRadius: 18, boxShadow: '0 4px 14px rgba(15,23,42,0.25)',
+              '& .MuiChip-icon': { color: '#fff' },
+              '&:hover': { bgcolor: '#1e40af' },
+            }}
+          />
+        </Box>
+      )}
+
       {/* ── Content ── */}
       {loading ? (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -1885,13 +2201,13 @@ export default function Detections() {
           </Typography>
         </Box>
       ) : (view === 'grid' || isMobile) ? (
-        <Grid container spacing={2}>
+        <Grid container spacing={2} onMouseEnter={handleFeedMouseEnter} onMouseLeave={handleFeedMouseLeave}>
           {filteredData.map((item, i) => (
-            <Grid item xs={12} sm={6} md={4} lg={3} key={`${item.chNo}-${i}`}>
-              <DetectionCard
+            <Grid item xs={12} sm={6} md={4} lg={3} key={getDetectionKey(item) || i}>
+              <MemoDetectionCard
                 item={item}
                 onClick={setSelected}
-                onPushToClient={pushToClient}
+                onPushToClient={handlePushToClient}
                 isPushing={copyingId === (item.uid || item.id || item.image_url)}
                 isPushed={pushedUids.has(item.uid || item.id || item.image_url) || item.pushed_to_client === 1 || item.pushed_to_client === true}
                 onSkip={handleSkipLocally}
@@ -1900,13 +2216,15 @@ export default function Detections() {
           ))}
         </Grid>
       ) : (
-        <ListViewPanel
+        <MemoListViewPanel
           data={filteredData}
           selectedIndex={listSelectedIndex}
           onSelect={setListSelectedIndex}
-          onPushToClient={pushToClient}
+          onPushToClient={handlePushToClient}
           copyingToClient={copyingToClient}
           pushedUids={pushedUids}
+          onSkip={handleSkipLocally}
+          jumpToTopKey={listJumpKey}
         />
       )}
 
@@ -1917,6 +2235,7 @@ export default function Detections() {
         onPushToClient={pushToClient}
         isPushing={selected ? copyingId === (selected.uid || selected.id || selected.image_url) : false}
         isPushed={selected ? (pushedUids.has(selected.uid || selected.id || selected.image_url) || selected.pushed_to_client === 1 || selected.pushed_to_client === true) : false}
+        pendingLiveCount={pendingLiveCount}
       />
 
       <Snackbar

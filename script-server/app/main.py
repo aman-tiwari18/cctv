@@ -794,10 +794,15 @@ async def detection_watch_loop():
             known_detection_files = new_known
             known_detection_by_date = new_date_index
 
-            # O(1) today count via date index — no O(N) iteration.
+            # Today count via date index (O(today), not O(N)), minus operator skips
+            # so the live counts match what /detections lists.
             today_iso = datetime.now().date().isoformat()
+            skipped_uids = await asyncio.to_thread(_get_skipped_uids)
             counts = {
-                k: len(known_detection_by_date.get(k, {}).get(today_iso, set()))
+                k: sum(
+                    1 for tp in known_detection_by_date.get(k, {}).get(today_iso, set())
+                    if os.path.splitext(os.path.basename(tp))[0].split("_")[-1] not in skipped_uids
+                ) if skipped_uids else len(known_detection_by_date.get(k, {}).get(today_iso, set()))
                 for k in DETECTION_FOLDERS
             }
             await sio.emit("detection:counts", counts)
@@ -1404,6 +1409,73 @@ DETECTION_LABELS = {
     "vision":           "Scene Classification",
 }
 
+# ── Feed order for the live / queued-review detection pages ──────────────────
+# Both pages anchor their paged view at one detection's feed position and send
+# it back as `until` (+ `until_source`, `until_id`), so pages 2, 3… stay put
+# while new detections wait behind the "N new" pill. Ties within one second
+# break on source (hls < rtsp) then row id, matching the frontend's order.
+_FEED_SOURCE_RANK = {"hls": 0, "rtsp": 1}
+
+
+def _parse_feed_until(until):
+    """Frontend anchor timestamp -> naive local datetime, or None if absent/invalid."""
+    if not until:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(until).strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone().replace(tzinfo=None)
+    return dt
+
+
+def _feed_iso(value):
+    """DB datetime -> naive ISO string the frontend echoes back as `until`."""
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%dT%H:%M:%S")
+    return str(value) if value else None
+
+
+def _uid_feed_id(uid):
+    """Stable numeric tie-break for file-based detections (they have no row id).
+    First 48 bits of the uuid — fits a JS Number, so the frontend's `until_id`
+    round-trips exactly. Non-hex uids fall back to crc32."""
+    if not uid:
+        return 0
+    try:
+        return int(uid.replace("-", "")[:12], 16)
+    except ValueError:
+        import zlib
+        return zlib.crc32(uid.encode())
+
+
+# Operator "Skip" decisions (camera_report_*.skipped). Loaded once from the DB,
+# then kept current by the skip/undo endpoints — this single process is the only
+# writer, so no periodic rescan of the report tables is needed.
+_skipped_uids = set()
+_skipped_uids_loaded = False
+
+
+def _get_skipped_uids():
+    global _skipped_uids_loaded
+    if _skipped_uids_loaded:
+        return _skipped_uids
+    try:
+        conn = _get_connection()
+        try:
+            with conn.cursor() as cur:
+                for table in ("camera_report_hls", "camera_report_rtsp"):
+                    cur.execute(f"SELECT unique_id FROM {table} WHERE skipped = 1")
+                    _skipped_uids.update(r["unique_id"] for r in cur.fetchall() if r.get("unique_id"))
+        finally:
+            conn.close()
+        _skipped_uids_loaded = True
+    except Exception as e:
+        logger.error(f"Failed to load skipped detection uids: {e}")
+    return _skipped_uids
+
+
 def parse_detection_filename(
     filename: str,
     type_key: str,
@@ -1569,6 +1641,14 @@ def parse_detection_filename(
         except Exception:
             detected_at_ms = now_ms  # Fallback to current time
 
+    # Feed-order key: the filename's own capture time (same clock it was written in).
+    created_at_iso = None
+    if date_str and time_str:
+        try:
+            created_at_iso = datetime.strptime(date_str + time_str, "%Y%m%d%H%M%S").strftime("%Y-%m-%dT%H:%M:%S")
+        except Exception:
+            created_at_iso = None
+
     image_rel = quote(str(file_obj.as_posix()), safe="/")
     issue_label_map = {
         "no_targets": "No Targets",
@@ -1620,7 +1700,9 @@ def parse_detection_filename(
         "image_url":   image_url,
         "exam_id":     exam_id,
         "uid":         uid,
+        "id":          _uid_feed_id(uid),
         "gpu_id":      gpu_id_fn,
+        "created_at":  created_at_iso,
     }
 
 
@@ -1638,6 +1720,9 @@ def list_detections(
     gpu_id: Optional[int] = None,      # operator sharding: restrict to this worker's gpu
     page: int = 1,
     limit: int = 50,
+    until: Optional[str] = None,       # queued-review anchor (see _FEED_SOURCE_RANK)
+    until_source: Optional[str] = None,
+    until_id: Optional[int] = None,
 ):
     selected_types = set(type.split(',')) if type else set()
     check_types = selected_types if selected_types else set(DETECTION_FOLDERS.keys())
@@ -1660,7 +1745,8 @@ def list_detections(
     # When a date filter is provided and the index is populated we iterate only
     # the O(k) bucket for that date instead of the full O(N) snapshot.
     all_counts = {k: 0 for k in DETECTION_FOLDERS}
-    candidates = []  # (sort_key, type_key, relative_path, origin)
+    candidates = []  # (sort_key, type_key, relative_path, origin, feed_id)
+    skipped_uids = _get_skipped_uids()
 
     for type_key in DETECTION_FOLDERS:
         # Use date index for O(k) lookup; fall back to full snapshot when the
@@ -1698,22 +1784,46 @@ def list_detections(
             ):
                 continue
 
+            # Operator-skipped detections are reviewed-and-dismissed: hidden from
+            # the list and the counts (uid = last "_" segment of the filename stem).
+            uid = os.path.splitext(os.path.basename(relative_path))[0].split("_")[-1]
+            if uid in skipped_uids:
+                continue
+
             all_counts[type_key] += 1
 
             if type_key in check_types:
                 basic = _basic_detection_meta(relative_path)
                 sort_key = (basic.get("date") or "") + (basic.get("time") or "")
-                candidates.append((sort_key, type_key, relative_path, origin))
+                candidates.append((sort_key, type_key, relative_path, origin, _uid_feed_id(uid)))
 
-    # Sort newest first (YYYYMMDDHHMMSS lexicographic == chronological)
-    candidates.sort(key=lambda x: x[0], reverse=True)
+    # Pagination anchor: only detections at-or-before it are paged; newer ones
+    # wait behind the "N new" pill. Sidebar counts above stay live. Position is
+    # (second, source rank, feed_id) — feed_id is the uid-derived tie-break the
+    # item carries as `id`, so same-second ties split exactly like the frontend.
+    until_dt = _parse_feed_until(until)
+    if until_dt is not None:
+        until_pos = (until_dt.strftime("%Y%m%d%H%M%S"),
+                     _FEED_SOURCE_RANK.get(until_source, 0), until_id or 0)
+
+        def _at_or_before(c):
+            # sort_key is "YYYY-MM-DD" + "HHMMSS"; drop the dashes to compare.
+            if until_id is None:
+                # Old-style anchor (no id): whole second on the paged side.
+                return (c[0].replace("-", ""), _FEED_SOURCE_RANK.get(c[3], 0)) <= until_pos[:2]
+            return (c[0].replace("-", ""), _FEED_SOURCE_RANK.get(c[3], 0), c[4]) <= until_pos
+
+        candidates = [c for c in candidates if _at_or_before(c)]
+
+    # Newest first (YYYYMMDDHHMMSS lexicographic == chronological), then source, then feed_id.
+    candidates.sort(key=lambda x: (x[0], _FEED_SOURCE_RANK.get(x[3], 0), x[4]), reverse=True)
     start_idx = (page - 1) * limit
 
     if needs_search:
         # Search path: parse all filtered candidates, apply text filter, paginate.
         rows = []
         q = search.lower()
-        for _, type_key, relative_path, origin in candidates:
+        for _, type_key, relative_path, origin, _fid in candidates:
             base_dir = RTSP_RESULTS_DIR if origin == "rtsp" else RESULTS_DIR
             file_path = base_dir / DETECTION_FOLDERS[type_key] / relative_path
             item = parse_detection_filename(
@@ -1745,7 +1855,7 @@ def list_detections(
         total = len(candidates)
         page_candidates = candidates[start_idx: start_idx + limit]
         paginated = []
-        for _, type_key, relative_path, origin in page_candidates:
+        for _, type_key, relative_path, origin, _fid in page_candidates:
             base_dir = RTSP_RESULTS_DIR if origin == "rtsp" else RESULTS_DIR
             file_path = base_dir / DETECTION_FOLDERS[type_key] / relative_path
             item = parse_detection_filename(
@@ -1888,6 +1998,52 @@ def _resolve_detection_source_path(source: str, type_key: str, relative_path: st
     return abs_path
 
 
+class DetectionSkipRequest(BaseModel):
+    uid: str
+
+
+def _set_detection_skipped(uid: str, skipped: bool) -> int:
+    """Persist an operator skip (or its undo) on whichever report table holds the uid."""
+    conn = _get_connection()
+    updated = 0
+    try:
+        with conn.cursor() as cur:
+            for table in ("camera_report_hls", "camera_report_rtsp"):
+                if skipped:
+                    cur.execute(f"UPDATE {table} SET skipped = 1, skipped_at = NOW() WHERE unique_id = %s", (uid,))
+                else:
+                    cur.execute(f"UPDATE {table} SET skipped = 0, skipped_at = NULL WHERE unique_id = %s", (uid,))
+                updated += cur.rowcount
+        conn.commit()
+    finally:
+        conn.close()
+    return updated
+
+
+@app.post("/detections/skip")
+async def skip_detection(payload: DetectionSkipRequest):
+    """Operator reviewed this detection and chose not to push it — hide it for good."""
+    try:
+        updated = await asyncio.to_thread(_set_detection_skipped, payload.uid, True)
+    except Exception as e:
+        logger.error(f"[skip_detection] {payload.uid}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to skip detection")
+    (await asyncio.to_thread(_get_skipped_uids)).add(payload.uid)
+    return {"success": True, "uid": payload.uid, "updated": updated}
+
+
+@app.post("/detections/skip/undo")
+async def unskip_detection(payload: DetectionSkipRequest):
+    """Reverse a skip (mis-click recovery)."""
+    try:
+        updated = await asyncio.to_thread(_set_detection_skipped, payload.uid, False)
+    except Exception as e:
+        logger.error(f"[unskip_detection] {payload.uid}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to undo skip")
+    (await asyncio.to_thread(_get_skipped_uids)).discard(payload.uid)
+    return {"success": True, "uid": payload.uid, "updated": updated}
+
+
 class ClientDetectionCopyItem(BaseModel):
     source: str
     type: str
@@ -1969,15 +2125,17 @@ async def copy_client_detections(payload: ClientDetectionCopyRequest):
                         failed.append({"uid": item.uid, "error": f"uid {item.uid} not found"})
                         continue
 
+                    pushed_at_dt = datetime.now().replace(microsecond=0)
                     cur.execute(
                         f"""
                         UPDATE {table_name}
                         SET pushed_to_client = 1,
                             pushed_by = %s,
+                            pushed_at = %s,
                             unique_id = COALESCE(NULLIF(unique_id, ''), %s)
                         WHERE id = %s
                         """,
-                        (pushed_by, item_uid, row.get("id")),
+                        (pushed_by, pushed_at_dt, item_uid, row.get("id")),
                     )
                     if not row.get("unique_id"):
                         row["unique_id"] = item_uid
@@ -2020,6 +2178,9 @@ async def copy_client_detections(payload: ClientDetectionCopyRequest):
                         "pushedBy": pushed_by,
                         "pushed_by": pushed_by,
                         "pushedByName": pushed_by_name,
+                        # Client feed position (see _FEED_SOURCE_RANK).
+                        "pushed_at": _feed_iso(pushed_at_dt),
+                        "created_at": _feed_iso(row.get("created_at")),
                     })
                     copied.append(copied_item)
                     
@@ -2110,6 +2271,9 @@ def list_client_detections(
     user_role: Optional[str] = None,
     user_id: Optional[int] = None,
     user_company: Optional[str] = None,
+    until: Optional[str] = None,       # queued-review anchor (see _FEED_SOURCE_RANK)
+    until_source: Optional[str] = None,
+    until_id: Optional[int] = None,
 ):
     all_counts = {k: 0 for k in DETECTION_FOLDERS}
 
@@ -2190,6 +2354,25 @@ def list_client_detections(
             where_data, params_data = _build_where(include_type=True)
             where_cnt,  params_cnt  = _build_where(include_type=False)
 
+            # The client feed is ordered by when a detection was PUSHED (an
+            # operator can push an hours-old one and it belongs at the top).
+            # The anchor bounds the total and page rows, never the sidebar counts.
+            feed_at = "COALESCE(pushed_at, created_at)"
+            until_dt = _parse_feed_until(until)
+            until_str = until_dt.strftime("%Y-%m-%d %H:%M:%S") if until_dt else None
+            anchor_rank = _FEED_SOURCE_RANK.get(until_source)
+
+            def _paged_where(table):
+                if not until_str:
+                    return where_data, list(params_data)
+                my_rank = _FEED_SOURCE_RANK["rtsp" if table.endswith("rtsp") else "hls"]
+                if anchor_rank is None or until_id is None or my_rank < anchor_rank:
+                    return f"{where_data} AND {feed_at} <= %s", list(params_data) + [until_str]
+                if my_rank > anchor_rank:
+                    return f"{where_data} AND {feed_at} < %s", list(params_data) + [until_str]
+                return (f"{where_data} AND ({feed_at} < %s OR ({feed_at} = %s AND id <= %s))",
+                        list(params_data) + [until_str, until_str, int(until_id)])
+
             active_tables = []
             for table in ("camera_report_hls", "camera_report_rtsp"):
                 if source == "rtsp" and table == "camera_report_hls":
@@ -2202,8 +2385,9 @@ def list_client_detections(
             total = 0
             for table in active_tables:
                 try:
-                    cur.execute(f"SELECT COUNT(*) AS c FROM {table} WHERE {where_data}",
-                                tuple(params_data) if params_data else None)
+                    w, p = _paged_where(table)
+                    cur.execute(f"SELECT COUNT(*) AS c FROM {table} WHERE {w}",
+                                tuple(p) if p else None)
                     total += int((cur.fetchone() or {}).get("c") or 0)
                 except Exception as e:
                     logger.error(f"Client detections count failed ({table}): {e}")
@@ -2228,16 +2412,19 @@ def list_client_detections(
             db_rows: List[dict] = []
             for table in active_tables:
                 try:
-                    cur.execute(f"SELECT * FROM {table} WHERE {where_data} "
-                                f"ORDER BY created_at DESC LIMIT {int(need)}",
-                                tuple(params_data) if params_data else None)
+                    w, p = _paged_where(table)
+                    cur.execute(f"SELECT *, {feed_at} AS feed_at FROM {table} WHERE {w} "
+                                f"ORDER BY feed_at DESC, id DESC LIMIT {int(need)}",
+                                tuple(p) if p else None)
                     for r in cur.fetchall():
                         r["_source"] = "rtsp" if table.endswith("rtsp") else "hls"
                         db_rows.append(r)
                 except Exception as e:
                     logger.error(f"Client detections fetch failed ({table}): {e}")
 
-            db_rows.sort(key=lambda x: str(x.get("created_at", "")), reverse=True)
+            db_rows.sort(key=lambda x: (str(x.get("feed_at") or ""),
+                                        _FEED_SOURCE_RANK.get(x.get("_source"), 0),
+                                        int(x.get("id") or 0)), reverse=True)
             start_idx = (page - 1) * limit
             page_rows = db_rows[start_idx: start_idx + limit]
 
@@ -2292,6 +2479,10 @@ def list_client_detections(
                     "_mtime":      _epoch_ms(row.get("created_at")) or 0,
                     "updatedAt":   _epoch_ms(row.get("updated_at")),
                     "updated_at":  _epoch_ms(row.get("updated_at")),
+                    # Feed position for the queued-review page (see _FEED_SOURCE_RANK).
+                    "id":          row.get("id"),
+                    "pushed_at":   _feed_iso(row.get("feed_at")),
+                    "created_at":  _feed_iso(row.get("created_at")),
                 })
                 rows.append(item)
 

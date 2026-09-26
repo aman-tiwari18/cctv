@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, memo } from 'react';
 import {
   Box,
   Card,
@@ -49,7 +49,7 @@ import {
   Warning,
   Close as CloseIcon,
   GridView, LocationCity, Close, Memory, DeleteOutline, Undo as UndoIcon,
-  Person, LocalOffer,
+  Person, LocalOffer, ArrowUpward,
 } from '@mui/icons-material';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -104,6 +104,9 @@ const TYPE_ICONS = {
   default: CameraAlt,
 };
 
+// How long the NEW tag shows on a card after it arrives or is revealed.
+const NEW_BADGE_MS = 6000;
+
 const NewBadge = ({ addedAt, sx }) => {
   const [visible, setVisible] = useState(false);
 
@@ -116,9 +119,9 @@ const NewBadge = ({ addedAt, sx }) => {
     
     const diff = Math.max(0, Date.now() - parsedTime);
     
-    if (diff < 5000) {
+    if (diff < NEW_BADGE_MS) {
       setVisible(true);
-      const timer = setTimeout(() => setVisible(false), 5000 - diff);
+      const timer = setTimeout(() => setVisible(false), NEW_BADGE_MS - diff);
       return () => clearTimeout(timer);
     } else {
       setVisible(false);
@@ -200,7 +203,7 @@ function DetectionCard({ item, onClick, onRemove, onUndo, onAccept, isRemoving, 
     >
       <Box sx={{ position: 'relative', bgcolor: '#f1f5f9' }}>
         {imgError ? (
-          <Box sx={{ height: { xs: 260, md: 380 }, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#1e293b' }}>
+          <Box sx={{ height: { xs: 200, md: 220 }, display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#1e293b' }}>
             <CameraAlt sx={{ fontSize: 48, color: '#475569' }} />
           </Box>
         ) : (
@@ -208,8 +211,10 @@ function DetectionCard({ item, onClick, onRemove, onUndo, onAccept, isRemoving, 
             component="img"
             image={item.image_url}
             alt={item.camera_id}
+            loading="lazy"
+            decoding="async"
             onError={() => setImgError(true)}
-            sx={{ height: { xs: 260, md: 380 }, width: '100%', objectFit: 'contain', bgcolor: '#f1f5f9', filter: isPendingRemoval ? 'grayscale(0.4) brightness(0.85)' : 'none', transition: 'filter 0.2s ease' }}
+            sx={{ height: { xs: 200, md: 220 }, width: '100%', objectFit: 'contain', bgcolor: '#f1f5f9', filter: isPendingRemoval ? 'grayscale(0.4) brightness(0.85)' : 'none', transition: 'filter 0.2s ease' }}
           />
         )}
         {/* When pending removal, overlay a trash glyph on the image — matches
@@ -231,7 +236,7 @@ function DetectionCard({ item, onClick, onRemove, onUndo, onAccept, isRemoving, 
           </Box>
         )}
         <NewBadge
-          addedAt={item.updatedAt || item.updated_at}
+          addedAt={item.newBadgeAt || item.updatedAt || item.updated_at}
           sx={{ position: 'absolute', top: 8, right: 8 }}
         />
         {Number(item.sms_sent) === 1 && (
@@ -453,7 +458,7 @@ function DetectionCard({ item, onClick, onRemove, onUndo, onAccept, isRemoving, 
   );
 }
 
-function Lightbox({ item, onClose }) {
+function Lightbox({ item, onClose, pendingLiveCount = 0 }) {
   const theme = useTheme();
   const { user } = useAuth();
   const isSmDown = useMediaQuery(theme.breakpoints.down('sm'));
@@ -476,6 +481,13 @@ function Lightbox({ item, onClose }) {
         >
           <Close sx={{ fontSize: { xs: 26, sm: 24 } }} />
         </IconButton>
+        {pendingLiveCount > 0 && (
+          <Chip
+            label={`${pendingLiveCount} new detection${pendingLiveCount > 1 ? 's' : ''} waiting`}
+            size="small"
+            sx={{ position: 'absolute', top: 8, left: 8, zIndex: 10, bgcolor: '#f59e0b', color: '#fff', fontWeight: 700 }}
+          />
+        )}
         <Box
           component="img"
           src={item.image_url}
@@ -568,6 +580,28 @@ const timeStringToSeconds = (t) => {
 };
 
 const todayDate = formatDateDDMMYYYY(new Date());
+
+// A pushed detection's position in the client feed: (pushed_at, source, id),
+// matching the backend's order. pushed_at is whole seconds and a push burst
+// puts many in one second, so time alone can't say which one is "the 50th".
+const SOURCE_RANK = { hls: 0, rtsp: 1 };
+const feedPosition = (it) => ({
+  ts: it.pushed_at || it.created_at || new Date().toISOString(),
+  source: it.source,
+  id: Number(it.id) || 0,
+});
+const compareFeedPosition = (a, b) => (Date.parse(a.ts) - Date.parse(b.ts))
+  || ((SOURCE_RANK[a.source] ?? 0) - (SOURCE_RANK[b.source] ?? 0))
+  || (a.id - b.id);
+
+// Live socket events are applied in batches this often — a 100-item burst
+// becomes a handful of renders instead of one full-page render per detection.
+const LIVE_BATCH_MS = 250;
+
+// The page re-renders on every live batch/count change; memoized so cards and
+// list rows whose props didn't change skip re-rendering.
+const MemoDetectionCard = memo(DetectionCard);
+const MemoListViewPanel = memo(ListViewPanel);
 
 const buildImageKey = (item) => `${item.source}|${item.type}|${item.relativePath}`;
 
@@ -771,7 +805,7 @@ const buildImageKey = (item) => `${item.source}|${item.type}|${item.relativePath
 //   );
 // }
 
-function ListViewPanel({ data, selectedIndex, onSelect, onRemove, onUndo, onAccept, removingId, pendingRemovals, acceptingId }) {
+function ListViewPanel({ data, selectedIndex, onSelect, onRemove, onUndo, onAccept, removingId, pendingRemovals, acceptingId, jumpToTopKey }) {
   const { user } = useAuth();
   const item = data[selectedIndex];
   const itemRefs = useRef([]); // ✅ ref array for each list item
@@ -800,11 +834,26 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, onUndo, onAcce
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, [selectedIndex]);
 
+  // Accepted/removed items leave the list, so the index can end up past the end.
+  useEffect(() => {
+    if (data.length > 0 && selectedIndex > data.length - 1) onSelect(data.length - 1);
+  }, [data.length, selectedIndex, onSelect]);
+
+  // selectedIndex may already be 0 when the pill is clicked, so the effect
+  // above won't fire — scroll the list container explicitly.
+  const listContainerRef = useRef(null);
+  useEffect(() => {
+    if (jumpToTopKey && listContainerRef.current) {
+      listContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [jumpToTopKey]);
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 2, height: { xs: 'auto', md: 'calc(100vh - 310px)' }, minHeight: { xs: 0, md: 500 } }}>
 
       <Box
+        ref={listContainerRef}
         sx={{
           width: { xs: '100%', md: '30%', lg: 300 }, flexShrink: 0, overflowY: 'auto',
           maxHeight: { xs: 280, md: 'none' },
@@ -826,7 +875,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, onUndo, onAcce
 
           return (
             <Box
-              key={`${listItem.filename}-${idx}`}
+              key={listItem.uid || listItem.filename || idx}
               ref={(el) => (itemRefs.current[idx] = el)} // ✅ assign ref per item
               onClick={() => onSelect(idx)}
               sx={{
@@ -841,13 +890,15 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, onUndo, onAcce
             >
               <Box sx={{ position: 'relative', display: 'flex', ml: 1, mr: 1.5, my: 0.5 }}>
                 <NewBadge
-                  addedAt={listItem.updatedAt || listItem.updated_at}
+                  addedAt={listItem.newBadgeAt || listItem.updatedAt || listItem.updated_at}
                   sx={{ position: 'absolute', top: -4, left: -4, zIndex: 10, transform: 'scale(0.85)' }}
                 />
                 <Box
                   component="img"
                   src={listItem.image_url}
                   alt={listItem.camera_id}
+                  loading="lazy"
+                  decoding="async"
                   sx={{
                     width: { xs: 62, sm: 70, md: 70 },
                     height: { xs: 62, sm: 70, md: 70 },
@@ -895,7 +946,10 @@ function ListViewPanel({ data, selectedIndex, onSelect, onRemove, onUndo, onAcce
                 minHeight: { xs: 240, md: 0 },
                 bgcolor: '#fff'
               }}>
+                {/* Keyed per detection: onError hides the element, so reusing one
+                    <img> across selections would keep every later image hidden. */}
                 <Box
+                  key={item.uid || item.filename}
                   component="img"
                   src={item.image_url}
                   alt={item.filename}
@@ -1171,9 +1225,13 @@ const ClientDetections = () => {
 
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [images, setImages] = useState([]);
+  const imagesRef = useRef(images);
+  useEffect(() => { imagesRef.current = images; }, [images]);
   const [counts, setCounts] = useState({});
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const loadingRef = useRef(true);
+  useEffect(() => { loadingRef.current = loading; }, [loading]);
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(50);
   const [view, setView] = useState('grid');
@@ -1206,6 +1264,35 @@ const ClientDetections = () => {
   // without re-subscribing every render.
   const pendingRemovalsRef = useRef(pendingRemovals);
   useEffect(() => { pendingRemovalsRef.current = pendingRemovals; }, [pendingRemovals]);
+
+  // The paged view is anchored at one pushed detection's feed position:
+  // pages 1, 2, 3… are pushes at-or-before it (server-side `until`), so they
+  // stay stable while new pushes arrive. Anything after it waits in
+  // `pendingRef` (key -> feed position) behind the "N new" pill; each click
+  // steps the anchor forward by exactly one page. null = not anchored yet.
+  const anchorRef = useRef(null);
+  const pendingRef = useRef(new Map());
+  // key -> when it was revealed (pill click or direct live placement). The
+  // reveal fetch rebuilds every card from the server, so the NEW tag's start
+  // time has to be carried over from here or revealed cards never get one.
+  const revealedAtRef = useRef(new Map());
+  const [pendingLiveCount, setPendingLiveCount] = useState(0);
+  // Live socket events queued between batch applications (see LIVE_BATCH_MS).
+  const incomingRef = useRef([]);
+  const countsDeltaRef = useRef({});
+  const batchTimerRef = useRef(null);
+  const [listJumpKey, setListJumpKey] = useState(0);
+  const selectedRef = useRef(null);
+  // Toggle: OFF (default) = the original live-stream page — every new push
+  // prepends immediately and the oldest falls off past rowsPerPage.
+  // ON = the queued/anchored review mode (the "N new" pill, step-by-page).
+  const [queuedMode, setQueuedMode] = useState(false);
+  const queuedModeRef = useRef(queuedMode);
+  useEffect(() => { queuedModeRef.current = queuedMode; }, [queuedMode]);
+  const viewRef = useRef(view);
+  const pageRef = useRef(page);
+  const hoverRef = useRef(false);
+  const scrolledRef = useRef(false);
   const [removingId, setRemovingId] = useState(null);
   const [acceptingId, setAcceptingId] = useState(null);
   const [keyboardHintShown, setKeyboardHintShown] = useState(false);
@@ -1228,16 +1315,32 @@ const ClientDetections = () => {
       // Pass user info for filtering via user_exam_assignments
       if (user?.role) params.append('user_role', user.role);
       if (user?.id) params.append('user_id', user.id);
+      if (anchorRef.current) {
+        params.append('until', anchorRef.current.ts);
+        if (anchorRef.current.source) params.append('until_source', anchorRef.current.source);
+        params.append('until_id', String(anchorRef.current.id));
+      }
 
       console.log('[ClientDetections] Fetching with params:', Object.fromEntries(params));
 
       const res = await axios.get(`${API_BASE_1}/client-detections?${params}`);
       if (res.data.success) {
-        setImages((res.data.data || []).map((item) => ({
+        const fetched = (res.data.data || []).map((item) => ({
           ...item,
           image_url: `${API_BASE_1}${item.image_url || item.imageUrl}`,
-        })));
+          newBadgeAt: revealedAtRef.current.get(item.uid || item.id),
+        }));
+        setImages(fetched);
         setTotal(res.data.total || 0);
+        // First unanchored page-1 load: anchor at the newest push we were
+        // shown, so later pages and the pill agree on where "new" starts.
+        if (!anchorRef.current && pg === 1) {
+          anchorRef.current = fetched.reduce((max, it) => {
+            if (!it.pushed_at && !it.created_at) return max;
+            const p = feedPosition(it);
+            return !max || compareFeedPosition(p, max) > 0 ? p : max;
+          }, null);
+        }
         setCounts(res.data.counts || {});
         // Backend now returns counts for ALL types regardless of the type filter,
         // so we can drive the sidebar directly from this response.
@@ -1289,8 +1392,15 @@ const ClientDetections = () => {
     setShiftFilter('');
   }, [examFilter, exams]);
 
-  // Fetch images when filters change
+  // Fetch images when filters change. New filters = a new view: drop the old
+  // anchor and backlog BEFORE fetching, so this request isn't bounded by the
+  // previous view's anchor and re-anchors from its own results.
   useEffect(() => {
+    anchorRef.current = null;
+    pendingRef.current.clear();
+    revealedAtRef.current = new Map();
+    incomingRef.current = [];
+    setPendingLiveCount(0);
     setPage(1);
     setListSelectedIndex(0);
     fetchClientImages(1, rowsPerPage);
@@ -1497,20 +1607,177 @@ const ClientDetections = () => {
     return true;
   }, [search, typeFilter, sourceFilter, dateFilter, appliedStartTime, appliedEndTime, examFilter, shiftFilter]);
 
+  const isReviewing = useCallback(() => (
+    Boolean(selectedRef.current)
+    || viewRef.current === 'list'
+    || pageRef.current !== 1
+    || hoverRef.current
+    || scrolledRef.current
+  ), []);
+
+  // "Reviewing" signals only decide whether a quiet trickle may land directly
+  // on page 1. They never reveal the backlog on their own — that only
+  // happens when the client clicks the pill.
+  useEffect(() => { selectedRef.current = selected; }, [selected]);
+  useEffect(() => {
+    viewRef.current = (view === 'grid' || isMobile) ? 'grid' : 'list';
+  }, [view, isMobile]);
+  useEffect(() => { pageRef.current = page; }, [page]);
+
+  useEffect(() => {
+    const onScroll = () => { scrolledRef.current = window.scrollY > 200; };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  const handleFeedMouseEnter = () => { hoverRef.current = true; };
+  const handleFeedMouseLeave = () => { hoverRef.current = false; };
+
+  // Switching modes mid-session shouldn't leave a hybrid view (e.g. an old
+  // anchor lingering under legacy mode) — clear queue state and reload page 1
+  // fresh under whichever mode was just selected.
+  const handleQueuedModeChange = (_, next) => {
+    setQueuedMode(next);
+    queuedModeRef.current = next;
+    anchorRef.current = null;
+    pendingRef.current.clear();
+    revealedAtRef.current = new Map();
+    setPendingLiveCount(0);
+    setPage(1);
+    setListSelectedIndex(0);
+    fetchClientImages(1, rowsPerPage);
+  };
+
+  // Reveal the next page's worth of new pushes, oldest first: step the anchor
+  // forward to exactly the rowsPerPage-th pending one and re-fetch page 1.
+  // Those become page 1, the previous page 1 becomes page 2 (and so on), and
+  // the rest stay behind the pill for the next click.
+  const handleShowNewDetections = () => {
+    const pendingOldestFirst = [...pendingRef.current.entries()]
+      .sort((a, b) => compareFeedPosition(a[1], b[1]));
+    const chunk = pendingOldestFirst.slice(0, rowsPerPage);
+    if (chunk.length === 0) return;
+    anchorRef.current = chunk[chunk.length - 1][1];
+    chunk.forEach(([key]) => pendingRef.current.delete(key));
+    setPendingLiveCount(pendingRef.current.size);
+    const revealedAt = Date.now();
+    revealedAtRef.current = new Map(chunk.map(([key]) => [key, revealedAt]));
+
+    setPage(1);
+    setListSelectedIndex(0);
+    fetchClientImages(1, rowsPerPage);
+    setListJumpKey((k) => k + 1);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Live events are filtered on arrival (pure, no state) and queued; the
+  // queue is applied once per LIVE_BATCH_MS so a burst costs a few renders.
+
+  const applyIncomingBatch = useCallback(() => {
+    batchTimerRef.current = null;
+    const batch = incomingRef.current;
+    const delta = countsDeltaRef.current;
+    incomingRef.current = [];
+    countsDeltaRef.current = {};
+
+    if (Object.keys(delta).length > 0) {
+      const bump = (prev) => {
+        const next = { ...prev };
+        Object.entries(delta).forEach(([type, n]) => { next[type] = (next[type] || 0) + n; });
+        return next;
+      };
+      setCounts(bump);
+      setUnfilteredCounts(bump);
+    }
+    if (batch.length === 0) return;
+
+    if (!queuedModeRef.current) {
+      // Legacy live-stream behavior: every push merges straight onto the
+      // page immediately, oldest cards fall off past rowsPerPage. No pill,
+      // no anchor, no "reviewing" gate.
+      setTotal((t) => t + batch.length);
+      const seen = new Set(imagesRef.current.map((i) => i.uid || i.id).filter(Boolean));
+      const fresh = [];
+      for (const item of batch) {
+        const key = item.uid || item.id;
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        fresh.push(item);
+      }
+      if (fresh.length > 0) {
+        const now = Date.now();
+        const newestFirst = fresh.map((it) => ({ ...it, newBadgeAt: now })).reverse();
+        setImages((prev) => [...newestFirst, ...prev].slice(0, rowsPerPage));
+      }
+      return;
+    }
+
+    // Split by the anchor: at-or-before it already belongs to the paged view
+    // (pages 1..N); after it is "new" and waits behind the pill. Oldest first.
+    const anchor = anchorRef.current;
+    const pageKeys = new Set(imagesRef.current.map((i) => i.uid || i.id).filter(Boolean));
+    const newer = [];
+    let olderCount = 0;
+    for (const item of batch) {
+      const key = item.uid || item.id;
+      if (!key || pageKeys.has(key) || pendingRef.current.has(key)) continue;
+      const pos = feedPosition(item);
+      if (anchor && compareFeedPosition(pos, anchor) <= 0) { olderCount += 1; continue; }
+      newer.push({ item, key, pos });
+    }
+    newer.sort((a, b) => compareFeedPosition(a.pos, b.pos));
+
+    // Idle on page 1 with room and nothing already queued: place the oldest
+    // new ones straight onto the page (the quiet-trickle case — no click
+    // needed) and move the anchor up to cover them. Everything else queues.
+    // Not while a page load is in flight — its response would overwrite them.
+    let placed = [];
+    const room = rowsPerPage - imagesRef.current.length;
+    if (!isReviewing() && !loadingRef.current && pendingRef.current.size === 0 && room > 0) {
+      placed = newer.slice(0, room);
+    }
+    const queued = newer.slice(placed.length);
+
+    if (placed.length > 0) {
+      anchorRef.current = placed[placed.length - 1].pos;
+      const now = Date.now();
+      placed.forEach(({ key }) => revealedAtRef.current.set(key, now));
+      const newestFirst = placed.map(({ item }) => ({ ...item, newBadgeAt: now })).reverse();
+      setImages((prev) => [...newestFirst, ...prev]);
+    }
+    // Pagination total counts the anchored view only (what pages 1..N hold);
+    // the pill counts everything past the anchor.
+    if (placed.length + olderCount > 0) setTotal((t) => t + placed.length + olderCount);
+
+    if (queued.length > 0) {
+      queued.forEach(({ key, pos }) => pendingRef.current.set(key, pos));
+      setPendingLiveCount(pendingRef.current.size);
+    }
+  }, [setUnfilteredCounts, isReviewing, rowsPerPage]);
+
+  const applyIncomingBatchRef = useRef(applyIncomingBatch);
+  useEffect(() => { applyIncomingBatchRef.current = applyIncomingBatch; }, [applyIncomingBatch]);
+  useEffect(() => () => clearTimeout(batchTimerRef.current), []);
+
   // Handle live socket updates for client detections
   const { socket } = useSocket();
   useEffect(() => {
     if (!socket) return;
 
     const handleNewClientDetection = (item) => {
-      console.log('[ClientDetections] New detection received:', item.type);
-
       // NOTE: sidebar / header pill counter bumps are handled centrally in
       // SocketContext (one place, always mounted). Here we only update the
       // page-local data list and the page-local per-type chip count.
 
       // Filter by typeFilter FIRST before processing the data list
       if (typeFilter.length > 0 && !typeFilter.includes(item.type)) {
+        return;
+      }
+
+      // The socket broadcasts every push to every connection; only keep
+      // detections from exams this user can see (the REST feed is scoped server-side).
+      if (user?.role !== 'ADMIN' && exams.length > 0 && item.exam_id != null
+        && !exams.some((e) => String(e.id) === String(item.exam_id))) {
         return;
       }
 
@@ -1521,18 +1788,15 @@ const ClientDetections = () => {
         updatedAt: item.updatedAt || item.updated_at || Date.now(),
       };
 
-      if (matchesFilters(processedItem)) {
-        if (item?.type) {
-          setCounts(prev => ({ ...prev, [item.type]: (prev[item.type] || 0) + 1 }));
-          setUnfilteredCounts(prev => ({ ...prev, [item.type]: (prev[item.type] || 0) + 1 }));
-        }
-        setImages(prev => {
-          const exists = prev.some(i => (i.uid || i.id) === (processedItem.uid || processedItem.id));
-          if (exists) return prev;
-          const next = [processedItem, ...prev];
-          return next.slice(0, rowsPerPage);
-        });
-        setTotal(t => t + 1);
+      if (!matchesFilters(processedItem)) return;
+
+      if (item?.type) {
+        countsDeltaRef.current[item.type] = (countsDeltaRef.current[item.type] || 0) + 1;
+      }
+      incomingRef.current.push(processedItem);
+
+      if (!batchTimerRef.current) {
+        batchTimerRef.current = setTimeout(() => applyIncomingBatchRef.current(), LIVE_BATCH_MS);
       }
     };
 
@@ -1545,6 +1809,9 @@ const ClientDetections = () => {
       // the card immediately. Read via ref so we don't have to re-subscribe
       // on every pendingRemovals change.
       if (pendingRemovalsRef.current.has(data.uid)) return;
+
+      incomingRef.current = incomingRef.current.filter(i => i.uid !== data.uid);
+      if (pendingRef.current.delete(data.uid)) setPendingLiveCount(pendingRef.current.size);
 
       const removedType = data?.type;
       if (removedType) {
@@ -1562,7 +1829,7 @@ const ClientDetections = () => {
       socket.off('client-detection:new', handleNewClientDetection);
       socket.off('client-detection:remove', handleClientDetectionRemove);
     };
-  }, [socket, matchesFilters, rowsPerPage, typeFilter]);
+  }, [socket, matchesFilters, typeFilter, user?.role, exams, setUnfilteredCounts]);
 
   // Memoize filtered images to prevent unnecessary recalculations.
   // pendingRemovals stay in the list (rendered as "Detection removed / Undo");
@@ -1702,6 +1969,13 @@ const ClientDetections = () => {
       setAcceptingId(null);
     }
   };
+
+  // Stable identities for memoized cards/list; always call the latest handler.
+  const actionsRef = useRef({});
+  actionsRef.current = { handleRemove, handleUndo, handleAccept };
+  const onRemoveStable = useCallback((item) => actionsRef.current.handleRemove(item), []);
+  const onUndoStable = useCallback((item) => actionsRef.current.handleUndo(item), []);
+  const onAcceptStable = useCallback((item) => actionsRef.current.handleAccept(item), []);
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: '#f8fafc' }}>
@@ -1969,7 +2243,23 @@ const ClientDetections = () => {
             />
           );
         })}
-        <Box sx={{ ml: 'auto', display: { xs: 'none', md: 'block' } }}>
+        <Box sx={{ ml: 'auto', display: { xs: 'none', md: 'flex' }, alignItems: 'center', gap: 1.5 }}>
+          <ToggleButton
+            size="small"
+            value="queued"
+            selected={queuedMode}
+            onChange={() => handleQueuedModeChange(null, !queuedMode)}
+            title={queuedMode
+              ? 'Queued review mode: new pushes wait behind the "N new" pill.'
+              : 'Live mode: new pushes appear immediately, oldest fall off the page.'}
+            sx={{
+              height: 36, borderRadius: '8px !important', textTransform: 'none', fontSize: 12, fontWeight: 600,
+              px: 1.5, color: '#64748b', border: '1px solid #e2e8f0',
+              '&.Mui-selected': { bgcolor: '#eff6ff', color: '#1e40af', borderColor: '#93c5fd', '&:hover': { bgcolor: '#dbeafe' } },
+            }}
+          >
+            {queuedMode ? 'Queued review: ON' : 'Live mode'}
+          </ToggleButton>
           <ToggleButtonGroup
             value={view}
             exclusive
@@ -2010,6 +2300,22 @@ const ClientDetections = () => {
         </Box>
       </Box>
 
+      {pendingLiveCount > 0 && (
+        <Box sx={{ position: 'fixed', top: 76, left: 0, right: 0, zIndex: 1200, display: 'flex', justifyContent: 'center', pointerEvents: 'none' }}>
+          <Chip
+            icon={<ArrowUpward />}
+            label={`${pendingLiveCount} new detection${pendingLiveCount > 1 ? 's' : ''}`}
+            onClick={handleShowNewDetections}
+            sx={{
+              pointerEvents: 'auto', bgcolor: '#3c81f6', color: '#fff', fontWeight: 700,
+              height: 36, px: 1, borderRadius: 18, boxShadow: '0 4px 14px rgba(15,23,42,0.25)',
+              '& .MuiChip-icon': { color: '#fff' },
+              '&:hover': { bgcolor: '#1e40af' },
+            }}
+          />
+        </Box>
+      )}
+
       {/* ── Content ── */}
       {loading ? (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -2029,15 +2335,15 @@ const ClientDetections = () => {
           </Typography>
         </Box>
       ) : (view === 'grid' || isMobile) ? (
-        <Grid container spacing={2}>
+        <Grid container spacing={2} onMouseEnter={handleFeedMouseEnter} onMouseLeave={handleFeedMouseLeave}>
           {filteredImages.map((item, i) => (
-            <Grid item xs={12} sm={6} key={`${item.filename}-${i}`}>
-              <DetectionCard
+            <Grid item xs={12} sm={6} md={4} lg={3} key={item.uid || `${item.filename}-${i}`}>
+              <MemoDetectionCard
                 item={item}
                 onClick={setSelected}
-                onRemove={handleRemove}
-                onUndo={handleUndo}
-                onAccept={handleAccept}
+                onRemove={onRemoveStable}
+                onUndo={onUndoStable}
+                onAccept={onAcceptStable}
                 isRemoving={removingId === item.uid}
                 isPendingRemoval={pendingRemovals.has(item.uid)}
                 isAccepting={acceptingId === item.uid}
@@ -2047,20 +2353,21 @@ const ClientDetections = () => {
           ))}
         </Grid>
       ) : (
-        <ListViewPanel
+        <MemoListViewPanel
           data={filteredImages}
           selectedIndex={listSelectedIndex}
           onSelect={setListSelectedIndex}
-          onRemove={handleRemove}
-          onUndo={handleUndo}
-          onAccept={handleAccept}
+          onRemove={onRemoveStable}
+          onUndo={onUndoStable}
+          onAccept={onAcceptStable}
           removingId={removingId}
           pendingRemovals={pendingRemovals}
           acceptingId={acceptingId}
+          jumpToTopKey={listJumpKey}
         />
       )}
 
-      <Lightbox item={selected} onClose={() => setSelected(null)} />
+      <Lightbox item={selected} onClose={() => setSelected(null)} pendingLiveCount={pendingLiveCount} />
 
       <Snackbar
         open={snackbar.open}
