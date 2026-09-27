@@ -163,7 +163,9 @@ const ClientVideoUploads = () => {
   const loadExams = useCallback(async () => {
     try {
       const res = await examsAPI.getAll({ is_active: true });
-      setExams(Array.isArray(res?.data?.data) ? res.data.data : []);
+      const all = Array.isArray(res?.data?.data) ? res.data.data : [];
+      // Video Uploads is only relevant for NEET / Re-NEET exams.
+      setExams(all.filter((e) => /neet/i.test(e.exam_name || '')));
     } catch (e) { console.error(e); }
   }, []);
   useEffect(() => { loadExams(); }, [loadExams]);
