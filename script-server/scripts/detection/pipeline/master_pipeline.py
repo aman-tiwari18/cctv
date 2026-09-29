@@ -1070,6 +1070,7 @@ def rtsp_producer(cam_configs, queues, pre_fetched_token=None, enabled_scripts=N
                         "shift_id":       shift_id,
                         "source_type":    "RTSP",   # rtsp_producer only feeds RTSP cameras
                         "enabled_scripts": enabled_scripts,
+                        "captured_at":     time.time(),
                     }
                 else:
                     # Legacy path: per-script queues, tuple packet.
@@ -1415,6 +1416,7 @@ def _rr_capture_once(label, configs, enabled_scripts, server_tokens_map, unified
                     "shift_id":        shift_id,
                     "tc_code":         tc_code,
                     "enabled_scripts": enabled_scripts,
+                    "captured_at":     time.time(),
                 }
                 for q in ([unified_queue] if enabled_scripts else []) + list(side_queues):
                     try:
@@ -1623,6 +1625,7 @@ def _hls_unified_persistent(cfg, stop_event, unified_queue, side_queues=None, st
                         "tc_code":         tc_code,
                         "source_type":     "HLS",
                         "enabled_scripts": scripts,
+                        "captured_at":     now,
                     }, cfg, unified_queue, side_queues, timeout=0.5):
                         with _hls_unified_stats_lock:
                             _hls_unified_stats["pushed"] += 1
@@ -1706,6 +1709,7 @@ def _hls_unified_capture(cfg, stop_event, unified_queue, side_queues=None, state
                 "tc_code":         tc_code,
                 "source_type":     "HLS",      # routes to report_to_db_hls
                 "enabled_scripts": scripts,
+                "captured_at":     time.time(),
             }, cfg, unified_queue, side_queues, timeout=0.5):
                 break
             pushed += 1

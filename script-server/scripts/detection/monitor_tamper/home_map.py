@@ -4,7 +4,7 @@ Captured once, when a camera first connects, by collecting monitor detections
 for a few seconds and keeping the boxes that are present most of the time.
 Saved to disk so reconnects and restarts reuse the same map.
 
-Vendored unchanged from monitor_alerts_deploy/monitor_alerts/home_map.py.
+Vendored unchanged from monitor_alerts_deploy_v2/monitor_alerts/home_map.py.
 """
 from __future__ import annotations
 

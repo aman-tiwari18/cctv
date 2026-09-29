@@ -1,10 +1,12 @@
 """Shared types, box geometry and parameters.
 
-Vendored from monitor_alerts_deploy/monitor_alerts/core.py (config loading and the
-unused `simple` logic params dropped; missing_min_obs / capture_min_frames added so
-the rules hold on the pipeline's sparse per-camera sampling)."""
+Vendored from monitor_alerts_deploy_v2/monitor_alerts/core.py. Changes for the
+pipeline, which samples each camera sparsely: config loading and the unused
+`simple` logic params dropped; missing_min_obs / capture_min_frames / touch_cover
+added so the rules hold on bursts every few seconds instead of a steady 5 fps."""
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, fields
 
 Box = tuple[float, float, float, float]  # (x1, y1, x2, y2) in original-frame pixels
@@ -45,6 +47,15 @@ def overlap(a: Box, b: Box) -> float:
     return _intersection(a, b) / smaller if smaller > 0 else 0.0
 
 
+def centre_distance(a: Box, b: Box) -> float:
+    return math.hypot((a[0] + a[2] - b[0] - b[2]) / 2, (a[1] + a[3] - b[1] - b[3]) / 2)
+
+
+def box_size(b: Box) -> float:
+    """Longer side: the scale used for "within one box size" linking."""
+    return max(b[2] - b[0], b[3] - b[1])
+
+
 def coverage(person: Box, spot: Box) -> float:
     """Fraction of `spot` hidden behind `person` (used to decide 'occluded')."""
     spot_area = _area(spot)
@@ -54,7 +65,7 @@ def coverage(person: Box, spot: Box) -> float:
 @dataclass(frozen=True)
 class Params:
     """Every tunable number of the anomaly logic (spec §5.5)."""
-    fps: float = 5
+    fps: float = 5                        # highest rate a camera is fed at (sizes the evidence buffer)
     capture_seconds: float = 30
     capture_min_frames: int = 1           # ...and at least this many frames seen during capture
     capture_group_iou: float = 0.5
@@ -74,6 +85,22 @@ class Params:
     stray_forget_seconds: float = 120
     learn_seconds: float = 10
     gap_reset_seconds: float = 2.0
+    # evidence (culprit frames)
+    evidence_buffer_seconds: float = 60       # recent footage kept per camera
+    evidence_delay_seconds: float = 10        # wait after the trigger before writing the alert
+    evidence_lookback_seconds: float = 45     # how far before the trigger to search
+    evidence_frames: int = 3                  # maximum evidence frames per alert
+    evidence_min_spacing_seconds: float = 1.0 # minimum time between chosen frames
+    carry_overlap: float = 0.3                # share of the monitor box inside a person box = held
+    min_carry_frames: int = 2                 # "carrying" needs the monitor seen in someone's hands this many times
+    link_gap_frames: int = 5                  # frames the monitor may go undetected before its path ends
+
+    def __post_init__(self) -> None:
+        # The search window must fit in the buffer, or the oldest frames it
+        # asks for are already gone.
+        if self.evidence_lookback_seconds + self.evidence_delay_seconds > self.evidence_buffer_seconds:
+            raise ValueError("evidence_lookback_seconds + evidence_delay_seconds must not exceed "
+                             "evidence_buffer_seconds")
 
     @classmethod
     def from_dict(cls, d: dict) -> Params:
@@ -84,4 +111,3 @@ class Params:
         if unknown:
             raise ValueError(f"unknown params: {unknown}")
         return cls(**d)
-        

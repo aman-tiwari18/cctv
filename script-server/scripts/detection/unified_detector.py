@@ -75,10 +75,11 @@ def _env_choice(name, default, allowed):
     return value
 
 
-# Per-worker switches. The defaults keep the behaviour from before the fine-tuned
-# models, so nothing changes on a worker until they are set.
+# Per-worker switches. The person default keeps the behaviour from before the
+# fine-tuned models, so nothing changes on a worker until it is set. monitor_tamper
+# defaults to RF-DETR, the model shipped with monitor_alerts_deploy_v2.
 PERSON_MODEL = _env_choice("UNIFIED_PERSON_MODEL", "yolov10m", ("yolov10m", "finetuned"))
-MONITOR_MODEL = _env_choice("UNIFIED_MONITOR_MODEL", "yolo26m", ("yolo26m", "rfdetr"))
+MONITOR_MODEL = _env_choice("UNIFIED_MONITOR_MODEL", "rfdetr", ("rfdetr", "yolo26m"))
 
 
 def model_for(script):
@@ -135,7 +136,7 @@ _COOLDOWN_DEFAULTS = {
     "blind_spot": 180,
     "furniture":  300,
     "invigilator": 420,
-    "monitor_tamper": 120,
+    "monitor_tamper": 15,   # monitor_alerts_deploy_v2; incident grouping stops repeats
 }
 _GLOBAL_COOLDOWN = os.environ.get("COOLDOWN_TIME")
 COOLDOWNS = {
@@ -273,24 +274,38 @@ def _make_evaluator(module_name, fn_name, folder, script_code):
 def _make_stateful_evaluator(module_name, folder, script_code):
     """For analytics that track each camera over time and decide themselves when to
     alert (own cooldown and incident grouping): no consecutive-hit gate.
-    module.evaluate(result, frame, state, t, camera_id, cooldown_s) returns
-    [(annotated_frame, event_type)] to report."""
+    module.evaluate(result, frame, state, t, camera_id, cooldown_s, session) and
+    module.flush(state, now) return [(annotated_frame, event_type)] to report; flush
+    reports alerts the module held back (e.g. waiting for evidence frames), and is
+    called by the worker about once a second and with now=None at shutdown."""
     _cache = {}
 
-    def _eval(result, item, state):
-        fn = _cache.get("fn")
-        if fn is None:
-            fn = _cache["fn"] = getattr(importlib.import_module(module_name), "evaluate")
-        camera_id = f"{item['device_id']}_{item['camera_no']}"
-        for annotated, _event_type in fn(result, item["frame"], state, time.time(), camera_id,
-                                         COOLDOWNS.get(script_code, 120)):
-            _save_and_report(
-                annotated, folder=folder, script_name=script_code,
-                device_id=item["device_id"], camera_no=item["camera_no"],
-                exam_id=item.get("exam_id", "0"), shift_id=item.get("shift_id", "0"),
-                source_type=item.get("source_type", "RTSP"),
-            )
+    def _module():
+        mod = _cache.get("mod")
+        if mod is None:
+            mod = _cache["mod"] = importlib.import_module(module_name)
+        return mod
 
+    def _report(state, alerts):
+        for annotated, _event_type in alerts:
+            _save_and_report(annotated, folder=folder, script_name=script_code, **state["report_to"])
+
+    def _eval(result, item, state):
+        exam_id, shift_id = item.get("exam_id", "0"), item.get("shift_id", "0")
+        state["report_to"] = dict(device_id=item["device_id"], camera_no=item["camera_no"],
+                                  exam_id=exam_id, shift_id=shift_id,
+                                  source_type=item.get("source_type", "RTSP"))
+        camera_id = f"{item['device_id']}_{item['camera_no']}"
+        # Saved per-camera state is only trusted within the same exam shift.
+        session = None if str(exam_id) == "0" and str(shift_id) == "0" else f"exam{exam_id}_shift{shift_id}"
+        _report(state, _module().evaluate(result, item["frame"], state, item.get("captured_at") or time.time(),
+                                          camera_id, COOLDOWNS.get(script_code, 120), session))
+
+    def _flush(state, now):
+        if "report_to" in state:
+            _report(state, _module().flush(state, now))
+
+    _eval.flush = _flush
     return _eval
 
 
@@ -314,6 +329,19 @@ EVALUATORS.update({
 # Unified worker — each model runs ONCE per batch, dispatched per camera/script
 # ============================================================
 STATS_EVERY_S = float(os.environ.get("UNIFIED_STATS_EVERY_S", "300"))
+FLUSH_EVERY_S = 1.0  # how often stateful analytics may report alerts they held back
+
+
+def _flush_stateful(states, now):
+    """Report held alerts of every stateful analytic (now=None: all of them)."""
+    for (dev, cam_no, script), state in states.items():
+        flush = getattr(EVALUATORS.get(script), "flush", None)
+        if flush is None:
+            continue
+        try:
+            flush(state, now)
+        except Exception as e:
+            logger.error(f"[Unified] flush '{script}' error ({dev}_{cam_no}): {e}")
 
 
 def _plan_batch(batch):
@@ -388,6 +416,7 @@ def unified_worker(frame_queue, scripts=None):
             logger.error(f"[Unified] {name} FAILED to load — {sorted(users)} will not run until it does")
     pool = ThreadPoolExecutor(max_workers=len(BACKENDS), thread_name_prefix="unified-model")
     stats, last_stats = {}, time.time()
+    last_flush = time.time()
     # per-(camera, script) cooldown/consec state
     states = {}
 
@@ -395,6 +424,12 @@ def unified_worker(frame_queue, scripts=None):
         return states.setdefault((dev, ch, script), {})
 
     while True:
+        # Also runs while no frames arrive, so a held alert is not stuck waiting for
+        # its camera's next frame.
+        if time.time() - last_flush >= FLUSH_EVERY_S:
+            last_flush = time.time()
+            _flush_stateful(states, last_flush)
+
         batch = []
         try:
             pkt = frame_queue.get(timeout=0.1)
@@ -445,6 +480,8 @@ def unified_worker(frame_queue, scripts=None):
                 # on ANY single person. The per-script workers pass it, so the
                 # unified path has to as well.
                 "tc_code":     pkt.get("tc_code", ""),
+                # Set by the producers; stateful analytics time their rules on it.
+                "captured_at": pkt.get("captured_at"),
             }
             for script in pkt.get("enabled_scripts", []):
                 model = assign.get((idx, script))
@@ -477,5 +514,6 @@ def unified_worker(frame_queue, scripts=None):
         if stop:
             break
 
+    _flush_stateful(states, None)
     pool.shutdown(wait=False)
     logger.info("🔴 [Unified] worker stopped")

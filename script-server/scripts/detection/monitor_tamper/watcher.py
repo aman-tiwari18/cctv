@@ -16,7 +16,7 @@ protected like the others. A track that stays MOVED away from where it first app
 (for `offhome_min_frames` frames in a row) while a person touches it is a
 monitor being carried or lifted - an alert.
 
-Vendored from monitor_alerts_deploy/monitor_alerts/watcher.py. Changes for the
+Vendored from monitor_alerts_deploy_v2/monitor_alerts/watcher.py. Changes for the
 pipeline, which samples each camera sparsely (bursts every few seconds) instead of
 a steady 5 fps: "missing" also needs `missing_min_obs` EMPTY frames in a row,
 "still long enough to learn" counts frames actually seen, not seconds * fps, and
@@ -25,10 +25,9 @@ with `touch_cover` a person standing at a still-visible monitor counts as a touc
 """
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 
-from .core import Box, Detection, FrameDetections, Params, coverage, iou, overlap
+from .core import Box, Detection, FrameDetections, Params, box_size, centre_distance, coverage, iou, overlap
 from .home_map import HomeMap, HomeSpot
 
 OK, OCCLUDED, EMPTY = "OK", "OCCLUDED", "EMPTY"
@@ -157,8 +156,8 @@ class Watcher:
         for det in self._off_home(dets):
             # Link to the nearest track within one box size (a walking person
             # moves a carried monitor less than that between frames at 5 fps).
-            near = [tr for tr in unmatched if _centre_distance(tr.det.box, det.box) <= _size(tr.det.box)]
-            tr = min(near, key=lambda tr: _centre_distance(tr.det.box, det.box), default=None)
+            near = [tr for tr in unmatched if centre_distance(tr.det.box, det.box) <= box_size(tr.det.box)]
+            tr = min(near, key=lambda tr: centre_distance(tr.det.box, det.box), default=None)
             if tr is None:
                 tr = _Track(start=det.box, anchor=det.box, still_since=t, still_since_frame=self.frame_no,
                             det=det, last_seen=t)
@@ -249,8 +248,8 @@ class Watcher:
     # --- helpers ---------------------------------------------------------------
 
     def _moved(self, before: Box, now: Box) -> bool:
-        needed = max(self.p.offhome_move_frac * _size(now), self.min_move_px)
-        return _centre_distance(before, now) >= needed
+        needed = max(self.p.offhome_move_frac * box_size(now), self.min_move_px)
+        return centre_distance(before, now) >= needed
 
     def _covering_person(self, box: Box, dets: FrameDetections) -> Detection | None:
         """The person hiding most of this spot, if any hides at least `occlude_cover` of it."""
@@ -267,11 +266,3 @@ class Watcher:
     def _event(self, type_: str, dets: FrameDetections, t: float) -> Event:
         return Event(type_, self.camera_id, t, [s.home for s in self._long_empty(t)],
                      self._off_home(dets), list(dets.persons))
-
-
-def _centre_distance(a: Box, b: Box) -> float:
-    return math.hypot((a[0] + a[2] - b[0] - b[2]) / 2, (a[1] + a[3] - b[1] - b[3]) / 2)
-
-
-def _size(b: Box) -> float:
-    return max(b[2] - b[0], b[3] - b[1])

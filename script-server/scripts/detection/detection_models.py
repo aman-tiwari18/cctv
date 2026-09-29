@@ -8,7 +8,8 @@ There is no fallback between models: an analytic whose model isn't loaded doesn'
                                                 UNIFIED_PERSON_MODEL=yolov10m)
   person_monitor_yolo26m  0 person, 1 monitor   person analytics (UNIFIED_PERSON_MODEL=finetuned),
                                                 monitor_tamper (UNIFIED_MONITOR_MODEL=yolo26m)
-  person_monitor_rfdetr   0 person, 1 monitor   monitor_tamper (UNIFIED_MONITOR_MODEL=rfdetr)
+  person_monitor_rfdetr   0 person, 1 monitor   monitor_tamper (UNIFIED_MONITOR_MODEL=rfdetr, default;
+                                                monitor_alerts_deploy_v2/rfdetr_model/checkpoint_best_total.pth)
   mobile                  0 mobile              phone
 
 Exam-safety rules every wrapper follows:
@@ -130,7 +131,7 @@ class RFDetrBackend(_Backend):
         for start in range(0, len(frames), self.batch_size):
             chunk = [cv2.cvtColor(f, cv2.COLOR_BGR2RGB) for f in frames[start:start + self.batch_size]]
             padded = chunk + [chunk[-1]] * (self.batch_size - len(chunk))
-            dets = model.predict(padded, threshold=self.conf)
+            dets = model.predict(padded, threshold=self.conf, include_source_image=False)
             dets = dets if isinstance(dets, list) else [dets]
             out += dets[:len(chunk)]
         return out
