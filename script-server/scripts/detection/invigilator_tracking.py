@@ -2,6 +2,8 @@ import cv2
 import time
 import os
 import random
+import json
+import re
 _DET_GPU_ID = int(os.environ["WORKER_INDEX"]) if os.environ.get("WORKER_INDEX", "").strip().isdigit() else int("".join(c for c in os.environ.get("WORKER_ID", "main").split("-")[-1] if c.isdigit()) or "0")
 import logging
 import threading
@@ -70,7 +72,17 @@ MAX_ANCHORS           = 20    # Per camera; bounds work if a scene produces many
 APPEARANCE_MAX_DIST   = 0.40
 GALLERY_SIZE          = 3     # Anchor signature + the next confirmed matches, compared by min distance
 
+# --- Checkpoint state on disk (JSON, one file per camera) ---
+# Written after every checkpoint, read back when a camera's tracker is created, so a worker
+# restart mid-shift keeps the 7-min timers. Each anchor also keeps its recent checkpoint results
+# (position, px moved from the anchor, colour distance, hit/miss) for review.
+# INVIGILATOR_STATE_DIR="" turns it off (state stays in memory only).
+STATE_DIR         = os.environ.get("INVIGILATOR_STATE_DIR", os.path.join(BASE_DIR, "results/invigilator_state"))
+STATE_HISTORY_LEN = 20        # Checkpoint results kept per anchor
+
 os.makedirs(SAVE_FOLDER, exist_ok=True)
+if STATE_DIR:
+    os.makedirs(STATE_DIR, exist_ok=True)
 
 # ================= YOLO ====================
 yolo_model = None
@@ -131,8 +143,9 @@ class PersonTracker:
                CHECK_INTERVAL_SEC.
 
     At a checkpoint each anchor (foot position + colour gallery) is checked:
-    a standing box near the anchor whose colours match the gallery is a hit,
-    anything else is a miss. MISS_STREAK_RESET misses in a row drop the anchor.
+    a standing box whose foot is within the anchor radius of the anchor's
+    stored position and whose colours match the gallery is a hit, anything
+    else is a miss. MISS_STREAK_RESET misses in a row drop the anchor.
     Standing boxes that matched no anchor start new anchors — so a different
     person stepping into the spot starts their own timer instead of inheriting one.
 
@@ -140,26 +153,41 @@ class PersonTracker:
     CONFIRM_HIT_STREAK checkpoints all hits) STATIC stays true on every frame where that person is still at the
     spot, so the reporting gate (consecutive hits + cooldown) sees a stable
     signal and decides the save cadence.
+
+    With a `state_path`, the anchors (position, counters, colour gallery and the
+    last STATE_HISTORY_LEN checkpoint results) are written to that JSON file after
+    every checkpoint and read back on creation, so a worker restart keeps the timers.
     """
-    def __init__(self):
+    def __init__(self, state_path=None):
         self.no_target_start = None
         self.anchors = []
         self.last_check = None
         self.next_check = None
+        self.state_path = state_path
+        self._load()
 
     @staticmethod
     def _foot(box):
-        return ((box[0] + box[2]) / 2.0, float(box[3]))
+        return (float(box[0] + box[2]) / 2.0, float(box[3]))
 
     @staticmethod
-    def _near(anchor, foot):
-        r = max(ANCHOR_RADIUS_FLOOR, anchor['h'] * ANCHOR_RADIUS_RATIO)
-        return ((foot[0] - anchor['x']) ** 2 + (foot[1] - anchor['y']) ** 2) ** 0.5 < r
+    def _moved(anchor, foot):
+        """Pixel distance of a foot point from the anchor's stored position."""
+        return ((foot[0] - anchor['x']) ** 2 + (foot[1] - anchor['y']) ** 2) ** 0.5
+
+    @classmethod
+    def _near(cls, anchor, foot):
+        return cls._moved(anchor, foot) < max(ANCHOR_RADIUS_FLOOR, anchor['h'] * ANCHOR_RADIUS_RATIO)
 
     @staticmethod
-    def _same_person(anchor, sig):
-        return sig is not None and min(
-            appearance_distance(g, sig) for g in anchor['gallery']) < APPEARANCE_MAX_DIST
+    def _colour_dist(anchor, sig):
+        """Distance to the closest gallery signature, or None if there is no crop."""
+        return None if sig is None else min(appearance_distance(g, sig) for g in anchor['gallery'])
+
+    @classmethod
+    def _same_person(cls, anchor, sig):
+        d = cls._colour_dist(anchor, sig)
+        return d is not None and d < APPEARANCE_MAX_DIST
 
     def _checkpoint(self, now, people):
         # Camera unseen for too long → can't vouch for continuity.
@@ -176,6 +204,20 @@ class PersonTracker:
                 if self._near(a, foot) and self._same_person(a, sig):
                     hit = i
                     break
+            # Record where the person was at this checkpoint (the match, else the
+            # standing person closest to the spot) for review.
+            seen = hit if hit is not None else min(
+                range(len(people)), key=lambda i: self._moved(a, people[i][0]), default=None)
+            entry = {'t': round(now, 1), 'hit': hit is not None,
+                     'x': None, 'y': None, 'moved_px': None, 'colour_dist': None}
+            if seen is not None:
+                foot, _, sig = people[seen]
+                cd = self._colour_dist(a, sig)
+                entry.update(x=round(foot[0], 1), y=round(foot[1], 1),
+                             moved_px=round(self._moved(a, foot), 1),
+                             colour_dist=None if cd is None else round(cd, 3))
+            a['history'] = (a['history'] + [entry])[-STATE_HISTORY_LEN:]
+
             if hit is None:
                 a['miss_streak'] += 1
                 a['hit_streak'] = 0
@@ -194,7 +236,62 @@ class PersonTracker:
             self.anchors.append({
                 'x': foot[0], 'y': foot[1], 'h': h, 'gallery': [sig], 'start': now,
                 'checks': 1, 'hits': 1, 'miss_streak': 0, 'hit_streak': 1,
+                'history': [{'t': round(now, 1), 'hit': True, 'x': round(foot[0], 1),
+                             'y': round(foot[1], 1), 'moved_px': 0.0, 'colour_dist': 0.0}],
             })
+
+        self._save(now)
+
+    # ---- JSON state ---------------------------------------------------------
+    def _save(self, now):
+        if not self.state_path:
+            return
+        state = {
+            'updated_at': datetime.fromtimestamp(now).strftime('%Y-%m-%d %H:%M:%S'),
+            'last_check': now,
+            'anchors': [{
+                'x': round(float(a['x']), 1), 'y': round(float(a['y']), 1), 'h': round(float(a['h']), 1),
+                'start': a['start'],
+                'start_at': datetime.fromtimestamp(a['start']).strftime('%Y-%m-%d %H:%M:%S'),
+                'stood_sec': round(now - a['start'], 1),
+                'checks': a['checks'], 'hits': a['hits'],
+                'miss_streak': a['miss_streak'], 'hit_streak': a['hit_streak'],
+                'history': a['history'],
+                # colour gallery last: long float lists (torso hist, legs hist) per signature
+                'gallery': [[np.round(part, 5).tolist() for part in sig] for sig in a['gallery']],
+            } for a in self.anchors],
+        }
+        tmp = f"{self.state_path}.tmp"
+        try:
+            with open(tmp, 'w') as f:
+                json.dump(state, f, indent=1)
+            os.replace(tmp, self.state_path)   # atomic: readers never see a half-written file
+        except Exception as e:
+            _warn_state_io(f"could not write {self.state_path}: {e}")
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+    def _load(self):
+        if not self.state_path or not os.path.exists(self.state_path):
+            return
+        try:
+            with open(self.state_path) as f:
+                state = json.load(f)
+            anchors = []
+            for a in state.get('anchors', []):
+                a['gallery'] = [tuple(np.asarray(part, dtype=np.float32) for part in sig)
+                                for sig in a['gallery']]
+                for k in ('start_at', 'stood_sec'):
+                    a.pop(k, None)
+                anchors.append(a)
+            self.anchors = anchors
+            # Stale state (camera unseen > MAX_CHECK_GAP_SEC) is dropped by the next checkpoint.
+            self.last_check = state.get('last_check')
+        except Exception as e:
+            self.anchors, self.last_check = [], None
+            _warn_state_io(f"could not read {self.state_path}, starting fresh: {e}")
 
     def update(self, person_boxes, frame):
         """
@@ -238,6 +335,21 @@ class PersonTracker:
 # ================= STATE ===================
 trackers = {}
 _state_lock = threading.Lock()
+_last_state_warn = [0.0]
+
+
+def _warn_state_io(msg):
+    """State-file problems never stop detection; warn at most once a minute."""
+    if time.time() - _last_state_warn[0] >= 60:
+        _last_state_warn[0] = time.time()
+        logger.warning(f"[Invigilator] state JSON: {msg}")
+
+
+def _new_tracker(key):
+    path = None
+    if STATE_DIR:
+        path = os.path.join(STATE_DIR, re.sub(r"[^A-Za-z0-9_.-]", "_", key) + ".json")
+    return PersonTracker(state_path=path)
 
 # =====================================================
 # CORE DETECTION LOGIC
@@ -266,7 +378,7 @@ def detect_invigilator_in_frame(frame, device_id="unknown", camera_no="unknown",
     key = f"{device_id}_{camera_no}"
     with _state_lock:
         if key not in trackers:
-            trackers[key] = PersonTracker()
+            trackers[key] = _new_tracker(key)
         tracker = trackers[key]
 
     absent, static_violation, static_feet = tracker.update(person_boxes, frame)
@@ -350,7 +462,7 @@ def detect_invigilator_batch(items, results=None):
 
         with _state_lock:
             if key not in trackers:
-                trackers[key] = PersonTracker()
+                trackers[key] = _new_tracker(key)
             tracker = trackers[key]
 
         absent, static_violation, static_feet = tracker.update(person_boxes, frame)
