@@ -53,6 +53,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# RF-DETR's deformable attention makes torch JIT-compile a kernel with NVRTC, which
+# dlopen()s libnvrtc-builtins.so.13.0 by bare name. The pip wheel ships it in
+# site-packages/nvidia/cu13/lib, which is not on the loader path, so the monitor_tamper
+# model failed with "failed to open libnvrtc-builtins.so.13.0". The loader reads
+# LD_LIBRARY_PATH only at exec, so set it here: the worker processes spawned below
+# inherit it.
+try:
+    import nvidia as _nvidia_pkg
+    _cu13_lib = os.path.join(list(_nvidia_pkg.__path__)[0], "cu13", "lib")
+    if os.path.isdir(_cu13_lib) and _cu13_lib not in os.environ.get("LD_LIBRARY_PATH", "").split(":"):
+        os.environ["LD_LIBRARY_PATH"] = ":".join(filter(None, [_cu13_lib, os.environ.get("LD_LIBRARY_PATH", "")]))
+except Exception:
+    pass
+
 # Force RTSP over TCP for OpenCV — prevents UDP data loss behind QEMU/KVM NAT
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
 
@@ -205,6 +219,13 @@ GST_PIPELINE_TEMPLATE = os.environ.get(
     'appsink drop=true max-buffers=1 sync=false'
 )
 
+# Analytics that need a CONTINUOUS feed, not round-robin bursts: monitor_tamper follows a
+# monitor being carried and counts empty frames over seconds, which a 2-frame visit every
+# minute or two can never satisfy. Their cameras get a stream held open for the whole run
+# (SAMPLE_FPS frames/s); every other camera stays on round-robin.
+CONTINUOUS_SCRIPTS = {s.strip() for s in os.environ.get("CONTINUOUS_SCRIPTS", "monitor_tamper").split(",") if s.strip()}
+CONTINUOUS_RETRY_SECONDS = float(os.environ.get("CONTINUOUS_RETRY_SECONDS", "15"))
+
 # Sampling rate per camera. Default 5 fps = current behavior (0.2s). Scaling Path A
 # lowers this to ~3 fps via SAMPLE_FPS=3 (cooldowns are 60-360s so 3 fps is plenty).
 SAMPLE_FPS      = float(os.environ.get("SAMPLE_FPS", "5"))
@@ -227,9 +248,9 @@ STARTVIDEO_CACHE_TTL = float(os.environ.get("STARTVIDEO_CACHE_TTL", "180"))
 _ACTIVE_CHILD_PROCESSES = set()
 _ACTIVE_CHILD_LOCK = threading.Lock()
 
-DSS_USER = "system"
-DSS_PASS = "Sasd@12345"
-# DSS_PASS = "Sasd@12345"
+# Camview/DSS login, shared with camview_token_server.py; set in script-server/.env.
+DSS_USER = os.environ.get("CAMVIEW_AUTH_USER", "system")
+DSS_PASS = os.environ.get("CAMVIEW_AUTH_PASS", "")
 
 # ================= CRITICAL FIX: Shared disk-based token cache =================
 TOKEN_CACHE_FILE = os.path.join(PROJECT_ROOT, "server_tokens.json")
@@ -935,6 +956,11 @@ def rtsp_producer(cam_configs, queues, pre_fetched_token=None, enabled_scripts=N
 
     consecutive_failures = 0
     MAX_CONSECUTIVE_FAILURES = 3
+    # Continuous analytics (CONTINUOUS_SCRIPTS): keep reconnecting for the whole run instead
+    # of dropping the camera after 3 failures, and keep the stream drained (see below).
+    continuous = bool(set(enabled_scripts or ()) & CONTINUOUS_SCRIPTS)
+    if continuous:
+        MAX_CONSECUTIVE_FAILURES = 10 ** 9
 
     while not STOP and consecutive_failures < MAX_CONSECUTIVE_FAILURES:
         stream_urls = []
@@ -1029,8 +1055,23 @@ def rtsp_producer(cam_configs, queues, pre_fetched_token=None, enabled_scripts=N
             last_good_frame_time = time.time()
             STREAM_DEAD_THRESHOLD = 15  # seconds without any good frame
 
+            last_push = 0.0
             while not STOP:
-                frame, is_valid = read_frame_from_capture(cap, label)
+                if continuous:
+                    # grab() every frame so we always sample the LIVE picture: reading one
+                    # frame then sleeping lets the stream's buffer back up and the feed
+                    # falls behind real time. retrieve() only the frames we hand on.
+                    if not cap.grab():
+                        frame, is_valid = None, False
+                    elif time.time() - last_push < _FRAME_INTERVAL:
+                        continue
+                    else:
+                        ok, frame = cap.retrieve()
+                        is_valid = bool(ok) and frame is not None and frame.size > 0 and frame.ndim == 3
+                        if is_valid:
+                            last_push = time.time()
+                else:
+                    frame, is_valid = read_frame_from_capture(cap, label)
 
                 if not is_valid:
                     fail_count += 1
@@ -1086,7 +1127,9 @@ def rtsp_producer(cam_configs, queues, pre_fetched_token=None, enabled_scripts=N
                 
                 # Sampling rate (Scaling Path A): SAMPLE_FPS, default 3 fps. Cooldowns are
                 # 60-360s so higher fps adds no reportable value, only GPU/decode load.
-                time.sleep(_FRAME_INTERVAL)
+                # (Continuous mode paces itself by grabbing, see above.)
+                if not continuous:
+                    time.sleep(_FRAME_INTERVAL)
 
             cap.release()
             
@@ -1104,7 +1147,7 @@ def rtsp_producer(cam_configs, queues, pre_fetched_token=None, enabled_scripts=N
                 f"(failure {consecutive_failures}/{MAX_CONSECUTIVE_FAILURES})"
             )
             if consecutive_failures < MAX_CONSECUTIVE_FAILURES:
-                time.sleep(10)
+                time.sleep(CONTINUOUS_RETRY_SECONDS if continuous else 10)
 
     # Do not signal shared workers from an individual camera producer.
     # The RTSP pipeline owns the shared worker lifecycle and sends the
@@ -1215,11 +1258,25 @@ def run_rtsp_pipeline(camera_group, max_concurrent=MAX_CONCURRENT, unified=None)
 
     logger.info(f"Launching producers for {len(grouped)} camera groups (max_concurrent={max_concurrent})")
 
-    # 5a. ROUND-ROBIN mode (Scaling Path A): rotate all cameras over a bounded pool.
+    # 5a. ROUND-ROBIN mode (Scaling Path A): rotate cameras over a bounded pool — except
+    # cameras running a CONTINUOUS_SCRIPTS analytic (monitor_tamper), which get a
+    # persistent producer (5b) so that analytic sees a steady feed.
     rr_mode = ROUND_ROBIN and unified
+    rr_grouped, continuous_grouped = dict(grouped), {}
     if rr_mode:
-        logger.info(f"ROUND-ROBIN: {len(grouped)} cameras over pool of {RR_POOL_SIZE} slots")
-        _run_round_robin(grouped, server_tokens_map, unified_queue, script_queues)
+        for label, configs in grouped.items():
+            if {c.get("script_code") for c in configs} & CONTINUOUS_SCRIPTS:
+                continuous_grouped[label] = rr_grouped.pop(label)
+    rr_thread = None
+    if rr_mode and rr_grouped:
+        logger.info(f"ROUND-ROBIN: {len(rr_grouped)} cameras over pool of {RR_POOL_SIZE} slots")
+        rr_thread = threading.Thread(target=_run_round_robin,
+                                     args=(rr_grouped, server_tokens_map, unified_queue, script_queues),
+                                     name="RR-driver", daemon=True)
+        rr_thread.start()
+    if continuous_grouped:
+        logger.info(f"CONTINUOUS: {len(continuous_grouped)} cameras get a persistent stream "
+                    f"({sorted(CONTINUOUS_SCRIPTS)}; {SAMPLE_FPS:g} frames/s each)")
 
     # 5b. Continuous-producer mode (default): one persistent producer per camera.
     sem = threading.Semaphore(max_concurrent)
@@ -1277,8 +1334,8 @@ def run_rtsp_pipeline(camera_group, max_concurrent=MAX_CONCURRENT, unified=None)
             _unregister_child_process(proc)
 
     threads = []
-    for label, configs in grouped.items():
-        if STOP or rr_mode:   # rr_mode already drove all cameras above; skip continuous producers
+    for label, configs in (continuous_grouped if rr_mode else grouped).items():
+        if STOP:
             break
         t = threading.Thread(target=start_producer, args=(label, configs), daemon=True)
         t.start()
@@ -1287,6 +1344,10 @@ def run_rtsp_pipeline(camera_group, max_concurrent=MAX_CONCURRENT, unified=None)
 
     for t in threads:
         t.join()
+    # Round-robin runs until STOP; wait for it too before stopping the workers.
+    if rr_thread is not None:
+        while rr_thread.is_alive() and not STOP:
+            rr_thread.join(timeout=1.0)
 
     # 6. Clean up workers
     logger.info("All producers finished. Stopping workers...")

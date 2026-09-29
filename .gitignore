@@ -92,6 +92,8 @@ script-server/scripts/test_simple.sh
 script-server/scripts/detection/results/
 script-server/scripts/detection/results.backup.*/
 script-server/scripts/detection/models/*
+# Camview login-token cache written at runtime by the pipelines (secrets, not code)
+script-server/scripts/detection/server_tokens.json
 script-server/models/*
 script-server/scripts/detection/frames/*
 script-server/scripts/frames/*

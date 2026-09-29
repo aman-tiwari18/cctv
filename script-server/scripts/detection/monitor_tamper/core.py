@@ -82,6 +82,9 @@ class Params:
     person_window_seconds: float = 30
     view_changed_frac: float = 0.5
     cooldown_seconds: float = 30
+    # A monitor still HELD (it and a person overlapping it both detected in the frame)
+    # alerts again every this many seconds; the camera cooldown still applies.
+    repeat_held_seconds: float = 15.0
     stray_forget_seconds: float = 120
     learn_seconds: float = 10
     gap_reset_seconds: float = 2.0

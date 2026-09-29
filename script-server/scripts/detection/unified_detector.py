@@ -139,8 +139,13 @@ _COOLDOWN_DEFAULTS = {
     "monitor_tamper": 15,   # monitor_alerts_deploy_v2; incident grouping stops repeats
 }
 _GLOBAL_COOLDOWN = os.environ.get("COOLDOWN_TIME")
+# Analytics that group repeat alerts into incidents themselves and must NOT inherit the
+# generic COOLDOWN_TIME (a merged group's representative Frequency, e.g. 120 s): only their
+# own COOLDOWN_TIME_<KEY> or the default above applies.
+_OWN_COOLDOWN_ONLY = {"monitor_tamper"}
 COOLDOWNS = {
-    key: int(os.environ.get(f"COOLDOWN_TIME_{key.upper()}", _GLOBAL_COOLDOWN or default))
+    key: int(os.environ.get(f"COOLDOWN_TIME_{key.upper()}",
+                            default if key in _OWN_COOLDOWN_ONLY else (_GLOBAL_COOLDOWN or default)))
     for key, default in _COOLDOWN_DEFAULTS.items()
 }
 

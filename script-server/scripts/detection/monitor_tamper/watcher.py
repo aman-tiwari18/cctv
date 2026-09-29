@@ -75,7 +75,8 @@ class _Track:
     moved_streak: int = 0            # consecutive frames it has been away from `start`
     touched_at: float | None = None  # last time a person box overlapped it
     toucher: Detection | None = None # ...and that person
-    alerted: bool = False            # stays alerted, so a carried monitor alerts once
+    alerted: bool = False            # alerted at least once
+    alerted_at: float | None = None  # last alert; a still-HELD monitor re-alerts every repeat_held_seconds
 
 
 
@@ -185,7 +186,9 @@ class Watcher:
             still_for = t - tr.still_since
             # Same bar as home capture: seen in most frames, not just now and then.
             seen_enough = tr.still_hits / (self.frame_no - tr.still_since_frame + 1) >= self.p.capture_min_presence
-            if tr.last_seen == t and still_for >= self.p.learn_seconds and seen_enough:
+            # Never while a person is holding it: someone standing still with a monitor in
+            # their hands must keep alerting, not have it turned into a desk.
+            if tr.last_seen == t and tr.touched_at != t and still_for >= self.p.learn_seconds and seen_enough:
                 next_id = max((s.home.id for s in self.spots), default=-1) + 1
                 self.spots.append(_Spot(HomeSpot(next_id, tr.det.box), learned=True))
                 self.tracks.remove(tr)
@@ -224,13 +227,17 @@ class Watcher:
 
     def _off_home_event(self, dets: FrameDetections, t: float) -> Event | None:
         carried = [tr for tr in self.tracks
-                   if not tr.alerted and tr.last_seen == t
+                   if tr.last_seen == t
                    and tr.moved_streak >= self.p.offhome_min_frames
-                   and tr.touched_at is not None and t - tr.touched_at <= self.p.person_window_seconds]
+                   and tr.touched_at is not None and t - tr.touched_at <= self.p.person_window_seconds
+                   and (not tr.alerted
+                        # Repeat while it is still being HELD: the monitor and a person
+                        # overlapping it are both in this frame.
+                        or (tr.touched_at == t and t - tr.alerted_at >= self.p.repeat_held_seconds))]
         if not carried:
             return None
         for tr in carried:
-            tr.alerted = True
+            tr.alerted, tr.alerted_at = True, t
         event = self._event("MONITOR_OFF_HOME", dets, t)
         event.off_home_monitors = [tr.det for tr in carried]
         event.nearest_person = max(carried, key=lambda tr: tr.touched_at).toucher

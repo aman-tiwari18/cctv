@@ -31,7 +31,7 @@ from .watcher import Event
 
 EPS = 1e-6  # frame times are float sums of 1/fps; compare them with a little slack
 SPOT_EVENTS = {"MONITOR_MISSING", "MONITOR_GONE"}   # anchored on the home spot the monitor left
-MOVE_EVENTS = {"MONITOR_OFF_HOME", "MONITOR_NEW"}   # anchored on a monitor seen away from home
+MOVE_EVENTS = {"MONITOR_OFF_HOME", "MONITOR_NEW", "MONITOR_CARRIED"}   # anchored on a monitor seen away from home
 EMPTY_CONFIRM_SECONDS = 1.0  # a desk counts as visibly empty once it stays so this long (one missed person box is not enough)
 
 

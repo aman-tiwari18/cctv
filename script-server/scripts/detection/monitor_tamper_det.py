@@ -43,7 +43,7 @@ import cv2
 import numpy as np
 
 from monitor_tamper.alerts import BASIS_LABEL, draw_annotated, draw_incident, write_alert
-from monitor_tamper.core import Detection, FrameDetections, Params
+from monitor_tamper.core import Detection, FrameDetections, Params, box_size, centre_distance, coverage, overlap
 from monitor_tamper.evidence import Evidence, FrameBuffer, decode, select_evidence
 from monitor_tamper.home_map import HomeMap, capture_home_map, load_home_map, save_home_map
 from monitor_tamper.watcher import Event, Watcher
@@ -61,6 +61,13 @@ THRESHOLDS_RFDETR = {"person": 0.475, "monitor": 0.45}
 THRESHOLDS = {"person": 0.425, "monitor": 0.35}
 HOMES_DIR = os.path.join(BASE_DIR, "results", "monitor_tamper_homes")
 ALERTS_DIR = os.path.join(BASE_DIR, "results", "monitor_tamper_alerts")
+# Debug: every frame this analytic checks, annotated with what it saw, whether or not it
+# alerted. MONITOR_TAMPER_SAVE_FRAMES=0 turns it off.
+FRAMES_DIR = os.path.join(BASE_DIR, "results", "monitor_tamper_frames")
+SAVE_ALL_FRAMES = os.environ.get("MONITOR_TAMPER_SAVE_FRAMES", "1") != "0"
+# At most one saved frame per camera per this many seconds (a continuous 5 fps feed on
+# 12 cameras would otherwise be ~60 images/s). 0 = save every checked frame.
+SAVE_EVERY_S = float(os.environ.get("MONITOR_TAMPER_SAVE_EVERY_S", "1.0"))
 
 # The pipeline feeds a camera either at a steady rate (continuous RTSP, SAMPLE_FPS=5)
 # or in sparse bursts (RTSP round-robin: 2 frames per visit; HLS: a frame every ~3 s).
@@ -140,6 +147,152 @@ def to_frame_detections(result) -> FrameDetections:
     return FrameDetections(persons, monitors)
 
 
+def weak_monitors(result) -> list:
+    """Monitor boxes scored between HELD["min_conf"] and the normal monitor threshold:
+    too weak for the v2 rules, but used by the held-monitor fallback."""
+    if hasattr(result, "boxes"):
+        xyxy, conf, cls = (result.boxes.xyxy.cpu().numpy(), result.boxes.conf.cpu().numpy(),
+                           result.boxes.cls.cpu().numpy())
+        cut = THRESHOLDS["monitor"]
+    else:
+        xyxy, conf, cls = result.xyxy, result.confidence, result.class_id
+        cut = THRESHOLDS_RFDETR["monitor"]
+    return [Detection(tuple(float(v) for v in box), float(score))
+            for box, score, c in zip(xyxy, conf, cls.astype(int))
+            if c == CLASS_IDS["monitor"] and HELD["min_conf"] <= score < cut]
+
+
+# ================= HELD-MONITOR FALLBACK ===
+# The v2 rules only see a carried monitor the model scores >= 0.45 for several frames in
+# a row. Held against the body with its screen off, a monitor often scores lower: on
+# 29 Sep (LAB1 CAM1, 15:56) a man carried one through the view with the model at
+# 0.58-0.63 offline but under 0.45 live, and nothing fired. This rule watches weak
+# monitor boxes too and alerts when a standing person is carrying a dark monitor that is
+# not on any learned home spot, for several frames, while it moves.
+HELD = {
+    "min_conf": 0.15,          # weakest monitor box considered
+    "person_cover": 0.6,       # >= this share of the monitor inside the person's box
+    "min_width_frac": 0.3,     # monitor at least this share of the person's width (not a phone)
+    "min_depth_frac": 0.3,     # monitor centre below this share of the person's height (held, not a lit screen behind the head)
+    "min_standing_ratio": 1.5, # person box height / width: standing, not seated
+    "dark_max_mean": 90,       # mean grey of the monitor box: screen off / back side (a lit desk screen is ~130-180)
+    "window_s": 3.0,           # hits and travel are counted over this window
+    "min_hits": {"steady": 3, "sparse": 2},
+    "min_travel_frac": 0.15,   # the monitor moves >= this share of its size over the window
+    "repeat_s": 15.0,          # still held (it is a candidate in this frame): alert again this often
+}
+
+
+@dataclass
+class _HeldTrack:
+    box: tuple
+    hits: list            # [(t, box)] inside the window
+    last_t: float
+    person: Detection
+    score: float
+    alerted_at: float | None = None   # last alert of this held monitor
+
+
+class _HeldMonitorRule:
+    def __init__(self, camera_id: str):
+        self.camera_id = camera_id
+        self.tracks: list[_HeldTrack] = []
+
+    def _candidates(self, frame, dets: FrameDetections, monitors, home_map: HomeMap):
+        gray = None
+        out = []
+        for m in monitors:
+            if any(overlap(m.box, s.box) >= 0.5 for s in home_map.spots):
+                continue                                   # sitting on a desk spot: v2 rules own it
+            holder = max(dets.persons, key=lambda p: coverage(p.box, m.box), default=None)
+            if holder is None or coverage(holder.box, m.box) < HELD["person_cover"]:
+                continue
+            px1, py1, px2, py2 = holder.box
+            pw, ph = max(px2 - px1, 1.0), max(py2 - py1, 1.0)
+            mx1, my1, mx2, my2 = m.box
+            if (mx2 - mx1) < HELD["min_width_frac"] * pw or ph / pw < HELD["min_standing_ratio"]:
+                continue
+            if ((my1 + my2) / 2 - py1) / ph < HELD["min_depth_frac"]:
+                continue
+            if gray is None:
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            ix, iy = (mx2 - mx1) * 0.15, (my2 - my1) * 0.15   # inner part: skip the bezel/background
+            patch = gray[int(my1 + iy):int(my2 - iy), int(mx1 + ix):int(mx2 - ix)]
+            if patch.size == 0 or float(patch.mean()) > HELD["dark_max_mean"]:
+                continue
+            out.append((m, holder))
+        return out
+
+    def update(self, frame, dets: FrameDetections, monitors, home_map: HomeMap, t: float, profile: str):
+        """Returns an Event when a carried monitor is confirmed, else None."""
+        self.tracks = [tr for tr in self.tracks if t - tr.last_t <= HELD["window_s"]]
+        event = None
+        for m, holder in self._candidates(frame, dets, monitors, home_map):
+            near = [tr for tr in self.tracks if centre_distance(tr.box, m.box) <= box_size(tr.box)]
+            tr = min(near, key=lambda tr: centre_distance(tr.box, m.box), default=None)
+            if tr is None:
+                tr = _HeldTrack(m.box, [], t, holder, m.score)
+                self.tracks.append(tr)
+            tr.hits = [(ht, hb) for ht, hb in tr.hits if t - ht <= HELD["window_s"]] + [(t, m.box)]
+            tr.box, tr.last_t, tr.person, tr.score = m.box, t, holder, max(tr.score, m.score)
+            travel = centre_distance(tr.hits[0][1], m.box)
+            # First alert: confirmed over several frames while moving. After that the monitor
+            # is re-reported every repeat_s for as long as it is still held (a candidate in
+            # this frame means the holder and the monitor are both visible), moving or not.
+            first = (tr.alerted_at is None and len(tr.hits) >= HELD["min_hits"][profile]
+                     and travel >= HELD["min_travel_frac"] * box_size(m.box))
+            repeat = tr.alerted_at is not None and t - tr.alerted_at >= HELD["repeat_s"]
+            if first or repeat:
+                tr.alerted_at = t
+                event = Event("MONITOR_CARRIED", self.camera_id, t, [], [Detection(m.box, tr.score)],
+                              list(dets.persons), nearest_person=holder)
+        return event
+
+
+# ================= REPORTING GATE ==========
+# Only alerts that SHOW a monitor being moved are reported. On 29 Sep (CGL mock test) 60
+# of 70 alerts were MONITOR_MISSING whose image showed no monitor at all - an empty desk,
+# often just a monitor the model missed for a few frames - and the held-monitor fallback
+# reported boxes scored 0.18-0.25 that were not clearly monitors. The moved monitor's box
+# must clear these bars (fraction of the frame area / pixels):
+MOVED_MONITOR = {
+    "min_conf": 0.35,          # best score of the moved monitor (fallback: best over its frames)
+    "min_area_frac": 0.001,    # >= 0.1 % of the frame (e.g. 32x32 px at 960x1080)
+    "min_side_px": 20,         # shorter side
+}
+# Alerts whose trigger itself is a monitor seen away from home (moving / carried).
+MOVE_ALERTS = {"MONITOR_OFF_HOME", "MONITOR_CARRIED"}
+
+
+def _moved_box_ok(box, frame_size) -> str | None:
+    """None if the box is big enough to be a visible monitor, else why not."""
+    w, h = box[2] - box[0], box[3] - box[1]
+    if min(w, h) < MOVED_MONITOR["min_side_px"]:
+        return f"monitor box too small ({w:.0f}x{h:.0f} px)"
+    if w * h < MOVED_MONITOR["min_area_frac"] * frame_size[0] * frame_size[1]:
+        return f"monitor box too small ({100 * w * h / (frame_size[0] * frame_size[1]):.2f}% of frame)"
+    return None
+
+
+def _skip_reason(event: Event, evidence: Evidence, frame_size) -> str | None:
+    """None if the alert shows a monitor being moved (report it), else why it is skipped."""
+    if event.type in MOVE_ALERTS:
+        if not event.off_home_monitors:
+            return "no moved monitor box"
+        m = max(event.off_home_monitors, key=lambda d: d.score)
+        if m.score < MOVED_MONITOR["min_conf"]:
+            return f"moved monitor score {m.score:.2f} < {MOVED_MONITOR['min_conf']}"
+        return _moved_box_ok(m.box, frame_size)
+    if event.type == "MONITOR_MISSING":
+        # An empty desk alone is not reported; it is if the evidence caught the monitor
+        # being carried away (a monitor box inside the culprit's box in >= 2 frames).
+        boxes = [f.monitor_box for f in evidence.frames if f.monitor_box is not None]
+        if evidence.basis != "carrying" or not boxes:
+            return f"no moved monitor visible (evidence: {evidence.basis})"
+        return _moved_box_ok(max(boxes, key=lambda b: (b[2] - b[0]) * (b[3] - b[1])), frame_size)
+    return f"{event.type} never shows a moved monitor"
+
+
 # ================= PER-CAMERA LIFECYCLE ====
 @dataclass
 class _Pending:
@@ -170,8 +323,9 @@ class _Camera:
         self._saved: HomeMap | None = None  # saved spots, used once the rate is known
         self._first_t: float | None = None  # rate measurement since the stream (re)started
         self._seen = 0
+        self.held = _HeldMonitorRule(camera_id)
 
-    def process(self, frame, dets: FrameDetections, t: float) -> list:
+    def process(self, frame, dets: FrameDetections, t: float, weak=()) -> list:
         size = (frame.shape[1], frame.shape[0])
         if size != self.frame_size:
             self._on_new_frame_size(size)
@@ -187,8 +341,21 @@ class _Camera:
                 logger.info(f"[MonitorTamper] {self.camera_id}: reusing {len(self._saved.spots)} saved monitor spots")
                 self._saved = None
             return []
+        prev_alert_t = self.watcher.last_alert_t
         for event in self.watcher.update(dets, t):
+            if event.type not in MOVE_ALERTS:
+                # Reported only if its evidence later shows the monitor being carried, so
+                # it must not put the camera in cooldown and block that carry alert.
+                self.watcher.last_alert_t = prev_alert_t
             self._pending.append(_Pending(event, frame, t + self.params.evidence_delay_seconds))
+        profile = "steady" if self.params is self.profiles["steady"] else "sparse"
+        held = self.held.update(frame, dets, list(dets.monitors) + list(weak), self.home_map, t, profile)
+        if held is not None and not self.watcher._cooling_down(t):
+            # Same per-camera cooldown / incident grouping as the v2 alerts.
+            self.watcher._start_incident(t)
+            logger.info(f"[MonitorTamper] {self.camera_id}: MONITOR_CARRIED (held-monitor fallback, "
+                        f"monitor score {held.off_home_monitors[0].score:.2f})")
+            self._pending.append(_Pending(held, frame, t + self.params.evidence_delay_seconds))
         return self.flush(t)
 
     def flush(self, now: float | None) -> list:
@@ -198,6 +365,10 @@ class _Camera:
         for alert in due:
             self._pending.remove(alert)
             evidence = select_evidence(alert.event, self.buffer, self.home_map, self.params)
+            why = _skip_reason(alert.event, evidence, self.frame_size)
+            if why:
+                logger.info(f"[MonitorTamper] {self.camera_id}: skipped {alert.event.type} - {why}")
+                continue
             out.append((alert.event, alert.frame, evidence))
         return out
 
@@ -262,7 +433,59 @@ def evaluate(result, frame, state: dict, t: float, camera_id: str, cooldown_s: f
     if cam is None:
         profiles = {name: Params.from_dict({**p, "cooldown_seconds": cooldown_s}) for name, p in PROFILES.items()}
         cam = state["camera"] = _Camera(camera_id, profiles, _homes_dir(session))
-    return _render(cam, cam.process(frame, to_frame_detections(result), t))
+    dets = to_frame_detections(result)
+    weak = weak_monitors(result)
+    alerts = cam.process(frame, dets, t, weak)
+    if SAVE_ALL_FRAMES and (alerts or t - state.get("_last_frame_save", 0.0) >= SAVE_EVERY_S):
+        state["_last_frame_save"] = t
+        try:
+            _save_checked_frame(cam, frame, dets, t, session, [a[0].type for a in alerts], weak)
+        except Exception as e:
+            logger.error(f"[MonitorTamper] {camera_id}: could not save checked frame: {e}")
+    return _render(cam, alerts)
+
+
+_STATE_COLOURS = {"OK": (0, 200, 0), "OCCLUDED": (0, 215, 255), "EMPTY": (0, 0, 255)}
+
+
+def _save_checked_frame(cam, frame, dets: FrameDetections, t: float, session, alert_types, weak=()) -> None:
+    """Write the frame as the analytic saw it: detected monitors (cyan) and persons
+    (magenta), and - once home spots are learned - every spot coloured by its state
+    (OK green / person in front yellow / EMPTY red, with its empty-frame count)."""
+    img = frame.copy()
+    for d in dets.persons:
+        x1, y1, x2, y2 = map(int, d.box)
+        cv2.rectangle(img, (x1, y1), (x2, y2), (255, 0, 255), 1)
+    for d in dets.monitors:
+        x1, y1, x2, y2 = map(int, d.box)
+        cv2.rectangle(img, (x1, y1), (x2, y2), (255, 255, 0), 1)
+    for d in weak:                                   # weak monitor boxes (fallback input): orange, dashed-looking thin
+        x1, y1, x2, y2 = map(int, d.box)
+        cv2.rectangle(img, (x1, y1), (x2, y2), (0, 140, 255), 1)
+        cv2.putText(img, f"{d.score:.2f}", (x1, max(y1 - 2, 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 140, 255), 1)
+    watcher = getattr(cam, "watcher", None)
+    if watcher is not None:
+        phase = "WATCHING " + ("steady" if cam.params is cam.profiles.get("steady") else "sparse")
+        for sp in watcher.spots:
+            x1, y1, x2, y2 = map(int, sp.home.box)
+            col = _STATE_COLOURS.get(sp.state, (255, 255, 255))
+            cv2.rectangle(img, (x1, y1), (x2, y2), col, 2)
+            label = f"{sp.home.id}" + (f" e{sp.empty_obs}" if sp.state == "EMPTY" else "")
+            cv2.putText(img, label, (x1 + 2, max(y1 - 3, 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.4, col, 1, cv2.LINE_AA)
+        counts = watcher.state_counts()
+        status = f"{phase}  OK={counts['OK']} OCC={counts['OCCLUDED']} EMPTY={counts['EMPTY']}"
+    else:
+        status = f"LEARNING home spots ({len(getattr(cam, '_capture_frames', []) or [])} frames so far)"
+    when = datetime.fromtimestamp(t).astimezone()
+    head = f"{cam.camera_id}  {when.strftime('%H:%M:%S')}  {status}  mon={len(dets.monitors)} weak={len(weak)} per={len(dets.persons)}"
+    if alert_types:
+        head += "  ALERT:" + ",".join(alert_types)
+    cv2.rectangle(img, (0, 0), (img.shape[1], 24), (0, 0, 0), -1)
+    cv2.putText(img, head, (6, 17), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+    out = os.path.join(FRAMES_DIR, session or "no_session", cam.camera_id)
+    os.makedirs(out, exist_ok=True)
+    cv2.imwrite(os.path.join(out, when.strftime("%Y%m%d_%H%M%S_%f")[:-3] + ".jpg"), img,
+                [cv2.IMWRITE_JPEG_QUALITY, 80])
 
 
 def flush(state: dict, now: float | None) -> list:

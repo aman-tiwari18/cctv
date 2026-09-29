@@ -152,7 +152,9 @@ BACKENDS = {
     # conf 0.35 = the lowest any consumer needs (monitor); person analytics get a >= 0.45 view.
     "person_monitor_yolo26m": YoloBackend("person_monitor_yolo26m",
                                           os.path.join(MODELS_DIR, "monitor_person_yolo26m.pt"), conf=0.35, imgsz=960),
+    # conf 0.15: monitor_tamper's rules still apply their own 0.45 cut
+    # (THRESHOLDS_RFDETR); the weaker boxes only feed its held-monitor fallback.
     "person_monitor_rfdetr": RFDetrBackend("person_monitor_rfdetr",
-                                           os.path.join(MODELS_DIR, "monitor_person_rfdetr.pth"), conf=0.45),
+                                           os.path.join(MODELS_DIR, "monitor_person_rfdetr.pth"), conf=0.15),
     "mobile": YoloBackend("mobile", os.path.join(MODELS_DIR, "best_mobile_model.pt"), conf=0.25, imgsz=960),
 }
