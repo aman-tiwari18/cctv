@@ -465,7 +465,8 @@ exports.getRemovedDetections = async (req, res) => {
                                 camera_name, ${tbl.source === 'rtsp' ? 'device_id, camera_no,' : 'camera_category, ch_code,'}
                                 tc_code, state, camera_status, events, date_time,
                                 imageurl, detection_type, unique_id, created_at,
-                                pushed_to_client, remove_from_client, sms_sent, sms_sent_at, updated_at
+                                pushed_to_client, remove_from_client, sms_sent, sms_sent_at, updated_at,
+                                violation_count
                          FROM ${tbl.name}
                          WHERE ${whereData}
                          ORDER BY created_at DESC
@@ -531,6 +532,7 @@ exports.getRemovedDetections = async (req, res) => {
                 remove_from_client: row.remove_from_client,
                 sms_sent: row.sms_sent,
                 sms_sent_at: row.sms_sent_at,
+                violation_count: row.violation_count,
             };
         });
 
@@ -691,7 +693,7 @@ exports.getAcceptedDetections = async (req, res) => {
                                 tc_code, state, camera_status, events, date_time,
                                 imageurl, detection_type, unique_id, created_at,
                                 pushed_to_client, remove_from_client, accepted_by_client, accepted_at,
-                                sms_sent, sms_sent_at, updated_at
+                                sms_sent, sms_sent_at, updated_at, violation_count
                          FROM ${tbl.name}
                          WHERE ${whereData}
                          ORDER BY created_at DESC
@@ -759,6 +761,7 @@ exports.getAcceptedDetections = async (req, res) => {
                 accepted_at: row.accepted_at,
                 sms_sent: row.sms_sent,
                 sms_sent_at: row.sms_sent_at,
+                violation_count: row.violation_count,
             };
         });
 

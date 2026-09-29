@@ -281,6 +281,19 @@ function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onS
             }}
           />
         )}
+        {/* Repeat counter: 2, 3, ... = same pair at the same spot as this camera's earlier report */}
+        {item.type === 'proximity' && item.violation_count != null && (
+          <Chip
+            icon={<Warning sx={{ fontSize: 12, color: '#fff !important' }} />}
+            label={`Proximity Violation ${item.violation_count}`}
+            size="small"
+            sx={{
+              position: 'absolute', bottom: 8, right: 8,
+              bgcolor: Number(item.violation_count) > 1 ? '#dc2626' : 'rgba(15, 23, 42, 0.72)', color: '#fff',
+              fontWeight: 700, fontSize: '0.65rem',
+            }}
+          />
+        )}
         {item.count != null && (
           <Chip
             icon={<Warning sx={{ fontSize: 12, color: '#fff !important' }} />}
@@ -487,6 +500,9 @@ function Lightbox({ item, onClose, onPushToClient, isPushing, isPushed, pendingL
             <Chip label={meta.label} size="small" sx={{ bgcolor: meta.color, color: '#fff', fontWeight: 700 }} />
             {invigilatorEventLabel && (
               <Chip label={invigilatorEventLabel} size="small" sx={{ bgcolor: '#334155', color: '#fff' }} />
+            )}
+            {item.type === 'proximity' && item.violation_count != null && (
+              <Chip label={`Proximity Violation ${item.violation_count}`} size="small" sx={{ bgcolor: '#dc2626', color: '#fff', fontWeight: 700 }} />
             )}
             {item.count != null && <Chip label={`Count: ${item.count}`} size="small" sx={{ bgcolor: '#334155', color: '#fff' }} />}
             {item.confidence != null && (

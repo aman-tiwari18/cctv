@@ -397,7 +397,7 @@ def _enrich_detection_item_from_report(item: dict, conn=None) -> dict:
                 cur.execute(
                     f"""
                     SELECT cr.shift_id, cr.tc_code, cr.gpu_id, cr.pushed_to_client,
-                           cr.pushed_by, es.shift_name
+                           cr.pushed_by, cr.violation_count, es.shift_name
                     FROM {table} AS cr
                     LEFT JOIN exam_shifts AS es ON es.id = cr.shift_id
                     WHERE cr.unique_id = %s
@@ -426,6 +426,8 @@ def _enrich_detection_item_from_report(item: dict, conn=None) -> dict:
                 if row.get("pushed_by") is not None:
                     item["pushedBy"] = row.get("pushed_by")
                     item["pushed_by"] = row.get("pushed_by")
+                if row.get("violation_count") is not None:
+                    item["violation_count"] = row.get("violation_count")
                 break
     except Exception as e:
         logger.error(f"Detection report metadata lookup failed: {e}")
@@ -1980,7 +1982,8 @@ def list_detections(
                     cur.execute(
                         f"""
                         SELECT cr.unique_id, cr.pushed_to_client, cr.gpu_id,
-                               cr.shift_id, cr.tc_code, cr.sms_sent, es.shift_name
+                               cr.shift_id, cr.tc_code, cr.sms_sent, cr.violation_count,
+                               es.shift_name
                         FROM camera_report_hls AS cr USE INDEX (idx_unique_id)
                         LEFT JOIN exam_shifts AS es ON es.id = cr.shift_id
                         WHERE cr.unique_id IN ({fmt})
@@ -2003,6 +2006,8 @@ def list_detections(
                                 meta["tcCode"] = row.get("tc_code")
                             if row.get("sms_sent") is not None:
                                 meta["sms_sent"] = row.get("sms_sent")
+                            if row.get("violation_count") is not None:
+                                meta["violation_count"] = row.get("violation_count")
                 except Exception as e:
                     logger.error(f"HLS pushed uids fetch failed: {e}")
 
@@ -2010,7 +2015,8 @@ def list_detections(
                     cur.execute(
                         f"""
                         SELECT cr.unique_id, cr.pushed_to_client, cr.gpu_id,
-                               cr.shift_id, cr.tc_code, cr.sms_sent, es.shift_name
+                               cr.shift_id, cr.tc_code, cr.sms_sent, cr.violation_count,
+                               es.shift_name
                         FROM camera_report_rtsp AS cr USE INDEX (idx_unique_id)
                         LEFT JOIN exam_shifts AS es ON es.id = cr.shift_id
                         WHERE cr.unique_id IN ({fmt})
@@ -2033,6 +2039,8 @@ def list_detections(
                                 meta["tcCode"] = row.get("tc_code")
                             if row.get("sms_sent") is not None:
                                 meta["sms_sent"] = row.get("sms_sent")
+                            if row.get("violation_count") is not None:
+                                meta["violation_count"] = row.get("violation_count")
                 except Exception as e:
                     logger.error(f"RTSP pushed uids fetch failed: {e}")
             conn.close()
@@ -2057,6 +2065,9 @@ def list_detections(
         if meta.get("tcCode"):
             item["tcCode"] = meta.get("tcCode")
             item["tc_code"] = meta.get("tcCode")
+        # Proximity repeat count ("Proximity Violation N" on the card).
+        if meta.get("violation_count") is not None:
+            item["violation_count"] = meta.get("violation_count")
 
     # Resolve shift names for the page (covers filename-derived shift_ids whose
     # camera_report row had a NULL shift_id) so the cards always show the shift.
@@ -2276,6 +2287,7 @@ async def copy_client_detections(payload: ClientDetectionCopyRequest):
                         # SMS now fires when the client ACCEPTS (not on push).
                         "sms_sent": 0,
                         "accepted": 0,
+                        "violation_count": row.get("violation_count"),
                         "pushedBy": pushed_by,
                         "pushed_by": pushed_by,
                         "pushedByName": pushed_by_name,
@@ -2577,6 +2589,7 @@ def list_client_detections(
                     # Client "Accept" state (cctv_backend sets accepted_by_client).
                     "accepted":    1 if row.get("accepted_by_client") == 1 else 0,
                     "accepted_at": _epoch_ms(row.get("accepted_at")),
+                    "violation_count": row.get("violation_count"),
                     "_mtime":      _epoch_ms(row.get("created_at")) or 0,
                     "updatedAt":   _epoch_ms(row.get("updated_at")),
                     "updated_at":  _epoch_ms(row.get("updated_at")),
