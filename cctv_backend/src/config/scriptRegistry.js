@@ -137,4 +137,11 @@ module.exports = {
         default_frequency: 5,
         default_duration: 1,
     },
+    crowd_five_invigilator: {
+        name: 'Crowd < 5 + Invigilator Static',
+        description: 'Detects 1-4 seated candidates in an exam room while the invigilator stands at one spot for 7 minutes.',
+        script_path: 'scripts/detection/pipeline/master_pipeline.py',
+        default_frequency: 5,
+        default_duration: 1,
+    },
 };

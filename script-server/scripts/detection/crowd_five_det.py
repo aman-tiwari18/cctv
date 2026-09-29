@@ -114,32 +114,48 @@ def _is_frame_corrupt(frame, prev_hash):
     return None, h
 
 
-def _box_weight(xyxy, frame_w, frame_h):
-    """G3 + G4 + G4b + G5: returns weighted contribution (0.0 reject, EDGE_WEIGHT edge, 1.0 full)."""
+def _shape_reject(xyxy, frame_w, frame_h):
+    """G3 + G4: returns the reject reason, or None if the box looks like a person."""
     x1, y1, x2, y2 = xyxy
     w = x2 - x1
     h = y2 - y1
     if w <= 0 or h <= 0:
-        return 0.0, 'shape_reject'
+        return 'shape_reject'
     area = w * h
     area_ratio = area / max(frame_w * frame_h, 1)
     # G3: size
     if area < MIN_BOX_AREA_ABS or area_ratio < MIN_BOX_AREA_RATIO:
-        return 0.0, 'size_reject'
+        return 'size_reject'
     if area_ratio > MAX_BOX_AREA_RATIO:
-        return 0.0, 'size_reject'
+        return 'size_reject'
     # G4: aspect
     woh = w / h
     if woh > ASPECT_W_OVER_H_MAX or woh < ASPECT_W_OVER_H_MIN:
-        return 0.0, 'aspect_reject'
-    # G4b: standing only — seated persons are not counted
-    if h < STANDING_MIN_HEIGHT or (h / w) < STANDING_ASPECT_RATIO:
-        return 0.0, 'sitting_reject'
-    # G5: edge — partial person at frame edge counted at EDGE_WEIGHT
+        return 'aspect_reject'
+    return None
+
+
+def _edge_weight(xyxy, frame_w, frame_h):
+    """G5: partial person at frame edge counted at EDGE_WEIGHT, else 1.0."""
+    x1, y1, x2, y2 = xyxy
     if (x1 <= EDGE_MARGIN_PX or y1 <= EDGE_MARGIN_PX or
         x2 >= frame_w - EDGE_MARGIN_PX or y2 >= frame_h - EDGE_MARGIN_PX):
-        return EDGE_WEIGHT, 'edge'
-    return 1.0, None
+        return EDGE_WEIGHT
+    return 1.0
+
+
+def _box_weight(xyxy, frame_w, frame_h):
+    """G3 + G4 + G4b + G5: returns weighted contribution (0.0 reject, EDGE_WEIGHT edge, 1.0 full)."""
+    reason = _shape_reject(xyxy, frame_w, frame_h)
+    if reason is not None:
+        return 0.0, reason
+    # G4b: standing only — seated persons are not counted
+    x1, y1, x2, y2 = xyxy
+    h = y2 - y1
+    if h < STANDING_MIN_HEIGHT or (h / (x2 - x1)) < STANDING_ASPECT_RATIO:
+        return 0.0, 'sitting_reject'
+    weight = _edge_weight(xyxy, frame_w, frame_h)
+    return weight, ('edge' if weight < 1.0 else None)
 
 
 def _iomin_dedup(detections):

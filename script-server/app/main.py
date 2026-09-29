@@ -446,7 +446,7 @@ _RTSP_SCRIPT_PREFIXES = {
     "tampering", "violation", "entry_exit", "server_room", "blind_spot",
     "zero_person", "detection", "crowd_zero", "crowd_five", "blindspot",
     "crowd_biometric", "strongroom", "qp_box", "improper_furniture",
-    "monitor_tamper",
+    "monitor_tamper", "crowd_five_invigilator",
 }
 
 
@@ -1416,6 +1416,7 @@ DETECTION_FOLDERS = {
     "qp_box":           "qp_box_missing",
     "furniture":        "improper_furniture_detection",
     "monitor_tamper":   "monitor_tamper_detection",
+    "crowd_five_invigilator": "crowd_five_invigilator_detection",
     "vision":           "scene_classification",
 }
 
@@ -1437,6 +1438,7 @@ DETECTION_LABELS = {
     "qp_box":           "QP Box Detection",
     "furniture":        "Improper Furniture",
     "monitor_tamper":   "Monitor Tampering",
+    "crowd_five_invigilator": "Crowd < 5 + Invigilator Static",
     "vision":           "Scene Classification",
 }
 

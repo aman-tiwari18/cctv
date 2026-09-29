@@ -61,6 +61,7 @@ const DETECTION_FOLDERS = {
     qp_box: 'qp_box_missing',
     furniture: 'improper_furniture_detection',
     monitor_tamper: 'monitor_tamper_detection',
+    crowd_five_invigilator: 'crowd_five_invigilator_detection',
     vision: 'scene_classification',
 };
 

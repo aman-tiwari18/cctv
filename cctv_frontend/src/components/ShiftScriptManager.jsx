@@ -188,6 +188,14 @@ const SCRIPT_META = {
         color: '#6d28d9',
         category: 'movement',
     },
+    crowd_five_invigilator: {
+        label: 'Few candidates, supervisor idle',
+        icon: Visibility,
+        iconColor: '#0f766e',
+        bg: '#ccfbf1',
+        color: '#0f766e',
+        category: 'people',
+    },
     vision: {
         label: 'Vision Detection',
         icon: Visibility,

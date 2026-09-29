@@ -82,6 +82,9 @@ SCRIPT_CLASSIFICATION_MAP = {
     # Broken / overturned / missing furniture -> Inside Lab
     "furniture":       ["computer lab", "inside classroom"],
 
+    # 1-4 seated candidates AND invigilator standing still 7 min -> Inside Lab
+    "crowd_five_invigilator": ["computer lab", "inside classroom"],
+
     # Monitor moved / lifted / carried away -> Computer Lab (rooms with monitors)
     "monitor_tamper":  ["computer lab"],
 }

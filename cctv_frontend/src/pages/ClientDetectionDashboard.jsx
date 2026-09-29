@@ -79,6 +79,7 @@ const SCRIPT_DEFS = [
     { key: 'qp_box',          label: 'QP Box',            icon: Extension,             iconColor: '#dc2626', bg: '#fee2e2' },
     { key: 'furniture',       label: 'Improper Furniture', icon: EventSeat,            iconColor: '#c2410c', bg: '#fff1e6' },
     { key: 'monitor_tamper',  label: 'Monitor Tampering', icon: DesktopAccessDisabled, iconColor: '#6d28d9', bg: '#f3e8ff' },
+    { key: 'crowd_five_invigilator', label: 'Crowd < 5 + Invigilator Static', icon: Visibility, iconColor: '#0f766e', bg: '#ccfbf1' },
     { key: 'strongroom',      label: 'Strong Room',       icon: SecurityUpdateWarning, iconColor: '#b91c1c', bg: '#fef2f2' },
     // Camera & System
     { key: 'inversion',       label: 'Camera Inversion',  icon: FlipCameraAndroid,     iconColor: '#7a86b4', bg: '#eceef5' },

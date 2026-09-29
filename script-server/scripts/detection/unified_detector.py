@@ -64,6 +64,7 @@ CONF_THRESHOLD = 0.45          # base detector confidence; per-rule filters tigh
 PERSON_ANALYTICS = {
     "crowd", "crowd_zero", "crowd_five", "crowd_biometric", "proximity", "intruder",
     "entry_exit", "server", "invigilator", "strongroom", "blind_spot",
+    "crowd_five_invigilator",
 }
 
 
@@ -136,6 +137,7 @@ _COOLDOWN_DEFAULTS = {
     "blind_spot": 180,
     "furniture":  300,
     "invigilator": 420,
+    "crowd_five_invigilator": 420,
     "monitor_tamper": 15,   # monitor_alerts_deploy_v2; incident grouping stops repeats
 }
 _GLOBAL_COOLDOWN = os.environ.get("COOLDOWN_TIME")
@@ -244,6 +246,8 @@ ANALYTIC_SPEC = {
     "blind_spot":     ("blind_spot_det",      "detect_blind_spot_batch",      "blind_spot_detection"),
     "crowd_biometric":("Crowd_det_biometric", "detect_crowd_biometric_batch", "crowd_detection_biometric"),
     "furniture":      ("improper_furniture_det", "detect_improper_furniture_batch", "improper_furniture_detection"),
+    "crowd_five_invigilator": ("crowd_five_invigilator_det", "detect_crowd_five_invigilator_batch",
+                               "crowd_five_invigilator_detection"),
     # NOTE: 'tamper' and 'inversion' are classical-CV checks (no YOLO boxes) and stay
     # as their own workers — they don't consume the shared detector output.
 }

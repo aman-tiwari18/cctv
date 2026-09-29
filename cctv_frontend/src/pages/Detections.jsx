@@ -115,6 +115,7 @@ const TYPE_META = {
   qp_box: { label: 'QP Box Not Visible In Strong Room', color: '#dc2626', bg: '#fee2e2', iconKey: 'qp_box' },
   furniture: { label: 'Improper Furniture', color: '#c2410c', bg: '#fff1e6', iconKey: 'furniture' },
   monitor_tamper: { label: 'Monitor Tampering', color: '#6d28d9', bg: '#f3e8ff', iconKey: 'monitor_tamper' },
+  crowd_five_invigilator: { label: 'Crowd < 5 + Invigilator Static', color: '#0f766e', bg: '#ccfbf1', iconKey: 'crowd_five_invigilator' },
   entry_exit: { label: 'Entry/Exit', color: '#1d7a7d', bg: '#e0f0f0', iconKey: 'entry_exit' },
   phone: { label: 'Phone', color: '#465a38', bg: '#e8ece5', iconKey: 'phone' },
   blind_spot: { label: 'Blind Spot', color: '#b0a850', bg: '#f3f2e4', iconKey: 'blind_spot' },
@@ -136,6 +137,7 @@ const TYPE_ICONS = {
   qp_box: SecurityUpdateWarning,
   furniture: EventSeat,
   monitor_tamper: DesktopAccessDisabled,
+  crowd_five_invigilator: Visibility,
   entry_exit: MeetingRoom,
   phone: Smartphone,
   blind_spot: VisibilityOff,
@@ -1729,7 +1731,7 @@ export default function Detections() {
     const TYPE_LABELS = {
       proximity: 'Close Proximity', crowd: 'Crowd Detection', crowd_five: 'Less Than 5 People In a Lab',
       crowd_zero: 'Zero Person', server: 'Server Room', intruder: 'Intruder',
-      entry_exit: 'Entry/Exit', phone: 'Phone', blind_spot: 'Blind Spot', furniture: 'Improper Furniture', monitor_tamper: 'Monitor Tampering',
+      entry_exit: 'Entry/Exit', phone: 'Phone', blind_spot: 'Blind Spot', furniture: 'Improper Furniture', monitor_tamper: 'Monitor Tampering', crowd_five_invigilator: 'Crowd < 5 + Invigilator Static',
       invigilator: 'Invigilator', inversion: 'Camera Inversion', tamper: 'Camera Tampering',
     };
 

@@ -129,6 +129,7 @@ def get_worker(analytic_name, mode="rtsp"):
         "strongroom":       ("strongroom_worker",          "strongroom_worker",          "strongroom_worker_hls"),
         "qp_box":           ("qp_box_det_worker",          "qp_box_det_worker",          "qp_box_det_worker_hls"),
         "furniture":        ("improper_furniture_worker",  "improper_furniture_worker",  "improper_furniture_worker_hls"),
+        "crowd_five_invigilator": ("crowd_five_invigilator_worker", "crowd_five_invigilator_worker", "crowd_five_invigilator_worker_hls"),
     }
     
     if analytic_name not in mapping:
@@ -171,6 +172,7 @@ def get_worker_info(analytic_name, mode="rtsp"):
         "strongroom":       ("strongroom_worker",          "strongroom_worker",          "strongroom_worker_hls"),
         "qp_box":           ("qp_box_det_worker",          "qp_box_det_worker",          "qp_box_det_worker_hls"),
         "furniture":        ("improper_furniture_worker",  "improper_furniture_worker",  "improper_furniture_worker_hls"),
+        "crowd_five_invigilator": ("crowd_five_invigilator_worker", "crowd_five_invigilator_worker", "crowd_five_invigilator_worker_hls"),
     }
 
     if analytic_name not in mapping:
@@ -365,6 +367,7 @@ def handle_sigterm(sig, frame):
         "workers.strongroom_worker",
         "workers.qp_box_det_worker",
         "workers.improper_furniture_worker",
+        "workers.crowd_five_invigilator_worker",
     ]:
         try:
             mod = sys.modules.get(mod_name)
@@ -1569,7 +1572,7 @@ HLS_SIDE_SCRIPTS = {"tamper", "inversion"}
 UNIFIED_SCRIPTS = {
     "crowd", "crowd_zero", "crowd_five", "proximity", "intruder", "entry_exit",
     "server", "phone", "qp_box", "strongroom", "invigilator", "blind_spot",
-    "crowd_biometric", "furniture",
+    "crowd_biometric", "furniture", "crowd_five_invigilator",
     # Unified-only: no per-script worker, so it doesn't run with
     # UNIFIED_DETECTOR=0 / UNIFIED_HLS=0.
     "monitor_tamper",

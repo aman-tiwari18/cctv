@@ -428,6 +428,7 @@ class ScriptRunner:
         "qp_box",
         "furniture",
         "monitor_tamper",
+        "crowd_five_invigilator",
     }
 
     # Script codes that are classification/vision passes (one-shot per worker
