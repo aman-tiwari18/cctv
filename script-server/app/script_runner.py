@@ -427,6 +427,7 @@ class ScriptRunner:
         "strongroom",
         "qp_box",
         "furniture",
+        "monitor_tamper",
     }
 
     # Script codes that are classification/vision passes (one-shot per worker

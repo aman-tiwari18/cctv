@@ -42,6 +42,10 @@ tags:
     description: Aggregate stats grouped by exam_body for client-facing dashboard
   - name: SMS
     description: SMS alert delivery to subscribers (script-server callbacks)
+  - name: Client API v1
+    description: |
+      External client integration API (spec CCTV_API_v1.2). Pinned to a single
+      exam (exam_id 1234); authenticate with the Client API key, not a login JWT.
   - name: Health
     description: Liveness probe
 

@@ -16,6 +16,29 @@ const { sendAlertWithConfig, TYPE_MAP, SMS_ELIGIBLE_TYPES } = require('../servic
 const { getObserverNumbers } = require('../utils/observerList');
 const { getExamObserverNumbers } = require('../utils/examObservers');
 
+/**
+ * Narrow a start/end time filter ('HH:MM') to a shift's time window. Shifts are
+ * matched by time rather than the stored shift_id because older detection rows
+ * often lack a reliable one — same rule as the script-server's client-detections
+ * feed (_apply_shift_window), so the shift filter behaves the same on every page.
+ */
+const applyShiftWindow = async (shiftId, startTime, endTime) => {
+    const id = parseInt(shiftId, 10);
+    if (!id) return { startTime, endTime };
+    const rows = await query('SELECT start_time, end_time FROM exam_shifts WHERE id = ? LIMIT 1', [id]);
+    if (!rows || !rows.length) return { startTime, endTime };
+    const hm = (v) => {
+        const m = /^(\d{1,2}):(\d{2})/.exec(String(v || ''));
+        return m ? `${m[1].padStart(2, '0')}:${m[2]}` : '';
+    };
+    const swStart = hm(rows[0].start_time);
+    const swEnd = hm(rows[0].end_time);
+    return {
+        startTime: swStart ? (startTime && startTime > swStart ? startTime : swStart) : startTime,
+        endTime: swEnd ? (endTime && endTime < swEnd ? endTime : swEnd) : endTime,
+    };
+};
+
 // Reverse-mapping of script-server's DETECTION_FOLDERS. The detection_type
 // column stores the folder name (e.g. "proximity_detection"); the frontend
 // uses the short key (e.g. "proximity") to drive icons/labels/filters.
@@ -37,6 +60,7 @@ const DETECTION_FOLDERS = {
     strongroom: 'strongroom_detection',
     qp_box: 'qp_box_missing',
     furniture: 'improper_furniture_detection',
+    monitor_tamper: 'monitor_tamper_detection',
     vision: 'scene_classification',
 };
 
@@ -333,10 +357,11 @@ exports.getRemovedDetections = async (req, res) => {
         const source = (req.query.source || '').toLowerCase();
         const typeParam = req.query.type || '';
         const rawDate = req.query.date || '';
-        const startTime = req.query.start_time || '';
-        const endTime = req.query.end_time || '';
+        let startTime = req.query.start_time || '';
+        let endTime = req.query.end_time || '';
         const search = (req.query.search || '').trim().toLowerCase();
         const examIdParam = req.query.exam_id;
+        ({ startTime, endTime } = await applyShiftWindow(req.query.shift_id, startTime, endTime));
 
         const userRole = req.user?.role;
 
@@ -372,12 +397,16 @@ exports.getRemovedDetections = async (req, res) => {
             if (iso) { [, y, m, d] = iso; }
             else if (dmy) { [, d, m, y] = dmy; }
             if (y && m && d) {
-                whereConds.push('created_at >= ? AND created_at < (? + INTERVAL 1 DAY)');
+                // The pool's session runs in UTC (+00:00) while detections are stamped
+                // in server time (IST), so convert the IST day bounds into the session's
+                // zone; the column side stays bare so the created_at index is used.
+                whereConds.push("created_at >= CONVERT_TZ(?, 'SYSTEM', @@session.time_zone) AND created_at < CONVERT_TZ(? + INTERVAL 1 DAY, 'SYSTEM', @@session.time_zone)");
                 whereParams.push(`${y}-${m}-${d} 00:00:00`, `${y}-${m}-${d} 00:00:00`);
             }
         }
-        if (startTime) { whereConds.push('TIME(created_at) >= ?'); whereParams.push(`${startTime}:00`); }
-        if (endTime)   { whereConds.push('TIME(created_at) <= ?'); whereParams.push(`${endTime}:59`); }
+        // Time-of-day filters (and shift windows) are IST clock times: read created_at in server time.
+        if (startTime) { whereConds.push("TIME(CONVERT_TZ(created_at, @@session.time_zone, 'SYSTEM')) >= ?"); whereParams.push(`${startTime}:00`); }
+        if (endTime)   { whereConds.push("TIME(CONVERT_TZ(created_at, @@session.time_zone, 'SYSTEM')) <= ?"); whereParams.push(`${endTime}:59`); }
         if (search) {
             whereConds.push('(LOWER(camera_name) LIKE ? OR LOWER(center_name) LIKE ? OR LOWER(city) LIKE ? OR LOWER(state) LIKE ? OR LOWER(tc_code) LIKE ? OR LOWER(imageurl) LIKE ?)');
             const lk = `%${search}%`; whereParams.push(lk, lk, lk, lk, lk, lk);
@@ -551,10 +580,11 @@ exports.getAcceptedDetections = async (req, res) => {
         const source = (req.query.source || '').toLowerCase();
         const typeParam = req.query.type || '';
         const rawDate = req.query.date || '';
-        const startTime = req.query.start_time || '';
-        const endTime = req.query.end_time || '';
+        let startTime = req.query.start_time || '';
+        let endTime = req.query.end_time || '';
         const search = (req.query.search || '').trim().toLowerCase();
         const examIdParam = req.query.exam_id;
+        ({ startTime, endTime } = await applyShiftWindow(req.query.shift_id, startTime, endTime));
 
         const userRole = req.user?.role;
 
@@ -592,12 +622,16 @@ exports.getAcceptedDetections = async (req, res) => {
             if (iso) { [, y, m, d] = iso; }
             else if (dmy) { [, d, m, y] = dmy; }
             if (y && m && d) {
-                whereConds.push('created_at >= ? AND created_at < (? + INTERVAL 1 DAY)');
+                // The pool's session runs in UTC (+00:00) while detections are stamped
+                // in server time (IST), so convert the IST day bounds into the session's
+                // zone; the column side stays bare so the created_at index is used.
+                whereConds.push("created_at >= CONVERT_TZ(?, 'SYSTEM', @@session.time_zone) AND created_at < CONVERT_TZ(? + INTERVAL 1 DAY, 'SYSTEM', @@session.time_zone)");
                 whereParams.push(`${y}-${m}-${d} 00:00:00`, `${y}-${m}-${d} 00:00:00`);
             }
         }
-        if (startTime) { whereConds.push('TIME(created_at) >= ?'); whereParams.push(`${startTime}:00`); }
-        if (endTime)   { whereConds.push('TIME(created_at) <= ?'); whereParams.push(`${endTime}:59`); }
+        // Time-of-day filters (and shift windows) are IST clock times: read created_at in server time.
+        if (startTime) { whereConds.push("TIME(CONVERT_TZ(created_at, @@session.time_zone, 'SYSTEM')) >= ?"); whereParams.push(`${startTime}:00`); }
+        if (endTime)   { whereConds.push("TIME(CONVERT_TZ(created_at, @@session.time_zone, 'SYSTEM')) <= ?"); whereParams.push(`${endTime}:59`); }
         if (search) {
             whereConds.push('(LOWER(camera_name) LIKE ? OR LOWER(center_name) LIKE ? OR LOWER(city) LIKE ? OR LOWER(state) LIKE ? OR LOWER(tc_code) LIKE ? OR LOWER(imageurl) LIKE ?)');
             const lk = `%${search}%`; whereParams.push(lk, lk, lk, lk, lk, lk);

@@ -45,6 +45,7 @@ import {
   FlipCameraAndroid,
   SecurityUpdateWarning,
   EventSeat,
+  DesktopAccessDisabled,
   Download,
   TrendingUp,
   VerifiedUser,
@@ -98,6 +99,7 @@ const TYPE_META = {
   strongroom: { label: 'Strong Room Movement', icon: SecurityUpdateWarning, iconColor: '#b91c1c' },
   qp_box: { label: 'QP Box Not Visible In Strong Room', icon: SecurityUpdateWarning, iconColor: '#dc2626' },
   furniture: { label: 'Improper Furniture', icon: EventSeat, iconColor: '#c2410c' },
+  monitor_tamper: { label: 'Monitor Tampering', icon: DesktopAccessDisabled, iconColor: '#6d28d9' },
   vision: { label: 'Vision Detection', icon: Visibility, iconColor: '#3b82f6' },
 };
 

@@ -19,6 +19,7 @@ const pathFiles = [
     'sms',
     'clientDashboard',
     'dashboard',
+    'clientApi',
     'health',
 ];
 

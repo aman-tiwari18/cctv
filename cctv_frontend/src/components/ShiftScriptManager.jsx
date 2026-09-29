@@ -42,6 +42,7 @@ import {
     FlipCameraAndroid,
     SecurityUpdateWarning,
     EventSeat,
+    DesktopAccessDisabled,
 } from '@mui/icons-material';
 import { shiftScriptsAPI, scriptsAPI, executionsAPI, smsAPI } from '../services/api';
 import ExecutionStatusBadge from './ExecutionStatusBadge';
@@ -178,6 +179,14 @@ const SCRIPT_META = {
         bg: '#fff1e6',
         color: '#c2410c',
         category: 'camera',
+    },
+    monitor_tamper: {
+        label: 'Monitor tampering',
+        icon: DesktopAccessDisabled,
+        iconColor: '#6d28d9',
+        bg: '#f3e8ff',
+        color: '#6d28d9',
+        category: 'movement',
     },
     vision: {
         label: 'Vision Detection',

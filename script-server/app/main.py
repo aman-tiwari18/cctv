@@ -3,6 +3,8 @@ import asyncio
 import re
 import os
 import time
+import threading
+import heapq
 import shutil
 import openpyxl
 from openpyxl.styles import Font
@@ -442,6 +444,7 @@ _RTSP_SCRIPT_PREFIXES = {
     "tampering", "violation", "entry_exit", "server_room", "blind_spot",
     "zero_person", "detection", "crowd_zero", "crowd_five", "blindspot",
     "crowd_biometric", "strongroom", "qp_box", "improper_furniture",
+    "monitor_tamper",
 }
 
 
@@ -495,11 +498,19 @@ def _extract_ch_no(camera_id: str) -> str:
     return m.group(1) if m else ""
 
 
-@lru_cache(maxsize=65536)
+_META_DT_RE = re.compile(r'(\d{8})_(\d{6})')
+_META_EXAM_RE = re.compile(r'_exam(\d+)', re.IGNORECASE)
+_META_SHIFT_RE = re.compile(r'_shift(\d+)', re.IGNORECASE)
+
+
+# Unbounded: one entry per detection file (~400k, ~150 MB). The old 65,536 cap was
+# far below the file count, so an all-dates listing evicted and re-parsed nearly
+# every filename on every request (~5 s). Filenames never change, so caching is safe.
+@lru_cache(maxsize=None)
 def _basic_detection_meta(filename: str) -> dict:
     """Extract cheap filter fields from filename without DB metadata lookups."""
-    stem = Path(filename).stem
-    dt_match = re.search(r'(\d{8})_(\d{6})', stem)
+    stem = os.path.splitext(filename.rsplit("/", 1)[-1])[0]
+    dt_match = _META_DT_RE.search(stem)
     date_iso = ""
     time_str = ""
     if dt_match:
@@ -508,17 +519,20 @@ def _basic_detection_meta(filename: str) -> dict:
         date_iso = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
 
     exam_id = None
-    exam_match = re.search(r'_exam(\d+)', stem, flags=re.IGNORECASE)
+    exam_match = _META_EXAM_RE.search(stem)
     if exam_match:
         exam_id = int(exam_match.group(1))
 
     shift_id = None
-    shift_match = re.search(r'_shift(\d+)', stem, flags=re.IGNORECASE)
+    shift_match = _META_SHIFT_RE.search(stem)
     if shift_match:
         _sid = int(shift_match.group(1))
         shift_id = _sid if _sid > 0 else None
 
-    return {"date": date_iso, "time": time_str, "exam_id": exam_id, "shift_id": shift_id}
+    uid = stem.split("_")[-1]
+    return {"date": date_iso, "time": time_str, "exam_id": exam_id, "shift_id": shift_id,
+            # listing fields: newest-first sort key, uid (skip check), numeric tie-break
+            "sort_key": date_iso + time_str, "uid": uid, "fid": _uid_feed_id(uid)}
 
 
 def _basic_detection_matches(
@@ -842,6 +856,19 @@ async def lifespan(app: FastAPI):
     # Run initial file scan in thread — 90k files takes ~0.5s synchronously.
     known_detection_files = await asyncio.to_thread(list_detection_files)
     known_detection_by_date = _build_date_index(known_detection_files)
+
+    # Pre-parse every filename into _basic_detection_meta's cache in the background,
+    # so the first all-dates /detections request after a restart isn't the one
+    # paying for ~400k filename parses.
+    def _warm_detection_meta(snapshot):
+        t0 = time.time()
+        for paths in snapshot.values():
+            for tagged_path in paths:
+                _basic_detection_meta(tagged_path.split(":", 1)[-1])
+        logger.info(f"[detections] filename meta cache warmed: {_basic_detection_meta.cache_info().currsize} files in {time.time() - t0:.1f}s")
+    asyncio.create_task(asyncio.to_thread(_warm_detection_meta, known_detection_files))
+    # Same for the operator gpu map of old untagged files (~8 s of DB lookups).
+    asyncio.create_task(asyncio.to_thread(_untagged_gpu_map, known_detection_files))
     
     # Background log cleanup task
     async def cleanup_loop():
@@ -1386,6 +1413,7 @@ DETECTION_FOLDERS = {
     "strongroom":       "strongroom_detection",
     "qp_box":           "qp_box_missing",
     "furniture":        "improper_furniture_detection",
+    "monitor_tamper":   "monitor_tamper_detection",
     "vision":           "scene_classification",
 }
 
@@ -1406,6 +1434,7 @@ DETECTION_LABELS = {
     "strongroom":       "Strong Room Movement",
     "qp_box":           "QP Box Detection",
     "furniture":        "Improper Furniture",
+    "monitor_tamper":   "Monitor Tampering",
     "vision":           "Scene Classification",
 }
 
@@ -1455,6 +1484,66 @@ def _uid_feed_id(uid):
 # writer, so no periodic rescan of the report tables is needed.
 _skipped_uids = set()
 _skipped_uids_loaded = False
+
+
+# Operator gpu sharding for detection files saved before the _gpu{N} filename token
+# existed (CTGD / NEET, May 2026): their gpu comes from the camera_report row instead.
+# uid -> gpu_id (None = no gpu recorded anywhere). Built once from the file index
+# (old files never change; every new file carries the token) and rebuilt at most
+# every _UNTAGGED_GPU_TTL_S in case untagged files are added.
+_ANY_GPU_TOKEN = re.compile(r'_gpu\d+[_.]', re.IGNORECASE)
+_UNTAGGED_GPU_TTL_S = 1800
+_untagged_gpu = {"map": None, "built_at": 0.0}
+_untagged_gpu_lock = threading.Lock()
+
+
+def _untagged_gpu_map(snapshot):
+    now = time.time()
+    if _untagged_gpu["map"] is not None:
+        if now - _untagged_gpu["built_at"] >= _UNTAGGED_GPU_TTL_S and not _untagged_gpu_lock.locked():
+            # Stale: refresh in the background and keep serving the current map, so
+            # no operator request waits on the ~280-query rebuild.
+            _untagged_gpu["built_at"] = now
+            threading.Thread(target=_build_untagged_gpu_map, args=(known_detection_files, True), daemon=True).start()
+        return _untagged_gpu["map"]
+    return _build_untagged_gpu_map(snapshot)
+
+
+def _build_untagged_gpu_map(snapshot, force=False):
+    now = time.time()
+    with _untagged_gpu_lock:
+        if not force and _untagged_gpu["map"] is not None and now - _untagged_gpu["built_at"] < _UNTAGGED_GPU_TTL_S:
+            return _untagged_gpu["map"]
+        uids = set()
+        for paths in snapshot.values():
+            for tagged_path in paths:
+                base = tagged_path.rsplit("/", 1)[-1]
+                if not _ANY_GPU_TOKEN.search(base):
+                    uids.add(os.path.splitext(base)[0].split("_")[-1])
+        mapping = dict.fromkeys(uids)
+        try:
+            conn = _get_connection()
+            try:
+                with conn.cursor() as cur:
+                    ids = list(uids)
+                    for table in ("camera_report_rtsp", "camera_report_hls"):
+                        for i in range(0, len(ids), 1000):
+                            chunk = ids[i:i + 1000]
+                            cur.execute(
+                                f"SELECT unique_id, gpu_id FROM {table} USE INDEX (idx_unique_id) "
+                                f"WHERE gpu_id IS NOT NULL AND unique_id IN ({','.join(['%s'] * len(chunk))})",
+                                tuple(chunk))
+                            for r in cur.fetchall():
+                                mapping[r["unique_id"]] = int(r["gpu_id"])
+            finally:
+                conn.close()
+            _untagged_gpu["map"], _untagged_gpu["built_at"] = mapping, now
+            logger.info(f"[detections] untagged-file gpu map: {len(mapping)} files, "
+                        f"{sum(v is not None for v in mapping.values())} with a DB gpu_id")
+        except Exception as e:
+            logger.error(f"[detections] untagged-file gpu map failed: {e}")
+            return _untagged_gpu["map"] or {}
+        return mapping
 
 
 def _get_skipped_uids():
@@ -1747,6 +1836,7 @@ def list_detections(
     all_counts = {k: 0 for k in DETECTION_FOLDERS}
     candidates = []  # (sort_key, type_key, relative_path, origin, feed_id)
     skipped_uids = _get_skipped_uids()
+    untagged_gpu = None   # loaded on the first untagged file an operator request hits
 
     for type_key in DETECTION_FOLDERS:
         # Use date index for O(k) lookup; fall back to full snapshot when the
@@ -1768,13 +1858,19 @@ def list_detections(
             if source == "hls" and origin != "hls":
                 continue
 
-            # Operator gpu sharding: skip files that don't carry this gpu's token.
-            # Files without any _gpu token are old/untagged → only shown when
-            # no gpu filter is active (i.e. admin/client sees everything).
+            # Operator gpu sharding: a file with a _gpu token is shown only to that
+            # gpu's operators. Old untagged files use the gpu_id on their DB row, and
+            # if none was recorded (no way to shard them) every operator sees them.
             if _gpu_filter_pat is not None:
                 basename_for_gpu = relative_path.split("/")[-1] if "/" in relative_path else relative_path
                 if not _gpu_filter_pat.search(basename_for_gpu):
-                    continue
+                    if _ANY_GPU_TOKEN.search(basename_for_gpu):
+                        continue
+                    if untagged_gpu is None:
+                        untagged_gpu = _untagged_gpu_map(snapshot)
+                    db_gpu = untagged_gpu.get(os.path.splitext(basename_for_gpu)[0].split("_")[-1])
+                    if db_gpu is not None and db_gpu != int(gpu_id):
+                        continue
 
             # Date is pre-filtered by the index; only run the regex for the
             # remaining filters to avoid redundant filename parsing.
@@ -1784,18 +1880,16 @@ def list_detections(
             ):
                 continue
 
+            basic = _basic_detection_meta(relative_path)
             # Operator-skipped detections are reviewed-and-dismissed: hidden from
             # the list and the counts (uid = last "_" segment of the filename stem).
-            uid = os.path.splitext(os.path.basename(relative_path))[0].split("_")[-1]
-            if uid in skipped_uids:
+            if skipped_uids and basic["uid"] in skipped_uids:
                 continue
 
             all_counts[type_key] += 1
 
             if type_key in check_types:
-                basic = _basic_detection_meta(relative_path)
-                sort_key = (basic.get("date") or "") + (basic.get("time") or "")
-                candidates.append((sort_key, type_key, relative_path, origin, _uid_feed_id(uid)))
+                candidates.append((basic["sort_key"], type_key, relative_path, origin, basic["fid"]))
 
     # Pagination anchor: only detections at-or-before it are paged; newer ones
     # wait behind the "N new" pill. Sidebar counts above stay live. Position is
@@ -1816,8 +1910,15 @@ def list_detections(
         candidates = [c for c in candidates if _at_or_before(c)]
 
     # Newest first (YYYYMMDDHHMMSS lexicographic == chronological), then source, then feed_id.
-    candidates.sort(key=lambda x: (x[0], _FEED_SOURCE_RANK.get(x[3], 0), x[4]), reverse=True)
     start_idx = (page - 1) * limit
+    _order = lambda x: (x[0], _FEED_SOURCE_RANK.get(x[3], 0), x[4])
+    total_candidates = len(candidates)
+    if not needs_search and start_idx + limit < total_candidates // 4:
+        # Only this page is parsed below, so pick just the top start_idx+limit
+        # (O(n log k)) instead of sorting every file on disk (O(n log n)).
+        candidates = heapq.nlargest(start_idx + limit, candidates, key=_order)
+    else:
+        candidates.sort(key=_order, reverse=True)
 
     if needs_search:
         # Search path: parse all filtered candidates, apply text filter, paginate.
@@ -1852,7 +1953,7 @@ def list_detections(
         paginated = rows[start_idx: start_idx + limit]
     else:
         # Fast path: only parse the `limit` items on this page.
-        total = len(candidates)
+        total = total_candidates
         page_candidates = candidates[start_idx: start_idx + limit]
         paginated = []
         for _, type_key, relative_path, origin, _fid in page_candidates:

@@ -42,6 +42,7 @@ import {
   FlipCameraAndroid,
   SecurityUpdateWarning,
   EventSeat,
+  DesktopAccessDisabled,
   ChevronLeft,
   ChevronRight,
   KeyboardArrowDown,
@@ -74,6 +75,7 @@ const TYPE_META = {
   strongroom: { label: 'Strong Room Movement', color: '#b91c1c', bg: '#fef2f2' },
   qp_box: { label: 'QP Box Not Visible In Strong Room', color: '#dc2626', bg: '#fee2e2' },
   furniture: { label: 'Improper Furniture', color: '#c2410c', bg: '#fff1e6' },
+  monitor_tamper: { label: 'Monitor Tampering', color: '#6d28d9', bg: '#f3e8ff' },
   entry_exit: { label: 'Entry/Exit', color: '#1d7a7d', bg: '#e0f0f0' },
   phone: { label: 'Phone', color: '#465a38', bg: '#e8ece5' },
   blind_spot: { label: 'Blind Spot', color: '#b0a850', bg: '#f3f2e4' },
@@ -94,6 +96,7 @@ const TYPE_ICONS = {
   strongroom: SecurityUpdateWarning,
   qp_box: SecurityUpdateWarning,
   furniture: EventSeat,
+  monitor_tamper: DesktopAccessDisabled,
   entry_exit: MeetingRoom,
   phone: Smartphone,
   blind_spot: VisibilityOff,
@@ -580,6 +583,32 @@ const timeStringToSeconds = (t) => {
 };
 
 const todayDate = formatDateDDMMYYYY(new Date());
+
+// Date filter to apply when an exam is picked from the dropdown: today while the
+// exam is running, otherwise no date (all of that exam's days). The page defaults
+// to today, so a past exam would otherwise show nothing.
+const dateFilterForExam = (exam) => {
+  if (!exam?.start_date) return '';
+  const now = new Date();
+  const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const start = String(exam.start_date).slice(0, 10);
+  const end = String(exam.end_date || exam.start_date).slice(0, 10);
+  return start <= todayIso && todayIso <= end ? todayDate : '';
+};
+
+// Date to use when an exam is picked: today while the exam is running, otherwise
+// the date of its newest detection this user can see (role-aware count endpoint),
+// so a past exam opens on a day that has data. '' (all dates) if it has none.
+const resolveExamDate = async (exam) => {
+  const running = dateFilterForExam(exam);
+  if (running || !exam?.id) return running;
+  try {
+    const res = await examsAPI.getDetectionCount(exam.id);
+    return res.data?.data?.latest_date || '';
+  } catch (err) {
+    return '';
+  }
+};
 
 // A pushed detection's position in the client feed: (pushed_at, source, id),
 // matching the backend's order. pushed_at is whole seconds and a push burst
@@ -1236,12 +1265,17 @@ const ClientDetections = () => {
   const [rowsPerPage, setRowsPerPage] = useState(50);
   const [view, setView] = useState('grid');
   const [search, setSearch] = useState('');
-  const [examFilter, setExamFilter] = useState('');
+  const [examFilter, setExamFilter] = useState(() => searchParams.get('exam_id') || '');
   const [exams, setExams] = useState([]);
   const [examShifts, setExamShifts] = useState([]);
   const [shiftFilter, setShiftFilter] = useState('');
   const [sourceFilter, setSourceFilter] = useState('');
-  const [dateFilter, setDateFilter] = useState(todayDate);
+  const [dateFilter, setDateFilter] = useState(() => {
+    const dp = searchParams.get('date');
+    if (dp && /^\d{2}-\d{2}-\d{4}$/.test(dp)) return dp;
+    if (dp === 'all') return '';   // exam card for an exam not running today
+    return todayDate;
+  });
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
   const [appliedStartTime, setAppliedStartTime] = useState('');
@@ -1371,14 +1405,6 @@ const ClientDetections = () => {
     fetchExams();
   }, []);
 
-  // Read exam_id (and optional date, e.g. opened from an exam card) on mount
-  useEffect(() => {
-    const examId = searchParams.get('exam_id');
-    if (examId) setExamFilter(examId);
-    const dp = searchParams.get('date');
-    if (dp && /^\d{2}-\d{2}-\d{4}$/.test(dp)) setDateFilter(dp);
-  }, [searchParams]);
-
   // Populate the dependent Shift filter from the selected exam — the exam list
   // (examsAPI.getAll) already embeds each exam's `examShifts`.
   useEffect(() => {
@@ -1480,7 +1506,7 @@ const ClientDetections = () => {
     const TYPE_LABELS = {
       proximity: 'Close Proximity', crowd: 'Crowd Detection', crowd_five: 'Less Than 5 People In a Lab',
       crowd_zero: 'Zero Person', server: 'Server Room', intruder: 'Intruder',
-      entry_exit: 'Entry/Exit', phone: 'Phone', blind_spot: 'Blind Spot', furniture: 'Improper Furniture',
+      entry_exit: 'Entry/Exit', phone: 'Phone', blind_spot: 'Blind Spot', furniture: 'Improper Furniture', monitor_tamper: 'Monitor Tampering',
       invigilator: 'Invigilator', inversion: 'Camera Inversion', tamper: 'Camera Tampering',
     };
 
@@ -2016,7 +2042,14 @@ const ClientDetections = () => {
           <Select
             value={examFilter}
             displayEmpty
-            onChange={(e) => { setExamFilter(e.target.value); setPage(1); }}
+            onChange={async (e) => {
+              const id = e.target.value;
+              // Set exam + date together (one fetch, never an empty in-between view).
+              const date = id ? await resolveExamDate(exams.find((x) => String(x.id) === String(id))) : dateFilter;
+              setExamFilter(id);
+              setDateFilter(date);
+              setPage(1);
+            }}
             sx={{ borderRadius: '8px', bgcolor: '#f8fafc', height: 36, fontSize: 14, '& fieldset': { border: 'none' } }}
           >
             <MenuItem value="">All Exams</MenuItem>

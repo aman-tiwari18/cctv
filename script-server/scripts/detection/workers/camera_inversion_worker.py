@@ -251,7 +251,9 @@ def _gpu_batch_worker(stop_event, save_folder, cooldown_time=240):
                 else:
                     fname = f"{script_name}_{cam_id}_{ch_no}_exam{exam_id}_shift{shift_id}_gpu{_DET_GPU_ID}_{ts}_{uid}.jpg"
                 
-                path = os.path.join(save_folder, fname)
+                # The queue entry serves both sources (HLS frames come from the unified
+                # HLS capture), so the folder follows the frame, not the worker.
+                path = os.path.join(HLS_SAVE_FOLDER if item.get("source_type") == "HLS" else save_folder, fname)
                 # Save the raw frame as received — not the 180°-rotated candidate —
                 # so the snapshot shows the camera's actual orientation as proof,
                 # instead of a software-flipped copy with an upside-down OSD.
@@ -319,8 +321,12 @@ def camera_inversion_worker(frame_queue):
                 frame        = packet.get("frame")
                 device_id    = str(packet.get("device_id", "unknown"))
                 camera_no    = str(packet.get("camera_no") or packet.get("ch_no") or "0")
+                exam_id      = str(packet.get("exam_id", "0"))
+                shift_id     = str(packet.get("shift_id") or os.environ.get("SHIFT_ID", "0"))
+                source_type  = packet.get("source_type") or "RTSP"
             else:
                 frame, device_id, camera_no, _, exam_id = packet[:5]
+                shift_id, source_type = os.environ.get("SHIFT_ID", "0"), "RTSP"
 
             if frame is None:
                 continue
@@ -331,8 +337,8 @@ def camera_inversion_worker(frame_queue):
                     "device_id":    device_id,
                     "ch_no":        camera_no,
                     "exam_id":      exam_id,
-                    "shift_id":     os.environ.get("SHIFT_ID", "0"),
-                    "source_type":  "RTSP",
+                    "shift_id":     shift_id,
+                    "source_type":  source_type,
                 }, timeout=0.1)
             except queue.Full:
                 pass

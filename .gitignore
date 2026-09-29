@@ -99,7 +99,15 @@ script-server/results/
 script-server/results.backup.*/
 script-server/scripts/models/*
 script-server/scripts/yolo11n.pt
-
+# Monitor tampering test-clip replays (annotated videos / frames)
+script-server/monitor_tamper_test/
+script-server/crowd_model_test/
+script-server/phone_test/
+phone_test_results/
+script-server/monitor_alerts_deploy
+script-server/monitor_person_model
+script-server/monitor_person_model.zip
+script-server/monitor_alerts_deploy.zip
 # NFS and shared storage (symlinks and mounted directories)
 /mnt/nfs/
 script-server/scripts/detection/results
@@ -115,7 +123,7 @@ script-server/.env.worker.*
 .env
 .env.*
 !.env.example
-
+data_dump/
 # Ignore virtual environments if any
 env/
 venv/

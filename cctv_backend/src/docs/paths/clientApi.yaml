@@ -1,0 +1,158 @@
+/api/v1/cameras:
+  get:
+    tags: [Client API v1]
+    summary: List cameras of the pinned exam
+    description: |
+      One entry per physical camera of exam 1234 (HLS rows are per shift/date
+      and are collapsed per `ch_code`). Empty list while the exam does not exist.
+
+      `cam_type` comes from the camera's classification (falls back to the
+      uploaded camera_category). `status` rules, first match wins:
+      inactive or Invalid type → 200 Excluded; Not Accessible → 9999 Other;
+      unclassified → 100 ClassificationPending; today outside exam dates →
+      0 Idle/Ready; otherwise → 1 AnalyticsLive.
+    security:
+      - clientApiKeyAuth: []
+    responses:
+      '200':
+        description: Camera list.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                cameras:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      cam_id: { type: string, example: '1000736$1$0$5-d14.camview.io' }
+                      cam_type: { type: integer, enum: [0, 1, 2, 4, 5, 9], example: 1 }
+                      cam_type_name: { type: string, example: InsideLabs }
+                      tc_code: { type: string, example: '100104' }
+                      center_name: { type: string, example: BALAJI DIGITAL ZONE }
+                      city: { type: string, example: DELHI }
+                      state: { type: string, example: Delhi }
+                      status: { type: integer, enum: [0, 1, 100, 200, 9999], example: 1 }
+                      status_name: { type: string, example: AnalyticsLive }
+                      vendor_id: { type: string, example: '' }
+      '401': { $ref: '#/components/responses/ClientApiUnauthorized' }
+      '500': { $ref: '#/components/responses/ClientApiServerError' }
+
+/api/v1/master/camera-types:
+  get:
+    tags: [Client API v1]
+    summary: Camera types present in the pinned exam
+    description: |
+      Distinct types the exam's cameras resolve to after classification,
+      mapped onto the client catalog (InsideLabs, ServerRoom, Outside,
+      EntryExit, Invalid, Other). Unclassified cameras use the uploaded
+      camera_category. Same mapping as `cam_type` in `/api/v1/cameras`.
+      Empty list while the exam does not exist.
+    security:
+      - clientApiKeyAuth: []
+    responses:
+      '200':
+        description: Camera types.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                camera_types:
+                  type: array
+                  items: { $ref: '#/components/schemas/ClientApiMasterItem' }
+            example:
+              camera_types:
+                - { id: 1, name: InsideLabs, vendor_id: '' }
+                - { id: 2, name: ServerRoom, vendor_id: '' }
+                - { id: 4, name: Outside, vendor_id: '' }
+                - { id: 5, name: EntryExit, vendor_id: '' }
+                - { id: 9, name: Invalid, vendor_id: '' }
+      '401': { $ref: '#/components/responses/ClientApiUnauthorized' }
+      '500': { $ref: '#/components/responses/ClientApiServerError' }
+
+/api/v1/master/camera-statuses:
+  get:
+    tags: [Client API v1]
+    summary: Camera status catalog
+    security:
+      - clientApiKeyAuth: []
+    responses:
+      '200':
+        description: Camera statuses.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                statuses:
+                  type: array
+                  items: { $ref: '#/components/schemas/ClientApiMasterItem' }
+            example:
+              statuses:
+                - { id: 0, name: Idle/Ready, vendor_id: '' }
+                - { id: 1, name: AnalyticsLive, vendor_id: '' }
+                - { id: 100, name: ClassificationPending, vendor_id: '' }
+                - { id: 200, name: Excluded, vendor_id: '' }
+                - { id: 9999, name: Other, vendor_id: '' }
+      '401': { $ref: '#/components/responses/ClientApiUnauthorized' }
+
+/api/v1/master/event-types:
+  get:
+    tags: [Client API v1]
+    summary: Scripts scheduled for the pinned exam
+    description: |
+      Distinct analytics scripts scheduled on any shift of the exam (active
+      assignments only). `id` is the script's DB id, `name` its script name.
+      Scene classification scripts are excluded (they raise no events).
+      Empty list while the exam does not exist.
+    security:
+      - clientApiKeyAuth: []
+    responses:
+      '200':
+        description: Scheduled scripts.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                event_types:
+                  type: array
+                  items: { $ref: '#/components/schemas/ClientApiMasterItem' }
+            example:
+              event_types:
+                - { id: 1, name: Server Room Detection, vendor_id: '' }
+                - { id: 5, name: Proximity Detection, vendor_id: '' }
+                - { id: 6, name: Phone Detection, vendor_id: '' }
+                - { id: 7, name: Invigilator Detection, vendor_id: '' }
+      '401': { $ref: '#/components/responses/ClientApiUnauthorized' }
+      '500': { $ref: '#/components/responses/ClientApiServerError' }
+
+/api/v1/master/current-schedule:
+  get:
+    tags: [Client API v1]
+    summary: Current exam schedule
+    description: |
+      The pinned exam (1234): `client_name` = exam body, `schedule_name` =
+      exam name. Empty list while the exam does not exist or is inactive.
+    security:
+      - clientApiKeyAuth: []
+    responses:
+      '200':
+        description: Current schedule.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                schedules:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      client_name: { type: string, example: SSC }
+                      schedule_name: { type: string, example: CTGD-Apr2026 }
+                      vendor_id: { type: string, example: '' }
+      '401': { $ref: '#/components/responses/ClientApiUnauthorized' }
+      '500': { $ref: '#/components/responses/ClientApiServerError' }

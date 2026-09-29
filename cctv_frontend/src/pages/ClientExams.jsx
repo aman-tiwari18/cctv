@@ -11,14 +11,17 @@ import ExamScheduleCalendar from '../components/ExamScheduleCalendar';
 const formatDateV1 = (date) =>
   new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
-// today, or the exam's last date — whichever is earlier → "DD-MM-YYYY"
+// Date to open the Detections page on: today while the exam is running, otherwise
+// "all" (no date filter). A finished exam's end date often has no detections of its
+// own (e.g. NEET ran on 3 May but ends 4 May), so opening on it showed an empty page.
 const examDefaultDate = (exam) => {
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  let d = today;
-  const end = exam?.end_date ? new Date(exam.end_date) : null;
-  if (end && !isNaN(end)) { end.setHours(0, 0, 0, 0); if (end < today) d = end; }
+  const now = new Date();
   const p = (n) => String(n).padStart(2, '0');
-  return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()}`;
+  const todayIso = `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}`;
+  const start = exam?.start_date ? String(exam.start_date).slice(0, 10) : null;
+  const end = exam?.end_date ? String(exam.end_date).slice(0, 10) : start;
+  if (start && start <= todayIso && todayIso <= end) return `${p(now.getDate())}-${p(now.getMonth() + 1)}-${now.getFullYear()}`;
+  return 'all';
 };
 
 const ViewOnlyExamCard = ({ exam, examCounts, navigate }) => {
@@ -134,7 +137,7 @@ const ViewOnlyExamCard = ({ exam, examCounts, navigate }) => {
           </Typography>
         </Box>
         <Box
-          onClick={() => navigate(`/detections?exam_id=${exam.id}&date=${examDefaultDate(exam)}`)}
+          onClick={() => navigate(`/detections?exam_id=${exam.id}&date=${examCounts[exam.id]?.latestDetectionDate || examDefaultDate(exam)}`)}
           sx={{ display: 'flex', alignItems: 'center', gap: 0.8, cursor: 'pointer', '&:hover': { opacity: 0.75, color: '#3c81f6' } }}
         >
           <ReportProblemIcon sx={{ fontSize: 18, color: '#8b929cff' }} />
@@ -162,15 +165,17 @@ const ClientExams = () => {
 
       const countsPromises = examsList.map(async (exam) => {
         let detectionCount = 0;
+        let latestDetectionDate = null;
         try {
           const detectionResponse = await examsAPI.getDetectionCount(exam.id);
           detectionCount = detectionResponse.data?.data?.detection_count || 0;
+          latestDetectionDate = detectionResponse.data?.data?.latest_date || null;
         } catch (err) { /* ignore */ }
-        return { examId: exam.id, detectionCount };
+        return { examId: exam.id, detectionCount, latestDetectionDate };
       });
       const counts = await Promise.all(countsPromises);
       const countsMap = counts.reduce((acc, item) => {
-        acc[item.examId] = { detections: item.detectionCount };
+        acc[item.examId] = { detections: item.detectionCount, latestDetectionDate: item.latestDetectionDate };
         return acc;
       }, {});
       setExamCounts(countsMap);
