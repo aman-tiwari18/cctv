@@ -229,6 +229,7 @@ const CATEGORIES = [
 // simply skips the send (see sendAlertWithConfig), so listing it here is safe.
 const SMS_ELIGIBLE_SCRIPTS = new Set([
     'invigilator',
+    'crowd_five_invigilator', // sends under the invigilator template
     'proximity',
     'server',
     'intruder',

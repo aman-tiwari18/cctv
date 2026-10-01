@@ -1287,6 +1287,8 @@ const ClientDetections = () => {
   const [exams, setExams] = useState([]);
   const [examShifts, setExamShifts] = useState([]);
   const [shiftFilter, setShiftFilter] = useState('');
+  const [regionFilter, setRegionFilter] = useState('');
+  const [regionOptions, setRegionOptions] = useState([]);
   const [sourceFilter, setSourceFilter] = useState('');
   const [dateFilter, setDateFilter] = useState(() => {
     const dp = searchParams.get('date');
@@ -1351,6 +1353,12 @@ const ClientDetections = () => {
 
   const UNDO_WINDOW_MS = 15000;
 
+  useEffect(() => {
+    axios.get(`${API_BASE_1}/detections/regions`)
+      .then((res) => setRegionOptions(Array.isArray(res?.data?.data) ? res.data.data : []))
+      .catch((err) => console.error('Failed to load regions:', err));
+  }, []);
+
   const fetchClientImages = useCallback(async (pg = 1, rpp = rowsPerPage) => {
     setLoading(true);
     try {
@@ -1363,6 +1371,7 @@ const ClientDetections = () => {
       if (appliedEndTime) params.append('end_time', appliedEndTime);
       if (examFilter) params.append('exam_id', examFilter);
       if (shiftFilter) params.append('shift_id', shiftFilter);
+      if (regionFilter) params.append('region', regionFilter);
       
       // Pass user info for filtering via user_exam_assignments
       if (user?.role) params.append('user_role', user.role);
@@ -1410,7 +1419,7 @@ const ClientDetections = () => {
     } finally {
       setLoading(false);
     }
-  }, [sourceFilter, typeFilter, dateFilter, search, appliedStartTime, appliedEndTime, examFilter, shiftFilter, rowsPerPage, user?.role, user?.company_name]);
+  }, [sourceFilter, typeFilter, dateFilter, search, appliedStartTime, appliedEndTime, examFilter, shiftFilter, regionFilter, rowsPerPage, user?.role, user?.company_name]);
 
   // Load exams for filter dropdown
   useEffect(() => {
@@ -2088,6 +2097,22 @@ const ClientDetections = () => {
               <MenuItem value="">All Shifts</MenuItem>
               {examShifts.map((sh) => (
                 <MenuItem key={sh.id} value={sh.id}>{sh.shift_name || `Shift #${sh.id}`}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        )}
+        {/* Region Filter — RTSP cameras only */}
+        {regionOptions.length > 0 && (
+          <FormControl size="small" sx={{ width: { xs: 'calc(30% - 8px)', sm: 130 } }}>
+            <Select
+              value={regionFilter}
+              displayEmpty
+              onChange={(e) => { setRegionFilter(e.target.value); setPage(1); }}
+              sx={{ borderRadius: '8px', bgcolor: '#f8fafc', height: 36, fontSize: 14, '& fieldset': { border: 'none' } }}
+            >
+              <MenuItem value="">All Regions</MenuItem>
+              {regionOptions.map((r) => (
+                <MenuItem key={r} value={r}>{r}</MenuItem>
               ))}
             </Select>
           </FormControl>

@@ -111,6 +111,9 @@ const getStatusChipProps = (status) => {
 // filter dropdown back.
 const SHOW_CLASSIFICATION_FILTER = false;
 
+// A classification run is identified by the shift it was run for + its start time.
+const runKey = (r) => `${r.shift_id ?? ''}|${r.started_at}`;
+
 const HLS_EMPTY = {
   centre_name: '', tc_code: '', city: '', state: '',
   camera_name: '', ch_code: '', cctv_url: '', camera_category: '',
@@ -118,7 +121,7 @@ const HLS_EMPTY = {
 };
 const RTSP_EMPTY = {
   device_id: '', tc_code: '', camera_name: '', centre_name: '',
-  city: '', state: '', cctv_url: '', classification: '',
+  city: '', state: '', region: '', cctv_url: '', classification: '',
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -152,10 +155,11 @@ const Cameras = () => {
   const [filterShiftId, setFilterShiftId] = useState('');
   const [filterExamDate, setFilterExamDate] = useState('');
   const [filterClassification, setFilterClassification] = useState('');
+  const [filterRegion, setFilterRegion] = useState('');
 
   /* ── Classification run picker ── */
   const [classificationRuns, setClassificationRuns] = useState([]);
-  const [selectedRunKey, setSelectedRunKey] = useState(''); // started_at ISO string, or '' = latest/live
+  const [selectedRunKey, setSelectedRunKey] = useState(''); // runKey(run) = "<shift_id>|<started_at>", or '' = latest/live
 
 
   const [page, setPage] = useState(0);
@@ -206,6 +210,7 @@ const Cameras = () => {
   const { user } = useAuth();
   const isVerifier = user?.role === 'OPERATOR' || user?.role === 'ADMIN';
   const [classOptions, setClassOptions] = useState([]);
+  const [regionOptions, setRegionOptions] = useState([]);
   const [verifyChoice, setVerifyChoice] = useState('');
   const [verifying, setVerifying] = useState(false);
   const [verifyError, setVerifyError] = useState('');
@@ -251,6 +256,7 @@ const Cameras = () => {
     setFilterShiftId('');
     setFilterExamDate('');
     setFilterClassification('');
+    setFilterRegion('');
     setSelectedRunKey('');
     setSearchQuery('');
     setDebouncedSearchQuery('');
@@ -277,7 +283,7 @@ const Cameras = () => {
 
   useEffect(() => {
     if (selectedExamId) loadCameras();
-  }, [page, rowsPerPage, filterShiftId, filterExamDate, filterClassification, selectedRunKey, debouncedSearchQuery, orderBy, order]);
+  }, [page, rowsPerPage, filterShiftId, filterExamDate, filterClassification, filterRegion, selectedRunKey, debouncedSearchQuery, orderBy, order]);
 
   const loadCameras = useCallback(async () => {
     if (!selectedExamId) return;
@@ -287,9 +293,10 @@ const Cameras = () => {
       if (filterShiftId) params.shift_id = filterShiftId;
       if (filterExamDate) params.exam_date = parseDDMMYYYYToISO(filterExamDate);
       if (filterClassification) params.classification = filterClassification;
+      if (filterRegion) params.region = filterRegion;
       if (selectedRunKey) {
-        const run = classificationRuns.find((r) => r.started_at === selectedRunKey);
-        if (run) { params.run_start = run.started_at; params.run_end = run.ended_at; }
+        const run = classificationRuns.find((r) => runKey(r) === selectedRunKey);
+        if (run) { params.run_start = run.started_at; params.run_end = run.ended_at; if (run.shift_id != null) params.run_shift_id = run.shift_id; }
       }
       if (debouncedSearchQuery.trim()) params.search = debouncedSearchQuery.trim();
       if (orderBy) { params.sort_by = orderBy; params.sort_order = order; }
@@ -300,7 +307,7 @@ const Cameras = () => {
       setStatusCounts(res.data.statusCounts || { accessible: 0, notAccessible: 0, unknown: 0 });
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }, [selectedExamId, page, rowsPerPage, filterShiftId, filterExamDate, filterClassification, selectedRunKey, classificationRuns, debouncedSearchQuery, orderBy, order]);
+  }, [selectedExamId, page, rowsPerPage, filterShiftId, filterExamDate, filterClassification, filterRegion, selectedRunKey, classificationRuns, debouncedSearchQuery, orderBy, order]);
 
   /* ── Derived ── */
   const selectedExamData = exams.find((e) => String(e.id) === String(selectedExamId));
@@ -319,9 +326,10 @@ const Cameras = () => {
       if (filterShiftId) params.shift_id = filterShiftId;
       if (filterExamDate) params.exam_date = parseDDMMYYYYToISO(filterExamDate);
       if (filterClassification) params.classification = filterClassification;
+      if (filterRegion) params.region = filterRegion;
       if (selectedRunKey) {
-        const run = classificationRuns.find((r) => r.started_at === selectedRunKey);
-        if (run) { params.run_start = run.started_at; params.run_end = run.ended_at; }
+        const run = classificationRuns.find((r) => runKey(r) === selectedRunKey);
+        if (run) { params.run_start = run.started_at; params.run_end = run.ended_at; if (run.shift_id != null) params.run_shift_id = run.shift_id; }
       }
       const res = await camerasAPI.getByExam(selectedExamId, params);
       let rows = res.data.data || [];
@@ -386,16 +394,17 @@ const Cameras = () => {
           'Camera Name': cam.camera_name || '-',
           'Centre Name': cam.centre_name || cam.tc_name || '-',
           'State': cam.state || '-',
+          'Region': cam.region || '-',
           ...(dropClassView ? {} : { 'Classification': cam.classification || '-' }),
           'Classification Run': runTimeLabel(cam),
           'Status': cam.status || '-',
           ...(dropClassView ? {} : { 'View': toAbsFrame(cam.frame_path) }),
           'CCTV URL': cam.cctv_url || cam.url || '-',
         }));
-        viewCol = dropClassView ? -1 : 9;
+        viewCol = dropClassView ? -1 : 10;
         cols = dropClassView
-          ? [{ wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 22 }, { wch: 34 }, { wch: 16 }, { wch: 20 }, { wch: 16 }, { wch: 60 }]
-          : [{ wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 22 }, { wch: 34 }, { wch: 16 }, { wch: 18 }, { wch: 20 }, { wch: 16 }, { wch: 12 }, { wch: 60 }];
+          ? [{ wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 22 }, { wch: 34 }, { wch: 16 }, { wch: 12 }, { wch: 20 }, { wch: 16 }, { wch: 60 }]
+          : [{ wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 22 }, { wch: 34 }, { wch: 16 }, { wch: 12 }, { wch: 18 }, { wch: 20 }, { wch: 16 }, { wch: 12 }, { wch: 60 }];
       }
 
       const ws = XLSX.utils.json_to_sheet(sheetRows);
@@ -423,7 +432,7 @@ const Cameras = () => {
       // otherwise keep the original filename format unchanged.
       let fileStamp = '';
       if (selectedRunKey) {
-        const run = classificationRuns.find((r) => r.started_at === selectedRunKey);
+        const run = classificationRuns.find((r) => runKey(r) === selectedRunKey);
         if (run) {
           try { fileStamp = '_' + format(new Date(run.started_at), 'ddMMMyyyy_HHmmss'); }
           catch { fileStamp = ''; }
@@ -461,7 +470,7 @@ const Cameras = () => {
           device_id: camera.device_id || '', tc_code: camera.tc_code || '',
           camera_name: camera.camera_name || '', city: camera.city || '',
           centre_name: camera.centre_name || camera.tc_name || '',
-          state: camera.state || '', cctv_url: camera.cctv_url || camera.url || '',
+          state: camera.state || '', region: camera.region || '', cctv_url: camera.cctv_url || camera.url || '',
           classification: camera.classification || ''
         });
     } else {
@@ -542,6 +551,23 @@ const Cameras = () => {
   }, [selectedExamId, cameras]);
 
   useEffect(() => { loadClassOptions(); }, [loadClassOptions]);
+
+  /* Load distinct region values (RTSP only — empty for HLS exams) whenever the
+     exam changes. Mirrors loadClassOptions. */
+  const loadRegionOptions = useCallback(async () => {
+    if (!selectedExamId) { setRegionOptions([]); return; }
+    try {
+      const res = await camerasAPI.getRegions(selectedExamId);
+      setRegionOptions(Array.isArray(res?.data?.data) ? res.data.data : []);
+    } catch {
+      const local = Array.from(new Set(
+        (cameras || []).map((c) => c.region).filter((v) => v && String(v).trim())
+      )).sort();
+      setRegionOptions(local);
+    }
+  }, [selectedExamId, cameras]);
+
+  useEffect(() => { loadRegionOptions(); }, [loadRegionOptions]);
 
   /* Reset verify-dialog state whenever the preview camera changes. */
   useEffect(() => {
@@ -737,6 +763,29 @@ const Cameras = () => {
                     </FormControl>
                   )}
 
+                  {/* Region filter — RTSP cameras only; empty options list (HLS
+                      exam, or exam with no region data) hides it entirely. */}
+                  {regionOptions.length > 0 && (
+                    <FormControl size="small" sx={{ minWidth: { xs: 0, sm: 140 }, flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' } }}>
+                      <InputLabel id="cam-region-label" sx={{ fontSize: '0.85rem' }}>Region</InputLabel>
+                      <Select
+                        labelId="cam-region-label"
+                        value={filterRegion}
+                        label="Region"
+                        onChange={(e) => { setFilterRegion(e.target.value); setPage(0); }}
+                        sx={{
+                          borderRadius: 2, fontSize: '0.85rem', bgcolor: '#f1f5f9',
+                          height: 40,
+                          '& fieldset': { border: '1px solid #e2e8f0' },
+                          '&:hover fieldset': { borderColor: '#cbd5e1 !important' },
+                        }}
+                      >
+                        <MenuItem value="">All regions</MenuItem>
+                        {regionOptions.map((r) => <MenuItem key={r} value={r}>{r}</MenuItem>)}
+                      </Select>
+                    </FormControl>
+                  )}
+
                   {/* Classification run picker — how many times classification has run;
                       selecting one scopes the table to that run's results.
                       Kept permanently mounted (visibility toggled via `display`,
@@ -768,8 +817,9 @@ const Cameras = () => {
                     >
                       <MenuItem value="">Latest (live)</MenuItem>
                       {classificationRuns.map((r) => (
-                        <MenuItem key={r.started_at} value={r.started_at}>
-                          {format(new Date(r.started_at), 'dd MMM, HH:mm')} · {r.camera_count} cameras
+                        <MenuItem key={runKey(r)} value={runKey(r)}>
+                          {r.shift_name ? `${r.shift_name} · ` : ''}{format(new Date(r.started_at), 'dd MMM, HH:mm')} · {r.total_cameras ?? r.camera_count} cameras
+                          {r.total_cameras != null && ` (${r.camera_count} classified)`}
                         </MenuItem>
                       ))}
                     </Select>
@@ -1170,6 +1220,15 @@ const Cameras = () => {
                                   State
                                 </TableSortLabel>
                               </TableCell>
+                              <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 100 }}>
+                                <TableSortLabel
+                                  active={orderBy === 'region'}
+                                  direction={orderBy === 'region' ? order : 'asc'}
+                                  onClick={() => handleRequestSort('region')}
+                                >
+                                  Region
+                                </TableSortLabel>
+                              </TableCell>
                               <TableCell sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b', minWidth: 120 }}>
                                 <TableSortLabel
                                   active={orderBy === 'classification'}
@@ -1257,6 +1316,7 @@ const Cameras = () => {
                                 <TableCell sx={{ fontSize: '0.85rem' }}>{cam.camera_name || '-'}</TableCell>
                                 <TableCell sx={{ fontSize: '0.85rem' }}>{cam.centre_name || cam.tc_name || '-'}</TableCell>
                                 <TableCell sx={{ fontSize: '0.85rem' }}>{cam.state || '-'}</TableCell>
+                                <TableCell sx={{ fontSize: '0.85rem' }}>{cam.region || '-'}</TableCell>
                                 <TableCell sx={{ fontSize: '0.85rem' }}>
                                   <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
                                     {cam.classification || '-'}
@@ -1338,7 +1398,7 @@ const Cameras = () => {
             <Alert severity="info" sx={{ mb: 2 }}>
               {isHLS
                 ? 'Expected HLS columns: TC Code, Centre Name, City, State, Camera Name, ch_no, CCTV URL, Camera Category, Classification (optional)'
-                : 'Expected RTSP columns: Device ID, TC Code, Camera Name, Centre Name, City, State, Server Address, Classification (or Scene Classification / Room Classification - optional)'}
+                : 'Expected RTSP columns: Device ID, TC Code, Camera Name, Centre Name, City, State, Region, Server Address, Classification (or Scene Classification / Room Classification - optional)'}
               <br /><strong>Download the template below to get the exact format.</strong>
               <br />
               <Typography variant="caption" sx={{ mt: 1, display: 'block', color: '#0288d1' }}>

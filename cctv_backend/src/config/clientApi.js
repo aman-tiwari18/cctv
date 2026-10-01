@@ -5,20 +5,20 @@
  * (/cctv_analytics/api/v1/*, spec: CCTV_API_v1.2).
  *
  * This API serves exactly ONE exam — EXAM_ID below — and never any other.
- * The exam does not exist in the DB yet, so until it is created every
- * endpoint that reads it returns an empty list. VENDOR_ID will be provided
- * by the client later.
+ * If that exam is missing from the DB, every endpoint that reads it returns
+ * an empty list.
  */
 
 'use strict';
 
-const EXAM_ID = 38; // TEMP for testing (RE: UPCISB - 2026) — revert to 1234
-const VENDOR_ID = process.env.CLIENT_API_VENDOR_ID || '';
+const EXAM_ID = 42; // SSC Combined Graduate Level Examination 2026
+const VENDOR_ID = process.env.CLIENT_API_VENDOR_ID || 'CDIS';
 
 // ── Camera types ─────────────────────────────────────────────
 const CAMERA_TYPES = [
     { id: 1, name: 'InsideLabs' },
     { id: 2, name: 'ServerRoom' },
+    { id: 3, name: 'BiometricArea' },
     { id: 4, name: 'Outside' },
     { id: 5, name: 'EntryExit' },
     { id: 9, name: 'Invalid' },
@@ -28,12 +28,14 @@ const CAMERA_TYPES = [
 // Our classification / camera_category values → client cam_type id.
 // Keys are normalized (lowercase, letters only) so "Entry/ Exit",
 // "Entry/Exit" and "Entry/Exit Gate" all resolve. Anything unlisted
-// (Strong Room, Biometric, Stairs, …) falls through to 0 = Other.
+// (Strong Room, Stairs, …) falls through to 0 = Other.
 const CAMERA_TYPE_BY_LABEL = {
     computerlab: 1,
     insideclassroom: 1,
     insidelab: 1,
     serverroom: 2,
+    biometric: 3,
+    biometricarea: 3,
     outsidearea: 4,
     outdoorscene: 4,
     parkinglot: 4,

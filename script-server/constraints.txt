@@ -1,0 +1,17 @@
+# Pin the ML stack to the versions worker-0 runs (script-server/venv, 2026-09-29).
+# requirements.txt / the vLLM step are unpinned (>=), so an unconstrained rebuild
+# pulled torch 2.13 / vLLM 0.30 / transformers 5.17 — untested with start_vllm.sh
+# flags and patch_vllm.py. Bump these deliberately, on one worker first.
+torch==2.11.0
+torchvision==0.26.0
+triton==3.6.0
+transformers==5.8.0
+vllm==0.20.1
+flashinfer-python==0.6.8.post1
+ultralytics==8.4.23
+rfdetr==1.11.0
+# OpenCV 4.11 (worker-0 runs 4.x; headless 4.13 needs numpy>=2, which conflicts with requirements numpy<2). Unpinned,
+# the vLLM step pulled opencv-python-headless 5.0 onto the workers (2026-09-30).
+opencv-python==4.11.0.86
+opencv-contrib-python==4.11.0.86
+opencv-python-headless==4.11.0.86

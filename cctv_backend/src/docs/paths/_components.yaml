@@ -164,7 +164,7 @@ schemas:
     properties:
       id: { type: integer, example: 1 }
       name: { type: string, example: InsideLabs }
-      vendor_id: { type: string, example: '' }
+      vendor_id: { type: string, example: CDIS }
 
   # ── Generic response envelopes ─────────────────────────────────
   SuccessResponse:

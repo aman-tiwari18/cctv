@@ -395,6 +395,11 @@ function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onS
           </Typography>
         )}
 
+        {(item.skipped === 1 || item.skipped === true) && (
+          <Typography sx={{ display: 'inline-block', mt: 0.8, px: 1, py: 0.25, borderRadius: 1, bgcolor: '#fef3c7', color: '#92400e', fontSize: 12, fontWeight: 700 }}>
+            Skipped
+          </Typography>
+        )}
         {item.gpu_id != null && (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.8 }}>
             <Memory sx={{ fontSize: 13, color: '#64748b' }} />
@@ -422,7 +427,7 @@ function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onS
                 '&:hover': { bgcolor: '#c3c5d8', borderColor: '#c3c5d8' },
               }}
             >
-              Skip
+              {item.skipped ? 'Unskip' : 'Skip'}
             </Button>
           )}
 
@@ -657,11 +662,10 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
 
   const goNext = useCallback(() => onSelect(Math.min(data.length - 1, selectedIndex + 1)), [data.length, selectedIndex, onSelect]);
 
-  // Skipping removes the row, so the next item slides into this index —
-  // advancing as well would silently jump over it.
+  // Skip keeps the row (it is only flagged), so move on to the next one.
   const handleSkip = useCallback(() => {
     if (item && onSkip) onSkip(item);
-    else goNext();
+    goNext();
   }, [item, onSkip, goNext]);
 
   useEffect(() => {
@@ -679,8 +683,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
       if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
       if (e.key === 'ArrowUp') { e.preventDefault(); onSelect(Math.max(0, selectedIndex - 1)); }
       if (e.key === 'ArrowDown') { e.preventDefault(); goNext(); }
-      if (e.key === 'ArrowRight') { e.preventDefault(); handlePush(); }
-      if (e.key === 'ArrowLeft') { e.preventDefault(); handleSkip(); }
+      // No keyboard push/skip: those only happen from an explicit button click.
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -924,6 +927,11 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
                     </Typography>
                   )}
 
+                  {(item.skipped === 1 || item.skipped === true) && (
+                    <Typography sx={{ display: 'inline-block', mt: 0.8, px: 1, py: 0.25, borderRadius: 1, bgcolor: '#fef3c7', color: '#92400e', fontSize: 12, fontWeight: 700 }}>
+                      Skipped
+                    </Typography>
+                  )}
                   {item.gpu_id != null && (
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 0.8 }}>
                       <Memory sx={{ fontSize: 13, color: '#64748b' }} />
@@ -968,7 +976,7 @@ function ListViewPanel({ data, selectedIndex, onSelect, onPushToClient, copyingT
                           >
                             <Box component="img" src="/cctv_analytics/icon.svg" alt="left" sx={{ width: 16, height: 16, display: 'block', transform: 'scaleX(-1)' }} />
                           </Box>
-                          <span sx = {{color: '#fff'}}>Skip</span>
+                          <span sx = {{color: '#fff'}}>{item.skipped ? 'Unskip' : 'Skip'}</span>
                         </Box>
                       </Button>
                     )}
@@ -1082,6 +1090,8 @@ export default function Detections() {
   const [examFilter, setExamFilter] = useState(() => searchParams.get('exam_id') || '');
   const [examShifts, setExamShifts] = useState([]);
   const [shiftFilter, setShiftFilter] = useState('');
+  const [regionFilter, setRegionFilter] = useState('');
+  const [regionOptions, setRegionOptions] = useState([]);
   const [dateFilter, setDateFilter] = useState(() => {
     const dp = searchParams.get('date');
     if (dp && /^\d{2}-\d{2}-\d{4}$/.test(dp)) return dp;
@@ -1169,12 +1179,15 @@ export default function Detections() {
     ));
   };
 
-  const handleSkipLocally = useCallback((itemToRemove) => {
-    setData((prev) => prev.filter(i => getDetectionKey(i) !== getDetectionKey(itemToRemove)));
-    // Persist so the skip survives a reload / shows for other operators, same
-    // as push/accept/remove already do on the client side.
-    if (itemToRemove?.uid) {
-      axios.post(`${API_BASE_1}/detections/skip`, { uid: itemToRemove.uid }).catch((err) => {
+  // Skip only flags the detection (a second click undoes it). It stays in the
+  // admin list either way, shown with a "Skipped" badge.
+  const handleSkipLocally = useCallback((target) => {
+    const key = getDetectionKey(target);
+    const nowSkipped = !(target?.skipped === 1 || target?.skipped === true);
+    setData((prev) => prev.map(i => (getDetectionKey(i) === key ? { ...i, skipped: nowSkipped ? 1 : 0 } : i)));
+    // Persist so the skip survives a reload / shows for other operators.
+    if (target?.uid) {
+      axios.post(`${API_BASE_1}/detections/skip${nowSkipped ? '' : '/undo'}`, { uid: target.uid }).catch((err) => {
         console.error('Failed to persist skip:', err);
       });
     }
@@ -1189,6 +1202,18 @@ export default function Detections() {
       } catch (err) { console.error('Failed to load exams:', err); }
     };
     fetchExams();
+  }, []);
+
+  // Region filter options — distinct regions across RTSP cameras (global, not
+  // exam-scoped: the dropdown is meant to work the same way across exams).
+  useEffect(() => {
+    const fetchRegions = async () => {
+      try {
+        const response = await axios.get(`${API_BASE_1}/detections/regions`);
+        setRegionOptions(Array.isArray(response?.data?.data) ? response.data.data : []);
+      } catch (err) { console.error('Failed to load regions:', err); }
+    };
+    fetchRegions();
   }, []);
 
   // Populate the dependent Shift filter from the selected exam. The exam list
@@ -1211,6 +1236,7 @@ export default function Detections() {
     if (debouncedSearch.trim()) params.append('search', debouncedSearch.trim()); // Use debounced search
     if (examFilter) params.append('exam_id', examFilter);
     if (shiftFilter) params.append('shift_id', shiftFilter);
+    if (regionFilter) params.append('region', regionFilter);
     if (appliedStartTime) params.append('start_time', appliedStartTime);
     if (appliedEndTime) params.append('end_time', appliedEndTime);
     // Operator sharding: restrict to their assigned GPU's detections only.
@@ -1219,7 +1245,7 @@ export default function Detections() {
       params.append('gpu_id', user.gpu_id);
     }
     return params;
-  }, [typeFilter, dateFilter, debouncedSearch, examFilter, shiftFilter, appliedStartTime, appliedEndTime, rowsPerPage, user]);
+  }, [typeFilter, dateFilter, debouncedSearch, examFilter, shiftFilter, regionFilter, appliedStartTime, appliedEndTime, rowsPerPage, user]);
 
 
   // Optimized fetch with abort controller and request deduplication
@@ -1318,6 +1344,7 @@ export default function Detections() {
     if (filterDateIso && item.date && item.date !== filterDateIso) return false;
     if (examFilter && item.exam_id != null && String(item.exam_id) !== String(examFilter)) return false;
     if (shiftFilter && item.shift_id != null && String(item.shift_id) !== String(shiftFilter)) return false;
+    if (regionFilter && String(item.region || '') !== String(regionFilter)) return false;
     if (user?.role === 'OPERATOR' && user?.gpu_id != null && item.gpu_id != null
       && String(item.gpu_id) !== String(user.gpu_id)) return false;
 
@@ -1336,7 +1363,7 @@ export default function Detections() {
       if (appliedEndTime && hhmm > appliedEndTime) return false;
     }
     return true;
-  }, [dateFilter, examFilter, shiftFilter, debouncedSearch, appliedStartTime, appliedEndTime, user]);
+  }, [dateFilter, examFilter, shiftFilter, regionFilter, debouncedSearch, appliedStartTime, appliedEndTime, user]);
 
   // Buffered items were matched against the old filters; the refetch that a
   // filter change triggers pulls the real ones from the DB anyway.
@@ -1940,6 +1967,26 @@ export default function Detections() {
                 <MenuItem key={sh.id} value={sh.id}>
                   {sh.shift_name || `Shift #${sh.id}`}
                 </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        )}
+        {/* Region filter — RTSP cameras only; visible to admin, client and
+            operator alike (unlike Exam/Shift, which are admin/client only). */}
+        {regionOptions.length > 0 && (
+          <FormControl size="small" sx={{ width: { xs: 'calc(30% - 8px)', sm: 130 } }}>
+            <Select
+              value={regionFilter}
+              displayEmpty
+              onChange={(e) => setRegionFilter(e.target.value)}
+              sx={{
+                borderRadius: '8px', bgcolor: '#f8fafc', height: 36, fontSize: 14,
+                '& fieldset': { border: 'none' },
+              }}
+            >
+              <MenuItem value="">All Regions</MenuItem>
+              {regionOptions.map((r) => (
+                <MenuItem key={r} value={r}>{r}</MenuItem>
               ))}
             </Select>
           </FormControl>
