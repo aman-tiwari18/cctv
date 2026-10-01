@@ -35,7 +35,7 @@
                       state: { type: string, example: Delhi }
                       status: { type: integer, enum: [0, 1, 100, 200, 9999], example: 1 }
                       status_name: { type: string, example: AnalyticsLive }
-                      vendor_id: { type: string, example: CDIS }
+                      vendor_name: { type: string, example: CDIS }
       '401': { $ref: '#/components/responses/ClientApiUnauthorized' }
       '500': { $ref: '#/components/responses/ClientApiServerError' }
 
@@ -64,12 +64,12 @@
                   items: { $ref: '#/components/schemas/ClientApiMasterItem' }
             example:
               camera_types:
-                - { id: 1, name: InsideLabs, vendor_id: CDIS }
-                - { id: 2, name: ServerRoom, vendor_id: CDIS }
-                - { id: 3, name: BiometricArea, vendor_id: CDIS }
-                - { id: 4, name: Outside, vendor_id: CDIS }
-                - { id: 5, name: EntryExit, vendor_id: CDIS }
-                - { id: 9, name: Invalid, vendor_id: CDIS }
+                - { id: 1, name: InsideLabs, vendor_name: CDIS }
+                - { id: 2, name: ServerRoom, vendor_name: CDIS }
+                - { id: 3, name: BiometricArea, vendor_name: CDIS }
+                - { id: 4, name: Outside, vendor_name: CDIS }
+                - { id: 5, name: EntryExit, vendor_name: CDIS }
+                - { id: 9, name: Invalid, vendor_name: CDIS }
       '401': { $ref: '#/components/responses/ClientApiUnauthorized' }
       '500': { $ref: '#/components/responses/ClientApiServerError' }
 
@@ -92,11 +92,11 @@
                   items: { $ref: '#/components/schemas/ClientApiMasterItem' }
             example:
               statuses:
-                - { id: 0, name: Idle/Ready, vendor_id: CDIS }
-                - { id: 1, name: AnalyticsLive, vendor_id: CDIS }
-                - { id: 100, name: ClassificationPending, vendor_id: CDIS }
-                - { id: 200, name: Excluded, vendor_id: CDIS }
-                - { id: 9999, name: Other, vendor_id: CDIS }
+                - { id: 0, name: Idle/Ready, vendor_name: CDIS }
+                - { id: 1, name: AnalyticsLive, vendor_name: CDIS }
+                - { id: 100, name: ClassificationPending, vendor_name: CDIS }
+                - { id: 200, name: Excluded, vendor_name: CDIS }
+                - { id: 9999, name: Other, vendor_name: CDIS }
       '401': { $ref: '#/components/responses/ClientApiUnauthorized' }
 
 /api/v1/master/event-types:
@@ -123,10 +123,10 @@
                   items: { $ref: '#/components/schemas/ClientApiMasterItem' }
             example:
               event_types:
-                - { id: 1, name: Server Room Detection, vendor_id: CDIS }
-                - { id: 5, name: Proximity Detection, vendor_id: CDIS }
-                - { id: 6, name: Phone Detection, vendor_id: CDIS }
-                - { id: 7, name: Invigilator Detection, vendor_id: CDIS }
+                - { id: 1, name: Server Room Detection, vendor_name: CDIS }
+                - { id: 5, name: Proximity Detection, vendor_name: CDIS }
+                - { id: 6, name: Phone Detection, vendor_name: CDIS }
+                - { id: 7, name: Invigilator Detection, vendor_name: CDIS }
       '401': { $ref: '#/components/responses/ClientApiUnauthorized' }
       '500': { $ref: '#/components/responses/ClientApiServerError' }
 
@@ -154,6 +154,6 @@
                     properties:
                       client_name: { type: string, example: SSC }
                       schedule_name: { type: string, example: CTGD-Apr2026 }
-                      vendor_id: { type: string, example: CDIS }
+                      vendor_name: { type: string, example: CDIS }
       '401': { $ref: '#/components/responses/ClientApiUnauthorized' }
       '500': { $ref: '#/components/responses/ClientApiServerError' }

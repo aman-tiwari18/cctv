@@ -12,7 +12,7 @@
 'use strict';
 
 const EXAM_ID = 42; // SSC Combined Graduate Level Examination 2026
-const VENDOR_ID = process.env.CLIENT_API_VENDOR_ID || 'CDIS';
+const VENDOR_NAME = process.env.CLIENT_API_VENDOR_NAME || 'CDIS';
 
 // ── Camera types ─────────────────────────────────────────────
 const CAMERA_TYPES = [
@@ -68,7 +68,7 @@ const CAMERA_STATUSES = [
 
 module.exports = {
     EXAM_ID,
-    VENDOR_ID,
+    VENDOR_NAME,
     CAMERA_TYPES,
     CAMERA_TYPE_BY_LABEL,
     CAMERA_STATUS,

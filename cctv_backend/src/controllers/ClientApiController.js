@@ -12,7 +12,7 @@ const { query } = require('../config/database');
 const logger = require('../utils/logger');
 const {
     EXAM_ID,
-    VENDOR_ID,
+    VENDOR_NAME,
     CAMERA_TYPES,
     CAMERA_TYPE_BY_LABEL,
     CAMERA_STATUS,
@@ -25,7 +25,7 @@ const NON_EVENT_SCRIPTS = ['vision', 'vision_neet'];
 const CAMERA_TYPE_NAME = new Map(CAMERA_TYPES.map((t) => [t.id, t.name]));
 const CAMERA_STATUS_NAME = new Map(CAMERA_STATUSES.map((s) => [s.id, s.name]));
 
-const withVendor = (items) => items.map((i) => ({ ...i, vendor_id: VENDOR_ID }));
+const withVendor = (items) => items.map((i) => ({ ...i, vendor_name: VENDOR_NAME }));
 
 const normLabel = (v) => String(v || '').toLowerCase().replace(/[^a-z]/g, '');
 
@@ -131,7 +131,7 @@ async function loadCameras() {
             state: row.state || '',
             status,
             status_name: CAMERA_STATUS_NAME.get(status),
-            vendor_id: VENDOR_ID,
+            vendor_name: VENDOR_NAME,
         });
     }
     return cameras;
@@ -200,7 +200,7 @@ exports.getCurrentSchedule = async (req, res) => {
     try {
         const exam = await getExam();
         const schedules = exam && Number(exam.is_active)
-            ? [{ client_name: exam.exam_body || '', schedule_name: exam.exam_name || '', vendor_id: VENDOR_ID }]
+            ? [{ client_name: exam.exam_body || '', schedule_name: exam.exam_name || '', vendor_name: VENDOR_NAME }]
             : [];
         return res.json({ schedules });
     } catch (err) {

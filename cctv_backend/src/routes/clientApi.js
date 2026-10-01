@@ -15,7 +15,7 @@ router.use(requireClientApiKey);
 /**
  * @route   GET /cctv_analytics/api/v1/cameras
  * @returns { cameras: [{ cam_id, cam_type, cam_type_name, tc_code, center_name,
- *            city, state, status, status_name, vendor_id }] }
+ *            city, state, status, status_name, vendor_name }] }
  */
 router.get('/cameras', ClientApiController.getCameras);
 

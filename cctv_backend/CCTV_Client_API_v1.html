@@ -69,10 +69,10 @@ table,pre,.note{page-break-inside:avoid}tr,td,th{page-break-inside:avoid}thead{d
     <li><a href="#overview">Overview</a></li>
     <li><a href="#auth">Authentication</a></li>
     <li><a href="#endpoints">Endpoints</a></li>
-    <li><a href="#cameras">GET /cameras</a></li>
-    <li><a href="#camera-types">GET /master/camera-types</a></li>
-    <li><a href="#event-types">GET /master/event-types</a></li>
-    <li><a href="#current-schedule">GET /master/current-schedule</a></li>
+    <li><a href="#cameras">GET /api/v1/cameras</a></li>
+    <li><a href="#camera-types">GET /api/v1/master/camera-types</a></li>
+    <li><a href="#event-types">GET /api/v1/master/event-types</a></li>
+    <li><a href="#current-schedule">GET /api/v1/master/current-schedule</a></li>
     <li><a href="#errors">Errors</a></li>
   </ul>
 </nav>
@@ -81,11 +81,11 @@ table,pre,.note{page-break-inside:avoid}tr,td,th{page-break-inside:avoid}thead{d
 <p>Four read-only GET endpoints give you the cameras, camera types, detection event types and current schedule for <strong>SSC Combined Graduate Level Examination 2026</strong>. All responses are JSON.</p>
 <div class="table-wrap"><table>
   <tr><th>Item</th><th>Value</th></tr>
-  <tr><td>Base URL</td><td><code>http://examscctvmonitoring.com/cctv_analytics/api/v1</code></td></tr>
+  <tr><td>Base URL</td><td><code>http://examscctvmonitoring.com/cctv_analytics</code></td></tr>
   <tr><td>Method</td><td><code>GET</code> (all endpoints)</td></tr>
   <tr><td>Response format</td><td><code>application/json</code></td></tr>
   <tr><td>Scope</td><td>One exam only: SSC Combined Graduate Level Examination 2026</td></tr>
-  <tr><td>Vendor</td><td><code>vendor_id</code> = <code>CDIS</code> in every response</td></tr>
+  <tr><td>Vendor</td><td><code>vendor_name</code> = <code>CDIS</code> in every response</td></tr>
 </table></div>
 <p>Data is live: camera types and statuses change as cameras are classified and come online during the exam.</p>
 
@@ -103,14 +103,14 @@ table,pre,.note{page-break-inside:avoid}tr,td,th{page-break-inside:avoid}thead{d
 <p>All paths are relative to the base URL. None take query parameters.</p>
 <div class="table-wrap"><table>
   <tr><th>Method</th><th>Path</th><th>Returns</th></tr>
-  <tr><td>GET</td><td><a href="#cameras"><code>/cameras</code></a></td><td>Every camera of the exam, with its centre, type and status</td></tr>
-  <tr><td>GET</td><td><a href="#camera-types"><code>/master/camera-types</code></a></td><td>Camera types used by the exam's cameras</td></tr>
-  <tr><td>GET</td><td><a href="#event-types"><code>/master/event-types</code></a></td><td>Detection scripts scheduled for the exam (the event types)</td></tr>
-  <tr><td>GET</td><td><a href="#current-schedule"><code>/master/current-schedule</code></a></td><td>The exam's client and schedule name</td></tr>
+  <tr><td>GET</td><td><a href="#cameras"><code>/api/v1/cameras</code></a></td><td>Every camera of the exam, with its centre, type and status</td></tr>
+  <tr><td>GET</td><td><a href="#camera-types"><code>/api/v1/master/camera-types</code></a></td><td>Camera types used by the exam's cameras</td></tr>
+  <tr><td>GET</td><td><a href="#event-types"><code>/api/v1/master/event-types</code></a></td><td>Detection scripts scheduled for the exam (the event types)</td></tr>
+  <tr><td>GET</td><td><a href="#current-schedule"><code>/api/v1/master/current-schedule</code></a></td><td>The exam's client and schedule name</td></tr>
 </table></div>
 
 <section class="endpoint">
-<h2 id="cameras"><span class="method">GET</span><code>/cameras</code></h2>
+<h2 id="cameras"><span class="method">GET</span><code>/api/v1/cameras</code></h2>
 <p>Returns one entry per physical camera of the exam (about 3,100 for this exam).</p>
 <h3>Example response</h3>
 <pre><code>{
@@ -125,14 +125,14 @@ table,pre,.note{page-break-inside:avoid}tr,td,th{page-break-inside:avoid}thead{d
       "state": "UTTAR PRADESH",
       "status": 1,
       "status_name": "AnalyticsLive",
-      "vendor_id": "CDIS"
+      "vendor_name": "CDIS"
     }
   ]
 }</code></pre>
 <div class="table-wrap"><table>
   <tr><th>Field</th><th>Type</th><th>Description</th></tr>
   <tr><td><code>cam_id</code></td><td>string</td><td>Unique camera identifier, in the format <code>&lt;device_id&gt;$&lt;camera_no&gt;</code></td></tr>
-  <tr><td><code>cam_type</code></td><td>integer</td><td>Camera type id; see <a href="#camera-types"><code>/master/camera-types</code></a></td></tr>
+  <tr><td><code>cam_type</code></td><td>integer</td><td>Camera type id; see <a href="#camera-types"><code>/api/v1/master/camera-types</code></a></td></tr>
   <tr><td><code>cam_type_name</code></td><td>string</td><td>Camera type name</td></tr>
   <tr><td><code>tc_code</code></td><td>string</td><td>Test centre code</td></tr>
   <tr><td><code>center_name</code></td><td>string</td><td>Test centre name</td></tr>
@@ -140,9 +140,9 @@ table,pre,.note{page-break-inside:avoid}tr,td,th{page-break-inside:avoid}thead{d
   <tr><td><code>state</code></td><td>string</td><td>State of the test centre</td></tr>
   <tr><td><code>status</code></td><td>integer</td><td>Camera status id; see <a href="#status-values">Status values</a></td></tr>
   <tr><td><code>status_name</code></td><td>string</td><td>Camera status name</td></tr>
-  <tr><td><code>vendor_id</code></td><td>string</td><td>Always <code>CDIS</code></td></tr>
+  <tr><td><code>vendor_name</code></td><td>string</td><td>Always <code>CDIS</code></td></tr>
 </table></div>
-<h3 id="status-values">Status values</h3>
+<h3 id="status-values" style="page-break-before:always">Status values</h3>
 <div class="table-wrap"><table>
   <tr><th>id</th><th>name</th><th>Meaning</th></tr>
   <tr><td>0</td><td>Idle/Ready</td><td>Camera is working, but today is not an exam day</td></tr>
@@ -154,17 +154,17 @@ table,pre,.note{page-break-inside:avoid}tr,td,th{page-break-inside:avoid}thead{d
 </section>
 
 <section class="endpoint">
-<h2 id="camera-types"><span class="method">GET</span><code>/master/camera-types</code></h2>
+<h2 id="camera-types"><span class="method">GET</span><code>/api/v1/master/camera-types</code></h2>
 <p>Returns only the camera types that this exam's cameras actually have. The type comes from AI scene classification of each camera.</p>
 <pre><code>{
   "camera_types": [
-    { "id": 1, "name": "InsideLabs", "vendor_id": "CDIS" },
-    { "id": 2, "name": "ServerRoom", "vendor_id": "CDIS" },
-    { "id": 3, "name": "BiometricArea", "vendor_id": "CDIS" },
-    { "id": 4, "name": "Outside", "vendor_id": "CDIS" },
-    { "id": 5, "name": "EntryExit", "vendor_id": "CDIS" },
-    { "id": 9, "name": "Invalid", "vendor_id": "CDIS" },
-    { "id": 0, "name": "Other", "vendor_id": "CDIS" }
+    { "id": 1, "name": "InsideLabs", "vendor_name": "CDIS" },
+    { "id": 2, "name": "ServerRoom", "vendor_name": "CDIS" },
+    { "id": 3, "name": "BiometricArea", "vendor_name": "CDIS" },
+    { "id": 4, "name": "Outside", "vendor_name": "CDIS" },
+    { "id": 5, "name": "EntryExit", "vendor_name": "CDIS" },
+    { "id": 9, "name": "Invalid", "vendor_name": "CDIS" },
+    { "id": 0, "name": "Other", "vendor_name": "CDIS" }
   ]
 }</code></pre>
 <div class="table-wrap"><table>
@@ -180,12 +180,12 @@ table,pre,.note{page-break-inside:avoid}tr,td,th{page-break-inside:avoid}thead{d
 </section>
 
 <section class="endpoint">
-<h2 id="event-types"><span class="method">GET</span><code>/master/event-types</code></h2>
+<h2 id="event-types"><span class="method">GET</span><code>/api/v1/master/event-types</code></h2>
 <p>Returns the AI detection scripts scheduled for this exam. Each <code>id</code> identifies one event type; the list grows if more scripts are scheduled.</p>
 <pre><code>{
   "event_types": [
-    { "id": 1, "name": "Server Room Detection", "vendor_id": "CDIS" },
-    { "id": 6, "name": "Phone Detection", "vendor_id": "CDIS" }
+    { "id": 1, "name": "Server Room Detection", "vendor_name": "CDIS" },
+    { "id": 6, "name": "Phone Detection", "vendor_name": "CDIS" }
   ]
 }</code></pre>
 <p>Event types currently scheduled for this exam:</p>
@@ -206,14 +206,14 @@ table,pre,.note{page-break-inside:avoid}tr,td,th{page-break-inside:avoid}thead{d
 </section>
 
 <section class="endpoint">
-<h2 id="current-schedule"><span class="method">GET</span><code>/master/current-schedule</code></h2>
+<h2 id="current-schedule"><span class="method">GET</span><code>/api/v1/master/current-schedule</code></h2>
 <p>Returns the exam's client and schedule name.</p>
 <pre><code>{
   "schedules": [
     {
       "client_name": "SSC",
       "schedule_name": "SSC Combined Graduate Level Examination 2026",
-      "vendor_id": "CDIS"
+      "vendor_name": "CDIS"
     }
   ]
 }</code></pre>
