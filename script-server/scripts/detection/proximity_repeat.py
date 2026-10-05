@@ -10,8 +10,9 @@ before starts at 1. A pair missing from one report keeps its count for the rest
 of the shift, so it continues if the same two persons are seen together again.
 
 State lives in results/proximity_repeat/<session>/<camera>.json (session =
-exam{E}_shift{S}), so a worker restart within the shift keeps the counts and a
-new shift starts from 1.
+exam{E}_shift{S}_{YYYYMMDD}), so a worker restart within the shift keeps the counts
+and every new shift AND every new day starts from 1. (The same shift id comes round
+every exam day; without the date in the session a camera kept counting up across days.)
 """
 
 import json
@@ -54,8 +55,17 @@ def _same_pair(new, old):
     return (_same_spot(a, oa) and _same_spot(b, ob)) or (_same_spot(a, ob) and _same_spot(b, oa))
 
 
+def _session_day():
+    """The exam day this run belongs to, as YYYYMMDD: the assignment's date
+    (ASSIGNMENT_DATE, set by script_runner for every pipeline), else today."""
+    d = os.environ.get("ASSIGNMENT_DATE", "").strip()[:10]
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", d):
+        d = time.strftime("%Y-%m-%d")
+    return d.replace("-", "")
+
+
 def _json_path(camera_key, exam_id, shift_id):
-    session = f"exam{exam_id or 0}_shift{shift_id or 0}"
+    session = f"exam{exam_id or 0}_shift{shift_id or 0}_{_session_day()}"
     safe = re.sub(r"[^A-Za-z0-9_.-]", "_", str(camera_key))
     return os.path.join(REPEAT_DIR, session, f"{safe}.json")
 

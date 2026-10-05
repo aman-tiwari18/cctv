@@ -130,3 +130,10 @@ data_dump/
 env/
 venv/
 .venv/
+# Large generated files / exports — keep them on disk, out of git
+*.tar.gz
+script-server/yolo11n.pt
+Superview_vs_CDIS_*_Report.html
+superview_vs_cdis_report.html
+docs/client_report_*.xlsx
+docs/Events_Report_*.csv
