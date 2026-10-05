@@ -173,6 +173,103 @@ function cameraIsOnline(cam, isRTSP) {
     return hasClassification && isAccessible;
 }
 
+// Rows of one classification run land within minutes of each other (each
+// worker bulk-writes its share at the end of Pass-2); separate runs of the same
+// day are scheduled hours apart. A gap longer than this starts a new run.
+const RTSP_RUN_GAP_MS = 15 * 60 * 1000;
+
+/**
+ * RTSP camera list for each shift, as that shift's own classification saw it.
+ *
+ * camera_links_rtsp holds only the LATEST classification/status (the final run
+ * of the day overwrites earlier ones), so reading it for every shift gave all
+ * shifts the same — final — picture. Instead each shift uses the classification
+ * that was run FOR THAT SHIFT: camera_classification_rtsp rows carry the
+ * shift_id of the assignment that produced them, so the mapping is exact —
+ * a run scheduled for Shift 2 belongs to Shift 2 only, whenever it ran (e.g.
+ * 30-09: the 10:31 and 12:05 runs were both Shift 2's; Shift 1 had none).
+ *
+ *   - shift has runs on the report date → its LATEST run is used;
+ *   - shift has no run, but other shifts that day do → no classification for
+ *     this shift: every camera is Offline / "Not Classified" (never borrowed
+ *     from another shift's run);
+ *   - no classification history at all for the date (older data) → the live
+ *     camera_links_rtsp values, as before.
+ *
+ * Within a run, a camera with a history row is Accessible with that label;
+ * every other camera is Not Accessible for that shift (every run attempts all
+ * active cameras — only reachable, classified ones get a history row).
+ *
+ * @returns {{ camsByShift: Object<number, object[]>, runByShift: Object<number, string> }}
+ *          runByShift = human-readable description of the classification used.
+ */
+async function rtspShiftCameraLists(examId, mysqlDate, shifts, masterCameras) {
+    const history = await query(
+        `SELECT cc.camera_id, cc.shift_id, cc.classification, cc.created_at
+         FROM camera_classification_rtsp cc
+         JOIN camera_links_rtsp cl ON cl.id = cc.camera_id AND cl.exam_id = ?
+         WHERE cc.exam_date = ? OR (cc.exam_date IS NULL AND DATE(cc.created_at) = ?)
+         ORDER BY cc.created_at ASC, cc.id ASC`,
+        [examId, mysqlDate, mysqlDate]
+    );
+
+    // Partition by the shift each row was classified for, then split each
+    // shift's rows into runs by time gap.
+    const runsByShift = {};
+    history.forEach(r => {
+        if (r.shift_id == null) return;
+        const sid = Number(r.shift_id);
+        const t = new Date(r.created_at).getTime();
+        const runs = runsByShift[sid] || (runsByShift[sid] = []);
+        let cur = runs[runs.length - 1];
+        if (!cur || t - cur.endMs > RTSP_RUN_GAP_MS) {
+            cur = { startMs: t, endMs: t, byCamera: new Map() };
+            runs.push(cur);
+        }
+        cur.endMs = t;
+        cur.byCamera.set(Number(r.camera_id), r.classification); // last row per camera wins
+    });
+
+    const fmt = ms => {
+        const d = new Date(ms);
+        const pad = n => String(n).padStart(2, '0');
+        return `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
+    const hhmm = ms => fmt(ms).slice(-5);
+
+    const camsByShift = {};
+    const runByShift = {};
+    shifts.forEach(sh => {
+        const runs = runsByShift[Number(sh.id)] || [];
+        const run = runs[runs.length - 1];
+        if (!run) {
+            if (history.length === 0) {
+                camsByShift[sh.id] = masterCameras;
+                runByShift[sh.id] = 'No classification history for this date — current camera status used';
+            } else {
+                camsByShift[sh.id] = masterCameras.map(cam => ({
+                    ...cam, classification: null, status: 'Not Accessible', _notClassified: true,
+                }));
+                runByShift[sh.id] = 'No classification run for this shift';
+            }
+            return;
+        }
+        camsByShift[sh.id] = masterCameras.map(cam => {
+            const hit = run.byCamera.has(Number(cam.id));
+            return {
+                ...cam,
+                classification: hit ? run.byCamera.get(Number(cam.id)) : null,
+                status: hit ? 'Accessible' : 'Not Accessible',
+            };
+        });
+        const all = runs.length > 1
+            ? ` — this shift's runs: ${runs.map(r => hhmm(r.startMs)).join(', ')}; latest used`
+            : '';
+        runByShift[sh.id] = `${fmt(run.startMs)} (${run.byCamera.size} cameras classified)${all}`;
+    });
+    return { camsByShift, runByShift };
+}
+
 /**
  * Identity of a physical camera across shifts: device_id + camera_no for RTSP,
  * ch_code for HLS. Used to count a camera once when it appears in several shifts.
@@ -279,6 +376,14 @@ exports.downloadReport = async (req, res) => {
         const [y, m, d] = mysqlDate.split('-');
         const searchDate = `${d}/${m}/${y}`; // 16/04/2026
 
+        // RTSP: each shift uses its own (latest) classification run instead of
+        // the final live classification — see rtspShiftCameraLists. HLS keeps
+        // the shift/date-scoped camera_links list.
+        const rtspShift = isRTSP ? await rtspShiftCameraLists(examId, mysqlDate, shifts, masterCameras) : null;
+        const shiftCamsOf = (sid) => (rtspShift
+            ? rtspShift.camsByShift[sid]
+            : camerasForShiftAndDate(masterCameras, sid, mysqlDate));
+
         // ── 4. Fetch All Detections for exam + date ───────────────────────────
         const detections = isRTSP ? await query(
             `SELECT id, shift_id, city, center_name, camera_id, camera_name, camera_no,
@@ -369,7 +474,7 @@ exports.downloadReport = async (req, res) => {
         shifts.forEach((shiftMeta, idx) => {
             const shiftId = shiftMeta.id;
             const sheetName = `Shift ${idx + 1}`;
-            const shiftCams = camerasForShiftAndDate(masterCameras, shiftId, mysqlDate);
+            const shiftCams = shiftCamsOf(shiftId);
 
             let sheetData = [];
 
@@ -381,7 +486,7 @@ exports.downloadReport = async (req, res) => {
                 sheetData = shiftCams.map(cam => {
                     const key = `${cam.device_id}_${cam.camera_no}`;
                     const agg = (aggregated[shiftId] || {})[key];
-                    const camType = cam.classification || 'Failed to Classify';
+                    const camType = cam.classification || (cam._notClassified ? 'Not Classified' : 'Failed to Classify');
 
                     if (agg) {
                         return {
@@ -545,7 +650,7 @@ exports.downloadReport = async (req, res) => {
             // totals are scoped to this shift AND the report's date: a camera
             // uploaded against them is counted here, one uploaded without them
             // (NULL) is counted in every shift and on every date.
-            const shiftCams = camerasForShiftAndDate(masterCameras, shiftId, mysqlDate);
+            const shiftCams = shiftCamsOf(shiftId);
             const shiftDets = detections.filter(d => {
                 const resolvedSid = (d.shift_id != null) ? d.shift_id : determineShiftId(d.date_time, shifts);
                 return resolvedSid === shiftId;
@@ -563,6 +668,7 @@ exports.downloadReport = async (req, res) => {
                 .forEach(c => uniqueOnlineKeys.add(cameraUniqueKey(c, isRTSP)));
 
             analysisData.push([`Shift ${idx + 1} ANALYSIS`, '']);
+            if (rtspShift) analysisData.push(['Classification Used', rtspShift.runByShift[shiftId]]);
             analysisData.push(['Total Cameras Monitored', total]);
             analysisData.push(['Online Cameras', online]);
             analysisData.push(['Offline Cameras', offline]);
@@ -596,7 +702,7 @@ exports.downloadReport = async (req, res) => {
         analysisData.push(['Total Scheduled Duration (Active Shifts)', `${totalHours} hours`]);
 
         const analysisWs = XLSX.utils.aoa_to_sheet(analysisData);
-        analysisWs['!cols'] = [{ wch: 40 }, { wch: 20 }];
+        analysisWs['!cols'] = [{ wch: 40 }, { wch: 60 }];
         XLSX.utils.book_append_sheet(wb, analysisWs, 'Analysis');
 
         // ── 10. Stream to client ──────────────────────────────────────────────
@@ -709,6 +815,14 @@ exports.downloadClientReport = async (req, res) => {
         const [y, m, d] = mysqlDate.split('-');
         const searchDate = `${d}/${m}/${y}`;
 
+        // RTSP: each shift uses its own (latest) classification run instead of
+        // the final live classification — see rtspShiftCameraLists. HLS keeps
+        // the shift/date-scoped camera_links list.
+        const rtspShift = isRTSP ? await rtspShiftCameraLists(examId, mysqlDate, shifts, masterCameras) : null;
+        const shiftCamsOf = (sid) => (rtspShift
+            ? rtspShift.camsByShift[sid]
+            : camerasForShiftAndDate(masterCameras, sid, mysqlDate));
+
         // ── 4. Client-only detection set: pushed_to_client = 1 ───────────────
         // Carry remove_from_client through so the aggregated "Rejected Events"
         // count can use it, and accepted_by_client so the Detections List can
@@ -791,7 +905,7 @@ exports.downloadClientReport = async (req, res) => {
         shifts.forEach((shiftMeta, idx) => {
             const shiftId = shiftMeta.id;
             const sheetName = `Shift ${idx + 1}`;
-            const shiftCams = camerasForShiftAndDate(masterCameras, shiftId, mysqlDate);
+            const shiftCams = shiftCamsOf(shiftId);
 
             let sheetData = [];
 
@@ -799,7 +913,7 @@ exports.downloadClientReport = async (req, res) => {
                 sheetData = shiftCams.map(cam => {
                     const key = `${cam.device_id}_${cam.camera_no}`;
                     const agg = (aggregated[shiftId] || {})[key];
-                    const camType = cam.classification || 'Failed to Classify';
+                    const camType = cam.classification || (cam._notClassified ? 'Not Classified' : 'Failed to Classify');
 
                     if (agg) {
                         return {
@@ -963,7 +1077,7 @@ exports.downloadClientReport = async (req, res) => {
                 totalDurationMinutes += diff;
             }
 
-            const shiftCams = camerasForShiftAndDate(masterCameras, shiftId, mysqlDate);
+            const shiftCams = shiftCamsOf(shiftId);
             const shiftDets = detections.filter(d => {
                 const resolvedSid = (d.shift_id != null) ? d.shift_id : determineShiftId(d.date_time, shifts);
                 return resolvedSid === shiftId;
@@ -980,6 +1094,7 @@ exports.downloadClientReport = async (req, res) => {
                 .forEach(c => uniqueOnlineKeys.add(cameraUniqueKey(c, isRTSP)));
 
             analysisData.push([`Shift ${idx + 1} ANALYSIS`, '']);
+            if (rtspShift) analysisData.push(['Classification Used', rtspShift.runByShift[shiftId]]);
             analysisData.push(['Total Cameras Monitored', total]);
             analysisData.push(['Online Cameras', online]);
             analysisData.push(['Offline Cameras', offline]);
@@ -1011,7 +1126,7 @@ exports.downloadClientReport = async (req, res) => {
         analysisData.push(['Total Scheduled Duration (Active Shifts)', `${totalHours} hours`]);
 
         const analysisWs = XLSX.utils.aoa_to_sheet(analysisData);
-        analysisWs['!cols'] = [{ wch: 40 }, { wch: 20 }];
+        analysisWs['!cols'] = [{ wch: 40 }, { wch: 60 }];
         XLSX.utils.book_append_sheet(wb, analysisWs, 'Analysis');
 
         // ── 9. Stream ────────────────────────────────────────────────────────
@@ -1103,19 +1218,26 @@ exports.downloadSummaryReport = async (req, res) => {
             'Total Online',
             'Total Detections',
         ];
-        const rows = days.map(day => {
+        const rows = [];
+        for (const day of days) {
             const row = { 'Date': day.iso };
             let totalOnline = 0;
+            // RTSP: each shift's Online count comes from that shift's own
+            // classification run on that date (same rule as the consolidated
+            // report), not the final live classification.
+            const rtspShift = isRTSP ? await rtspShiftCameraLists(examId, day.iso, shifts, masterCameras) : null;
             shifts.forEach((sh, i) => {
-                const online = camerasForShiftAndDate(masterCameras, sh.id, day.iso)
-                    .filter(c => cameraIsOnline(c, isRTSP)).length;
+                const cams = rtspShift
+                    ? rtspShift.camsByShift[sh.id]
+                    : camerasForShiftAndDate(masterCameras, sh.id, day.iso);
+                const online = cams.filter(c => cameraIsOnline(c, isRTSP)).length;
                 row[`Shift${i + 1}(Online)`] = online;
                 totalOnline += online;
             });
             row['Total Online'] = totalOnline;
             row['Total Detections'] = day.count;
-            return row;
-        });
+            rows.push(row);
+        }
 
         // exceljs (not SheetJS) so the header row can be styled.
         const wb = new ExcelJS.Workbook();

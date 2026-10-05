@@ -92,6 +92,8 @@ script-server/scripts/test_simple.sh
 script-server/scripts/detection/results/
 script-server/scripts/detection/results.backup.*/
 script-server/scripts/detection/models/*
+# Camview login-token cache written at runtime by the pipelines (secrets, not code)
+script-server/scripts/detection/server_tokens.json
 script-server/models/*
 script-server/scripts/detection/frames/*
 script-server/scripts/frames/*
@@ -99,7 +101,15 @@ script-server/results/
 script-server/results.backup.*/
 script-server/scripts/models/*
 script-server/scripts/yolo11n.pt
-
+# Monitor tampering test-clip replays (annotated videos / frames)
+script-server/monitor_tamper_test/
+script-server/crowd_model_test/
+script-server/phone_test/
+phone_test_results/
+script-server/monitor_alerts_deploy
+script-server/monitor_person_model
+script-server/monitor_person_model.zip
+script-server/monitor_alerts_deploy.zip
 # NFS and shared storage (symlinks and mounted directories)
 /mnt/nfs/
 script-server/scripts/detection/results
@@ -115,8 +125,15 @@ script-server/.env.worker.*
 .env
 .env.*
 !.env.example
-
+data_dump/
 # Ignore virtual environments if any
 env/
 venv/
 .venv/
+# Large generated files / exports — keep them on disk, out of git
+*.tar.gz
+script-server/yolo11n.pt
+Superview_vs_CDIS_*_Report.html
+superview_vs_cdis_report.html
+docs/client_report_*.xlsx
+docs/Events_Report_*.csv

@@ -141,6 +141,8 @@ const ClientCameras = () => {
   const [camTotal, setCamTotal] = useState(0);
   const [camFilterShiftId, setCamFilterShiftId] = useState('');
   const [camFilterExamDate, setCamFilterExamDate] = useState('');
+  const [camFilterRegion, setCamFilterRegion] = useState('');
+  const [camRegionOptions, setCamRegionOptions] = useState([]);
   const [camVisionSummary, setCamVisionSummary] = useState(null);
   // Frame-preview dialog (read-only; mirrors the admin Cameras page)
   const [previewCamera, setPreviewCamera] = useState(null);
@@ -188,6 +190,7 @@ const ClientCameras = () => {
       const params = { is_active: true, page: camPage + 1, limit: camRowsPerPage };
       if (camFilterShiftId) params.shift_id = camFilterShiftId;
       if (camFilterExamDate) params.exam_date = parseDDMMYYYYToISO(camFilterExamDate);
+      if (camFilterRegion) params.region = camFilterRegion;
       if (camDebouncedSearch.trim()) params.search = camDebouncedSearch.trim();
       const res = await camerasAPI.getByExam(selectedCamExamId, params);
       setCameras(res.data.data || []);
@@ -196,7 +199,17 @@ const ClientCameras = () => {
       setCamStatusCounts(res.data.statusCounts || { accessible: 0, notAccessible: 0, unknown: 0 });
     } catch (e) { console.error(e); }
     finally { setCamLoading(false); }
-  }, [selectedCamExamId, camPage, camRowsPerPage, camFilterShiftId, camFilterExamDate, camDebouncedSearch]);
+  }, [selectedCamExamId, camPage, camRowsPerPage, camFilterShiftId, camFilterExamDate, camFilterRegion, camDebouncedSearch]);
+
+  const loadCamRegionOptions = useCallback(async () => {
+    if (!selectedCamExamId) { setCamRegionOptions([]); return; }
+    try {
+      const res = await camerasAPI.getRegions(selectedCamExamId);
+      setCamRegionOptions(Array.isArray(res?.data?.data) ? res.data.data : []);
+    } catch {
+      setCamRegionOptions([]);
+    }
+  }, [selectedCamExamId]);
 
   const loadVisionSummary = useCallback(() => {
     if (!selectedCamExamId) return;
@@ -210,10 +223,12 @@ const ClientCameras = () => {
     else { setCameras([]); setCamTotal(0); setCamVisionSummary(null); }
     setCamFilterShiftId('');
     setCamFilterExamDate('');
+    setCamFilterRegion('');
     setCamSearchQuery('');
     setCamDebouncedSearch('');
     setCamPage(0);
-  }, [selectedCamExamId]);
+    loadCamRegionOptions();
+  }, [selectedCamExamId]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   /* Re-fetch vision summary every 60s while it started today and workers may still be active */
   useEffect(() => {
@@ -228,7 +243,7 @@ const ClientCameras = () => {
 
   useEffect(() => {
     if (selectedCamExamId) loadCameras();
-  }, [camPage, camRowsPerPage, camFilterShiftId, camFilterExamDate, camDebouncedSearch]);
+  }, [camPage, camRowsPerPage, camFilterShiftId, camFilterExamDate, camFilterRegion, camDebouncedSearch]);
 
   const selectedCamExamData = camExams.find(e => String(e.id) === String(selectedCamExamId));
   const isHLS = camExamLinkType === 'HLS' || selectedCamExamData?.link_type?.toUpperCase() === 'HLS';
@@ -323,15 +338,16 @@ const ClientCameras = () => {
           'Camera Name': cam.camera_name || '-',
           'Centre Name': cam.centre_name || cam.tc_name || '-',
           'State': cam.state || '-',
+          'Region': cam.region || '-',
           ...(dropClassView ? {} : { 'Classification': cam.classification || '-' }),
           'Status': cam.status || '-',
           ...(dropClassView ? {} : { 'View': toAbsFrame(cam.frame_path) }),
           'CCTV URL': cam.cctv_url || cam.url || '-',
         }));
-        viewCol = dropClassView ? -1 : 8;
+        viewCol = dropClassView ? -1 : 9;
         cols = dropClassView
-          ? [{ wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 22 }, { wch: 34 }, { wch: 16 }, { wch: 16 }, { wch: 60 }]
-          : [{ wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 22 }, { wch: 34 }, { wch: 16 }, { wch: 18 }, { wch: 16 }, { wch: 12 }, { wch: 60 }];
+          ? [{ wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 22 }, { wch: 34 }, { wch: 16 }, { wch: 12 }, { wch: 16 }, { wch: 60 }]
+          : [{ wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 22 }, { wch: 34 }, { wch: 16 }, { wch: 12 }, { wch: 18 }, { wch: 16 }, { wch: 12 }, { wch: 60 }];
       }
 
       const ws = XLSX.utils.json_to_sheet(sheetRows);
@@ -430,6 +446,14 @@ const ClientCameras = () => {
                   InputProps={{ startAdornment: <InputAdornment position="start"><Search sx={{ fontSize: 18, color: '#94a3b8' }} /></InputAdornment>, endAdornment: camSearchQuery !== camDebouncedSearch ? <InputAdornment position="end"><CircularProgress size={16} sx={{ color: '#94a3b8' }} /></InputAdornment> : null, sx: { borderRadius: '8px', bgcolor: '#f8fafc', height: 40, fontSize: 14, '& fieldset': { border: '1px solid #e2e8f0' } } }}
                   sx={{ flex: { xs: '1 1 100%', sm: '0 0 auto' }, minWidth: { xs: '100%', sm: 260 }, maxWidth: { xs: '100%', sm: 300 } }}
                 />
+                {camRegionOptions.length > 0 && (
+                  <FormControl size="small" sx={{ flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' }, minWidth: { sm: 130 } }}>
+                    <Select value={camFilterRegion} onChange={(e) => { setCamFilterRegion(e.target.value); setCamPage(0); }} displayEmpty sx={{ borderRadius: 2, fontSize: '0.85rem', bgcolor: '#f1f5f9', height: 40, '& fieldset': { border: '1px solid #e2e8f0' } }} renderValue={(v) => v || 'All regions'}>
+                      <MenuItem value="">All regions</MenuItem>
+                      {camRegionOptions.map((r) => <MenuItem key={r} value={r}>{r}</MenuItem>)}
+                    </Select>
+                  </FormControl>
+                )}
                 {isHLS && (
                   <>
                     <FormControl size="small" sx={{ flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' }, minWidth: { sm: 130 } }}>
@@ -526,7 +550,7 @@ const ClientCameras = () => {
                           </>
                         ) : (
                           <>
-                            {['device_id', 'camera_no', 'tc_code', 'camera_name', 'centre_name', 'state', 'classification', 'status'].map((col) => (
+                            {['device_id', 'camera_no', 'tc_code', 'camera_name', 'centre_name', 'state', 'region', 'classification', 'status'].map((col) => (
                               <TableCell key={col} sx={{ fontWeight: 700, fontSize: '0.78rem', color: '#64748b' }}>
                                 <TableSortLabel active={camOrderBy === col} direction={camOrderBy === col ? camOrder : 'asc'} onClick={() => handleCamSort(col)}>
                                   {formatColumnLabel(col)}
@@ -580,6 +604,7 @@ const ClientCameras = () => {
                               <TableCell sx={{ fontSize: '0.85rem' }}>{cam.camera_name || '-'}</TableCell>
                               <TableCell sx={{ fontSize: '0.85rem' }}>{cam.centre_name || cam.tc_name || '-'}</TableCell>
                               <TableCell sx={{ fontSize: '0.85rem' }}>{cam.state || '-'}</TableCell>
+                              <TableCell sx={{ fontSize: '0.85rem' }}>{cam.region || '-'}</TableCell>
                               <TableCell sx={{ fontSize: '0.85rem' }}>
                                 <Box component="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.5 }}>
                                   {cam.classification || '-'}

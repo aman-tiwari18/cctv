@@ -42,6 +42,7 @@ import {
     FlipCameraAndroid,
     SecurityUpdateWarning,
     EventSeat,
+    DesktopAccessDisabled,
 } from '@mui/icons-material';
 import { shiftScriptsAPI, scriptsAPI, executionsAPI, smsAPI } from '../services/api';
 import ExecutionStatusBadge from './ExecutionStatusBadge';
@@ -179,6 +180,22 @@ const SCRIPT_META = {
         color: '#c2410c',
         category: 'camera',
     },
+    monitor_tamper: {
+        label: 'Monitor tampering',
+        icon: DesktopAccessDisabled,
+        iconColor: '#6d28d9',
+        bg: '#f3e8ff',
+        color: '#6d28d9',
+        category: 'movement',
+    },
+    crowd_five_invigilator: {
+        label: 'Few candidates, supervisor idle',
+        icon: Visibility,
+        iconColor: '#0f766e',
+        bg: '#ccfbf1',
+        color: '#0f766e',
+        category: 'people',
+    },
     vision: {
         label: 'Vision Detection',
         icon: Visibility,
@@ -212,6 +229,7 @@ const CATEGORIES = [
 // simply skips the send (see sendAlertWithConfig), so listing it here is safe.
 const SMS_ELIGIBLE_SCRIPTS = new Set([
     'invigilator',
+    'crowd_five_invigilator', // sends under the invigilator template
     'proximity',
     'server',
     'intruder',

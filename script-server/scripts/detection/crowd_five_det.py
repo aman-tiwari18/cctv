@@ -17,15 +17,17 @@ logger = logging.getLogger(__name__)
 
 # ================= CONFIG ==================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(BASE_DIR, "models", "yolov10m.pt")
+# UNIFIED_PERSON_MODEL=finetuned -> the fine-tuned person+monitor model (person = class 0)
+from detection_models import person_model_path
+MODEL_PATH = person_model_path(os.path.join(BASE_DIR, "models", "yolov10m.pt"))
 SAVE_FOLDER = os.path.join(BASE_DIR, "results/crowd_detection_threshold")
 
 # CAMERA CLASSIFICATION: Inside Lab
 # This detection runs on cameras classified as:
 # - Computer Lab / Inside Lab / Exam Lab / Inside Classroom
-# Detects when less than 5 candidates are present in the room.
-# Fires even in empty rooms (0 < smoothed_count < 5) — an empty exam room
-# during a scheduled exam window is exactly the signal we want operators to see.
+# Detects when less than 5 persons are present in the room — seated AND
+# standing are both counted (0 < smoothed_count < 5). Zero is not a violation
+# here — the empty-room case belongs to crowd_zero.
 
 # --- Threshold ---
 COOLDOWN_TIME = int(os.environ.get("COOLDOWN_TIME", 120))              # G9: seconds between saves per camera
@@ -40,8 +42,8 @@ MIN_BOX_AREA_RATIO = 0.0006      # >= 0.06% of frame area
 MIN_BOX_AREA_ABS   = 600         # ... AND >= 600 px² absolute (rejects sub-resolution shadow noise)
 MAX_BOX_AREA_RATIO = 0.45        # Reject single boxes > 45% of frame (operator at lens, not candidate)
 
-# G4: Aspect-ratio sanity. Looser than invigilator's standing-only gate — we
-# still want to count seated candidates here. Goal: reject obviously-not-a-person shapes.
+# G4: Aspect-ratio sanity. Looser than invigilator's standing-only gate — seated
+# candidates are counted here too. Goal: reject obviously-not-a-person shapes.
 ASPECT_W_OVER_H_MAX = 1.20       # Reject very horizontal boxes (furniture mis-classified)
 ASPECT_W_OVER_H_MIN = 0.25       # Reject impossibly thin verticals
 
@@ -107,29 +109,44 @@ def _is_frame_corrupt(frame, prev_hash):
     return None, h
 
 
-def _box_weight(xyxy, frame_w, frame_h):
-    """G3 + G4 + G5: returns weighted contribution (0.0 reject, EDGE_WEIGHT edge, 1.0 full)."""
+def _shape_reject(xyxy, frame_w, frame_h):
+    """G3 + G4: returns the reject reason, or None if the box looks like a person."""
     x1, y1, x2, y2 = xyxy
     w = x2 - x1
     h = y2 - y1
     if w <= 0 or h <= 0:
-        return 0.0, 'shape_reject'
+        return 'shape_reject'
     area = w * h
     area_ratio = area / max(frame_w * frame_h, 1)
     # G3: size
     if area < MIN_BOX_AREA_ABS or area_ratio < MIN_BOX_AREA_RATIO:
-        return 0.0, 'size_reject'
+        return 'size_reject'
     if area_ratio > MAX_BOX_AREA_RATIO:
-        return 0.0, 'size_reject'
+        return 'size_reject'
     # G4: aspect
     woh = w / h
     if woh > ASPECT_W_OVER_H_MAX or woh < ASPECT_W_OVER_H_MIN:
-        return 0.0, 'aspect_reject'
-    # G5: edge — partial person at frame edge counted at EDGE_WEIGHT
+        return 'aspect_reject'
+    return None
+
+
+def _edge_weight(xyxy, frame_w, frame_h):
+    """G5: partial person at frame edge counted at EDGE_WEIGHT, else 1.0."""
+    x1, y1, x2, y2 = xyxy
     if (x1 <= EDGE_MARGIN_PX or y1 <= EDGE_MARGIN_PX or
         x2 >= frame_w - EDGE_MARGIN_PX or y2 >= frame_h - EDGE_MARGIN_PX):
-        return EDGE_WEIGHT, 'edge'
-    return 1.0, None
+        return EDGE_WEIGHT
+    return 1.0
+
+
+def _box_weight(xyxy, frame_w, frame_h):
+    """G3 + G4 + G5: returns weighted contribution (0.0 reject, EDGE_WEIGHT edge, 1.0 full).
+    Every person counts — seated or standing."""
+    reason = _shape_reject(xyxy, frame_w, frame_h)
+    if reason is not None:
+        return 0.0, reason
+    weight = _edge_weight(xyxy, frame_w, frame_h)
+    return weight, ('edge' if weight < 1.0 else None)
 
 
 def _iomin_dedup(detections):

@@ -28,6 +28,11 @@ const TYPE_MAP = {
     entry_exit_detection: 'entry_exit',
     invigilator_detection: 'invigilator',
 
+    // ✅ Invigilator static in a lab with fewer than 5 candidates — same SOP alert
+    // ("invigilator not moving"), so it sends under the invigilator template.
+    crowd_five_invigilator: 'invigilator',
+    crowd_five_invigilator_detection: 'invigilator',
+
     // ✅ Phone
     phone: 'phone',
     phone_detection: 'phone',

@@ -16,7 +16,9 @@ logger = logging.getLogger(__name__)
 # ================= CONFIG ==================
 # PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
-MODEL_PATH = os.path.join(PROJECT_ROOT, "models", "yolov10m.pt")
+# UNIFIED_PERSON_MODEL=finetuned -> the fine-tuned person+monitor model (person = class 0)
+from detection_models import person_model_path
+MODEL_PATH = person_model_path(os.path.join(PROJECT_ROOT, "models", "yolov10m.pt"))
 SAVE_FOLDER = os.path.join(PROJECT_ROOT, "results/tcs_detections/server_room_detection")
 
 # CAMERA CLASSIFICATION: Server Room

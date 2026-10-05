@@ -4,7 +4,31 @@ global:
   external_labels:
     cluster: cctv
 
+# Mounted into the cctv_prometheus container as /etc/prometheus/prometheus.yml.
+# Reload after editing (no restart):  curl -X POST http://127.0.0.1:9090/-/reload
+#
+# fleet-* jobs: servers added with Fleet -> Add server. Prometheus reads them from the
+# backend registry (http_sd), so a new server is scraped within a minute of enrolling
+# and a retired one drops out — no edit here. The backend answers direct calls from
+# this host's Docker bridge only (fleetEnroll.prometheusAuthorized): no token needed.
+# The static jobs below are the servers set up by hand before the Fleet page.
 scrape_configs:
+  - job_name: fleet-workers
+    metrics_path: /metrics
+    scrape_interval: 30s
+    scrape_timeout: 20s
+    http_sd_configs:
+      - url: http://host.docker.internal:4000/prod_cctv/api/fleet/prometheus/sd?kind=workers
+        refresh_interval: 60s
+
+  - job_name: fleet-nodes
+    metrics_path: /metrics
+    scrape_interval: 30s
+    scrape_timeout: 15s
+    http_sd_configs:
+      - url: http://host.docker.internal:4000/prod_cctv/api/fleet/prometheus/sd?kind=nodes
+        refresh_interval: 60s
+
   - job_name: gpu-workers
     metrics_path: /metrics
     # 30s interval + 20s timeout tolerates occasional slow nvidia-smi

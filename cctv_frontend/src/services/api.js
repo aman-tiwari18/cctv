@@ -109,6 +109,9 @@ export const camerasAPI = {
     // Distinct classification values for the verify-dropdown.
     getClassifications: (examId) =>
         api.get(`/exams/${examId}/cameras/classifications`),
+    // Distinct region values (RTSP only) for the region filter dropdown.
+    getRegions: (examId) =>
+        api.get(`/exams/${examId}/cameras/regions`),
     // Distinct classification "runs" (vision-classification executions) for the run-picker dropdown.
     getClassificationRuns: (examId) =>
         api.get(`/exams/${examId}/cameras/classification-runs`),

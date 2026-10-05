@@ -53,6 +53,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# RF-DETR's deformable attention makes torch JIT-compile a kernel with NVRTC, which
+# dlopen()s libnvrtc-builtins.so.13.0 by bare name. The pip wheel ships it in
+# site-packages/nvidia/cu13/lib, which is not on the loader path, so the monitor_tamper
+# model failed with "failed to open libnvrtc-builtins.so.13.0". The loader reads
+# LD_LIBRARY_PATH only at exec, so set it here: the worker processes spawned below
+# inherit it.
+try:
+    import nvidia as _nvidia_pkg
+    _cu13_lib = os.path.join(list(_nvidia_pkg.__path__)[0], "cu13", "lib")
+    if os.path.isdir(_cu13_lib) and _cu13_lib not in os.environ.get("LD_LIBRARY_PATH", "").split(":"):
+        os.environ["LD_LIBRARY_PATH"] = ":".join(filter(None, [_cu13_lib, os.environ.get("LD_LIBRARY_PATH", "")]))
+except Exception:
+    pass
+
 # Force RTSP over TCP for OpenCV — prevents UDP data loss behind QEMU/KVM NAT
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
 
@@ -69,7 +83,7 @@ except Exception:
     pass
 
 
-def _worker_process_entry(module_name, fn_name, queue):
+def _worker_process_entry(module_name, fn_name, queue, *extra):
     """
     Trampoline for mp.Process — pickle-safe with spawn mode.
     Imports the worker module inside the child process and calls the worker function.
@@ -89,7 +103,7 @@ def _worker_process_entry(module_name, fn_name, queue):
         module = importlib.import_module(f"workers.{module_name}")
 
     fn = getattr(module, fn_name)
-    fn(queue)
+    fn(queue, *extra)
 
 
 def get_worker(analytic_name, mode="rtsp"):
@@ -115,6 +129,7 @@ def get_worker(analytic_name, mode="rtsp"):
         "strongroom":       ("strongroom_worker",          "strongroom_worker",          "strongroom_worker_hls"),
         "qp_box":           ("qp_box_det_worker",          "qp_box_det_worker",          "qp_box_det_worker_hls"),
         "furniture":        ("improper_furniture_worker",  "improper_furniture_worker",  "improper_furniture_worker_hls"),
+        "crowd_five_invigilator": ("crowd_five_invigilator_worker", "crowd_five_invigilator_worker", "crowd_five_invigilator_worker_hls"),
     }
     
     if analytic_name not in mapping:
@@ -157,6 +172,7 @@ def get_worker_info(analytic_name, mode="rtsp"):
         "strongroom":       ("strongroom_worker",          "strongroom_worker",          "strongroom_worker_hls"),
         "qp_box":           ("qp_box_det_worker",          "qp_box_det_worker",          "qp_box_det_worker_hls"),
         "furniture":        ("improper_furniture_worker",  "improper_furniture_worker",  "improper_furniture_worker_hls"),
+        "crowd_five_invigilator": ("crowd_five_invigilator_worker", "crowd_five_invigilator_worker", "crowd_five_invigilator_worker_hls"),
     }
 
     if analytic_name not in mapping:
@@ -205,6 +221,13 @@ GST_PIPELINE_TEMPLATE = os.environ.get(
     'appsink drop=true max-buffers=1 sync=false'
 )
 
+# Analytics that need a CONTINUOUS feed, not round-robin bursts: monitor_tamper follows a
+# monitor being carried and counts empty frames over seconds, which a 2-frame visit every
+# minute or two can never satisfy. Their cameras get a stream held open for the whole run
+# (SAMPLE_FPS frames/s); every other camera stays on round-robin.
+CONTINUOUS_SCRIPTS = {s.strip() for s in os.environ.get("CONTINUOUS_SCRIPTS", "monitor_tamper").split(",") if s.strip()}
+CONTINUOUS_RETRY_SECONDS = float(os.environ.get("CONTINUOUS_RETRY_SECONDS", "15"))
+
 # Sampling rate per camera. Default 5 fps = current behavior (0.2s). Scaling Path A
 # lowers this to ~3 fps via SAMPLE_FPS=3 (cooldowns are 60-360s so 3 fps is plenty).
 SAMPLE_FPS      = float(os.environ.get("SAMPLE_FPS", "5"))
@@ -227,9 +250,27 @@ STARTVIDEO_CACHE_TTL = float(os.environ.get("STARTVIDEO_CACHE_TTL", "180"))
 _ACTIVE_CHILD_PROCESSES = set()
 _ACTIVE_CHILD_LOCK = threading.Lock()
 
-DSS_USER = "system"
-DSS_PASS = "Sasd@12345"
-# DSS_PASS = "Sasd@12345"
+# Camview/DSS login, shared with camview_token_server.py; set in script-server/.env.
+DSS_USER = os.environ.get("CAMVIEW_AUTH_USER", "system")
+DSS_PASS = os.environ.get("CAMVIEW_AUTH_PASS", "")
+
+# Camview DVRs allow ONE active session per username: every new login kills the
+# previous token. So all tokens come from the token coordination server on
+# worker-0 (camview_token_server.py) — one session per DVR for the whole fleet,
+# kept alive there — exactly like vision_classification_rtsp.py. Detection used
+# to log in directly from every worker/process (and re-login every 5 min), so
+# each login killed the session the others were streaming with.
+# Set CAMVIEW_TOKEN_SERVER="" to fall back to direct login (single-host only).
+_WORKER_ID = os.environ.get("WORKER_ID", "worker-0")
+CAMVIEW_TOKEN_SERVER = os.environ.get(
+    "CAMVIEW_TOKEN_SERVER",
+    "http://localhost:8090" if _WORKER_ID in ("worker-0", "") else "http://192.168.19.30:8090",
+).rstrip("/")
+# How long a process reuses a token from the server before asking again. Short, so a
+# re-login on the server reaches every worker within seconds (a 401 refreshes at once).
+TOKEN_SERVER_LOCAL_TTL = float(os.environ.get("TOKEN_SERVER_LOCAL_TTL", "20"))
+# After the server reports a DVR as unavailable (auth failed / locked), don't ask again for this long.
+TOKEN_SERVER_FAIL_TTL = float(os.environ.get("TOKEN_SERVER_FAIL_TTL", "30"))
 
 # ================= CRITICAL FIX: Shared disk-based token cache =================
 TOKEN_CACHE_FILE = os.path.join(PROJECT_ROOT, "server_tokens.json")
@@ -344,6 +385,7 @@ def handle_sigterm(sig, frame):
         "workers.strongroom_worker",
         "workers.qp_box_det_worker",
         "workers.improper_furniture_worker",
+        "workers.crowd_five_invigilator_worker",
     ]:
         try:
             mod = sys.modules.get(mod_name)
@@ -548,7 +590,97 @@ def _record_auth_result(server_address, token):
     _with_file_lock(_do)
 
 
+_ts_tokens = {}        # server -> (token or None, fetched_at)  — token-server mode cache
+_ts_locks = {}         # server -> Lock (one in-flight fetch per server per process)
+_ts_locks_meta = threading.Lock()
+_warn_last = {}        # key -> last warning time (rate-limited logging)
+
+
+def _warn_rl(key, msg, every=60):
+    """logger.warning at most once per `every` seconds per key (the RR loop retries constantly)."""
+    now = time.time()
+    if now - _warn_last.get(key, 0) >= every:
+        _warn_last[key] = now
+        logger.warning(msg)
+
+
+def _ts_lock(server_address):
+    with _ts_locks_meta:
+        lock = _ts_locks.get(server_address)
+        if lock is None:
+            lock = _ts_locks[server_address] = threading.Lock()
+        return lock
+
+
+def _get_token_from_server(server_address, force=False):
+    """Token for a DVR from the coordination server (cached here TOKEN_SERVER_LOCAL_TTL s).
+    None = no usable token right now (DVR locked/unreachable, or server down)."""
+    with _ts_lock(server_address):
+        tok, ts = _ts_tokens.get(server_address, (None, 0))
+        age = time.time() - ts
+        if not force:
+            if tok and age < TOKEN_SERVER_LOCAL_TTL:
+                return tok
+            if not tok and ts and age < TOKEN_SERVER_FAIL_TTL:
+                return None
+        try:
+            r = requests.get(f"{CAMVIEW_TOKEN_SERVER}/token",
+                             params={"server": server_address, **({"force": "1"} if force else {})},
+                             timeout=90)
+            tok = r.json().get("token") if r.status_code == 200 else None
+            if not tok:
+                _warn_rl(f"ts:{server_address}",
+                         f"Token server has no token for {server_address} (HTTP {r.status_code}) — DVR auth failed or locked")
+        except Exception as e:
+            tok = None
+            _warn_rl(f"ts:{server_address}", f"Token server {CAMVIEW_TOKEN_SERVER} unreachable for {server_address}: {e}")
+        _ts_tokens[server_address] = (tok, time.time())
+        return tok
+
+
+def invalidate_server_token(server_address, token):
+    """The DVR rejected `token` (HTTP 401). Drop it everywhere it could be reused, so the
+    very next get_server_token() returns the current/new session instead of the dead one.
+    Only drops it if it is still the cached token — a newer one is left alone."""
+    if not token:
+        return
+    if CAMVIEW_TOKEN_SERVER:
+        with _ts_lock(server_address):
+            if _ts_tokens.get(server_address, (None, 0))[0] == token:
+                _ts_tokens.pop(server_address, None)
+        try:
+            # The server evicts only if `token` is still its current one (no re-login storm).
+            requests.post(f"{CAMVIEW_TOKEN_SERVER}/evict",
+                          json={"server": server_address, "token": token}, timeout=5)
+        except Exception:
+            pass
+        return
+    with _local_lock:
+        if _server_tokens_local.get(server_address) == token:
+            _server_tokens_local.pop(server_address, None)
+            _server_token_timestamps_local.pop(server_address, None)
+
+    def _do():  # also the shared disk cache, or other processes keep handing it out
+        _load_token_cache()
+        if _server_tokens_local.get(server_address) == token:
+            _server_tokens_local.pop(server_address, None)
+            _server_token_timestamps_local.pop(server_address, None)
+            _save_token_cache()
+    try:
+        _with_file_lock(_do)
+    except Exception as e:
+        logger.error(f"Failed to invalidate token cache for {server_address}: {e}")
+
+
 def get_server_token(server_address):
+    """Current DSS session token for a DVR server — call it every time a token is needed
+    (it is cached; never hold on to a token across visits: sessions get replaced)."""
+    if CAMVIEW_TOKEN_SERVER:
+        return _get_token_from_server(server_address)
+    return _get_server_token_direct(server_address)
+
+
+def _get_server_token_direct(server_address):
     """
     Token management with claim-and-release file locking.
 
@@ -684,6 +816,19 @@ def extract_host_port(url):
     return host, port
 
 
+def _camera_classes_from_env(script_code):
+    """Camera types chosen on this analytic's assignment: JSON list in
+    CAMERA_CLASSIFICATIONS_<ANALYTIC> (see script_runner.py). [] = use defaults."""
+    raw = os.environ.get(f"CAMERA_CLASSIFICATIONS_{str(script_code).upper()}", "").strip()
+    if not raw:
+        return []
+    try:
+        val = json.loads(raw)
+    except ValueError:
+        val = [raw]
+    return [str(v).strip() for v in val if str(v).strip()] if isinstance(val, list) else []
+
+
 def authenticate_and_get_token(server):
     """Backwards compatibility wrapper."""
     return get_server_token(server)
@@ -735,13 +880,12 @@ def get_rtsp_from_dss(device_id, camera_no, token, server):
         r = requests.post(url, headers=headers, data=json.dumps(payload), timeout=10)
         
         if r.status_code == 401:
-            logger.debug(f"Token expired for {server}, clearing cache")
-            with _local_lock:
-                _server_tokens_local.pop(server, None)
+            _warn_rl(f"401:{server}", f"DSS session token rejected by {server} (401) — refreshing token")
+            invalidate_server_token(server, token)
             return None
 
         if r.status_code != 200:
-            logger.debug(f"StartVideo failed with status {r.status_code}")
+            _warn_rl(f"sv:{server}:{r.status_code}", f"StartVideo on {server} failed: HTTP {r.status_code}")
             return None
 
         data = r.json()
@@ -935,19 +1079,21 @@ def rtsp_producer(cam_configs, queues, pre_fetched_token=None, enabled_scripts=N
 
     consecutive_failures = 0
     MAX_CONSECUTIVE_FAILURES = 3
+    # Continuous analytics (CONTINUOUS_SCRIPTS): keep reconnecting for the whole run instead
+    # of dropping the camera after 3 failures, and keep the stream drained (see below).
+    continuous = bool(set(enabled_scripts or ()) & CONTINUOUS_SCRIPTS)
+    if continuous:
+        MAX_CONSECUTIVE_FAILURES = 10 ** 9
 
     while not STOP and consecutive_failures < MAX_CONSECUTIVE_FAILURES:
         stream_urls = []
         stream_token = None
         
         if use_dss:
-            # FIXED: Always get a fresh token before connecting. 
-            # Pre-fetched token is used as fallback, but may be stale.
-            token = pre_fetched_token
-            if token:
-                logger.debug(f"Using pre-fetched token for {label}")
-            else:
-                token = get_server_token(server)
+            # Always the CURRENT session token (cached in get_server_token). Never the
+            # pre-fetched one: once the DVR session is replaced it stays dead, and a
+            # producer reconnecting with it failed for the rest of the shift.
+            token = get_server_token(server)
             
             if not token:
                 logger.error(f"Auth failed (server might be locked) → {label}, retry in 30s")
@@ -1029,8 +1175,23 @@ def rtsp_producer(cam_configs, queues, pre_fetched_token=None, enabled_scripts=N
             last_good_frame_time = time.time()
             STREAM_DEAD_THRESHOLD = 15  # seconds without any good frame
 
+            last_push = 0.0
             while not STOP:
-                frame, is_valid = read_frame_from_capture(cap, label)
+                if continuous:
+                    # grab() every frame so we always sample the LIVE picture: reading one
+                    # frame then sleeping lets the stream's buffer back up and the feed
+                    # falls behind real time. retrieve() only the frames we hand on.
+                    if not cap.grab():
+                        frame, is_valid = None, False
+                    elif time.time() - last_push < _FRAME_INTERVAL:
+                        continue
+                    else:
+                        ok, frame = cap.retrieve()
+                        is_valid = bool(ok) and frame is not None and frame.size > 0 and frame.ndim == 3
+                        if is_valid:
+                            last_push = time.time()
+                else:
+                    frame, is_valid = read_frame_from_capture(cap, label)
 
                 if not is_valid:
                     fail_count += 1
@@ -1070,6 +1231,7 @@ def rtsp_producer(cam_configs, queues, pre_fetched_token=None, enabled_scripts=N
                         "shift_id":       shift_id,
                         "source_type":    "RTSP",   # rtsp_producer only feeds RTSP cameras
                         "enabled_scripts": enabled_scripts,
+                        "captured_at":     time.time(),
                     }
                 else:
                     # Legacy path: per-script queues, tuple packet.
@@ -1085,7 +1247,9 @@ def rtsp_producer(cam_configs, queues, pre_fetched_token=None, enabled_scripts=N
                 
                 # Sampling rate (Scaling Path A): SAMPLE_FPS, default 3 fps. Cooldowns are
                 # 60-360s so higher fps adds no reportable value, only GPU/decode load.
-                time.sleep(_FRAME_INTERVAL)
+                # (Continuous mode paces itself by grabbing, see above.)
+                if not continuous:
+                    time.sleep(_FRAME_INTERVAL)
 
             cap.release()
             
@@ -1103,7 +1267,7 @@ def rtsp_producer(cam_configs, queues, pre_fetched_token=None, enabled_scripts=N
                 f"(failure {consecutive_failures}/{MAX_CONSECUTIVE_FAILURES})"
             )
             if consecutive_failures < MAX_CONSECUTIVE_FAILURES:
-                time.sleep(10)
+                time.sleep(CONTINUOUS_RETRY_SECONDS if continuous else 10)
 
     # Do not signal shared workers from an individual camera producer.
     # The RTSP pipeline owns the shared worker lifecycle and sends the
@@ -1114,14 +1278,23 @@ def rtsp_producer(cam_configs, queues, pre_fetched_token=None, enabled_scripts=N
 # ============================================================
 # RTSP PIPELINE RUNNER — FIXED: Better concurrency and lifecycle management
 # ============================================================
-def run_rtsp_pipeline(camera_group, max_concurrent=MAX_CONCURRENT):
+def run_rtsp_pipeline(camera_group, max_concurrent=MAX_CONCURRENT, unified=None):
     """
     FIXED: 
     - Pre-authenticates per unique server ONCE in the parent process
     - Uses responsive join() loop for clean shutdown
     - Limits concurrent producers to prevent system overload
     - No longer mixes HLS into RTSP pipeline
+
+    `unified` defaults to UNIFIED_DETECTOR. In unified mode the analytics the shared
+    detector serves (UNIFIED_SCRIPTS) go to the unified worker; the rest (tamper /
+    inversion — classical CV, no model boxes) get their own per-script worker, fed
+    from the SAME capture (round-robin visit or producer), so they add no extra DVR
+    streams. Before this they were sent to the unified worker, which has no
+    evaluator for them, so they silently never ran on RTSP.
     """
+    if unified is None:
+        unified = UNIFIED_DETECTOR
     
     # 1. Identify unique servers and pre-auth for each
     unique_servers = set()
@@ -1133,6 +1306,9 @@ def run_rtsp_pipeline(camera_group, max_concurrent=MAX_CONCURRENT):
         if server and not str(c.get("cctv_url", "")).startswith("rtsp://"):
             unique_servers.add(server)
     
+    # Warm-up / reachability check only: producers and round-robin visits call
+    # get_server_token() themselves each time, so a session replaced mid-shift is
+    # picked up — tokens in this map are NOT reused for streaming.
     server_tokens_map = {}
     for server in unique_servers:
         if STOP:
@@ -1152,23 +1328,28 @@ def run_rtsp_pipeline(camera_group, max_concurrent=MAX_CONCURRENT):
     script_queues = {}      # legacy: per-script queue
     unified_queue  = None   # unified: single shared queue feeding the unified worker
 
-    if UNIFIED_DETECTOR:
-        # Scaling Path A: ONE shared YOLO worker for ALL analytics.
+    unified_scripts = (unique_scripts & UNIFIED_SCRIPTS) if unified else set()
+    per_script = unique_scripts - unified_scripts   # all of them in legacy mode
+
+    if unified_scripts:
+        # Scaling Path A: ONE shared worker for every model-based analytic.
         # Big feed buffer so a large RR pool bursting frames doesn't drop them before the GPU.
         unified_queue = mp.Queue(maxsize=int(os.environ.get("UNIFIED_QUEUE_SIZE", "256")))
         p = mp.Process(
             target=_worker_process_entry,
-            args=("unified_detector", "unified_worker", unified_queue),
+            args=("unified_detector", "unified_worker", unified_queue, sorted(unified_scripts)),
             name="Worker-unified",
             daemon=True
         )
         p.start()
         _register_child_process(p)
         worker_processes.append(p)
-        logger.info(f"Started UNIFIED detector worker (pid={p.pid}) for analytics: {sorted(unique_scripts)}")
-    else:
-        # Legacy: one model-per-analytic worker.
-        for script in unique_scripts:
+        logger.info(f"Started UNIFIED detector worker (pid={p.pid}) for analytics: {sorted(unified_scripts)}")
+
+    if per_script:
+        # One worker per analytic: every analytic in legacy mode; in unified mode only the
+        # classical-CV ones (tamper / inversion), fed from the shared capture below.
+        for script in per_script:
             module_name, fn_name = get_worker_info(script, mode="rtsp")
             if not module_name:
                 logger.error(f"Could not find worker info for {script}")
@@ -1188,9 +1369,9 @@ def run_rtsp_pipeline(camera_group, max_concurrent=MAX_CONCURRENT):
             worker_processes.append(p)
             logger.info(f"Started shared worker for: {script} (pid={p.pid})")
 
-        if not script_queues:
-            logger.error("No workers could be started — aborting RTSP pipeline. Check worker imports.")
-            return
+    if unified_queue is None and not script_queues:
+        logger.error("No workers could be started — aborting RTSP pipeline. Check worker imports.")
+        return
 
     # 4. Group cameras by label for producers
     grouped = {}
@@ -1200,11 +1381,25 @@ def run_rtsp_pipeline(camera_group, max_concurrent=MAX_CONCURRENT):
 
     logger.info(f"Launching producers for {len(grouped)} camera groups (max_concurrent={max_concurrent})")
 
-    # 5a. ROUND-ROBIN mode (Scaling Path A): rotate all cameras over a bounded pool.
-    rr_mode = ROUND_ROBIN and UNIFIED_DETECTOR and unified_queue is not None
+    # 5a. ROUND-ROBIN mode (Scaling Path A): rotate cameras over a bounded pool — except
+    # cameras running a CONTINUOUS_SCRIPTS analytic (monitor_tamper), which get a
+    # persistent producer (5b) so that analytic sees a steady feed.
+    rr_mode = ROUND_ROBIN and unified
+    rr_grouped, continuous_grouped = dict(grouped), {}
     if rr_mode:
-        logger.info(f"ROUND-ROBIN: {len(grouped)} cameras over pool of {RR_POOL_SIZE} slots")
-        _run_round_robin(grouped, server_tokens_map, unified_queue)
+        for label, configs in grouped.items():
+            if {c.get("script_code") for c in configs} & CONTINUOUS_SCRIPTS:
+                continuous_grouped[label] = rr_grouped.pop(label)
+    rr_thread = None
+    if rr_mode and rr_grouped:
+        logger.info(f"ROUND-ROBIN: {len(rr_grouped)} cameras over pool of {RR_POOL_SIZE} slots")
+        rr_thread = threading.Thread(target=_run_round_robin,
+                                     args=(rr_grouped, server_tokens_map, unified_queue, script_queues),
+                                     name="RR-driver", daemon=True)
+        rr_thread.start()
+    if continuous_grouped:
+        logger.info(f"CONTINUOUS: {len(continuous_grouped)} cameras get a persistent stream "
+                    f"({sorted(CONTINUOUS_SCRIPTS)}; {SAMPLE_FPS:g} frames/s each)")
 
     # 5b. Continuous-producer mode (default): one persistent producer per camera.
     sem = threading.Semaphore(max_concurrent)
@@ -1223,13 +1418,16 @@ def run_rtsp_pipeline(camera_group, max_concurrent=MAX_CONCURRENT):
                 server = urlparse(str(server)).netloc
             pre_token = server_tokens_map.get(server) if server else None
 
-            if UNIFIED_DETECTOR:
-                # One queue; tell the producer which analytics this camera runs.
-                enabled_scripts = sorted({cfg.get("script_code") for cfg in configs if cfg.get("script_code")})
-                if not enabled_scripts:
-                    logger.warning(f"No script_code for camera {label} — skipping")
+            if unified:
+                # Unified queue (with the camera's model analytics) + the per-script queues
+                # of its classical-CV analytics; all fed from this one capture.
+                cam_scripts = {cfg.get("script_code") for cfg in configs if cfg.get("script_code")}
+                enabled_scripts = sorted(cam_scripts & UNIFIED_SCRIPTS)
+                producer_queues = ([unified_queue] if enabled_scripts else []) + [
+                    script_queues[s] for s in sorted(cam_scripts) if s in script_queues]
+                if not producer_queues:
+                    logger.warning(f"No worker for camera {label} ({sorted(cam_scripts)}) — skipping")
                     return
-                producer_queues = [unified_queue]
                 producer_args = (configs, producer_queues, pre_token, enabled_scripts)
             else:
                 producer_queues = []
@@ -1259,8 +1457,8 @@ def run_rtsp_pipeline(camera_group, max_concurrent=MAX_CONCURRENT):
             _unregister_child_process(proc)
 
     threads = []
-    for label, configs in grouped.items():
-        if STOP or rr_mode:   # rr_mode already drove all cameras above; skip continuous producers
+    for label, configs in (continuous_grouped if rr_mode else grouped).items():
+        if STOP:
             break
         t = threading.Thread(target=start_producer, args=(label, configs), daemon=True)
         t.start()
@@ -1269,21 +1467,18 @@ def run_rtsp_pipeline(camera_group, max_concurrent=MAX_CONCURRENT):
 
     for t in threads:
         t.join()
+    # Round-robin runs until STOP; wait for it too before stopping the workers.
+    if rr_thread is not None:
+        while rr_thread.is_alive() and not STOP:
+            rr_thread.join(timeout=1.0)
 
     # 6. Clean up workers
     logger.info("All producers finished. Stopping workers...")
-    if UNIFIED_DETECTOR:
-        if unified_queue is not None:
-            try:
-                unified_queue.put(None)
-            except Exception:
-                pass
-    else:
-        for script, q in script_queues.items():
-            try:
-                q.put(None)
-            except Exception:
-                pass
+    for q in ([unified_queue] if unified_queue is not None else []) + list(script_queues.values()):
+        try:
+            q.put(None)
+        except Exception:
+            pass
 
     for p in worker_processes:
         if p.is_alive():
@@ -1308,14 +1503,21 @@ def get_rtsp_cached(label, device_id, camera_no, token, server):
     if STARTVIDEO_CACHE_TTL > 0:
         with _startvideo_cache_lock:
             hit = _startvideo_cache.get(label)
-        if hit and (time.time() - hit[2]) < STARTVIDEO_CACHE_TTL:
+        # Only reuse a StartVideo made with the current session token — its stream
+        # token dies with the session it came from.
+        if hit and hit[3] == token and (time.time() - hit[2]) < STARTVIDEO_CACHE_TTL:
             return hit[0], hit[1]
     result = get_rtsp_from_dss(device_id, camera_no, token, server)
     if result and STARTVIDEO_CACHE_TTL > 0:
         urls, stream_token = result
         with _startvideo_cache_lock:
-            _startvideo_cache[label] = (urls, stream_token, time.time())
+            _startvideo_cache[label] = (urls, stream_token, time.time(), token)
     return result
+
+
+def drop_rtsp_cache(label):
+    with _startvideo_cache_lock:
+        _startvideo_cache.pop(label, None)
 
 
 def _rr_resolve(first):
@@ -1342,8 +1544,12 @@ def _get_server_sem(server: str) -> threading.Semaphore:
         return sem
 
 
-def _rr_capture_once(label, configs, enabled_scripts, server_tokens_map, unified_queue):
+def _rr_capture_once(label, configs, enabled_scripts, server_tokens_map, unified_queue, side_queues=()):
     """One round-robin visit: connect, grab a short burst, push packets, disconnect.
+
+    Each frame goes to the unified queue (if the camera has model analytics —
+    `enabled_scripts`) and to every queue in `side_queues` (the camera's per-script
+    classical-CV workers), so one stream open serves all of the camera's analytics.
 
     Returns True if the visit actually pulled frames, False if it skipped (DVR slot busy or
     no usable stream) — the caller backs off briefly on False to avoid a hot spin.
@@ -1368,7 +1574,9 @@ def _rr_capture_once(label, configs, enabled_scripts, server_tokens_map, unified
     try:
         stream_urls = []
         if use_dss:
-            token = server_tokens_map.get(server) or get_server_token(server)
+            # Current token on every visit (was: the token pre-fetched at pipeline
+            # start, reused for the whole shift → every visit failed once it died).
+            token = get_server_token(server)
             if not token:
                 return False
             result = get_rtsp_cached(label, device_id, camera_no, token, server)
@@ -1401,27 +1609,35 @@ def _rr_capture_once(label, configs, enabled_scripts, server_tokens_map, unified
                     "shift_id":        shift_id,
                     "tc_code":         tc_code,
                     "enabled_scripts": enabled_scripts,
+                    "captured_at":     time.time(),
                 }
-                try:
-                    unified_queue.put(packet, timeout=0.1)
-                except queue_module.Full:
-                    pass
+                for q in ([unified_queue] if enabled_scripts else []) + list(side_queues):
+                    try:
+                        q.put(packet, timeout=0.1)
+                    except queue_module.Full:
+                        pass
                 grabbed += 1
             cap.release()
             if grabbed:
                 return True  # success on this URL; done for this visit
+        if use_dss:
+            drop_rtsp_cache(label)  # cached stream URLs didn't open — StartVideo afresh next visit
         return False
     finally:
         sem.release()
 
 
-def _run_round_robin(grouped, server_tokens_map, unified_queue):
-    """Bounded pool of capture slots; cameras rotate through a shared queue (fair, no starvation)."""
+def _run_round_robin(grouped, server_tokens_map, unified_queue, script_queues=None):
+    """Bounded pool of capture slots; cameras rotate through a shared queue (fair, no starvation).
+    `script_queues` = per-script worker queues (tamper / inversion) fed from the same visits."""
     import collections
-    work = collections.deque(
-        (label, configs, sorted({c.get("script_code") for c in configs if c.get("script_code")}))
-        for label, configs in grouped.items()
-    )
+    script_queues = script_queues or {}
+    work = collections.deque()
+    for label, configs in grouped.items():
+        cam_scripts = {c.get("script_code") for c in configs if c.get("script_code")}
+        enabled = sorted(cam_scripts & UNIFIED_SCRIPTS) if unified_queue is not None else []
+        side = [script_queues[s] for s in sorted(cam_scripts) if s in script_queues]
+        work.append((label, configs, enabled, side))
     work_lock = threading.Lock()
 
     def slot_loop():
@@ -1431,11 +1647,11 @@ def _run_round_robin(grouped, server_tokens_map, unified_queue):
                     return
                 item = work[0]
                 work.rotate(-1)   # move head to tail → fair rotation
-            label, configs, enabled = item
-            if not enabled:
+            label, configs, enabled, side = item
+            if not enabled and not side:
                 continue
             try:
-                got = _rr_capture_once(label, configs, enabled, server_tokens_map, unified_queue)
+                got = _rr_capture_once(label, configs, enabled, server_tokens_map, unified_queue, side)
             except Exception as e:
                 logger.error(f"[RR] capture error {label}: {e}")
                 got = False
@@ -1472,6 +1688,7 @@ def _run_round_robin(grouped, server_tokens_map, unified_queue):
 # _save_and_report already speaks HLS).
 #
 # Set UNIFIED_HLS=0 for an instant rollback to the per-script path below.
+# UNIFIED_SCRIPTS (below) is also what run_rtsp_pipeline uses to split RTSP.
 UNIFIED_HLS = os.environ.get("UNIFIED_HLS", "1") == "1"
 
 # Analytics the shared detector can serve. MUST stay in sync with
@@ -1479,10 +1696,17 @@ UNIFIED_HLS = os.environ.get("UNIFIED_HLS", "1") == "1"
 # parent process doesn't pull in torch/ultralytics just to read the keys.
 # 'tamper' and 'inversion' are classical-CV checks that consume no YOLO boxes,
 # so they deliberately stay on their own per-script capture path.
-UNIFIED_HLS_SCRIPTS = {
+# Classical-CV analytics (no model boxes) that, on HLS, run on their queue worker
+# fed from the unified capture — one stream open per camera for everything.
+HLS_SIDE_SCRIPTS = {"tamper", "inversion"}
+
+UNIFIED_SCRIPTS = {
     "crowd", "crowd_zero", "crowd_five", "proximity", "intruder", "entry_exit",
     "server", "phone", "qp_box", "strongroom", "invigilator", "blind_spot",
-    "crowd_biometric", "furniture",
+    "crowd_biometric", "furniture", "crowd_five_invigilator",
+    # Unified-only: no per-script worker, so it doesn't run with
+    # UNIFIED_DETECTOR=0 / UNIFIED_HLS=0.
+    "monitor_tamper",
 }
 
 # A visit opens the stream, grabs a short burst and releases. RTSP bursts 2
@@ -1519,9 +1743,34 @@ HLS_PERSIST_PUSH_INTERVAL = float(os.environ.get("HLS_PERSIST_PUSH_INTERVAL", "3
 HLS_PERSIST_RECONNECT_BACKOFF = float(os.environ.get("HLS_PERSIST_RECONNECT_BACKOFF", "10.0"))
 
 
-def _hls_unified_persistent(cfg, stop_event, unified_queue, state=None):
+def _hls_push(packet, cfg, unified_queue, side_queues, timeout):
+    """Send one captured HLS frame to the unified worker (if the camera has model
+    analytics) and to the per-script worker of each of its classical-CV analytics
+    (tamper / inversion). Returns True if any worker took it."""
+    delivered = False
+    if cfg.get("enabled_scripts") and unified_queue is not None:
+        try:
+            unified_queue.put(packet, timeout=timeout)
+            delivered = True
+        except queue_module.Full:
+            with _hls_unified_stats_lock:
+                _hls_unified_stats["dropped"] += 1
+    for script in cfg.get("side_scripts") or ():
+        q = (side_queues or {}).get(script)
+        if q is None:
+            continue
+        try:
+            q.put(packet, timeout=timeout)
+            delivered = True
+        except queue_module.Full:
+            pass
+    return delivered
+
+
+def _hls_unified_persistent(cfg, stop_event, unified_queue, side_queues=None, state=None):
     """Hold one HLS stream open for the whole shift, pushing a sampled frame
-    every HLS_PERSIST_PUSH_INTERVAL seconds into the unified queue."""
+    every HLS_PERSIST_PUSH_INTERVAL seconds into the unified queue (and the
+    camera's tamper / inversion queues)."""
     from tcs_hls_utils import extract_hls_streaming_url, test_hls_stream, open_hls_stream
 
     ch_no    = cfg.get("ch_no") or cfg.get("camera_no") or cfg.get("camera_id")
@@ -1530,7 +1779,7 @@ def _hls_unified_persistent(cfg, stop_event, unified_queue, state=None):
     tc_code  = str(cfg.get("tc_code") or cfg.get("TC_CODE") or "")
     scripts  = cfg.get("enabled_scripts") or []
     initial  = cfg.get("cctv_url") or cfg.get("stream_url") or cfg.get("url", "")
-    if not initial or not scripts:
+    if not initial or not (scripts or cfg.get("side_scripts")):
         return
 
     while not stop_event.is_set():
@@ -1561,23 +1810,20 @@ def _hls_unified_persistent(cfg, stop_event, unified_queue, state=None):
                     if not ok or frame is None:
                         break
                     last_push = now
-                    try:
-                        unified_queue.put({
-                            "frame":           frame,
-                            "device_id":       cfg.get("camera_id", ""),
-                            "ch_no":           ch_no,
-                            "camera_no":       ch_no,
-                            "exam_id":         exam_id,
-                            "shift_id":        shift_id,
-                            "tc_code":         tc_code,
-                            "source_type":     "HLS",
-                            "enabled_scripts": scripts,
-                        }, timeout=0.5)
+                    if _hls_push({
+                        "frame":           frame,
+                        "device_id":       cfg.get("camera_id", ""),
+                        "ch_no":           ch_no,
+                        "camera_no":       ch_no,
+                        "exam_id":         exam_id,
+                        "shift_id":        shift_id,
+                        "tc_code":         tc_code,
+                        "source_type":     "HLS",
+                        "enabled_scripts": scripts,
+                        "captured_at":     now,
+                    }, cfg, unified_queue, side_queues, timeout=0.5):
                         with _hls_unified_stats_lock:
                             _hls_unified_stats["pushed"] += 1
-                    except queue_module.Full:
-                        with _hls_unified_stats_lock:
-                            _hls_unified_stats["dropped"] += 1
             finally:
                 with _hls_unified_stats_lock:
                     _hls_unified_stats["streams_live"] -= 1
@@ -1595,7 +1841,7 @@ def _hls_unified_persistent(cfg, stop_event, unified_queue, state=None):
             stop_event.wait(HLS_PERSIST_RECONNECT_BACKOFF)
 
 
-def _hls_unified_capture(cfg, stop_event, unified_queue, state=None):
+def _hls_unified_capture(cfg, stop_event, unified_queue, side_queues=None, state=None):
     """One HLS round-robin visit: resolve, open, burst frames into the unified
     queue, release. Signature matches hls_scheduler's camera_fn contract
     (``state`` is optional so the legacy non-RR branch can call it too).
@@ -1614,7 +1860,7 @@ def _hls_unified_capture(cfg, stop_event, unified_queue, state=None):
     tc_code  = str(cfg.get("tc_code") or cfg.get("TC_CODE") or "")
     scripts  = cfg.get("enabled_scripts") or []
     initial  = cfg.get("cctv_url") or cfg.get("stream_url") or cfg.get("url", "")
-    if not initial or not scripts:
+    if not initial or not (scripts or cfg.get("side_scripts")):
         return False
 
     # Reuse the resolved .m3u8 while it is still fresh; re-resolve on a miss or
@@ -1648,23 +1894,20 @@ def _hls_unified_capture(cfg, stop_event, unified_queue, state=None):
             # so the analytics see genuinely different moments.
             if frames_read % max(1, HLS_UNIFIED_SAMPLE_EVERY) != 0:
                 continue
-            try:
-                unified_queue.put({
-                    "frame":           frame.copy(),
-                    "device_id":       cfg.get("camera_id", ""),
-                    "ch_no":           ch_no,
-                    "camera_no":       ch_no,      # HLS: camera_no IS the ch_code
-                    "exam_id":         exam_id,
-                    "shift_id":        shift_id,
-                    "tc_code":         tc_code,
-                    "source_type":     "HLS",      # routes to report_to_db_hls
-                    "enabled_scripts": scripts,
-                }, timeout=0.5)
-                pushed += 1
-            except queue_module.Full:
-                with _hls_unified_stats_lock:
-                    _hls_unified_stats["dropped"] += 1
+            if not _hls_push({
+                "frame":           frame.copy(),
+                "device_id":       cfg.get("camera_id", ""),
+                "ch_no":           ch_no,
+                "camera_no":       ch_no,      # HLS: camera_no IS the ch_code
+                "exam_id":         exam_id,
+                "shift_id":        shift_id,
+                "tc_code":         tc_code,
+                "source_type":     "HLS",      # routes to report_to_db_hls
+                "enabled_scripts": scripts,
+                "captured_at":     time.time(),
+            }, cfg, unified_queue, side_queues, timeout=0.5):
                 break
+            pushed += 1
         if pushed:
             with _hls_unified_stats_lock:
                 _hls_unified_stats["pushed"] += pushed
@@ -1677,47 +1920,80 @@ def run_hls_pipeline(camera_group):
     if not (UNIFIED_DETECTOR and UNIFIED_HLS):
         return _run_hls_pipeline_per_script(camera_group)
 
-    # Split: analytics the shared detector serves vs the classical-CV ones.
-    unified_cams, other_cams = [], []
+    # Split: analytics the shared detector serves; classical-CV ones (tamper /
+    # inversion) that run on their own queue worker but share the SAME capture;
+    # and anything else, which keeps its own per-script HLS path.
+    unified_cams, side_cams, other_cams = [], [], []
     for c in camera_group:
-        (unified_cams if c.get("script_code") in UNIFIED_HLS_SCRIPTS else other_cams).append(c)
+        sc = c.get("script_code")
+        if sc in UNIFIED_SCRIPTS:
+            unified_cams.append(c)
+        elif sc in HLS_SIDE_SCRIPTS:
+            side_cams.append(c)
+        else:
+            other_cams.append(c)
 
-    # Collapse the unified set to ONE config per camera carrying every analytic
-    # enabled for it — this is where the 4.3x reduction in stream opens comes from.
+    # Collapse to ONE config per camera carrying every analytic enabled for it —
+    # model analytics in enabled_scripts, classical-CV ones in side_scripts. One
+    # stream open per visit then serves all of them.
     by_camera, order = {}, []
-    for c in unified_cams:
+    for c in unified_cams + side_cams:
         key = str(c.get("ch_no") or c.get("camera_no") or c.get("camera_id"))
         entry = by_camera.get(key)
         if entry is None:
             entry = dict(c)
-            entry["enabled_scripts"] = []
+            entry["enabled_scripts"], entry["side_scripts"] = [], []
             by_camera[key] = entry
             order.append(key)
         sc = c.get("script_code")
-        if sc and sc not in entry["enabled_scripts"]:
-            entry["enabled_scripts"].append(sc)
+        bucket = entry["enabled_scripts"] if sc in UNIFIED_SCRIPTS else entry["side_scripts"]
+        if sc and sc not in bucket:
+            bucket.append(sc)
     unified_configs = [by_camera[k] for k in order]
 
     threads = []
+    worker_queues = []
 
     if unified_configs:
         all_scripts = sorted({s for c in unified_configs for s in c["enabled_scripts"]})
+        side_scripts = sorted({s for c in unified_configs for s in c["side_scripts"]})
         logger.info(
-            "HLS UNIFIED: %d analytic-camera pairs -> %d distinct cameras (%.1fx fewer opens); analytics: %s",
-            len(unified_cams), len(unified_configs),
-            len(unified_cams) / max(len(unified_configs), 1), all_scripts,
+            "HLS UNIFIED: %d analytic-camera pairs -> %d distinct cameras (%.1fx fewer opens); "
+            "model analytics: %s; classical-CV on the same capture: %s",
+            len(unified_cams) + len(side_cams), len(unified_configs),
+            (len(unified_cams) + len(side_cams)) / max(len(unified_configs), 1), all_scripts, side_scripts,
         )
 
-        unified_queue = mp.Queue(maxsize=int(os.environ.get("UNIFIED_QUEUE_SIZE", "256")))
-        p = mp.Process(
-            target=_worker_process_entry,
-            args=("unified_detector", "unified_worker", unified_queue),
-            name="Worker-unified-hls",
-            daemon=True,
-        )
-        p.start()
-        _register_child_process(p)
-        logger.info("Started UNIFIED detector worker (pid=%s) for HLS analytics: %s", p.pid, all_scripts)
+        unified_queue = None
+        if all_scripts:
+            unified_queue = mp.Queue(maxsize=int(os.environ.get("UNIFIED_QUEUE_SIZE", "256")))
+            p = mp.Process(
+                target=_worker_process_entry,
+                args=("unified_detector", "unified_worker", unified_queue, all_scripts),
+                name="Worker-unified-hls",
+                daemon=True,
+            )
+            p.start()
+            _register_child_process(p)
+            worker_queues.append(unified_queue)
+            logger.info("Started UNIFIED detector worker (pid=%s) for HLS analytics: %s", p.pid, all_scripts)
+
+        # Tamper / inversion: their queue-consuming worker (the same one RTSP uses),
+        # fed from the unified capture above instead of opening their own streams.
+        side_queues = {}
+        for script in side_scripts:
+            module_name, fn_name = get_worker_info(script, mode="rtsp")
+            if not module_name:
+                logger.error(f"Could not find worker info for {script}")
+                continue
+            q = mp.Queue(maxsize=int(os.environ.get("UNIFIED_QUEUE_SIZE", "256")))
+            p = mp.Process(target=_worker_process_entry, args=(module_name, fn_name, q),
+                           name=f"Worker-{script}-hls", daemon=True)
+            p.start()
+            _register_child_process(p)
+            side_queues[script] = q
+            worker_queues.append(q)
+            logger.info("Started %s worker (pid=%s) on the unified HLS capture", script, p.pid)
 
         from workers.hls_scheduler import run_hls_cameras, HLS_RR_POOL_SIZE, HLS_RR_ENABLED
         # The scheduler holds streams open when every camera fits the pool. Use
@@ -1730,13 +2006,13 @@ def run_hls_pipeline(camera_group):
         t = threading.Thread(
             target=run_hls_cameras,
             args=(unified_configs, stop_event, capture_fn),
-            kwargs={"label": "UnifiedHLS", "extra_args": (unified_queue,)},
+            kwargs={"label": "UnifiedHLS", "extra_args": (unified_queue, side_queues)},
             daemon=True,
         )
         t.start()
         threads.append(t)
 
-    # Classical-CV analytics (inversion / tamper) keep their own capture path.
+    # Anything the unified capture doesn't serve keeps its own per-script path.
     grouped = {}
     for c in other_cams:
         grouped.setdefault(c.get("script_code", ""), []).append(c)
@@ -1750,6 +2026,11 @@ def run_hls_pipeline(camera_group):
 
     for t in threads:
         t.join()
+    for q in worker_queues:
+        try:
+            q.put(None)
+        except Exception:
+            pass
 
 
 def _run_hls_pipeline_per_script(camera_group):
@@ -1798,6 +2079,13 @@ def main():
                 "link_type":   link_type,
                 "script_code": script_code,
             }
+            # The assignment's "Camera Type" selection for THIS analytic (set by
+            # script_runner.py as CAMERA_CLASSIFICATIONS_<ANALYTIC>); none = the
+            # analytic's built-in default camera types.
+            custom_cls = _camera_classes_from_env(script_code)
+            if custom_cls:
+                execution["camera_classifications"] = custom_cls
+                logger.info(f"[CameraLoader] {script_code}: camera types from the assignment = {custom_cls}")
             cameras = load_cameras_for_execution(execution)
             if cameras: 
                 results.append((execution, cameras))

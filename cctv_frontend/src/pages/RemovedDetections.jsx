@@ -40,6 +40,7 @@ import {
   Warning,
   GridView, LocationCity, Close, Memory, ArrowBack, Event,
   EventSeat,
+  DesktopAccessDisabled,
 } from '@mui/icons-material';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { API_BASE_1 } from '../constants/data';
@@ -58,6 +59,8 @@ const TYPE_META = {
   phone: { label: 'Phone', color: '#465a38', bg: '#e8ece5' },
   blind_spot: { label: 'Blind Spot', color: '#b0a850', bg: '#f3f2e4' },
   furniture: { label: 'Improper Furniture', color: '#c2410c', bg: '#fff1e6' },
+  monitor_tamper: { label: 'Monitor Tampering', color: '#6d28d9', bg: '#f3e8ff' },
+  crowd_five_invigilator: { label: 'Crowd < 5 + Invigilator Static', color: '#0f766e', bg: '#ccfbf1' },
   invigilator: { label: 'Invigilator', color: '#00bfcf', bg: '#e0f7fa' },
   inversion: { label: 'Camera Inversion', color: '#7a86b4', bg: '#eceef5' },
   tamper: { label: 'Camera Tampering', color: '#00c8d4', bg: '#e0f8fa' },
@@ -82,17 +85,13 @@ const TYPE_ICONS = {
   phone: Smartphone,
   blind_spot: VisibilityOff,
   furniture: EventSeat,
+  monitor_tamper: DesktopAccessDisabled,
+  crowd_five_invigilator: Visibility,
   invigilator: Visibility,
   inversion: FlipCameraAndroid,
   tamper: SecurityUpdateWarning,
   default: CameraAlt,
 };
-
-const SOURCE_OPTIONS = [
-  { value: '', label: 'All Sources' },
-  { value: 'hls', label: 'HLS' },
-  { value: 'rtsp', label: 'RTSP' },
-];
 
 const formatDateDDMMYYYY = (dateInput) => {
   const date = typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateInput)
@@ -114,6 +113,17 @@ const parseDateForQuery = (value) => {
 };
 
 const todayDate = formatDateDDMMYYYY(new Date());
+
+// Date filter to apply when an exam is picked: today while the exam is running,
+// otherwise no date (all of that exam's days). Same rule as ClientDetections.
+const dateFilterForExam = (exam) => {
+  if (!exam?.start_date) return '';
+  const now = new Date();
+  const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const start = String(exam.start_date).slice(0, 10);
+  const end = String(exam.end_date || exam.start_date).slice(0, 10);
+  return start <= todayIso && todayIso <= end ? todayDate : '';
+};
 
 // "Removed" pill replaces the destructive button from ClientDetections. The
 // component intentionally has no click handler — this page is read-only.
@@ -178,6 +188,19 @@ function DetectionCard({ item, onClick }) {
             sx={{
               position: 'absolute', bottom: 8, right: 8,
               bgcolor: 'rgba(15, 23, 42, 0.72)', color: '#fff',
+              fontWeight: 700, fontSize: '0.65rem',
+            }}
+          />
+        )}
+        {/* Repeat counter: 2, 3, ... = same pair at the same spot as this camera's earlier report */}
+        {item.type === 'proximity' && item.violation_count != null && (
+          <Chip
+            icon={<Warning sx={{ fontSize: 12, color: '#fff !important' }} />}
+            label={`Proximity Violation ${item.violation_count}`}
+            size="small"
+            sx={{
+              position: 'absolute', bottom: 8, right: 8,
+              bgcolor: Number(item.violation_count) > 1 ? '#dc2626' : 'rgba(15, 23, 42, 0.72)', color: '#fff',
               fontWeight: 700, fontSize: '0.65rem',
             }}
           />
@@ -308,6 +331,9 @@ function Lightbox({ item, onClose }) {
             <Chip label={meta.label} size="small" sx={{ bgcolor: meta.color, color: '#fff', fontWeight: 700 }} />
             {invigilatorEventLabel && (
               <Chip label={invigilatorEventLabel} size="small" sx={{ bgcolor: '#334155', color: '#fff' }} />
+            )}
+            {item.type === 'proximity' && item.violation_count != null && (
+              <Chip label={`Proximity Violation ${item.violation_count}`} size="small" sx={{ bgcolor: '#dc2626', color: '#fff', fontWeight: 700 }} />
             )}
             {item.count != null && <Chip label={`Count: ${item.count}`} size="small" sx={{ bgcolor: '#334155', color: '#fff' }} />}
             {item.confidence != null && (
@@ -596,7 +622,8 @@ const RemovedDetections = () => {
   const [search, setSearch] = useState('');
   const [examFilter, setExamFilter] = useState('');
   const [exams, setExams] = useState([]);
-  const [sourceFilter, setSourceFilter] = useState('');
+  const [shiftFilter, setShiftFilter] = useState('');
+  const [examShifts, setExamShifts] = useState([]);
   const [dateFilter, setDateFilter] = useState(todayDate);
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
@@ -612,12 +639,12 @@ const RemovedDetections = () => {
     try {
       const params = { page: pg, limit: rpp };
       if (typeFilter.length > 0) params.type = typeFilter.join(',');
-      if (sourceFilter) params.source = sourceFilter;
       if (dateFilter) params.date = parseDateForQuery(dateFilter);
       if (search.trim()) params.search = search.trim();
       if (appliedStartTime) params.start_time = appliedStartTime;
       if (appliedEndTime) params.end_time = appliedEndTime;
       if (examFilter) params.exam_id = examFilter;
+      if (shiftFilter) params.shift_id = shiftFilter;
 
       const res = await clientDetectionsAPI.getRemoved(params);
       if (res.data?.success) {
@@ -646,7 +673,7 @@ const RemovedDetections = () => {
     } finally {
       setLoading(false);
     }
-  }, [sourceFilter, typeFilter, dateFilter, search, appliedStartTime, appliedEndTime, examFilter, rowsPerPage, setUnfilteredCounts]);
+  }, [shiftFilter, typeFilter, dateFilter, search, appliedStartTime, appliedEndTime, examFilter, rowsPerPage, setUnfilteredCounts]);
 
   useEffect(() => {
     const fetchExams = async () => {
@@ -662,6 +689,19 @@ const RemovedDetections = () => {
     const examId = searchParams.get('exam_id');
     if (examId) setExamFilter(examId);
   }, [searchParams]);
+
+  // Populate the dependent Shift filter from the selected exam — the exam list
+  // (examsAPI.getAll) already embeds each exam's `examShifts`.
+  useEffect(() => {
+    if (!examFilter) {
+      setExamShifts([]);
+      setShiftFilter('');
+      return;
+    }
+    const exam = exams.find((e) => String(e.id) === String(examFilter));
+    setExamShifts(Array.isArray(exam?.examShifts) ? exam.examShifts : []);
+    setShiftFilter('');
+  }, [examFilter, exams]);
 
   useEffect(() => {
     setPage(1);
@@ -727,7 +767,12 @@ const RemovedDetections = () => {
           <Select
             value={examFilter}
             label="Exam"
-            onChange={(e) => { setExamFilter(e.target.value); setPage(1); }}
+            onChange={(e) => {
+              const id = e.target.value;
+              setExamFilter(id);
+              if (id) setDateFilter(dateFilterForExam(exams.find((x) => String(x.id) === String(id))));
+              setPage(1);
+            }}
             sx={{ borderRadius: '8px', bgcolor: '#f8fafc', height: 36, fontSize: 14, '& fieldset': { border: 'none' } }}
           >
             <MenuItem value=""><em>All Exams</em></MenuItem>
@@ -737,19 +782,23 @@ const RemovedDetections = () => {
           </Select>
         </FormControl>
 
-        <FormControl size="small" sx={{ minWidth: 130 }}>
-          <InputLabel sx={{ fontSize: 13 }}>Source</InputLabel>
-          <Select
-            value={sourceFilter}
-            label="Source"
-            onChange={(e) => { setSourceFilter(e.target.value); setPage(1); }}
-            sx={{ borderRadius: '8px', bgcolor: '#f8fafc', height: 36, fontSize: 14, '& fieldset': { border: 'none' } }}
-          >
-            {SOURCE_OPTIONS.map((opt) => (
-              <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+        {/* Shift filter — dependent on the selected exam (same as ClientDetections) */}
+        {examFilter && examShifts.length > 0 && (
+          <FormControl size="small" sx={{ minWidth: 130 }}>
+            <InputLabel sx={{ fontSize: 13 }}>Shift</InputLabel>
+            <Select
+              value={shiftFilter}
+              label="Shift"
+              onChange={(e) => { setShiftFilter(e.target.value); setPage(1); }}
+              sx={{ borderRadius: '8px', bgcolor: '#f8fafc', height: 36, fontSize: 14, '& fieldset': { border: 'none' } }}
+            >
+              <MenuItem value=""><em>All Shifts</em></MenuItem>
+              {examShifts.map((sh) => (
+                <MenuItem key={sh.id} value={sh.id}>{sh.shift_name || `Shift #${sh.id}`}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        )}
 
         <Box sx={{ position: 'relative', minWidth: 100, maxWidth: 150 }}>
           <TextField
@@ -881,10 +930,10 @@ const RemovedDetections = () => {
             }}
           />
 
-          {(typeFilter.length > 0 || dateFilter !== todayDate || search || sourceFilter || startTime || endTime) && (
+          {(typeFilter.length > 0 || dateFilter !== todayDate || search || shiftFilter || startTime || endTime) && (
             <Button
               size="small"
-              onClick={() => { setTypeFilter([]); setDateFilter(todayDate); setSearch(''); setSourceFilter(''); setStartTime(''); setEndTime(''); setAppliedStartTime(''); setAppliedEndTime(''); }}
+              onClick={() => { setTypeFilter([]); setDateFilter(todayDate); setSearch(''); setShiftFilter(''); setStartTime(''); setEndTime(''); setAppliedStartTime(''); setAppliedEndTime(''); }}
               sx={{ height: 36, borderRadius: '8px', fontSize: 13, textTransform: 'none', color: '#64748b' }}
             >
               Clear

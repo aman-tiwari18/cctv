@@ -438,6 +438,9 @@ exports.getDetectionCount = async (req, res) => {
 
     const linkType = (exam.link_type || "").toUpperCase();
     let detectionCount = 0;
+    // Date (DD-MM-YYYY, server time) of the newest detection this user can see —
+    // the Detections pages open an exam on it instead of an empty "today".
+    let latestDate = null;
 
     // For VIEWER (client) role, only count detections pushed to client
     const isClientView = userRole === 'VIEWER';
@@ -447,7 +450,8 @@ exports.getDetectionCount = async (req, res) => {
         if (linkType === "HLS") {
             // Count from camera_report_hls table
             const [results] = await sequelize.query(
-                `SELECT COUNT(DISTINCT id) as count 
+                `SELECT COUNT(DISTINCT id) as count,
+                        DATE_FORMAT(CONVERT_TZ(MAX(created_at), @@session.time_zone, 'SYSTEM'), '%d-%m-%Y') AS latest_date
                  FROM camera_report_hls 
                  WHERE exam_id = :examId ${clientFilter}`,
                 {
@@ -456,10 +460,12 @@ exports.getDetectionCount = async (req, res) => {
                 }
             );
             detectionCount = results?.count || 0;
+            latestDate = results?.latest_date || null;
         } else if (linkType === "RTSP") {
             // Count from camera_report_rtsp table
             const [results] = await sequelize.query(
-                `SELECT COUNT(DISTINCT id) as count 
+                `SELECT COUNT(DISTINCT id) as count,
+                        DATE_FORMAT(CONVERT_TZ(MAX(created_at), @@session.time_zone, 'SYSTEM'), '%d-%m-%Y') AS latest_date
                  FROM camera_report_rtsp 
                  WHERE exam_id = :examId ${clientFilter}`,
                 {
@@ -468,6 +474,7 @@ exports.getDetectionCount = async (req, res) => {
                 }
             );
             detectionCount = results?.count || 0;
+            latestDate = results?.latest_date || null;
         }
 
         res.json({
@@ -476,6 +483,7 @@ exports.getDetectionCount = async (req, res) => {
                 exam_id: examId,
                 link_type: linkType,
                 detection_count: parseInt(detectionCount, 10),
+                latest_date: latestDate,
                 is_client_view: isClientView,
             },
         });

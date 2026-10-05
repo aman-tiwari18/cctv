@@ -130,4 +130,18 @@ module.exports = {
         default_frequency: 15,
         default_duration: 1,
     },
+    monitor_tamper: {
+        name: 'Monitor Tampering Detection',
+        description: 'Detects a monitor moved, lifted or carried away in computer lab camera feeds, and a covered or moved camera.',
+        script_path: 'scripts/detection/pipeline/master_pipeline.py',
+        default_frequency: 5,
+        default_duration: 1,
+    },
+    crowd_five_invigilator: {
+        name: 'Crowd < 5 + Invigilator Static',
+        description: 'Detects 1-4 seated candidates in an exam room while the invigilator stands at one spot for 7 minutes.',
+        script_path: 'scripts/detection/pipeline/master_pipeline.py',
+        default_frequency: 5,
+        default_duration: 1,
+    },
 };

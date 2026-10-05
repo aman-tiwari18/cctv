@@ -44,6 +44,11 @@ const CameraLinkRTSP = sequelize.define(
             type: DataTypes.STRING,
             allowNull: true,
         },
+        region: {
+            type: DataTypes.STRING,
+            allowNull: true,
+            comment: "Region from the RTSP Excel (e.g. CR)",
+        },
         cctv_url: {
             type: DataTypes.TEXT,
             allowNull: false,

@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CCTV Exam Monitoring – Client API v1</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --border: #d1d9e0;
+    --panel: #f6f8fa; --accent: #0969da; --get: #1a7f37; --code-bg: #f6f8fa;
+    --warn-bg: #fff8c5; --warn-border: #d4a72c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117; --fg: #e6edf3; --muted: #9198a1; --border: #3d444d;
+      --panel: #151b23; --accent: #4493f8; --get: #3fb950; --code-bg: #151b23;
+      --warn-bg: #2e2a17; --warn-border: #9e6a03;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 28px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 28px; }
+  h2 { font-size: 21px; margin: 44px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 16px; margin: 22px 0 8px; }
+  p { margin: 0 0 12px; }
+  a { color: var(--accent); }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+  code { background: var(--code-bg); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; }
+  pre {
+    background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 12px 14px; overflow-x: auto; margin: 0 0 14px; line-height: 1.45;
+  }
+  pre code { background: none; border: 0; padding: 0; }
+  .table-wrap { overflow-x: auto; margin: 0 0 14px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { border: 1px solid var(--border); padding: 7px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--panel); font-weight: 600; }
+  .method {
+    display: inline-block; font-weight: 700; font-size: 12px; color: #fff; background: var(--get);
+    border-radius: 4px; padding: 1px 7px; margin-right: 8px; vertical-align: 2px;
+  }
+  .endpoint h2 code { font-size: 18px; border: 0; background: none; padding: 0; }
+  .key {
+    display: block; word-break: break-all; font-size: 14px; padding: 10px 12px;
+    background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; margin: 0 0 12px;
+  }
+  .note {
+    background: var(--warn-bg); border: 1px solid var(--warn-border); border-radius: 6px;
+    padding: 10px 14px; margin: 0 0 14px;
+  }
+  nav ul { margin: 0; padding-left: 20px; }
+  nav { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 12px 16px; }
+table,pre,.note{page-break-inside:avoid}tr,td,th{page-break-inside:avoid}thead{display:table-header-group}h2,h3{page-break-after:avoid}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>CCTV Exam Monitoring – Client API v1</h1>
+<p class="sub">GET endpoints · SSC Combined Graduate Level Examination 2026 · Provided by CDIS · 30 Sep 2026</p>
+
+<nav>
+  <ul>
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#auth">Authentication</a></li>
+    <li><a href="#endpoints">Endpoints</a></li>
+    <li><a href="#cameras">GET /api/v1/cameras</a></li>
+    <li><a href="#camera-types">GET /api/v1/master/camera-types</a></li>
+    <li><a href="#event-types">GET /api/v1/master/event-types</a></li>
+    <li><a href="#current-schedule">GET /api/v1/master/current-schedule</a></li>
+    <li><a href="#errors">Errors</a></li>
+  </ul>
+</nav>
+
+<h2 id="overview">Overview</h2>
+<p>Four read-only GET endpoints give you the cameras, camera types, detection event types and current schedule for <strong>SSC Combined Graduate Level Examination 2026</strong>. All responses are JSON.</p>
+<div class="table-wrap"><table>
+  <tr><th>Item</th><th>Value</th></tr>
+  <tr><td>Base URL</td><td><code>http://examscctvmonitoring.com/cctv_analytics</code></td></tr>
+  <tr><td>Method</td><td><code>GET</code> (all endpoints)</td></tr>
+  <tr><td>Response format</td><td><code>application/json</code></td></tr>
+  <tr><td>Scope</td><td>One exam only: SSC Combined Graduate Level Examination 2026</td></tr>
+  <tr><td>Vendor</td><td><code>vendor_name</code> = <code>CDIS</code> in every response</td></tr>
+</table></div>
+<p>Data is live: camera types and statuses change as cameras are classified and come online during the exam.</p>
+
+<h2 id="auth">Authentication</h2>
+<p>Every request must send the API key in the <code>Authorization</code> header as a Bearer token. Requests without it, or with a wrong key, get <code>401 Unauthorized</code>.</p>
+<h3>Header</h3>
+<pre><code>Authorization: Bearer &lt;API_KEY&gt;</code></pre>
+<h3>API key</h3>
+<div class="note">The API key is provided separately by CDIS. Keep it confidential and use it only from your servers. It does not expire; contact CDIS if it needs to be rotated.</div>
+<h3>Example request</h3>
+<pre><code>curl -H "Authorization: Bearer &lt;API_KEY&gt;" \
+  http://examscctvmonitoring.com/cctv_analytics/api/v1/master/camera-types</code></pre>
+
+<h2 id="endpoints" style="page-break-before:always">Endpoints</h2>
+<p>All paths are relative to the base URL. None take query parameters.</p>
+<div class="table-wrap"><table>
+  <tr><th>Method</th><th>Path</th><th>Returns</th></tr>
+  <tr><td>GET</td><td><a href="#cameras"><code>/api/v1/cameras</code></a></td><td>Every camera of the exam, with its centre, type and status</td></tr>
+  <tr><td>GET</td><td><a href="#camera-types"><code>/api/v1/master/camera-types</code></a></td><td>Camera types used by the exam's cameras</td></tr>
+  <tr><td>GET</td><td><a href="#event-types"><code>/api/v1/master/event-types</code></a></td><td>Detection scripts scheduled for the exam (the event types)</td></tr>
+  <tr><td>GET</td><td><a href="#current-schedule"><code>/api/v1/master/current-schedule</code></a></td><td>The exam's client and schedule name</td></tr>
+</table></div>
+
+<section class="endpoint">
+<h2 id="cameras"><span class="method">GET</span><code>/api/v1/cameras</code></h2>
+<p>Returns one entry per physical camera of the exam (about 3,100 for this exam).</p>
+<h3>Example response</h3>
+<pre><code>{
+  "cameras": [
+    {
+      "cam_id": "1000831$14",
+      "cam_type": 1,
+      "cam_type_name": "InsideLabs",
+      "tc_code": "350713",
+      "center_name": "ALLEN INFORMATICS CENTER",
+      "city": "KANPUR",
+      "state": "UTTAR PRADESH",
+      "status": 1,
+      "status_name": "AnalyticsLive",
+      "vendor_name": "CDIS"
+    }
+  ]
+}</code></pre>
+<div class="table-wrap"><table>
+  <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+  <tr><td><code>cam_id</code></td><td>string</td><td>Unique camera identifier, in the format <code>&lt;device_id&gt;$&lt;camera_no&gt;</code></td></tr>
+  <tr><td><code>cam_type</code></td><td>integer</td><td>Camera type id; see <a href="#camera-types"><code>/api/v1/master/camera-types</code></a></td></tr>
+  <tr><td><code>cam_type_name</code></td><td>string</td><td>Camera type name</td></tr>
+  <tr><td><code>tc_code</code></td><td>string</td><td>Test centre code</td></tr>
+  <tr><td><code>center_name</code></td><td>string</td><td>Test centre name</td></tr>
+  <tr><td><code>city</code></td><td>string</td><td>City of the test centre</td></tr>
+  <tr><td><code>state</code></td><td>string</td><td>State of the test centre</td></tr>
+  <tr><td><code>status</code></td><td>integer</td><td>Camera status id; see <a href="#status-values">Status values</a></td></tr>
+  <tr><td><code>status_name</code></td><td>string</td><td>Camera status name</td></tr>
+  <tr><td><code>vendor_name</code></td><td>string</td><td>Always <code>CDIS</code></td></tr>
+</table></div>
+<h3 id="status-values" style="page-break-before:always">Status values</h3>
+<div class="table-wrap"><table>
+  <tr><th>id</th><th>name</th><th>Meaning</th></tr>
+  <tr><td>0</td><td>Idle/Ready</td><td>Camera is working, but today is not an exam day</td></tr>
+  <tr><td>1</td><td>AnalyticsLive</td><td>Camera is working and AI analytics is running</td></tr>
+  <tr><td>100</td><td>ClassificationPending</td><td>Camera is not classified yet</td></tr>
+  <tr><td>200</td><td>Excluded</td><td>Camera is inactive or its view is Invalid</td></tr>
+  <tr><td>9999</td><td>Other</td><td>Camera is not accessible (offline)</td></tr>
+</table></div>
+</section>
+
+<section class="endpoint">
+<h2 id="camera-types"><span class="method">GET</span><code>/api/v1/master/camera-types</code></h2>
+<p>Returns only the camera types that this exam's cameras actually have. The type comes from AI scene classification of each camera.</p>
+<pre><code>{
+  "camera_types": [
+    { "id": 1, "name": "InsideLabs", "vendor_name": "CDIS" },
+    { "id": 2, "name": "ServerRoom", "vendor_name": "CDIS" },
+    { "id": 3, "name": "BiometricArea", "vendor_name": "CDIS" },
+    { "id": 4, "name": "Outside", "vendor_name": "CDIS" },
+    { "id": 5, "name": "EntryExit", "vendor_name": "CDIS" },
+    { "id": 9, "name": "Invalid", "vendor_name": "CDIS" },
+    { "id": 0, "name": "Other", "vendor_name": "CDIS" }
+  ]
+}</code></pre>
+<div class="table-wrap"><table>
+  <tr><th>id</th><th>name</th><th>Meaning</th></tr>
+  <tr><td>1</td><td>InsideLabs</td><td>Inside an exam lab or classroom</td></tr>
+  <tr><td>2</td><td>ServerRoom</td><td>Server room</td></tr>
+  <tr><td>3</td><td>BiometricArea</td><td>Biometric verification area</td></tr>
+  <tr><td>4</td><td>Outside</td><td>Outside area, corridor or parking</td></tr>
+  <tr><td>5</td><td>EntryExit</td><td>Entry or exit gate</td></tr>
+  <tr><td>9</td><td>Invalid</td><td>View unclear or obstructed</td></tr>
+  <tr><td>0</td><td>Other</td><td>Any other area, or type not yet known</td></tr>
+</table></div>
+</section>
+
+<section class="endpoint">
+<h2 id="event-types"><span class="method">GET</span><code>/api/v1/master/event-types</code></h2>
+<p>Returns the AI detection scripts scheduled for this exam. Each <code>id</code> identifies one event type; the list grows if more scripts are scheduled.</p>
+<pre><code>{
+  "event_types": [
+    { "id": 1, "name": "Server Room Detection", "vendor_name": "CDIS" },
+    { "id": 6, "name": "Phone Detection", "vendor_name": "CDIS" }
+  ]
+}</code></pre>
+<p>Event types currently scheduled for this exam:</p>
+<div class="table-wrap"><table>
+  <tr><th>id</th><th>name</th></tr>
+  <tr><td>1</td><td>Server Room Detection</td></tr>
+  <tr><td>2</td><td>Crowd Detection (Entry/Exit)</td></tr>
+  <tr><td>4</td><td>Entry Exit Detection</td></tr>
+  <tr><td>5</td><td>Proximity Detection</td></tr>
+  <tr><td>6</td><td>Phone Detection</td></tr>
+  <tr><td>7</td><td>Invigilator Detection</td></tr>
+  <tr><td>16</td><td>Camera Inversion Detection</td></tr>
+  <tr><td>1389</td><td>Zero Person Detection</td></tr>
+  <tr><td>1390</td><td>Crowd &lt; 5</td></tr>
+  <tr><td>108207</td><td>Monitor Tampering Detection</td></tr>
+  <tr><td>110069</td><td>Crowd &lt; 5 + Invigilator Static</td></tr>
+</table></div>
+</section>
+
+<section class="endpoint">
+<h2 id="current-schedule"><span class="method">GET</span><code>/api/v1/master/current-schedule</code></h2>
+<p>Returns the exam's client and schedule name.</p>
+<pre><code>{
+  "schedules": [
+    {
+      "client_name": "SSC",
+      "schedule_name": "SSC Combined Graduate Level Examination 2026",
+      "vendor_name": "CDIS"
+    }
+  ]
+}</code></pre>
+</section>
+
+<h2 id="errors">Errors</h2>
+<p>Errors return a JSON body with a single <code>error</code> message.</p>
+<pre><code>{ "error": "Invalid API key" }</code></pre>
+<div class="table-wrap"><table>
+  <tr><th>Status</th><th>When</th><th>Example <code>error</code></th></tr>
+  <tr><td>200</td><td>Request succeeded</td><td>—</td></tr>
+  <tr><td>401</td><td><code>Authorization</code> header missing</td><td><code>Missing Authorization: Bearer &lt;API_KEY&gt; header</code></td></tr>
+  <tr><td>401</td><td>API key is wrong</td><td><code>Invalid API key</code></td></tr>
+  <tr><td>404</td><td>Path does not exist</td><td>—</td></tr>
+  <tr><td>500</td><td>Unexpected server error; retry later</td><td><code>Internal server error</code></td></tr>
+</table></div>
+
+</div>
+</body>
+</html>

@@ -265,6 +265,7 @@ exports.uploadCameras = async (req, res) => {
                     camera_no: camera_no !== "" ? camera_no : null,
                     city: pick(row, "City", "city", "CITY"),
                     state: pick(row, "State", "state", "STATE"),
+                    region: pick(row, "Region", "region", "REGION") || null,
                     cctv_url,
                     classification,  // ← ADDED classification field
                     is_active: true,
@@ -276,7 +277,7 @@ exports.uploadCameras = async (req, res) => {
             const detectedHeaders = Object.keys(data[0] || {});
             const missingColumnsMessage =
                 linkType === "RTSP"
-                    ? `No valid records found. Required RTSP columns: Device ID, Server Address (or CCTV URL). Optional: Camera No, TC Code, Camera Name, Centre/Center Name, City, State, Classification (or Scene Classification / Room Classification). Detected headers: ${detectedHeaders.join(", ")}`
+                    ? `No valid records found. Required RTSP columns: Device ID, Server Address (or CCTV URL). Optional: Camera No, TC Code, Camera Name, Centre/Center Name, City, State, Region, Classification (or Scene Classification / Room Classification). Detected headers: ${detectedHeaders.join(", ")}`
                     : missingChCode > 0
                         ? `No valid records found. ${missingChCode} row(s) have no readable channel id — rename that column to 'ch_no' (accepted: ch_no, ch_code, Channel ID(key), unique key value). Detected headers: ${detectedHeaders.join(", ")}`
                         : "No valid records found. Make sure the Excel contains a 'CCTV URL' column.";
@@ -384,7 +385,7 @@ exports.uploadCameras = async (req, res) => {
                     exam_id: examId,
                     is_active: true
                 },
-                attributes: ['id', 'device_id', 'camera_no', 'tc_code', 'classification']
+                attributes: ['id', 'device_id', 'camera_no', 'tc_code', 'classification', 'region']
             });
 
             console.log(`[DUPLICATE CHECK] Found ${existingCameras.length} existing RTSP cameras for exam ${examId}`);
@@ -417,17 +418,18 @@ exports.uploadCameras = async (req, res) => {
                 const existingCamera = existingMap.get(uniqueKey);
                 
                 if (existingCamera) {
-                    // Update classification if provided in Excel (regardless of existing value)
-                    if (record.classification) {
-                        recordsToUpdate.push({
-                            id: existingCamera.id,
-                            classification: record.classification,
-                            oldClassification: existingCamera.classification
-                        });
-                        console.log(`[UPDATE] Will update classification for ${uniqueKey}: "${existingCamera.classification}" → "${record.classification}"`);
+                    // Update classification if provided in Excel (regardless of existing value),
+                    // and region when the sheet has one that differs from what is stored.
+                    const regionChanged = !!record.region && record.region !== existingCamera.region;
+                    if (record.classification || regionChanged) {
+                        const update = { id: existingCamera.id, oldClassification: existingCamera.classification };
+                        if (record.classification) update.classification = record.classification;
+                        if (regionChanged) update.region = record.region;
+                        recordsToUpdate.push(update);
+                        console.log(`[UPDATE] Will update ${uniqueKey}: classification "${existingCamera.classification}" → "${record.classification || existingCamera.classification}", region "${existingCamera.region}" → "${regionChanged ? record.region : existingCamera.region}"`);
                     } else {
                         skipped++;
-                        console.log(`[SKIP] Skipping duplicate (no classification provided in Excel): ${uniqueKey}`);
+                        console.log(`[SKIP] Skipping duplicate (no classification or new region in Excel): ${uniqueKey}`);
                     }
                 } else {
                     recordsToInsert.push(record);
@@ -445,18 +447,19 @@ exports.uploadCameras = async (req, res) => {
         // Update existing records with classification
         if (recordsToUpdate.length > 0) {
             for (const update of recordsToUpdate) {
-                await Model.update(
-                    { classification: update.classification },
-                    { where: { id: update.id } }
-                );
+                const fields = {};
+                if (update.classification) fields.classification = update.classification;
+                if (update.region) fields.region = update.region;
+                await Model.update(fields, { where: { id: update.id } });
             }
         }
         // Cleanup temp file
         try { fs.unlinkSync(req.file.path); } catch (_) { }
 
         // Count how many were actually updated vs overwritten
-        const newClassifications = recordsToUpdate.filter(r => !r.oldClassification).length;
-        const overwrittenClassifications = recordsToUpdate.filter(r => r.oldClassification).length;
+        const newClassifications = recordsToUpdate.filter(r => r.classification && !r.oldClassification).length;
+        const overwrittenClassifications = recordsToUpdate.filter(r => r.classification && r.oldClassification).length;
+        const regionsUpdated = recordsToUpdate.filter(r => r.region).length;
 
         let message = '';
         const parts = [];
@@ -471,6 +474,10 @@ exports.uploadCameras = async (req, res) => {
 
         if (overwrittenClassifications > 0) {
             parts.push(`${overwrittenClassifications} classification${overwrittenClassifications !== 1 ? 's' : ''} updated`);
+        }
+
+        if (regionsUpdated > 0) {
+            parts.push(`${regionsUpdated} region${regionsUpdated !== 1 ? 's' : ''} updated`);
         }
 
         if (parts.length > 0) {
@@ -504,6 +511,7 @@ exports.uploadCameras = async (req, res) => {
                 missingChCode,
                 newClassifications,
                 overwrittenClassifications,
+                regionsUpdated,
                 skipped
             }
         });
@@ -528,7 +536,7 @@ exports.downloadTemplate = async (req, res) => {
 
     const headers = isHLS
         ? [["S.No.", "TC Code", "Centre Name", "City", "State", "LIS IF/IDZ", "LAN and Lab Name", "Camera Name", "CCTV URL", "ch_no", "Camera Category"]]
-        : [["Device ID", "Camera No", "TC Code", "Camera Name", "Centre Name", "City", "State", "CCTV URL"]];
+        : [["Device ID", "Camera No", "TC Code", "Camera Name", "Centre Name", "City", "State", "Region", "CCTV URL"]];
 
     const wb = xlsx.utils.book_new();
     const ws = xlsx.utils.aoa_to_sheet(headers);
@@ -570,7 +578,7 @@ exports.createCamera = async (req, res) => {
  */
 exports.getByExam = async (req, res) => {
     const { examId } = req.params;
-    const { is_active = true, shift_id, exam_date, search, classification, run_start, run_end, page = 1, limit = 50, sort_by, sort_order = 'asc' } = req.query;
+    const { is_active = true, shift_id, exam_date, search, classification, region, run_start, run_end, run_shift_id, page = 1, limit = 50, sort_by, sort_order = 'asc' } = req.query;
     const { Model, linkType } = await getModelByExam(examId);
 
     const where = {
@@ -582,19 +590,27 @@ exports.getByExam = async (req, res) => {
         where.classification = classification.trim();
     }
 
-    // Scope to a specific classification "run" (see getClassificationRuns):
-    // only cameras that appear in the history table within [run_start, run_end]
-    // are included, and their classification/frame_path get overridden below
-    // to reflect that run's value rather than the current/latest one.
+    // Region is RTSP-only (no region column on camera_links_hls).
+    if (region && region.trim() && linkType === "RTSP") {
+        where.region = region.trim();
+    }
+
+    // Scope to a specific classification "run" (see getClassificationRuns).
+    // Every run attempts ALL the exam's cameras, but the history table only
+    // gets a row for the ones that were reachable and classified — so the full
+    // camera set is kept here (the total stays the exam's real count) and each
+    // row's classification/status is overlaid below with what that run produced:
+    // a history row = Accessible + its label, no row = Not Accessible that run.
     const historyTable = linkType === "RTSP" ? "camera_classification_rtsp" : "camera_classification_hls";
     let runCameraIds = null;
     if (run_start && run_end) {
+        const runShift = run_shift_id !== undefined && run_shift_id !== '' ? Number(run_shift_id) : null;
         const runRows = await query(
-            `SELECT DISTINCT camera_id FROM ${historyTable} WHERE created_at BETWEEN ? AND ?`,
-            [run_start, run_end]
+            `SELECT DISTINCT camera_id FROM ${historyTable} WHERE created_at BETWEEN ? AND ?`
+            + (runShift !== null ? ` AND COALESCE(shift_id, 0) = ?` : ''),
+            runShift !== null ? [run_start, run_end, runShift] : [run_start, run_end]
         );
         runCameraIds = runRows.map((r) => r.camera_id);
-        where.id = { [Op.in]: runCameraIds.length > 0 ? runCameraIds : [-1] };
     }
 
     if (linkType === "HLS") {
@@ -618,6 +634,7 @@ exports.getByExam = async (req, res) => {
         // Add device_id for RTSP
         if (linkType === "RTSP") {
             where[Op.or].push({ device_id: { [Op.like]: searchTerm } });
+            where[Op.or].push({ region: { [Op.like]: searchTerm } });
         }
 
         // Add ch_code for HLS
@@ -632,7 +649,7 @@ exports.getByExam = async (req, res) => {
 
     // Build server-side sort order
     const SORTABLE_HLS = ['centre_name', 'tc_code', 'city', 'state', 'camera_name', 'ch_code', 'camera_category', 'classification', 'status', 'exam_date', 'shift_id', 'created_at'];
-    const SORTABLE_RTSP = ['device_id', 'camera_no', 'tc_code', 'camera_name', 'centre_name', 'city', 'state', 'classification', 'status', 'created_at'];
+    const SORTABLE_RTSP = ['device_id', 'camera_no', 'tc_code', 'camera_name', 'centre_name', 'city', 'state', 'region', 'classification', 'status', 'created_at'];
     const validColumns = linkType === 'HLS' ? SORTABLE_HLS : SORTABLE_RTSP;
     // shift_name is a virtual column — sort by shift_id instead
     const columnMap = { shift_name: 'shift_id' };
@@ -655,10 +672,6 @@ exports.getByExam = async (req, res) => {
         is_active: is_active === "true" || is_active === true,
     };
 
-    if (runCameraIds) {
-        statusCountsWhere.id = { [Op.in]: runCameraIds.length > 0 ? runCameraIds : [-1] };
-    }
-
     if (linkType === "HLS") {
         const hlsScope = buildHlsCameraScope({ shiftId: shift_id, examDate: exam_date });
         if (hlsScope.length > 0) {
@@ -666,30 +679,41 @@ exports.getByExam = async (req, res) => {
         }
     }
 
-    // Get counts for each status
-    const accessibleCount = await Model.count({
-        where: {
-            ...statusCountsWhere,
-            status: 'Accessible'
-        }
-    });
+    let accessibleCount, notAccessibleCount, unknownCount;
+    if (runCameraIds) {
+        // Per-run status: classified in the run = Accessible, the rest of the
+        // exam's cameras = Not Accessible for that run.
+        const scopeTotal = await Model.count({ where: statusCountsWhere });
+        accessibleCount = runCameraIds.length > 0
+            ? await Model.count({ where: { ...statusCountsWhere, id: { [Op.in]: runCameraIds } } })
+            : 0;
+        notAccessibleCount = scopeTotal - accessibleCount;
+        unknownCount = 0;
+    } else {
+        accessibleCount = await Model.count({
+            where: {
+                ...statusCountsWhere,
+                status: 'Accessible'
+            }
+        });
 
-    const notAccessibleCount = await Model.count({
-        where: {
-            ...statusCountsWhere,
-            status: 'Not Accessible'
-        }
-    });
+        notAccessibleCount = await Model.count({
+            where: {
+                ...statusCountsWhere,
+                status: 'Not Accessible'
+            }
+        });
 
-    const unknownCount = await Model.count({
-        where: {
-            ...statusCountsWhere,
-            [Op.or]: [
-                { status: null },
-                { status: { [Op.notIn]: ['Accessible', 'Not Accessible'] } }
-            ]
-        }
-    });
+        unknownCount = await Model.count({
+            where: {
+                ...statusCountsWhere,
+                [Op.or]: [
+                    { status: null },
+                    { status: { [Op.notIn]: ['Accessible', 'Not Accessible'] } }
+                ]
+            }
+        });
+    }
 
     // When scoped to a run, replace classification/frame_path on this page's
     // rows with the values that run actually produced (the live table may
@@ -699,8 +723,11 @@ exports.getByExam = async (req, res) => {
         const pageIds = data.map((c) => c.id);
         const historyRows = await query(
             `SELECT camera_id, classification, frame_path, created_at FROM ${historyTable}
-             WHERE camera_id IN (?) AND created_at BETWEEN ? AND ?`,
-            [pageIds, run_start, run_end]
+             WHERE camera_id IN (?) AND created_at BETWEEN ? AND ?`
+            + (run_shift_id !== undefined && run_shift_id !== '' ? ` AND COALESCE(shift_id, 0) = ?` : ''),
+            run_shift_id !== undefined && run_shift_id !== ''
+                ? [pageIds, run_start, run_end, Number(run_shift_id)]
+                : [pageIds, run_start, run_end]
         );
         const byCameraId = new Map(historyRows.map((r) => [r.camera_id, r]));
         data = data.map((c) => {
@@ -709,6 +736,7 @@ exports.getByExam = async (req, res) => {
             return {
                 ...plain,
                 classification: runRow?.classification ?? null,
+                status: runRow ? "Accessible" : "Not Accessible",
                 frame_path: runRow?.frame_path ?? plain.frame_path,
                 // Exact time this camera's classification was recorded within the
                 // selected run (may differ slightly per-camera inside the burst).
@@ -852,6 +880,30 @@ exports.getClassificationOptions = async (req, res) => {
     res.json({ success: true, data: Array.from(new Set(options)) });
 };
 
+/**
+ * Distinct region values for the exam's RTSP cameras (Cameras tab + Detections
+ * page filter dropdown). Region only exists on camera_links_rtsp — HLS exams
+ * return an empty list.
+ */
+exports.getRegionOptions = async (req, res) => {
+    const { examId } = req.params;
+    const { Model, linkType } = await getModelByExam(examId);
+    if (linkType !== "RTSP") {
+        return res.json({ success: true, data: [] });
+    }
+    const rows = await Model.findAll({
+        attributes: [[require("sequelize").fn("DISTINCT", require("sequelize").col("region")), "region"]],
+        where: { exam_id: examId, is_active: true },
+        raw: true,
+    });
+    const options = rows
+        .map((r) => r.region)
+        .filter((v) => v != null && String(v).trim() !== "")
+        .map((v) => String(v).trim())
+        .sort((a, b) => a.localeCompare(b));
+    res.json({ success: true, data: Array.from(new Set(options)) });
+};
+
 // A single vision-classification execution writes one row per camera into
 // camera_classification_hls/rtsp, all within a tight burst (workers process
 // cameras a few seconds apart). Consecutive rows more than RUN_GAP_SECONDS
@@ -871,50 +923,94 @@ exports.getClassificationRuns = async (req, res) => {
     const historyTable = linkType === "RTSP" ? "camera_classification_rtsp" : "camera_classification_hls";
     const linksTable = linkType === "RTSP" ? "camera_links_rtsp" : "camera_links_hls";
 
+    // Runs are grouped per shift first (each history row carries the shift_id of
+    // the assignment that produced it), then by time gap — so a run is always
+    // mapped to exactly the shift it was scheduled for, even if two shifts'
+    // classifications ever overlap in time. shift_id NULL (old rows) = one group.
     const rows = await query(
         `
         WITH ordered AS (
-            SELECT DISTINCT cc.created_at AS ts
+            SELECT DISTINCT COALESCE(cc.shift_id, 0) AS sid, cc.created_at AS ts
             FROM ${historyTable} cc
             JOIN ${linksTable} cl ON cl.id = cc.camera_id
             WHERE cl.exam_id = ?
         ),
         gapped AS (
-            SELECT ts,
+            SELECT sid, ts,
                 CASE
-                    WHEN LAG(ts) OVER (ORDER BY ts) IS NULL
-                      OR TIMESTAMPDIFF(SECOND, LAG(ts) OVER (ORDER BY ts), ts) > ?
+                    WHEN LAG(ts) OVER (PARTITION BY sid ORDER BY ts) IS NULL
+                      OR TIMESTAMPDIFF(SECOND, LAG(ts) OVER (PARTITION BY sid ORDER BY ts), ts) > ?
                     THEN 1 ELSE 0
                 END AS is_new_run
             FROM ordered
         ),
         runs AS (
-            SELECT ts, SUM(is_new_run) OVER (ORDER BY ts) AS run_seq
+            SELECT sid, ts, SUM(is_new_run) OVER (PARTITION BY sid ORDER BY ts) AS run_seq
             FROM gapped
         ),
         bounds AS (
-            SELECT run_seq, MIN(ts) AS started_at, MAX(ts) AS ended_at
+            SELECT sid, run_seq, MIN(ts) AS started_at, MAX(ts) AS ended_at
             FROM runs
-            GROUP BY run_seq
+            GROUP BY sid, run_seq
         )
-        SELECT b.started_at, b.ended_at, COUNT(DISTINCT cc.camera_id) AS camera_count
+        SELECT b.sid, es.shift_name, b.started_at, b.ended_at, COUNT(DISTINCT cc.camera_id) AS camera_count
         FROM bounds b
         JOIN ${historyTable} cc ON cc.created_at BETWEEN b.started_at AND b.ended_at
+             AND COALESCE(cc.shift_id, 0) = b.sid
         JOIN ${linksTable} cl ON cl.id = cc.camera_id AND cl.exam_id = ?
-        GROUP BY b.started_at, b.ended_at
+        LEFT JOIN exam_shifts es ON es.id = b.sid
+        GROUP BY b.sid, es.shift_name, b.started_at, b.ended_at
         ORDER BY b.started_at DESC
         `,
         [examId, RUN_GAP_SECONDS, examId]
     );
 
-    res.json({
-        success: true,
-        data: rows.map((r) => ({
+    // camera_count above = cameras that got a history row in the run, i.e. were
+    // reachable and classified — it varies with DVR accessibility even though
+    // every run attempts every active camera. total_cameras is the exam's real
+    // camera count the run covered: constant for RTSP (all shifts share one
+    // camera set); for HLS, the active cameras of the run's shift/date.
+    let rtspTotal = null;
+    if (linkType === "RTSP") {
+        const [t] = await query(
+            `SELECT COUNT(*) AS c FROM camera_links_rtsp WHERE exam_id = ? AND is_active = 1`,
+            [examId]
+        );
+        rtspTotal = Number(t?.c || 0);
+    }
+
+    const data = [];
+    for (const r of rows) {
+        let total = rtspTotal;
+        if (linkType === "HLS") {
+            // The run's shift/date = the most common one among its cameras.
+            const [scope] = await query(
+                `SELECT cl.shift_id, cl.exam_date, COUNT(*) AS n
+                 FROM camera_classification_hls cc
+                 JOIN camera_links_hls cl ON cl.id = cc.camera_id AND cl.exam_id = ?
+                 WHERE cc.created_at BETWEEN ? AND ? AND COALESCE(cc.shift_id, 0) = ?
+                 GROUP BY cl.shift_id, cl.exam_date
+                 ORDER BY n DESC LIMIT 1`,
+                [examId, r.started_at, r.ended_at, Number(r.sid) || 0]
+            );
+            const conds = ["exam_id = ?", "is_active = 1"];
+            const params = [examId];
+            if (scope?.shift_id != null) { conds.push("(shift_id = ? OR shift_id IS NULL)"); params.push(scope.shift_id); }
+            if (scope?.exam_date != null) { conds.push("(exam_date = ? OR exam_date IS NULL)"); params.push(scope.exam_date); }
+            const [t] = await query(`SELECT COUNT(*) AS c FROM camera_links_hls WHERE ${conds.join(" AND ")}`, params);
+            total = Number(t?.c || 0);
+        }
+        data.push({
             started_at: r.started_at,
             ended_at: r.ended_at,
+            shift_id: Number(r.sid) || null,
+            shift_name: r.shift_name || null,
             camera_count: Number(r.camera_count),
-        })),
-    });
+            total_cameras: total,
+        });
+    }
+
+    res.json({ success: true, data });
 };
 
 /**

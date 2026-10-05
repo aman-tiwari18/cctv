@@ -14,6 +14,13 @@ securitySchemes:
       Static key used by the Python script-server to call backend endpoints
       that accept the `authenticate` middleware. Value comes from the
       `SCRIPT_SERVER_API_KEY` env var on the backend.
+  clientApiKeyAuth:
+    type: http
+    scheme: bearer
+    description: |
+      Static API key for the external Client API (`/api/v1/*`).
+      Send as `Authorization: Bearer <API_KEY>`. Value comes from the
+      `CLIENT_API_KEY` env var on the backend; if unset, every call is 401.
 
 parameters:
   ExamIdPath:
@@ -80,6 +87,18 @@ parameters:
     schema: { type: string }
 
 responses:
+  ClientApiUnauthorized:
+    description: Missing or invalid Client API key.
+    content:
+      application/json:
+        schema: { $ref: '#/components/schemas/ClientApiError' }
+        example: { error: Invalid API key }
+  ClientApiServerError:
+    description: Unexpected server error.
+    content:
+      application/json:
+        schema: { $ref: '#/components/schemas/ClientApiError' }
+        example: { error: Internal server error }
   Unauthorized:
     description: Missing, invalid, or expired authentication credentials.
     content:
@@ -134,6 +153,18 @@ responses:
           message: Internal server error
 
 schemas:
+
+  # ── Client API v1 (spec CCTV_API_v1.2) ─────────────────────────
+  ClientApiError:
+    type: object
+    properties:
+      error: { type: string, example: Human-readable explanation }
+  ClientApiMasterItem:
+    type: object
+    properties:
+      id: { type: integer, example: 1 }
+      name: { type: string, example: InsideLabs }
+      vendor_name: { type: string, example: CDIS }
 
   # ── Generic response envelopes ─────────────────────────────────
   SuccessResponse:
