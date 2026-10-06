@@ -15,6 +15,7 @@
 const XLSX = require('xlsx');
 const ExcelJS = require('exceljs');
 const { query } = require('../config/database');
+const { runningScope } = require('../utils/examSchedule');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -235,7 +236,6 @@ async function rtspShiftCameraLists(examId, mysqlDate, shifts, masterCameras) {
         const pad = n => String(n).padStart(2, '0');
         return `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
     };
-    const hhmm = ms => fmt(ms).slice(-5);
 
     const camsByShift = {};
     const runByShift = {};
@@ -262,12 +262,42 @@ async function rtspShiftCameraLists(examId, mysqlDate, shifts, masterCameras) {
                 status: hit ? 'Accessible' : 'Not Accessible',
             };
         });
-        const all = runs.length > 1
-            ? ` — this shift's runs: ${runs.map(r => hhmm(r.startMs)).join(', ')}; latest used`
-            : '';
-        runByShift[sh.id] = `${fmt(run.startMs)} (${run.byCamera.size} cameras classified)${all}`;
+        // Latest run of the shift only, e.g. "06-10-2026 07:57 (2150 cameras classified)".
+        runByShift[sh.id] = `${fmt(run.startMs)} (${run.byCamera.size} cameras classified)`;
     });
-    return { camsByShift, runByShift };
+
+    // Exam schedule (Exams page): a centre that does not run in this date + shift is
+    // "not scheduled", not "offline" — leave its cameras out of that shift's counts.
+    // No uploaded schedule = no change (the exam behaves as before).
+    const scopeByShift = {};
+    for (const sh of shifts) {
+        const scope = await runningScope(examId, mysqlDate, sh.id);
+        scopeByShift[sh.id] = scope;
+        if (!scope.restricted) continue;
+        camsByShift[sh.id] = !scope.examRuns ? []
+            : scope.centres ? (camsByShift[sh.id] || []).filter((c) => scope.centres.has(String(c.tc_code == null ? '' : c.tc_code).trim()))
+            : camsByShift[sh.id];
+        if (!scope.examRuns) runByShift[sh.id] = 'The exam does not run in this shift';
+    }
+    return { camsByShift, runByShift, scopeByShift };
+}
+
+/**
+ * Does a detection belong to the exam schedule of its shift? Unrestricted (no uploaded
+ * schedule, or HLS) = always yes; the exam not running that shift = no; otherwise its
+ * TC code must be one of the shift's scheduled centres. Keeps detection counts in line
+ * with the camera counts when a schedule is uploaded after detections already exist.
+ */
+function detectionInSchedule(d, scope) {
+    if (!scope || !scope.restricted) return true;
+    if (!scope.examRuns) return false;
+    if (!scope.centres) return true;
+    return scope.centres.has(String(d.tc_code == null ? '' : d.tc_code).trim());
+}
+
+/** True when the uploaded schedule says the exam does not run in this shift on the report date. */
+function shiftNotRunning(scope) {
+    return !!(scope && scope.restricted && !scope.examRuns);
 }
 
 /**
@@ -463,11 +493,18 @@ exports.downloadReport = async (req, res) => {
         // ── 6. Build Workbook ─────────────────────────────────────────────────
         const wb = XLSX.utils.book_new();
 
-        const SHIFT_HEADERS = [
+        // RTSP sheets also carry Device ID, Camera No and Server Address so a camera can be
+        // traced back to its DVR channel straight from the report.
+        const SHIFT_HEADERS = isRTSP ? [
+            'City', 'Center', 'Cam ID', 'Device ID', 'Camera No', 'Server Address', 'Camera Name',
+            'Cam Type', 'TC Code', 'Events (Excluding Rejected)', 'Rejected Events', 'False Positive', 'Camera Status'
+        ] : [
             'City', 'Center', 'Cam ID', 'Camera Name',
             'Cam Type', 'TC Code', 'Events (Excluding Rejected)', 'Rejected Events', 'False Positive', 'Camera Status'
         ];
-        const SHIFT_WIDTHS = [15, 30, 15, 35, 15, 12, 28, 16, 15, 15];
+        const SHIFT_WIDTHS = isRTSP
+            ? [15, 30, 15, 12, 11, 22, 35, 15, 12, 28, 16, 15, 15]
+            : [15, 30, 15, 35, 15, 12, 28, 16, 15, 15];
 
 
         // ── 7. Shift Sheets (Shift 1, 2, 3...) ──────────────────────────────────
@@ -493,6 +530,9 @@ exports.downloadReport = async (req, res) => {
                             'City': cam.city || agg.details.city || '',
                             'Center': cam.centre_name || agg.details.center || '',
                             'Cam ID': key,
+                            'Device ID': cam.device_id || '',
+                            'Camera No': cam.camera_no ?? '',
+                            'Server Address': serverByKey[key] || cam.cctv_url || '',
                             'Camera Name': cam.camera_name || agg.details.camera_name || '',
                             'Cam Type': camType,
                             'TC Code': cam.tc_code || agg.details.tc_code || '',
@@ -509,6 +549,9 @@ exports.downloadReport = async (req, res) => {
                             'City': cam.city || '',
                             'Center': cam.centre_name || '',
                             'Cam ID': key,
+                            'Device ID': cam.device_id || '',
+                            'Camera No': cam.camera_no ?? '',
+                            'Server Address': serverByKey[key] || cam.cctv_url || '',
                             'Camera Name': cam.camera_name || '',
                             'Cam Type': camType,
                             'TC Code': cam.tc_code || '',
@@ -629,6 +672,7 @@ exports.downloadReport = async (req, res) => {
         let cumulativeOnline = 0;
         const uniqueOnlineKeys = new Set();
         let totalDurationMinutes = 0;
+        let scheduledDetections = 0;
 
         const parseTimeToMinutes = (t) => {
             if (!t) return 0;
@@ -640,7 +684,8 @@ exports.downloadReport = async (req, res) => {
             const shiftId = shiftMeta.id;
 
             // Calculate duration for this shift
-            if (shiftMeta && shiftMeta.start_time && shiftMeta.end_time) {
+            const shiftScope = rtspShift ? rtspShift.scopeByShift[shiftId] : null;
+            if (shiftMeta && shiftMeta.start_time && shiftMeta.end_time && !shiftNotRunning(shiftScope)) {
                 let diff = parseTimeToMinutes(shiftMeta.end_time) - parseTimeToMinutes(shiftMeta.start_time);
                 if (diff < 0) diff += 1440; // Handle overnight shifts
                 totalDurationMinutes += diff;
@@ -653,8 +698,9 @@ exports.downloadReport = async (req, res) => {
             const shiftCams = shiftCamsOf(shiftId);
             const shiftDets = detections.filter(d => {
                 const resolvedSid = (d.shift_id != null) ? d.shift_id : determineShiftId(d.date_time, shifts);
-                return resolvedSid === shiftId;
+                return resolvedSid === shiftId && detectionInSchedule(d, shiftScope);
             });
+            scheduledDetections += shiftDets.length;
 
             const total = shiftCams.length;
             // Camera is online if: classification IS NOT NULL AND status = 'Accessible' (case-insensitive)
@@ -698,7 +744,10 @@ exports.downloadReport = async (req, res) => {
         analysisData.push(['OVERALL SUMMARY', '']);
         analysisData.push(['Total Unique Cameras Online Today', uniqueOnline]);
         analysisData.push(['Total Online Cameras (Sum of Shifts)', cumulativeOnline]);
-        analysisData.push(['Total Detections (All Shifts)', detections.length]);
+        // With an uploaded schedule only detections of scheduled centres/shifts count (same
+        // rule as each shift's total); without one this is every detection, as before.
+        const anyRestricted = !!(rtspShift && Object.values(rtspShift.scopeByShift).some(sc => sc && sc.restricted));
+        analysisData.push(['Total Detections (All Shifts)', anyRestricted ? scheduledDetections : detections.length]);
         analysisData.push(['Total Scheduled Duration (Active Shifts)', `${totalHours} hours`]);
 
         const analysisWs = XLSX.utils.aoa_to_sheet(analysisData);
@@ -896,11 +945,17 @@ exports.downloadClientReport = async (req, res) => {
         // ── 6. Workbook ──────────────────────────────────────────────────────
         const wb = XLSX.utils.book_new();
 
-        const SHIFT_HEADERS = [
+        // RTSP: Device ID, Camera No and Server Address instead of Channel Id (an HLS-only field).
+        const SHIFT_HEADERS = isRTSP ? [
+            'City', 'Center', 'Cam ID', 'Device ID', 'Camera No', 'Server Address', 'Camera Name',
+            'Cam Type', 'TC Code', 'Events (Excluding Rejected)', 'Rejected Events', 'Camera Status'
+        ] : [
             'City', 'Center', 'Cam ID', 'Channel Id', 'Camera Name',
             'Cam Type', 'TC Code', 'Events (Excluding Rejected)', 'Rejected Events', 'Camera Status'
         ];
-        const SHIFT_WIDTHS = [15, 30, 15, 18, 35, 15, 12, 28, 16, 15];
+        const SHIFT_WIDTHS = isRTSP
+            ? [15, 30, 15, 12, 11, 22, 35, 15, 12, 28, 16, 15]
+            : [15, 30, 15, 18, 35, 15, 12, 28, 16, 15];
 
         shifts.forEach((shiftMeta, idx) => {
             const shiftId = shiftMeta.id;
@@ -920,7 +975,9 @@ exports.downloadClientReport = async (req, res) => {
                             'City': cam.city || agg.details.city || '',
                             'Center': cam.centre_name || agg.details.center || '',
                             'Cam ID': key,
-                            'Channel Id': '',
+                            'Device ID': cam.device_id || '',
+                            'Camera No': cam.camera_no ?? '',
+                            'Server Address': serverByKey[key] || cam.cctv_url || '',
                             'Camera Name': cam.camera_name || agg.details.camera_name || '',
                             'Cam Type': camType,
                             'TC Code': cam.tc_code || agg.details.tc_code || '',
@@ -934,7 +991,9 @@ exports.downloadClientReport = async (req, res) => {
                             'City': cam.city || '',
                             'Center': cam.centre_name || '',
                             'Cam ID': key,
-                            'Channel Id': '',
+                            'Device ID': cam.device_id || '',
+                            'Camera No': cam.camera_no ?? '',
+                            'Server Address': serverByKey[key] || cam.cctv_url || '',
                             'Camera Name': cam.camera_name || '',
                             'Cam Type': camType,
                             'TC Code': cam.tc_code || '',
@@ -1061,6 +1120,7 @@ exports.downloadClientReport = async (req, res) => {
         let cumulativeOnline = 0;
         const uniqueOnlineKeys = new Set();
         let totalDurationMinutes = 0;
+        let scheduledDetections = 0;
 
         const parseTimeToMinutes = (t) => {
             if (!t) return 0;
@@ -1071,7 +1131,8 @@ exports.downloadClientReport = async (req, res) => {
         shifts.forEach((shiftMeta, idx) => {
             const shiftId = shiftMeta.id;
 
-            if (shiftMeta && shiftMeta.start_time && shiftMeta.end_time) {
+            const shiftScope = rtspShift ? rtspShift.scopeByShift[shiftId] : null;
+            if (shiftMeta && shiftMeta.start_time && shiftMeta.end_time && !shiftNotRunning(shiftScope)) {
                 let diff = parseTimeToMinutes(shiftMeta.end_time) - parseTimeToMinutes(shiftMeta.start_time);
                 if (diff < 0) diff += 1440;
                 totalDurationMinutes += diff;
@@ -1080,8 +1141,9 @@ exports.downloadClientReport = async (req, res) => {
             const shiftCams = shiftCamsOf(shiftId);
             const shiftDets = detections.filter(d => {
                 const resolvedSid = (d.shift_id != null) ? d.shift_id : determineShiftId(d.date_time, shifts);
-                return resolvedSid === shiftId;
+                return resolvedSid === shiftId && detectionInSchedule(d, shiftScope);
             });
+            scheduledDetections += shiftDets.length;
 
             const total = shiftCams.length;
             const online = shiftCams.filter(c => cameraIsOnline(c, isRTSP)).length;
@@ -1122,7 +1184,10 @@ exports.downloadClientReport = async (req, res) => {
         analysisData.push(['OVERALL SUMMARY', '']);
         analysisData.push(['Total Unique Cameras Online Today', uniqueOnline]);
         analysisData.push(['Total Online Cameras (Sum of Shifts)', cumulativeOnline]);
-        analysisData.push(['Total Detections (All Shifts)', detections.length]);
+        // With an uploaded schedule only detections of scheduled centres/shifts count (same
+        // rule as each shift's total); without one this is every detection, as before.
+        const anyRestricted = !!(rtspShift && Object.values(rtspShift.scopeByShift).some(sc => sc && sc.restricted));
+        analysisData.push(['Total Detections (All Shifts)', anyRestricted ? scheduledDetections : detections.length]);
         analysisData.push(['Total Scheduled Duration (Active Shifts)', `${totalHours} hours`]);
 
         const analysisWs = XLSX.utils.aoa_to_sheet(analysisData);
@@ -1184,7 +1249,7 @@ exports.downloadSummaryReport = async (req, res) => {
         );
 
         const masterCameras = isRTSP ? await query(
-            `SELECT id, classification, null as shift_id, null as exam_date, status
+            `SELECT id, classification, tc_code, null as shift_id, null as exam_date, status
              FROM camera_links_rtsp
              WHERE exam_id = ? AND is_active = 1`,
             [examId]
@@ -1235,7 +1300,20 @@ exports.downloadSummaryReport = async (req, res) => {
                 totalOnline += online;
             });
             row['Total Online'] = totalOnline;
-            row['Total Detections'] = day.count;
+            let dayCount = day.count;
+            if (rtspShift && Object.values(rtspShift.scopeByShift).some(sc => sc && sc.restricted)) {
+                const [yyyy, mm, dd] = day.iso.split('-');
+                const dets = await query(
+                    `SELECT shift_id, tc_code, date_time FROM ${table}
+                     WHERE exam_id = ? AND pushed_to_client = 1 AND date_time LIKE CONCAT(?, '%')`,
+                    [examId, `${dd}/${mm}/${yyyy}`]
+                );
+                dayCount = dets.filter(d => {
+                    const sid = (d.shift_id != null) ? d.shift_id : determineShiftId(d.date_time, shifts);
+                    return detectionInSchedule(d, rtspShift.scopeByShift[sid]);
+                }).length;
+            }
+            row['Total Detections'] = dayCount;
             rows.push(row);
         }
 

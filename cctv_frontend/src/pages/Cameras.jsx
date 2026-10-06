@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   Box, Button, Paper, Table, TableBody, TableCell, TableContainer,
@@ -138,10 +138,14 @@ const Cameras = () => {
   const [exams, setExams] = useState([]);
   const [viewingArchived, setViewingArchived] = useState(false);
   const [selectedExamId, setSelectedExamId] = useState(examIdParam || '');
+  // exam whose default date was already applied (so clearing the date by hand is respected)
+  const defaultDateFor = useRef(null);
 
 
   const [cameras, setCameras] = useState([]);
   const [examLinkType, setExamLinkType] = useState(null);
+  // RTSP: what the exam schedule did to the list for the chosen date + shift / run (null = nothing chosen)
+  const [scheduleInfo, setScheduleInfo] = useState(null);
   const [loading, setLoading] = useState(false);
   const [statusCounts, setStatusCounts] = useState({ accessible: 0, notAccessible: 0, unknown: 0 });
   const [visionSummary, setVisionSummary] = useState(null);
@@ -255,6 +259,7 @@ const Cameras = () => {
     }
     setFilterShiftId('');
     setFilterExamDate('');
+    defaultDateFor.current = null;          // pick the default date again for this exam
     setFilterClassification('');
     setFilterRegion('');
     setSelectedRunKey('');
@@ -304,6 +309,7 @@ const Cameras = () => {
       setCameras(res.data.data || []);
       setTotalCount(res.data.totalCount || (res.data.data || []).length);
       setExamLinkType(res.data.linkType);
+      setScheduleInfo(res.data.schedule || null);
       setStatusCounts(res.data.statusCounts || { accessible: 0, notAccessible: 0, unknown: 0 });
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
@@ -311,6 +317,26 @@ const Cameras = () => {
 
   /* ── Derived ── */
   const selectedExamData = exams.find((e) => String(e.id) === String(selectedExamId));
+
+  /* ── Date filter: limited to the exam's dates, and preselected ───────────
+     A running exam opens on today; an archived (or finished) exam on its last day; an exam that
+     has not started yet on its first day. The calendar only enables the exam's date range. */
+  const dayOf = (v) => (v ? String(v).slice(0, 10) : '');
+  const examStartIso = dayOf(selectedExamData?.start_date);
+  const examEndIso = dayOf(selectedExamData?.end_date);
+  useEffect(() => {
+    if (!selectedExamData || String(defaultDateFor.current) === String(selectedExamData.id)) return;
+    defaultDateFor.current = selectedExamData.id;
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    let iso;
+    if (selectedExamData.is_active === false) iso = examEndIso || today;           // archived: last day
+    else if (examStartIso && today < examStartIso) iso = examStartIso;             // not started: first day
+    else if (examEndIso && today > examEndIso) iso = examEndIso;                   // finished: last day
+    else iso = today;                                                              // running: today
+    const [y, m, d] = iso.split('-');
+    if (y && m && d) { setFilterExamDate(`${d}-${m}-${y}`); setPage(0); }
+  }, [selectedExamData]);
   const isHLS = examLinkType === 'HLS' || selectedExamData?.link_type?.toUpperCase() === 'HLS';
   const shifts = selectedExamData?.examShifts || [];
 
@@ -825,9 +851,68 @@ const Cameras = () => {
                     </Select>
                   </FormControl>
 
-                  {/* HLS filters */}
-                  {isHLS && (
+                  {/* Date, then shift. HLS: the camera rows of that date/shift. RTSP: pick a date first; the
+                      shift filter then appears and limits the list to the centres scheduled in that date +
+                      shift (uses the exam's centre schedule). */}
+                  {(
                     <>
+                      {/* Native date input — same style as Detections.jsx */}
+                      <Box sx={{ position: 'relative', minWidth: { xs: 0, sm: 150 }, flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' } }}>
+                        <TextField
+                          type="date"
+                          size="small"
+                          value={filterExamDate ? filterExamDate.split('-').reverse().join('-') : ''}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val) {
+                              // typed dates outside the exam period are ignored (the picker already greys them out)
+                              if ((examStartIso && val < examStartIso) || (examEndIso && val > examEndIso)) return;
+                              const [y, m, d] = val.split('-');
+                              setFilterExamDate(`${d}-${m}-${y}`);
+                            } else {
+                              setFilterExamDate('');
+                              if (!isHLS) setFilterShiftId('');   // RTSP: no date, no shift
+                            }
+                            setPage(0);
+                          }}
+                          InputProps={{
+                            sx: {
+                              borderRadius: '8px',
+                              bgcolor: '#f1f5f9',
+                              height: 40,
+                              fontSize: 14,
+                              color: filterExamDate ? 'transparent' : '#94a3b8',
+                              paddingRight: '6px',
+                              '& fieldset': { border: '1px solid #e2e8f0' },
+                              '&:hover fieldset': { borderColor: '#cbd5e1' },
+                              '&::-webkit-calendar-picker-indicator': {
+                                cursor: 'pointer', opacity: 0.6,
+                                '&:hover': { opacity: 1 },
+                              },
+                              // the formatted date is drawn by the overlay below: hide the browser's own text
+                              // when a date is set (otherwise its year field ghosts through)
+                              '& input::-webkit-datetime-edit': { opacity: filterExamDate ? 0 : 1 },
+                            },
+                          }}
+                          inputProps={{ min: examStartIso || undefined, max: examEndIso || undefined }}
+                          sx={{ width: '100%' }}
+                        />
+                        {filterExamDate && (
+                          <Box sx={{
+                            position: 'absolute', left: 14, top: '50%',
+                            transform: 'translateY(-50%)', fontSize: 14,
+                            color: '#334155', pointerEvents: 'none',
+                          }}>
+                            {filterExamDate}
+                          </Box>
+                        )}
+                      </Box>
+
+                      {/* RTSP: the shift filter appears only after a date is chosen */}
+                      {(isHLS || filterExamDate) && (
+                        <>
+                      <Tooltip arrow disableHoverListener={isHLS}
+                        title="Only the cameras of the centres scheduled on this date and shift (from the exam's centre schedule)">
                       <FormControl size="small" sx={{ minWidth: { xs: 0, sm: 140 }, flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' } }}>
                         <InputLabel id="cam-shift-label" sx={{ fontSize: '0.85rem' }}>Shift</InputLabel>
                         <Select
@@ -846,51 +931,9 @@ const Cameras = () => {
                           {shifts.map((s) => <MenuItem key={s.id} value={s.id}>{s.shift_name}</MenuItem>)}
                         </Select>
                       </FormControl>
-
-                      {/* Native date input — same style as Detections.jsx */}
-                      <Box sx={{ position: 'relative', minWidth: { xs: 0, sm: 150 }, flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' } }}>
-                        <TextField
-                          type="date"
-                          size="small"
-                          value={filterExamDate ? filterExamDate.split('-').reverse().join('-') : ''}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            if (val) {
-                              const [y, m, d] = val.split('-');
-                              setFilterExamDate(`${d}-${m}-${y}`);
-                            } else {
-                              setFilterExamDate('');
-                            }
-                            setPage(0);
-                          }}
-                          InputProps={{
-                            sx: {
-                              borderRadius: '8px',
-                              bgcolor: '#f1f5f9',
-                              height: 40,
-                              fontSize: 14,
-                              color: filterExamDate ? 'transparent' : '#94a3b8',
-                              paddingRight: '6px',
-                              '& fieldset': { border: '1px solid #e2e8f0' },
-                              '&:hover fieldset': { borderColor: '#cbd5e1' },
-                              '&::-webkit-calendar-picker-indicator': {
-                                cursor: 'pointer', opacity: 0.6,
-                                '&:hover': { opacity: 1 },
-                              },
-                            },
-                          }}
-                          sx={{ width: '100%' }}
-                        />
-                        {filterExamDate && (
-                          <Box sx={{
-                            position: 'absolute', left: 14, top: '50%',
-                            transform: 'translateY(-50%)', fontSize: 14,
-                            color: '#334155', pointerEvents: 'none',
-                          }}>
-                            {filterExamDate}
-                          </Box>
-                        )}
-                      </Box>
+                      </Tooltip>
+                        </>
+                      )}
                     </>
                   )}
 
@@ -917,6 +960,21 @@ const Cameras = () => {
 
                 </Box>
               </Box>
+
+              {!isHLS && filterExamDate && !filterShiftId && !selectedRunKey && (
+                <Alert severity="info" sx={{ mb: 2 }}>Now pick a shift to see only the centres scheduled on this date.</Alert>
+              )}
+              {!isHLS && scheduleInfo && (
+                <Alert severity={scheduleInfo.applied ? (scheduleInfo.exam_runs ? 'info' : 'warning') : 'info'} sx={{ mb: 2 }}>
+                  {!scheduleInfo.applied
+                    ? 'This exam has no schedule uploaded (Exams → Edit), so every camera is shown.'
+                    : !scheduleInfo.exam_runs
+                      ? `The exam does not run on ${scheduleInfo.date} in this shift (exam date & shift schedule) — no cameras are scheduled.`
+                      : scheduleInfo.centres != null
+                        ? `Showing only the cameras of the ${scheduleInfo.centres} centres scheduled on ${scheduleInfo.date} in this shift${selectedRunKey ? ' (plus any camera this run recorded)' : ''}. Other centres are not scheduled and are not checked or classified then.`
+                        : 'Every centre runs on this date and shift.'}
+                </Alert>
+              )}
 
               {cameras.length > 0 && cameras.some(cam => cam.status !== null && cam.status !== undefined) && (
                 <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap', justifyContent: { xs: 'flex-start', sm: 'flex-end' } }}>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -19,6 +19,7 @@ import {
   TextField,
   InputAdornment,
   Tooltip,
+  Alert,
   IconButton,
   Button,
   Dialog,
@@ -141,6 +142,10 @@ const ClientCameras = () => {
   const [camTotal, setCamTotal] = useState(0);
   const [camFilterShiftId, setCamFilterShiftId] = useState('');
   const [camFilterExamDate, setCamFilterExamDate] = useState('');
+  // RTSP: what the exam schedule did to the list for the chosen date + shift (null = nothing chosen)
+  const [camScheduleInfo, setCamScheduleInfo] = useState(null);
+  // exam whose default date was already applied (so clearing the date by hand is respected)
+  const defaultDateFor = useRef(null);
   const [camFilterRegion, setCamFilterRegion] = useState('');
   const [camRegionOptions, setCamRegionOptions] = useState([]);
   const [camVisionSummary, setCamVisionSummary] = useState(null);
@@ -197,6 +202,7 @@ const ClientCameras = () => {
       setCamTotal(res.data.totalCount || (res.data.data || []).length);
       setCamExamLinkType(res.data.linkType);
       setCamStatusCounts(res.data.statusCounts || { accessible: 0, notAccessible: 0, unknown: 0 });
+      setCamScheduleInfo(res.data.schedule || null);
     } catch (e) { console.error(e); }
     finally { setCamLoading(false); }
   }, [selectedCamExamId, camPage, camRowsPerPage, camFilterShiftId, camFilterExamDate, camFilterRegion, camDebouncedSearch]);
@@ -223,6 +229,8 @@ const ClientCameras = () => {
     else { setCameras([]); setCamTotal(0); setCamVisionSummary(null); }
     setCamFilterShiftId('');
     setCamFilterExamDate('');
+    setCamScheduleInfo(null);
+    defaultDateFor.current = null;          // pick the default date again for this exam
     setCamFilterRegion('');
     setCamSearchQuery('');
     setCamDebouncedSearch('');
@@ -248,6 +256,25 @@ const ClientCameras = () => {
   const selectedCamExamData = camExams.find(e => String(e.id) === String(selectedCamExamId));
   const isHLS = camExamLinkType === 'HLS' || selectedCamExamData?.link_type?.toUpperCase() === 'HLS';
   const camShifts = selectedCamExamData?.examShifts || [];
+
+  /* Date filter: limited to the exam's dates, and preselected (same rule as the admin Cameras tab).
+     A running exam opens on today, a finished one on its last day, one not started yet on its first. */
+  const dayOf = (v) => (v ? String(v).slice(0, 10) : '');
+  const examStartIso = dayOf(selectedCamExamData?.start_date);
+  const examEndIso = dayOf(selectedCamExamData?.end_date);
+  useEffect(() => {
+    if (!selectedCamExamData || String(defaultDateFor.current) === String(selectedCamExamData.id)) return;
+    defaultDateFor.current = selectedCamExamData.id;
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    let iso;
+    if (selectedCamExamData.is_active === false) iso = examEndIso || today;
+    else if (examStartIso && today < examStartIso) iso = examStartIso;
+    else if (examEndIso && today > examEndIso) iso = examEndIso;
+    else iso = today;
+    const [y, m, d] = iso.split('-');
+    if (y && m && d) { setCamFilterExamDate(`${d}-${m}-${y}`); setCamPage(0); }
+  }, [selectedCamExamData]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleCamSort = (property) => {
     const isAsc = camOrderBy === property && camOrder === 'asc';
@@ -454,19 +481,31 @@ const ClientCameras = () => {
                     </Select>
                   </FormControl>
                 )}
-                {isHLS && (
-                  <>
+                {/* Date, then shift. HLS: the camera rows of that date/shift. RTSP: the shift filter appears
+                    once a date is picked and limits the list to the centres scheduled in that date + shift. */}
+                <Box sx={{ position: 'relative', flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' }, minWidth: { sm: 150 } }}>
+                  <TextField type="date" size="small" value={camFilterExamDate ? camFilterExamDate.split('-').reverse().join('-') : ''}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      // typed dates outside the exam period are ignored (the picker already greys them out)
+                      if (val && ((examStartIso && val < examStartIso) || (examEndIso && val > examEndIso))) return;
+                      if (val) { const [y, m, d] = val.split('-'); setCamFilterExamDate(`${d}-${m}-${y}`); } else setCamFilterExamDate('');
+                      if (!isHLS) setCamFilterShiftId('');   // RTSP: a new date means choosing the shift again
+                      setCamPage(0);
+                    }}
+                    inputProps={{ min: examStartIso || undefined, max: examEndIso || undefined }}
+                    InputProps={{ sx: { borderRadius: '8px', bgcolor: '#f1f5f9', height: 40, fontSize: 14, color: camFilterExamDate ? 'transparent' : '#94a3b8', paddingRight: '6px', '& fieldset': { border: '1px solid #e2e8f0' }, '& input::-webkit-datetime-edit': { opacity: camFilterExamDate ? 0 : 1 } } }} sx={{ width: '100%' }} />
+                  {camFilterExamDate && <Box sx={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', fontSize: 14, color: '#334155', pointerEvents: 'none' }}>{camFilterExamDate}</Box>}
+                </Box>
+                {(isHLS || camFilterExamDate) && (
+                  <Tooltip arrow disableHoverListener={isHLS} title="Only the cameras of the centres scheduled on this date and shift">
                     <FormControl size="small" sx={{ flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' }, minWidth: { sm: 130 } }}>
                       <Select value={camFilterShiftId} onChange={(e) => { setCamFilterShiftId(e.target.value); setCamPage(0); }} displayEmpty sx={{ borderRadius: 2, fontSize: '0.85rem', bgcolor: '#f1f5f9', height: 40, '& fieldset': { border: '1px solid #e2e8f0' } }} renderValue={(v) => v ? camShifts.find(s => s.id === v)?.shift_name || v : 'All shifts'}>
                         <MenuItem value="">All shifts</MenuItem>
                         {camShifts.map(s => <MenuItem key={s.id} value={s.id}>{s.shift_name}</MenuItem>)}
                       </Select>
                     </FormControl>
-                    <Box sx={{ position: 'relative', flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' }, minWidth: { sm: 150 } }}>
-                      <TextField type="date" size="small" value={camFilterExamDate ? camFilterExamDate.split('-').reverse().join('-') : ''} onChange={(e) => { const val = e.target.value; if (val) { const [y, m, d] = val.split('-'); setCamFilterExamDate(`${d}-${m}-${y}`); } else setCamFilterExamDate(''); setCamPage(0); }} InputProps={{ sx: { borderRadius: '8px', bgcolor: '#f1f5f9', height: 40, fontSize: 14, color: camFilterExamDate ? 'transparent' : '#94a3b8', paddingRight: '6px', '& fieldset': { border: '1px solid #e2e8f0' } } }} sx={{ width: '100%' }} />
-                      {camFilterExamDate && <Box sx={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', fontSize: 14, color: '#334155', pointerEvents: 'none' }}>{camFilterExamDate}</Box>}
-                    </Box>
-                  </>
+                  </Tooltip>
                 )}
 
                 <Tooltip title="Download HLS Template">
@@ -486,6 +525,20 @@ const ClientCameras = () => {
               </Box>
             </Box>
 
+            {!isHLS && camFilterExamDate && !camFilterShiftId && (
+              <Alert severity="info" sx={{ mb: 2 }}>Pick a shift to see only the centres scheduled on this date.</Alert>
+            )}
+            {!isHLS && camScheduleInfo && (
+              <Alert severity={camScheduleInfo.applied && !camScheduleInfo.exam_runs ? 'warning' : 'info'} sx={{ mb: 2 }}>
+                {!camScheduleInfo.applied
+                  ? 'No centre schedule is set for this exam, so every camera is shown.'
+                  : !camScheduleInfo.exam_runs
+                    ? `The exam does not run on ${camScheduleInfo.date} in this shift — no cameras are scheduled.`
+                    : camScheduleInfo.centres != null
+                      ? `Showing only the cameras of the ${camScheduleInfo.centres} centres scheduled on ${camScheduleInfo.date} in this shift.`
+                      : 'Every centre runs on this date and shift.'}
+              </Alert>
+            )}
             {cameras.length > 0 && cameras.some(cam => cam.status !== null && cam.status !== undefined) && (
               <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap', justifyContent: { xs: 'flex-start', sm: 'flex-end' } }}>
                 <Button

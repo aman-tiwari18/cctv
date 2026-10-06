@@ -48,6 +48,16 @@ export const authAPI = {
     getAvailableCompanies: () => api.get('/auth/companies')
 };
 
+// multipart POST of one Excel file; dryRun adds ?dry_run=1 (preview, nothing saved)
+const sheetPost = (url, file, dryRun) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post(url, formData, {
+        params: dryRun ? { dry_run: 1 } : undefined,
+        headers: { 'Content-Type': 'multipart/form-data' },
+    });
+};
+
 export const examsAPI = {
     getAll: (params) => api.get('/exams', { params }),
     getById: (id) => api.get(`/exams/${id}`),
@@ -71,6 +81,29 @@ export const examsAPI = {
     deleteObservers: (id) => api.delete(`/exams/${id}/observers`),
     downloadObserverTemplate: () =>
         api.get('/exams/observers/template', { responseType: 'blob' }),
+
+    // ── Exam schedule + server-room thresholds (docs/EXAM_SCHEDULE_AND_THRESHOLDS.md) ──
+    // Read an "Exam Schedule" sheet and get the values for the exam form (exam need not exist yet)
+    parseScheduleSheet: (file) => sheetPost('/exams/schedule-sheet/parse', file),
+    // dryRun=true -> preview only (errors / warnings / summary), nothing is saved
+    uploadSlotSchedule: (id, file, dryRun) => sheetPost(`/exams/${id}/slot-schedule/upload`, file, dryRun),
+    getSlotSchedule: (id) => api.get(`/exams/${id}/slot-schedule`),
+    deleteSlotSchedule: (id) => api.delete(`/exams/${id}/slot-schedule`),
+    uploadCentreSchedule: (id, file, dryRun) => sheetPost(`/exams/${id}/centre-schedule/upload`, file, dryRun),
+    getCentreSchedule: (id) => api.get(`/exams/${id}/centre-schedule`),
+    setCentreCell: (id, body) => api.put(`/exams/${id}/centre-schedule/cell`, body),
+    deleteCentreSchedule: (id) => api.delete(`/exams/${id}/centre-schedule`),
+    exportCentreSchedule: (id) => api.get(`/exams/${id}/centre-schedule/export`, { responseType: 'blob' }),
+    centreScheduleTemplate: () => api.get('/exams/centre-schedule/template', { responseType: 'blob' }),
+    slotScheduleTemplate: () => api.get('/exams/slot-schedule/template', { responseType: 'blob' }),
+    getSlotSummary: (id, date, shiftId) => api.get(`/exams/${id}/slot-summary`, { params: { date, shift_id: shiftId } }),
+    uploadThresholds: (id, file, dryRun) => sheetPost(`/exams/${id}/server-room-thresholds/upload`, file, dryRun),
+    getThresholds: (id, params) => api.get(`/exams/${id}/server-room-thresholds`, { params }),
+    saveThreshold: (id, body) => api.put(`/exams/${id}/server-room-thresholds`, body),
+    deleteThreshold: (id, rowId) => api.delete(`/exams/${id}/server-room-thresholds/${rowId}`),
+    clearThresholds: (id) => api.delete(`/exams/${id}/server-room-thresholds`),
+    exportThresholds: (id) => api.get(`/exams/${id}/server-room-thresholds/export`, { responseType: 'blob' }),
+    thresholdTemplate: () => api.get('/exams/server-room-thresholds/template', { responseType: 'blob' }),
 };
 
 export const camerasAPI = {

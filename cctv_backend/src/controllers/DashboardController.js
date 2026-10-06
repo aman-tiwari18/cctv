@@ -6,6 +6,7 @@
 'use strict';
 
 const { query } = require('../config/database');
+const { scheduledExamIds, rtspScheduledCounts, rtspScheduledCountsPerShift } = require('../utils/examSchedule');
 
 /**
  * Local-IST date string "YYYY-MM-DD" from a Date (defaults to now).
@@ -421,13 +422,23 @@ exports.getOverview = async (req, res) => {
                  WHERE exam_id IN (?) AND is_active = 1`,
                 [activeExamIds]
             );
-            const rtspCamsP = query(
-                `SELECT COUNT(*) AS total,
-                        SUM(CASE WHEN LOWER(status) = 'accessible' THEN 1 ELSE 0 END) AS acc
-                 FROM camera_links_rtsp
-                 WHERE exam_id IN (?) AND is_active = 1`,
-                [activeExamIds]
-            );
+            // RTSP exams with an uploaded schedule (Exams page): on a single day, count only
+            // the cameras of centres scheduled that day (in the selected shifts, if any).
+            const schedIds = startDate === endDate ? await scheduledExamIds(activeExamIds) : new Set();
+            const plainIds = activeExamIds.filter((id) => !schedIds.has(Number(id)));
+            const rtspCamsP = Promise.all([
+                plainIds.length ? query(
+                    `SELECT COUNT(*) AS total,
+                            SUM(CASE WHEN LOWER(status) = 'accessible' THEN 1 ELSE 0 END) AS acc
+                     FROM camera_links_rtsp
+                     WHERE exam_id IN (?) AND is_active = 1`,
+                    [plainIds]
+                ) : [{ total: 0, acc: 0 }],
+                schedIds.size ? rtspScheduledCounts([...schedIds], startDate, useShiftFilter ? targetShiftIds : null) : { total: 0, acc: 0 },
+            ]).then(([plain, sched]) => [{
+                total: Number(plain[0]?.total || 0) + Number(sched?.total || 0),
+                acc: Number(plain[0]?.acc || 0) + Number(sched?.acc || 0),
+            }]);
 
             // Detections + distribution get the shift filter when set.
             const shiftClause = useShiftFilter ? ` AND shift_id IN (?)` : '';
@@ -663,8 +674,10 @@ exports.getLiveExams = async (req, res) => {
             [shiftIds, todayDate]
         );
 
-        const [hlsCams, rtspCams, hlsDet, rtspDet, scriptsAgg] = await Promise.all([
+        const [hlsCams, rtspCams, hlsDet, rtspDet, scriptsAgg, rtspShiftCams] = await Promise.all([
             hlsCamsP, rtspCamsP, hlsDetP, rtspDetP, scriptsP,
+            // scheduled RTSP exams: cameras of the centres running in each shift today
+            rtspScheduledCountsPerShift(examIds, todayDate),
         ]);
 
         // Build lookup maps
@@ -707,7 +720,7 @@ exports.getLiveExams = async (req, res) => {
                 cameras = shiftSpecific.cameras + allShifts.cameras;
                 detections = hlsDetMap.get(`${r.exam_id}::${r.shift_id}`) || 0;
             } else {
-                const c = rtspCamMap.get(r.exam_id) || { cameras: 0, running: 0 };
+                const c = rtspShiftCams.get(`${r.exam_id}::${r.shift_id}`) || rtspCamMap.get(r.exam_id) || { cameras: 0, running: 0 };
                 cameras = c.cameras;
                 detections = rtspDetMap.get(`${r.exam_id}::${r.shift_id}`) || 0;
             }

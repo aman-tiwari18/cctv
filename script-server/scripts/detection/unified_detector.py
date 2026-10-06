@@ -180,7 +180,8 @@ def class_from_result(result, class_ids, conf=CONF_THRESHOLD):
 # Reporting helper (shared by all evaluators)
 # ============================================================
 def _save_and_report(frame, *, folder, script_name, device_id, camera_no,
-                     exam_id, shift_id, source_type="RTSP", violation_count=None):
+                     exam_id, shift_id, source_type="RTSP", violation_count=None,
+                     violation_chain=None):
     """Save the annotated detection and report it, using the schema-correct identifier:
        - RTSP: device_id + camera_no  (filename `{dev}_{camera_no}`, report_to_db_rtsp)
        - HLS : ch_code (= camera_no)  (filename `ch{ch_code}`,        report_to_db_hls)
@@ -202,12 +203,12 @@ def _save_and_report(frame, *, folder, script_name, device_id, camera_no,
         if str(source_type).upper() == "HLS":
             from utils.db_client import report_to_db_hls
             report_to_db_hls(ch_code=str(camera_no), image_name=fname, folder=folder,
-                             violation_count=violation_count)
+                             violation_count=violation_count, violation_chain=violation_chain)
         else:
             from utils.db_client import report_to_db_rtsp
             report_to_db_rtsp(device_id=str(device_id), camera_no=str(camera_no),
                               image_name=fname, folder=folder,
-                              violation_count=violation_count)
+                              violation_count=violation_count, violation_chain=violation_chain)
     except Exception as e:
         logger.error(f"[Unified] DB report error ({script_name}): {e}")
     logger.warning(f"[Unified] 🚨 {script_name} saved → {path}")
@@ -279,15 +280,15 @@ def _make_evaluator(module_name, fn_name, folder, script_code):
             return
         if not _passed_gate(state, script_code, time.time()):
             return
-        violation_count = None
+        violation_count = violation_chain = None
         if script_code == "proximity" and len(out) > 3:
             # Same pair at the same spot as this camera's earlier report → 2, 3, ...
             # Keys match workers/close_proximity_worker.py so both paths share counts.
-            from proximity_repeat import next_violation_count
+            from proximity_repeat import next_violation
             is_hls = str(item.get("source_type", "RTSP")).upper() == "HLS"
             camera_key = (f"hls_ch{item['camera_no']}" if is_hls
                           else f"rtsp_{item['device_id']}_{item['camera_no']}")
-            violation_count = next_violation_count(
+            violation_count, violation_chain = next_violation(
                 camera_key, out[3], item.get("exam_id", "0"), item.get("shift_id", "0"))
         _save_and_report(
             annotated, folder=folder, script_name=script_code,
@@ -295,6 +296,7 @@ def _make_evaluator(module_name, fn_name, folder, script_code):
             exam_id=item.get("exam_id", "0"), shift_id=item.get("shift_id", "0"),
             source_type=item.get("source_type", "RTSP"),
             violation_count=violation_count,
+            violation_chain=violation_chain,
         )
 
     return _eval
