@@ -56,6 +56,7 @@ import ExamScheduleCalendar from '../components/ExamScheduleCalendar';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import { authAPI, examsAPI, shiftScriptsAPI, smsAPI } from '../services/api';
+import ExamScheduleSections, { describeError } from './exams/ScheduleSections';
 
 const ALL_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -108,6 +109,11 @@ const Exams = () => {
   const [examBodies, setExamBodies] = useState(FALLBACK_EXAM_BODIES);
   const [assignableUsers, setAssignableUsers] = useState([]);
   const [assignedUserIds, setAssignedUserIds] = useState([]);
+  // "Exam Schedule" sheet (date x shift Yes/No): fills the form; the same file is also stored as the
+  // exam's date/shift schedule right after Save.
+  const [scheduleFile, setScheduleFile] = useState(null);
+  const [scheduleBusy, setScheduleBusy] = useState(false);
+  const [scheduleImport, setScheduleImport] = useState(null);   // { ok, message, notes[], errors[] }
   // Observer sheet (TC code -> SMS number). On an existing exam the file uploads
   // straight away; while CREATING there is no exam id yet, so the file is held
   // here and posted right after the exam is created.
@@ -227,6 +233,7 @@ const Exams = () => {
         setAssignedUserIds((res?.data?.data || []).map(u => u.id));
       } catch { setAssignedUserIds([]); }
       setObserverFile(null);
+      setScheduleFile(null); setScheduleImport(null);
       try {
         const res = await examsAPI.getObservers(exam.id);
         setObserverSummary({ numbers: res?.data?.numbers || 0, tcCodes: res?.data?.tcCodes || 0 });
@@ -250,6 +257,7 @@ const Exams = () => {
       setAssignedUserIds([]);
       setObserverFile(null);
       setObserverSummary(null);
+      setScheduleFile(null); setScheduleImport(null);
     }
     setOpenDialog(true);
     setError('');
@@ -262,6 +270,53 @@ const Exams = () => {
     setNewSkipDate('');
     setObserverFile(null);
     setObserverSummary(null);
+    setScheduleFile(null);
+    setScheduleImport(null);
+  };
+
+  /* ── "Exam Schedule" sheet → fills the form ─────────────────────────────
+     Date x Shift (Yes/No). Reads the file on the server (nothing is saved), then fills the
+     start/end date, the skipped dates and the shifts. A new exam takes the sheet's shifts; on
+     an existing exam its shifts are kept and only missing ones are added. */
+  const handleImportScheduleSheet = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setScheduleBusy(true);
+    setScheduleImport(null);
+    try {
+      const res = await examsAPI.parseScheduleSheet(file);
+      const d = res.data.data;
+      const iso2ddmmyyyy = (iso) => iso.split('-').reverse().join('-');
+      const notes = [...(res.data.warnings || [])];
+      setFormData((prev) => {
+        let shifts = d.shifts;
+        if (editingExam) {
+          const have = new Map(prev.shifts.map((x) => [String(x.shift_name).trim().toLowerCase(), x]));
+          d.shifts.forEach((x) => {
+            const cur = have.get(x.shift_name.toLowerCase());
+            if (cur && x.start_time && (cur.start_time !== x.start_time || cur.end_time !== x.end_time)) {
+              notes.push(`${x.shift_name}: the sheet says ${x.start_time}–${x.end_time}, the exam has ${cur.start_time}–${cur.end_time} (kept as is).`);
+            }
+          });
+          shifts = [...prev.shifts, ...d.shifts.filter((x) => !have.has(x.shift_name.toLowerCase()))];
+        }
+        return { ...prev, start_date: iso2ddmmyyyy(d.start_date), end_date: iso2ddmmyyyy(d.end_date), skip_days: d.skip_days, skip_dates: d.skip_dates, shifts };
+      });
+      if (d.not_running_slots?.length) notes.push(`${d.not_running_slots.length} slot(s) are marked No (e.g. ${d.not_running_slots.slice(0, 3).join(', ')}) — stored when you save.`);
+      setScheduleFile(file);
+      setScheduleImport({
+        ok: true,
+        message: `Filled from "${file.name}": ${iso2ddmmyyyy(d.start_date)} to ${iso2ddmmyyyy(d.end_date)}, ${d.shifts.length} shift(s), ${d.skip_dates.length} skipped date(s). Check the shift times, then Save.`,
+        notes, errors: [],
+      });
+    } catch (err) {
+      const f = describeError(err, 'The schedule sheet could not be read');
+      setScheduleFile(null);
+      setScheduleImport({ ok: false, message: f.message, notes: [], errors: f.errors });
+    } finally {
+      setScheduleBusy(false);
+    }
   };
 
   /* ── Observer sheet (TC code -> mobile) ──────────────────────────────────
@@ -488,13 +543,25 @@ const Exams = () => {
       };
 
       let observerWarning = '';
+      let scheduleWarning = '';
+      const storeSchedule = async (examId) => {
+        if (!scheduleFile || !examId) return;
+        try {
+          await examsAPI.uploadSlotSchedule(examId, scheduleFile, false);
+        } catch (err) {
+          const f = describeError(err, 'could not be stored');
+          scheduleWarning = ` — but the date/shift schedule ${f.message}${f.errors?.length ? ` (${f.errors[0]})` : ''}. Upload it again by editing the exam.`;
+        }
+      };
       if (editingExam) {
         await examsAPI.update(editingExam.id, payload);
+        await storeSchedule(editingExam.id);
       } else {
         const created = await examsAPI.create(payload);
         // The staged observer sheet needs the new exam's id. A failure here must
         // not read as "the exam wasn't created" — it was; only the sheet missed.
         const newExamId = created?.data?.data?.id;
+        await storeSchedule(newExamId);
         if (observerFile && newExamId) {
           try {
             await uploadObserverSheet(newExamId, observerFile);
@@ -507,8 +574,8 @@ const Exams = () => {
       loadExams();
       setSnackbar({
         open: true,
-        message: (editingExam ? 'Exam updated successfully' : 'Exam created successfully') + observerWarning,
-        severity: observerWarning ? 'warning' : 'success',
+        message: (editingExam ? 'Exam updated successfully' : 'Exam created successfully') + observerWarning + scheduleWarning,
+        severity: (observerWarning || scheduleWarning) ? 'warning' : 'success',
       });
     } catch (error) {
       setError(error.response?.data?.message || 'Operation failed');
@@ -940,12 +1007,33 @@ const Exams = () => {
           </Grid>
 
           {/* EXAM DATE RANGE */}
-          <Box sx={{ display: 'flex', alignItems: 'center', mb: 2, mt: 4 }}>
-            <Box sx={{ width: 3, height: 14, bgcolor: '#3c81f6', mr: 1, borderRadius: 1 }} />
-            <Typography sx={{ fontWeight: 800, fontSize: '0.85rem', letterSpacing: '0.05em', color: '#1e293b' }}>
-              EXAM DATE RANGE
-            </Typography>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, mt: 4 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+              <Box sx={{ width: 3, height: 14, bgcolor: '#3c81f6', mr: 1, borderRadius: 1 }} />
+              <Typography sx={{ fontWeight: 800, fontSize: '0.85rem', letterSpacing: '0.05em', color: '#1e293b' }}>
+                EXAM DATE RANGE
+              </Typography>
+            </Box>
+            <Button
+              component="label"
+              disabled={scheduleBusy}
+              startIcon={scheduleBusy ? <CircularProgress size={14} /> : <UploadFile sx={{ fontSize: 16 }} />}
+              sx={{ color: '#3c81f6', fontWeight: 700, fontSize: '0.75rem', textTransform: 'none' }}
+            >
+              {scheduleBusy ? 'Reading…' : 'Import schedule from Excel'}
+              <input type="file" hidden accept=".xlsx,.xls,.ods" onChange={handleImportScheduleSheet} />
+            </Button>
           </Box>
+          {scheduleImport && (
+            <Alert severity={scheduleImport.ok ? (scheduleImport.notes.length ? 'warning' : 'success') : 'error'} sx={{ mb: 2 }} onClose={() => setScheduleImport(null)}>
+              {scheduleImport.message}
+              {[...(scheduleImport.errors || []), ...(scheduleImport.notes || [])].length > 0 && (
+                <Box component="ul" sx={{ m: 0, mt: 0.5, pl: 2.5, fontSize: '0.78rem', maxHeight: 140, overflow: 'auto' }}>
+                  {[...(scheduleImport.errors || []), ...(scheduleImport.notes || [])].slice(0, 30).map((x, i) => <li key={i}>{x}</li>)}
+                </Box>
+              )}
+            </Alert>
+          )}
           <LocalizationProvider dateAdapter={AdapterDateFns}>
             <Grid container spacing={2}>
               <Grid item xs={12} sm={6}>
@@ -1309,6 +1397,13 @@ const Exams = () => {
               missing from the sheet raises no SMS. Re-uploading replaces the whole list for this exam.
             </Typography>
           </Box>
+
+          {/* EXAM SCHEDULE + SERVER ROOM THRESHOLDS */}
+          <ExamScheduleSections
+            exam={editingExam}
+            linkType={formData.link_type}
+            notify={(message, severity = 'success') => setSnackbar({ open: true, message, severity })}
+          />
 
           {/* ASSIGN USERS */}
           <Box sx={{ display: 'flex', alignItems: 'center', mb: 2, mt: 4 }}>

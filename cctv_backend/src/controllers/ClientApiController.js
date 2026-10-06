@@ -9,6 +9,7 @@
 'use strict';
 
 const { query } = require('../config/database');
+const { scheduledTcCodesNow } = require('../utils/examSchedule');
 const logger = require('../utils/logger');
 const {
     EXAM_ID,
@@ -49,8 +50,11 @@ function resolveCamType(row) {
  *   today outside the exam's dates    → 0 Idle/Ready
  *   otherwise                         → 1 AnalyticsLive
  */
-function resolveStatus(row, camType, examRunning) {
+function resolveStatus(row, camType, examRunning, scheduledNow = true) {
     if (!Number(row.is_active) || camType === 9) return CAMERA_STATUS.EXCLUDED;
+    // Exam schedule (Exams page): the centre has no exam in the current shift / today ->
+    // idle, not "offline" (its stream is not being watched, so accessibility is irrelevant).
+    if (!scheduledNow) return CAMERA_STATUS.IDLE;
     if (normLabel(row.status) === 'notaccessible') return CAMERA_STATUS.OTHER;
     if (!row.classification || !row.status) return CAMERA_STATUS.CLASSIFICATION_PENDING;
     if (!examRunning) return CAMERA_STATUS.IDLE;
@@ -109,6 +113,20 @@ async function loadCameras() {
             [EXAM_ID]
         );
 
+    // RTSP exam with an uploaded schedule: which centres run now (null = all)
+    let runningTcs = null;
+    if (isRtsp) {
+        try {
+            const now = new Date();
+            const p2 = (n) => String(n).padStart(2, '0');
+            const today = `${now.getFullYear()}-${p2(now.getMonth() + 1)}-${p2(now.getDate())}`;
+            const nowTime = `${p2(now.getHours())}:${p2(now.getMinutes())}:${p2(now.getSeconds())}`;
+            runningTcs = await scheduledTcCodesNow(EXAM_ID, today, nowTime);
+        } catch (e) {
+            logger.warn(`[clientApi] schedule lookup failed, treating every centre as running: ${e.message}`);
+        }
+    }
+
     const seen = new Set();
     const cameras = [];
     for (const row of rows) {
@@ -120,7 +138,8 @@ async function loadCameras() {
         seen.add(key);
 
         const camType = resolveCamType(row);
-        const status = resolveStatus(row, camType, Number(exam.running) === 1);
+        const status = resolveStatus(row, camType, Number(exam.running) === 1,
+            !runningTcs || runningTcs.has(String(row.tc_code == null ? '' : row.tc_code).trim()));
         cameras.push({
             cam_id: camId,
             cam_type: camType,

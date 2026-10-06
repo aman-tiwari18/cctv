@@ -6,6 +6,7 @@ const fs = require("fs");
 const path = require("path");
 const { fetchFrameFromAnyWorker } = require("../utils/workerFrameFetch");
 const logger = require("../utils/logger");
+const { runningScope, toIsoDate } = require("../utils/examSchedule");
 
 // All classification frames live on NFS at this root (script-server side
 // symlinks `scripts/detection/results` and `script-server/results/classification_frames`
@@ -620,6 +621,43 @@ exports.getByExam = async (req, res) => {
         }
     }
 
+    // RTSP + exam schedule (Exams page): which centres run in the chosen date + shift — from the
+    // Shift/Date filters, or from the selected classification run (its day and shift). Only the
+    // scheduled centres' cameras are listed/counted; in a run view cameras that nevertheless have
+    // a history row in that run stay visible. No uploaded schedule = no restriction.
+    let scheduleInfo = null;
+    let scheduleCond = null;
+    if (linkType === "RTSP") {
+        let schedDate = null;
+        let schedShift = null;
+        if (run_start && run_end) {
+            // run_start arrives as a UTC ISO string ("…T23:00:00.000Z" for a 04:30 IST run):
+            // parse it to a Date first so the day is taken in local (IST) time, not UTC.
+            schedDate = toIsoDate(new Date(run_start));
+            schedShift = run_shift_id !== undefined && run_shift_id !== '' ? Number(run_shift_id) : null;
+        } else if (exam_date && shift_id) {
+            schedDate = toIsoDate(exam_date);
+            schedShift = Number(shift_id);
+        }
+        if (schedDate && Number.isInteger(schedShift) && schedShift > 0) {
+            const scope = await runningScope(examId, schedDate, schedShift);
+            scheduleInfo = {
+                date: schedDate, shift_id: schedShift, applied: !!scope.restricted,
+                exam_runs: scope.restricted ? !!scope.examRuns : true,
+                centres: scope.restricted && scope.centres ? scope.centres.size : null,
+            };
+            if (scope.restricted) {
+                const ids = runCameraIds || [];
+                const base = !scope.examRuns ? null : { tc_code: { [Op.in]: scope.centres ? [...scope.centres] : [] } };
+                const withRun = (cond) => (runCameraIds ? { [Op.or]: [cond, { id: { [Op.in]: ids.length ? ids : [0] } }] } : cond);
+                scheduleCond = base
+                    ? (scope.centres ? withRun(base) : null)               // every centre runs, only the exam-level slot matters
+                    : withRun({ id: { [Op.in]: [0] } });                   // the exam does not run in this slot
+                if (scheduleCond) where[Op.and] = [...(where[Op.and] || []), scheduleCond];
+            }
+        }
+    }
+
     // Add search functionality
     if (search && search.trim()) {
         const searchTerm = `%${search.trim()}%`;
@@ -678,6 +716,7 @@ exports.getByExam = async (req, res) => {
             statusCountsWhere[Op.and] = hlsScope;
         }
     }
+    if (scheduleCond) statusCountsWhere[Op.and] = [...(statusCountsWhere[Op.and] || []), scheduleCond];
 
     let accessibleCount, notAccessibleCount, unknownCount;
     if (runCameraIds) {
@@ -757,6 +796,9 @@ exports.getByExam = async (req, res) => {
             notAccessible: notAccessibleCount,
             unknown: unknownCount
         },
+        // RTSP: set when a date + shift (or a run) was chosen — says whether the exam schedule
+        // restricted the list, so the UI can explain why some cameras are not shown.
+        schedule: scheduleInfo,
         data
     });
 };
@@ -980,8 +1022,33 @@ exports.getClassificationRuns = async (req, res) => {
     }
 
     const data = [];
+    const schedTotals = new Map();       // "date#shift" -> scheduled camera count (RTSP)
     for (const r of rows) {
         let total = rtspTotal;
+        if (linkType === "RTSP" && Number(r.sid) > 0) {
+            // With an uploaded schedule a run only attempted the centres scheduled in its day + shift
+            const day = toIsoDate(r.started_at);
+            const key = `${day}#${r.sid}`;
+            if (day && !schedTotals.has(key)) {
+                let n = null;
+                try {
+                    const scope = await runningScope(examId, day, Number(r.sid));
+                    if (scope.restricted) {
+                        if (!scope.examRuns) n = 0;
+                        else if (scope.centres) {
+                            const codes = [...scope.centres];
+                            n = codes.length
+                                ? Number((await query(`SELECT COUNT(*) AS c FROM camera_links_rtsp WHERE exam_id = ? AND is_active = 1 AND tc_code IN (?)`, [examId, codes]))[0]?.c || 0)
+                                : 0;
+                        }
+                    }
+                } catch (e) {
+                    logger.warn(`[cameras] run total: schedule lookup failed: ${e.message}`);
+                }
+                schedTotals.set(key, n);
+            }
+            if (schedTotals.get(key) != null) total = Math.max(schedTotals.get(key), Number(r.camera_count));
+        }
         if (linkType === "HLS") {
             // The run's shift/date = the most common one among its cameras.
             const [scope] = await query(

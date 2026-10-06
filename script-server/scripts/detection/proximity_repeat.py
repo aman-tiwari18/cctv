@@ -13,6 +13,11 @@ State lives in results/proximity_repeat/<session>/<camera>.json (session =
 exam{E}_shift{S}_{YYYYMMDD}), so a worker restart within the shift keeps the counts
 and every new shift AND every new day starts from 1. (The same shift id comes round
 every exam day; without the date in the session a camera kept counting up across days.)
+
+Each pair also carries a chain id, fixed when the pair is first seen and kept while it
+repeats. It is stored with the detection (violation_chain) so that, when an operator
+pushes a detection to the client, the client-facing count can be worked out from the
+detections of the same pair that were actually pushed (see the push endpoint).
 """
 
 import json
@@ -21,6 +26,7 @@ import os
 import re
 import threading
 import time
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -97,14 +103,20 @@ def _save(path, camera_key, pairs):
 
 
 def next_violation_count(camera_key, pairs, exam_id=None, shift_id=None):
-    """Record a reported proximity violation and return its repeat count.
+    """Record a reported proximity violation and return its repeat count (see next_violation)."""
+    return next_violation(camera_key, pairs, exam_id, shift_id)[0]
+
+
+def next_violation(camera_key, pairs, exam_id=None, shift_id=None):
+    """Record a reported proximity violation; return (repeat count, chain id).
 
     camera_key: stable per-camera id (e.g. "rtsp_<device>_<camera_no>", "hls_ch<code>").
     pairs     : [(box_a, box_b), ...] — the [x1, y1, x2, y2] boxes of each violating pair.
-    Returns the highest count among this report's pairs (1 = first time seen).
+    The count is the highest among this report's pairs (1 = first time seen); the chain
+    id is that pair's, so every report of the same pair carries the same id.
     """
     if not pairs:
-        return 1
+        return 1, uuid.uuid4().hex[:16]
     path = _json_path(camera_key, exam_id, shift_id)
     now = time.time()
     with _lock:
@@ -117,11 +129,13 @@ def next_violation_count(camera_key, pairs, exam_id=None, shift_id=None):
             if match is not None:
                 unmatched.remove(match)
             count = match["count"] + 1 if match else 1
-            current.append({"a": new[0], "b": new[1], "count": count, "last_seen": now})
+            chain = (match.get("chain") if match else None) or uuid.uuid4().hex[:16]
+            current.append({"a": new[0], "b": new[1], "count": count, "last_seen": now, "chain": chain})
 
         # Pairs seen now (with their latest position) + pairs not seen this time.
         merged = current + sorted(unmatched, key=lambda p: p.get("last_seen", 0), reverse=True)
         merged = merged[:MAX_PAIRS_PER_CAMERA]
         _cache[path] = merged
         _save(path, camera_key, merged)
-        return max(p["count"] for p in current)
+        top = max(current, key=lambda p: p["count"])
+        return top["count"], top["chain"]

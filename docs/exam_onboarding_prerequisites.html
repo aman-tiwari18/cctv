@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Exam Onboarding Prerequisites</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Serif:wght@600&display=swap">
+<style>
+/* Layout: a single reading column with a sticky section index; every sheet format is shown as
+   a literal spreadsheet grid (header row + example rows) so the client can copy it exactly. */
+:root {
+  --bg: #f6f7f5;          /* paper */
+  --surface: #ffffff;
+  --ink: #17221d;         /* body text */
+  --muted: #5a6762;
+  --line: #d9dfdb;
+  --accent: #1d6b52;      /* spreadsheet green */
+  --accent-soft: #e3f0ea;
+  --rtsp: #1f5f8b; --rtsp-soft: #e2eef7;
+  --hls: #8a4b14;  --hls-soft: #f6eadb;
+  --warn: #8a5a00; --warn-soft: #fdf3dc;
+  --bad: #9b2c2c;  --bad-soft: #fbe6e4;
+  --grid-head: #eef2ef;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "IBM Plex Serif", Georgia, serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111715; --surface: #18201d; --ink: #e4ebe7; --muted: #9aa8a2; --line: #2c3833;
+    --accent: #5cc39b; --accent-soft: #1b3229;
+    --rtsp: #7cb6e0; --rtsp-soft: #182a38; --hls: #e2a868; --hls-soft: #33261a;
+    --warn: #e8c062; --warn-soft: #302714; --bad: #f09a92; --bad-soft: #351b1a; --grid-head: #1f2925;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111715; --surface: #18201d; --ink: #e4ebe7; --muted: #9aa8a2; --line: #2c3833;
+  --accent: #5cc39b; --accent-soft: #1b3229;
+  --rtsp: #7cb6e0; --rtsp-soft: #182a38; --hls: #e2a868; --hls-soft: #33261a;
+  --warn: #e8c062; --warn-soft: #302714; --bad: #f09a92; --bad-soft: #351b1a; --grid-head: #1f2925;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.6; margin: 0; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-inline: 20px; padding-block: 32px 64px; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 40px; }
+@media (max-width: 860px) { .wrap { grid-template-columns: minmax(0, 1fr); gap: 20px; padding-inline: 16px; } nav.toc { position: static !important; } }
+nav.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 20px); align-self: start; font-size: 13.5px; }
+nav.toc .label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+nav.toc ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; counter-reset: s; }
+nav.toc a { display: flex; gap: 8px; color: var(--ink); text-decoration: none; padding: 5px 8px; border-radius: 6px; }
+nav.toc a:hover, nav.toc a:focus-visible { background: var(--accent-soft); outline: none; }
+nav.toc a span.n { color: var(--muted); font-family: var(--font-mono); font-size: 12px; min-width: 18px; }
+main { min-width: 0; display: grid; gap: 44px; }
+header.top { display: grid; gap: 10px; }
+.eyebrow { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+h1 { font-family: var(--font-display); font-weight: 600; font-size: clamp(28px, 4vw, 38px); line-height: 1.15; margin: 0; text-wrap: balance; }
+h2 { font-family: var(--font-display); font-weight: 600; font-size: 24px; line-height: 1.25; margin: 0; text-wrap: balance; }
+h3 { font-size: 15px; margin: 0; font-weight: 600; }
+p { margin: 0; max-width: 72ch; }
+.lede { color: var(--muted); font-size: 16px; max-width: 70ch; }
+section { display: grid; gap: 16px; scroll-margin-top: 20px; }
+.sec-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.sec-head .num { font-family: var(--font-mono); color: var(--muted); font-size: 14px; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { font-size: 11.5px; font-weight: 600; letter-spacing: .04em; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+.chip.rtsp { background: var(--rtsp-soft); color: var(--rtsp); }
+.chip.hls { background: var(--hls-soft); color: var(--hls); }
+.chip.req { background: var(--accent-soft); color: var(--accent); }
+.chip.opt { background: var(--grid-head); color: var(--muted); }
+.chip.no { background: var(--grid-head); color: var(--muted); text-decoration: line-through; }
+.meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+.meta div { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; min-width: 0; }
+.meta dt { font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+.meta dd { margin: 2px 0 0; font-weight: 500; }
+ul.rules { margin: 0; padding-left: 20px; display: grid; gap: 6px; max-width: 74ch; }
+ul.rules li::marker { color: var(--accent); }
+code, .mono { font-family: var(--font-mono); font-size: 13px; }
+code { background: var(--grid-head); padding: 1px 5px; border-radius: 4px; }
+.scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+thead th { background: var(--grid-head); font-weight: 600; font-size: 12.5px; }
+tbody tr:last-child td { border-bottom: 0; }
+td.c, th.c { text-align: center; }
+/* spreadsheet look for the formats */
+table.sheet { font-family: var(--font-mono); font-size: 12.5px; width: auto; min-width: 100%; }
+table.sheet th, table.sheet td { border: 1px solid var(--line); white-space: nowrap; }
+table.sheet thead th { background: var(--accent-soft); color: var(--ink); }
+table.sheet .rh { background: var(--grid-head); color: var(--muted); text-align: center; width: 34px; font-weight: 400; }
+table.sheet .col-l th { background: var(--grid-head); color: var(--muted); font-weight: 400; text-align: center; }
+table.sheet td.req-col, table.sheet th.req-col { box-shadow: inset 0 -2px 0 var(--accent); }
+.sheet-bar { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sheet-bar .name { font-family: var(--font-mono); font-size: 12.5px; color: var(--muted); }
+button.copy { font: 500 12.5px var(--font-body); color: var(--accent); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+button.copy:hover { border-color: var(--accent); }
+button.copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.note { border-radius: 8px; padding: 11px 14px; font-size: 14px; display: grid; gap: 4px; max-width: 78ch; }
+.note.warn { background: var(--warn-soft); color: var(--ink); border-left: 3px solid var(--warn); }
+.note.bad { background: var(--bad-soft); border-left: 3px solid var(--bad); }
+.note.info { background: var(--accent-soft); border-left: 3px solid var(--accent); }
+.note b { font-weight: 600; }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 10px; min-width: 0; }
+.tick { color: var(--accent); font-weight: 700; }
+.dash { color: var(--muted); }
+.legend { font-size: 12.5px; color: var(--muted); }
+.checklist { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.checklist li { display: flex; gap: 10px; align-items: flex-start; max-width: 78ch; }
+.checklist input { margin-top: 4px; accent-color: var(--accent); width: 16px; height: 16px; flex: none; }
+footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 16px; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+html { scroll-behavior: smooth; }
+</style>
+
+<div class="wrap">
+  <nav class="toc" aria-label="Sections">
+    <div class="label">Prerequisites</div>
+    <ol>
+      <li><a href="#overview"><span class="n">00</span>What to send</a></li>
+      <li><a href="#exam"><span class="n">01</span>Exam details &amp; link type</a></li>
+      <li><a href="#schedule"><span class="n">02</span>Exam date &amp; shift schedule</a></li>
+      <li><a href="#centres"><span class="n">03</span>Centre-wise schedule</a></li>
+      <li><a href="#cameras"><span class="n">04</span>Camera links</a></li>
+      <li><a href="#thresholds"><span class="n">05</span>Server room limits</a></li>
+      <li><a href="#sms"><span class="n">06</span>SMS observer numbers</a></li>
+      <li><a href="#analytics"><span class="n">07</span>Analytics plan</a></li>
+      <li><a href="#checklist"><span class="n">08</span>Before you send</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <header class="top">
+      <div class="eyebrow">CCTV Exam Analytics · Client onboarding</div>
+      <h1>Exam Onboarding Prerequisites</h1>
+      <p class="lede">Everything we need from you to monitor an exam with CCTV analytics, and the exact Excel layout our system accepts for each file. The examples use the real files from SSC CGL 2026, so you can compare your sheet column by column.</p>
+    </header>
+
+    <!-- 00 -->
+    <section id="overview">
+      <div class="sec-head"><span class="num">00</span><h2>What to send</h2></div>
+      <p>Which files you need depends on how your cameras are delivered. <b>RTSP</b> exams stream from DVR servers (for example Camview). <b>HLS</b> exams stream web video links (.m3u8) per lab and shift.</p>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>#</th><th>Item</th><th class="c">RTSP exam</th><th class="c">HLS exam</th><th>Format</th><th>What it controls</th></tr></thead>
+          <tbody>
+            <tr><td>01</td><td>Exam details &amp; link type</td><td class="c"><span class="chip req">Required</span></td><td class="c"><span class="chip req">Required</span></td><td>Form / email</td><td>Exam name, exam body, dates, shifts, RTSP or HLS</td></tr>
+            <tr><td>02</td><td>Exam date &amp; shift schedule</td><td class="c"><span class="chip req">Required</span></td><td class="c"><span class="chip req">Required</span></td><td>Excel, 1 sheet</td><td>On which dates and in which shifts the exam runs</td></tr>
+            <tr><td>03</td><td>Centre-wise schedule</td><td class="c"><span class="chip req">Required</span></td><td class="c"><span class="chip no">Not used</span></td><td>Excel, 1 sheet</td><td>Which centres run in each date + shift</td></tr>
+            <tr><td>04</td><td>Camera links</td><td class="c"><span class="chip req">Required</span></td><td class="c"><span class="chip req">Required, per shift &amp; date</span></td><td>Excel, 1 sheet</td><td>Every camera we monitor</td></tr>
+            <tr><td>05</td><td>Server room limits</td><td class="c"><span class="chip opt">If server rooms are monitored</span></td><td class="c"><span class="chip opt">If server rooms are monitored</span></td><td>Excel, 1 sheet</td><td>Maximum people allowed in each centre's server room</td></tr>
+            <tr><td>06</td><td>SMS observer numbers</td><td class="c"><span class="chip opt">If SMS alerts are wanted</span></td><td class="c"><span class="chip opt">If SMS alerts are wanted</span></td><td>Excel, 2 columns</td><td>Who receives the SMS for each centre</td></tr>
+            <tr><td>07</td><td>Analytics plan</td><td class="c"><span class="chip req">Required</span></td><td class="c"><span class="chip req">Required</span></td><td>Excel or SOP table</td><td>Which analytics run, on which camera types, at what times</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note info"><b>The TC code ties everything together.</b> The centre schedule, the camera list, the server room limits and the SMS numbers are matched to each other by TC code alone. Use the same TC code for a centre in every file, written exactly the same way.</div>
+    </section>
+
+    <!-- 01 -->
+    <section id="exam">
+      <div class="sec-head"><span class="num">01</span><h2>Exam details &amp; link type</h2><div class="chips"><span class="chip rtsp">RTSP</span><span class="chip hls">HLS</span></div></div>
+      <p>Send these once per exam. We enter them on the Exams page.</p>
+      <dl class="meta">
+        <div><dt>Exam name</dt><dd>SSC Combined Graduate Level Examination 2026</dd></div>
+        <div><dt>Exam body</dt><dd>SSC</dd></div>
+        <div><dt>Link type (EXAM_LINK_TYPE)</dt><dd><span class="mono">RTSP</span> or <span class="mono">HLS</span></dd></div>
+        <div><dt>Exam period</dt><dd>30 Sep 2026 – 28 Oct 2026</dd></div>
+        <div><dt>Days with no exam</dt><dd>2–4, 11, 17–21, 25, 26 Oct</dd></div>
+        <div><dt>Shifts</dt><dd>Shift 1 10:00–11:00 · Shift 2 13:30–14:30 · Shift 3 17:00–18:00</dd></div>
+      </dl>
+      <ul class="rules">
+        <li><b>One link type per exam.</b> All cameras of an exam must be RTSP, or all HLS. If you have both, we set them up as two exams.</li>
+        <li><b>Shift times in 24-hour format</b> (13:30, not 01:30). Our analytics are scheduled around these times.</li>
+        <li>The dates and shifts can be read straight from the <a href="#schedule">exam schedule sheet</a>, so you don't have to type them twice.</li>
+      </ul>
+    </section>
+
+    <!-- 02 -->
+    <section id="schedule">
+      <div class="sec-head"><span class="num">02</span><h2>Exam date &amp; shift schedule</h2><div class="chips"><span class="chip rtsp">RTSP</span><span class="chip hls">HLS</span><span class="chip req">Required</span></div></div>
+      <p>One row per exam date, one column per shift, <b>Yes</b> or <b>No</b> in each cell. For RTSP exams, a date + shift marked No (or a date missing from the sheet) means <b>no camera is monitored then</b>. For HLS exams the sheet sets up the exam's dates and shifts; which cameras run is decided by the camera upload for that shift and date.</p>
+      <div class="sheet-bar"><span class="name">Sheet: Exam Schedule · from CDIS SOP for SSC CGL 2026</span><button class="copy" data-copy="Sr.No.&#9;Date&#9;Shift 1 (10:00:00 to 11:00:00)&#9;Shift 2 (13:30:00 to 14:30:00)&#9;Shift 3 (17:00:00 to 18:00:00)">Copy header row</button></div>
+      <div class="scroll">
+        <table class="sheet">
+          <thead>
+            <tr class="col-l"><th class="rh"></th><th>A</th><th>B</th><th>C</th><th>D</th><th>E</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="rh">1</td><td colspan="5"><b>Exam Schedule</b></td></tr>
+            <tr><td class="rh">2</td><th class="req-col">Sr.No.</th><th class="req-col">Date</th><th class="req-col">Shift 1 (10:00:00 to 11:00:00)</th><th class="req-col">Shift 2 (13:30:00 to 14:30:00)</th><th class="req-col">Shift 3 (17:00:00 to 18:00:00)</th></tr>
+            <tr><td class="rh">3</td><td>1</td><td>30-Sep-26</td><td>No</td><td>Yes</td><td>Yes</td></tr>
+            <tr><td class="rh">4</td><td>2</td><td>1-Oct-26</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+            <tr><td class="rh">5</td><td>3</td><td>5-Oct-26</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <ul class="rules">
+        <li><b>Date</b>: <span class="mono">30-Sep-26</span>, <span class="mono">30-09-2026</span>, <span class="mono">2026-09-30</span> or an Excel date cell.</li>
+        <li><b>Shift header</b>: <span class="mono">Shift N (HH:MM:SS to HH:MM:SS)</span>. "Shift N" is matched to the exam's Nth shift.</li>
+        <li><b>Cells</b>: Yes or No.</li>
+        <li><b>List every exam date.</b> A date that's missing counts as "the exam does not run".</li>
+      </ul>
+      <div class="note warn"><b>Write afternoon times in 24-hour form.</b> The current SOP sheet says <span class="mono">Shift 2 (01:30:00 to 02:30:00)</span> and <span class="mono">Shift 3 (05:00:00 to 06:00:00)</span> for 13:30 and 17:00. Our system flags times before 06:00 because they may mean the middle of the night. Please write <span class="mono">13:30:00</span> and <span class="mono">17:00:00</span>.</div>
+    </section>
+
+    <!-- 03 -->
+    <section id="centres">
+      <div class="sec-head"><span class="num">03</span><h2>Centre-wise schedule</h2><div class="chips"><span class="chip rtsp">RTSP only</span><span class="chip req">Required</span></div></div>
+      <p>One row per centre, one column per <b>date + shift</b>, <b>YES</b> or <b>NO</b> in each cell. In each date and shift, only the centres marked YES are monitored. There is no detection, classification or alert at any other centre.</p>
+      <div class="sheet-bar"><span class="name">Sheet: Exam Centre wise scheduling · CDIS</span><button class="copy" data-copy="#&#9;REGION&#9;TC CODE&#9;CENTRE NAME&#9;ACTUAL CITY&#9;ACTUAL STATE&#9;Part of CCTV Analytics&#9;30-9-26 Shift 1&#9;30-9-26 Shift 2&#9;30-9-26 Shift 3">Copy header row</button></div>
+      <div class="scroll">
+        <table class="sheet">
+          <thead>
+            <tr><th class="rh"></th><th>#</th><th>REGION</th><th class="req-col">TC CODE</th><th>CENTRE NAME</th><th>ACTUAL CITY</th><th>ACTUAL STATE</th><th>Part of CCTV Analytics</th><th class="req-col">30-9-26 Shift 1</th><th class="req-col">30-9-26 Shift 2</th><th class="req-col">30-9-26 Shift 3</th><th class="req-col">1-10-26 Shift 1</th><th>…</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="rh">2</td><td>1</td><td>CR</td><td>50106</td><td>AADARSH PARIKSHA KENDRA BHAGALPUR</td><td>BHAGALPUR</td><td>BIHAR</td><td>Yes</td><td>NO</td><td>YES</td><td>YES</td><td>YES</td><td>…</td></tr>
+            <tr><td class="rh">3</td><td>2</td><td>CR</td><td>50204</td><td>AADARSH PARIKSHA KENDRA CHHAPRA</td><td>CHHAPRA</td><td>BIHAR</td><td>Yes</td><td>NO</td><td>YES</td><td>YES</td><td>YES</td><td>…</td></tr>
+            <tr><td class="rh">4</td><td>3</td><td>CR</td><td>50302</td><td>AADARSH PARIKSHA KENDRA DARBHANGA</td><td>DARBHANGA</td><td>BIHAR</td><td>Yes</td><td>NO</td><td>NO</td><td>NO</td><td>NO</td><td>…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="legend">Columns underlined in green are the ones our system reads. The others (REGION, CENTRE NAME, CITY, STATE, CITY CODE, EDU CODE, PIN CODE, EXAM NODE and so on) are welcome but only shown for reference.</p>
+      <ul class="rules">
+        <li><b>TC CODE</b>: exactly as in the camera list. Codes are read as text, so <span class="mono">50106.0</span> becomes <span class="mono">50106</span> and <span class="mono">351603_1</span> stays as it is.</li>
+        <li><b>Date + shift headers</b>: <span class="mono">d-m-yy Shift n</span>, for example <span class="mono">30-9-26 Shift 1</span>. One column for every date + shift of the exam.</li>
+        <li><b>Cells</b>: YES or NO.</li>
+        <li>If the exam schedule (02) says the exam doesn't run in a slot, that wins over YES cells here.</li>
+      </ul>
+      <div class="note bad"><b>Every centre with cameras must be in this sheet.</b> A centre that's missing is not monitored on any date. In the current SSC CGL files, centre <span class="mono">210801</span> has cameras but is not in the centre schedule. Centres <span class="mono">350502</span>, <span class="mono">351524</span> and <span class="mono">351603_1</span> are in the schedule but have no cameras in the camera list.</div>
+      <div class="note warn"><b>Keep header spacing clean.</b> Nine headers in the current sheet have a double space (<span class="mono">15-10-26 Shift&nbsp;&nbsp;3</span>). They're accepted, but single spaces avoid mismatches.</div>
+    </section>
+
+    <!-- 04 -->
+    <section id="cameras">
+      <div class="sec-head"><span class="num">04</span><h2>Camera links</h2><div class="chips"><span class="chip rtsp">RTSP</span><span class="chip hls">HLS</span><span class="chip req">Required</span></div></div>
+      <p>One row per camera. The format depends on the link type.</p>
+
+      <div class="panel">
+        <div class="sheet-bar"><h3><span class="chip rtsp">RTSP</span>&nbsp; RTSP camera list (one file for the whole exam)</h3><button class="copy" data-copy="Device ID&#9;Camera No&#9;TC Code&#9;Camera Name&#9;Centre Name&#9;City&#9;State&#9;Region&#9;CCTV URL">Copy header row</button></div>
+        <div class="scroll">
+          <table class="sheet">
+            <thead><tr><th class="rh"></th><th class="req-col">Device ID</th><th class="req-col">Camera No</th><th class="req-col">TC Code</th><th>Camera Name</th><th>Centre Name</th><th>City</th><th>State</th><th>Region</th><th class="req-col">CCTV URL</th></tr></thead>
+            <tbody>
+              <tr><td class="rh">2</td><td>1000126</td><td>0</td><td>50106</td><td>LAB1 CAM1</td><td>AADARSH PARIKSHA KENDRA BHAGALPUR</td><td>BHAGALPUR</td><td>BIHAR</td><td>CR</td><td>d11.camview.io</td></tr>
+              <tr><td class="rh">3</td><td>1000126</td><td>1</td><td>50106</td><td>SERVER ROOM</td><td>AADARSH PARIKSHA KENDRA BHAGALPUR</td><td>BHAGALPUR</td><td>BIHAR</td><td>CR</td><td>d11.camview.io</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <ul class="rules">
+          <li><b>Device ID</b>: the DVR's ID. <b>Camera No</b>: the channel on that DVR. <b>CCTV URL</b>: the DVR server address (for example <span class="mono">d14.camview.io</span>; the header <span class="mono">Server Address</span> is also accepted).</li>
+          <li>A camera is identified by <b>Device ID + Camera No + TC Code</b>. Uploading the same camera again updates it instead of adding a duplicate.</li>
+          <li><b>Region</b> is optional. When given, the Cameras and Detections pages can be filtered by region.</li>
+          <li>Camera type (Computer Lab, Server Room, Entry and so on) comes from our scene classification. You can add a <span class="mono">Classification</span> column if you already know it.</li>
+          <li>The DVR login for our system must be active and allowed from our servers before the first exam day.</li>
+        </ul>
+      </div>
+
+      <div class="panel">
+        <div class="sheet-bar"><h3><span class="chip hls">HLS</span>&nbsp; HLS camera list (one file per shift and date)</h3><button class="copy" data-copy="S.No.&#9;TC Code&#9;Centre Name&#9;City&#9;State&#9;LIS IF/IDZ&#9;LAN and Lab Name&#9;Camera Name&#9;CCTV URL&#9;ch_no&#9;Camera Category">Copy header row</button></div>
+        <div class="scroll">
+          <table class="sheet">
+            <thead><tr><th class="rh"></th><th>S.No.</th><th class="req-col">TC Code</th><th>Centre Name</th><th>City</th><th>State</th><th>LIS IF/IDZ</th><th>LAN and Lab Name</th><th>Camera Name</th><th class="req-col">CCTV URL</th><th class="req-col">ch_no</th><th>Camera Category</th></tr></thead>
+            <tbody>
+              <tr><td class="rh">2</td><td>1</td><td>12175</td><td>EXAMPLE CENTRE</td><td>LUCKNOW</td><td>UTTAR PRADESH</td><td>IF</td><td>L-01A</td><td>12175/L-01A/C01</td><td>https://…/stream/index.m3u8</td><td>CH0001</td><td>Lab</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <ul class="rules">
+          <li><b>CCTV URL</b>: the camera's stream link. <b>ch_no</b>: the camera's unique channel key (also accepted as <span class="mono">ch_code</span>, <span class="mono">Channel ID</span> or <span class="mono">Channel ID(key)</span>). Rows without either are skipped.</li>
+          <li>Upload one file <b>for each shift and date</b>, choosing the shift and date at upload. The same camera may appear in every shift's file.</li>
+          <li>A camera is identified by <b>TC Code + ch_no</b> within that shift and date.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- 05 -->
+    <section id="thresholds">
+      <div class="sec-head"><span class="num">05</span><h2>Server room limits</h2><div class="chips"><span class="chip rtsp">RTSP</span><span class="chip hls">HLS</span><span class="chip opt">If server rooms are monitored</span></div></div>
+      <p>The maximum number of people allowed in each centre's server room. An alert is raised when <b>more</b> people than the limit are seen. Two layouts are accepted.</p>
+      <div class="sheet-bar"><span class="name">Layout A · one limit for the whole exam · Server Room Threshold_CGLE 2026</span><button class="copy" data-copy="TC CODE&#9;CENTRE NAME&#9;REGION&#9;Exam Nodes&#9;Minimum Required&#9;Additional IT Manager&#9;Maximum Server Room Threshold">Copy header row</button></div>
+      <div class="scroll">
+        <table class="sheet">
+          <thead><tr><th class="rh"></th><th class="req-col">TC CODE</th><th>CENTRE NAME</th><th>REGION</th><th>Exam Nodes</th><th>Minimum Required</th><th>Additional IT Manager</th><th class="req-col">Maximum Server Room Threshold</th></tr></thead>
+          <tbody>
+            <tr><td class="rh">2</td><td>50106</td><td>AADARSH PARIKSHA KENDRA BHAGALPUR</td><td>CR</td><td>1052</td><td>4</td><td>7.0133</td><td>11.0133</td></tr>
+            <tr><td class="rh">3</td><td>50204</td><td>AADARSH PARIKSHA KENDRA CHHAPRA</td><td>CR</td><td>562</td><td>4</td><td>3.7467</td><td>7.7467</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="sheet-bar"><span class="name">Layout B · a limit per date + shift</span><button class="copy" data-copy="TC CODE&#9;CENTRE NAME&#9;30-9-26 Shift 1&#9;30-9-26 Shift 2&#9;30-9-26 Shift 3">Copy header row</button></div>
+      <div class="scroll">
+        <table class="sheet">
+          <thead><tr><th class="rh"></th><th class="req-col">TC CODE</th><th>CENTRE NAME</th><th class="req-col">30-9-26 Shift 1</th><th class="req-col">30-9-26 Shift 2</th><th class="req-col">30-9-26 Shift 3</th><th>…</th></tr></thead>
+          <tbody><tr><td class="rh">2</td><td>50106</td><td>AADARSH PARIKSHA KENDRA BHAGALPUR</td><td>0</td><td>11</td><td>11</td><td>…</td></tr></tbody>
+        </table>
+      </div>
+      <ul class="rules">
+        <li><b>Decimals are rounded down</b> to whole people: 11.01 means an alert at 12 or more people.</li>
+        <li>In layout B, <b>0 or an empty cell</b> means the centre isn't scheduled in that slot.</li>
+        <li><b>A centre missing from the sheet gets no server room alerts.</b> We never borrow another exam's limit.</li>
+        <li>The current SSC CGL sheet has 221 centres with limits from 4.05 to 26, and every centre with a server room camera has a limit.</li>
+      </ul>
+    </section>
+
+    <!-- 06 -->
+    <section id="sms">
+      <div class="sec-head"><span class="num">06</span><h2>SMS observer numbers</h2><div class="chips"><span class="chip rtsp">RTSP</span><span class="chip hls">HLS</span><span class="chip opt">If SMS alerts are wanted</span></div></div>
+      <p>When your team accepts an alert on the client dashboard, an SMS goes to the numbers listed for that alert's centre. Two columns: the TC code and a mobile number.</p>
+      <div class="sheet-bar"><span class="name">Sheet: Contact details for SMS_CGLE 2026</span><button class="copy" data-copy="TC CODE&#9;Contact Number">Copy header row</button></div>
+      <div class="scroll">
+        <table class="sheet">
+          <thead><tr><th class="rh"></th><th class="req-col">TC CODE</th><th class="req-col">Contact Number</th></tr></thead>
+          <tbody>
+            <tr><td class="rh">2</td><td>10202</td><td>98XXXXXX01</td></tr>
+            <tr><td class="rh">3</td><td>10202</td><td>98XXXXXX02</td></tr>
+            <tr><td class="rh">4</td><td>50106</td><td>98XXXXXX03</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <ul class="rules">
+        <li><b>One number per row</b>; repeat the TC code for each extra number. Several numbers in one cell separated by commas also work.</li>
+        <li><b>10-digit mobile numbers.</b> <span class="mono">+91</span>, spaces and dashes are removed automatically.</li>
+        <li>Accepted headers include <span class="mono">TC Code</span> / <span class="mono">Centre Code</span> and <span class="mono">Mobile Number</span> / <span class="mono">Contact Number</span> / <span class="mono">Phone</span>.</li>
+        <li><b>Each upload replaces the whole list.</b> To remove a number, upload the corrected sheet.</li>
+        <li>SMS templates must be approved on DLT under your sender ID before the first exam day.</li>
+      </ul>
+      <div class="note info">The current SSC CGL sheet has 557 rows for 160 centres (1 to 5 numbers each). Every number is valid, and every centre with cameras has at least one. 55 rows are exact repeats; we ignore them, but you can remove them.</div>
+    </section>
+
+    <!-- 07 -->
+    <section id="analytics">
+      <div class="sec-head"><span class="num">07</span><h2>Analytics plan</h2><div class="chips"><span class="chip rtsp">RTSP</span><span class="chip hls">HLS</span><span class="chip req">Required</span></div></div>
+      <p>Tell us which analytics to run, on which camera types, and in which time window around each shift. You can send it as a table in your SOP or in the sheet below; our team enters it on the schedule screen.</p>
+
+      <h3>Available analytics</h3>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>Analytic</th><th>Raises an alert when</th><th>Usual camera types</th></tr></thead>
+          <tbody>
+            <tr><td>Scene Classification</td><td>Runs before each shift: checks every camera is reachable and labels its view (lab, server room, entry, outside, biometric)</td><td>All cameras</td></tr>
+            <tr><td>Monitor Tampering</td><td>A monitor is moved, lifted or carried away</td><td>Inside Lab</td></tr>
+            <tr><td>Crowd (Entry/Exit)</td><td>10 or more people are standing in one view</td><td>Entry/Exit · Outside, Biometric · Inside Lab</td></tr>
+            <tr><td>Zero Person</td><td>An exam room is empty during the shift</td><td>Inside Lab</td></tr>
+            <tr><td>Crowd &lt; 5</td><td>Fewer than 5 people (seated or standing) are in a lab</td><td>Inside Lab</td></tr>
+            <tr><td>Crowd &lt; 5 + Invigilator Static</td><td>Few candidates and the invigilator has not moved</td><td>Inside Lab</td></tr>
+            <tr><td>Invigilator</td><td>The invigilator stays in one place too long</td><td>Inside Lab</td></tr>
+            <tr><td>Proximity</td><td>Two candidates sit or stand too close together</td><td>Inside Lab</td></tr>
+            <tr><td>Phone</td><td>A mobile phone is visible</td><td>Inside Lab · Server Room · Outside</td></tr>
+            <tr><td>Server Room</td><td>More people than the centre's limit are in the server room (see 05)</td><td>Server Room</td></tr>
+            <tr><td>Entry Exit</td><td>Movement at an entry, exit or outside area</td><td>Outside, Entry/Exit</td></tr>
+            <tr><td>Intruder</td><td>Anyone is in a lab or server room outside exam hours</td><td>Inside Lab, Server Room</td></tr>
+            <tr><td>Camera Inversion</td><td>A camera is turned, tilted or upside down</td><td>Inside Lab, Server Room, Outside</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="legend">Also available on request: Blind Spot, Camera Tampering, Biometric Crowd, Strong Room Movement, QP Box and Improper Furniture.</p>
+
+      <h3>Plan format</h3>
+      <div class="sheet-bar"><span class="name">Sheet: Analytics plan · example for one shift (Shift 1, 10:00–11:00)</span><button class="copy" data-copy="Shift&#9;Analytic&#9;Camera types&#9;Start&#9;End&#9;Alert gap per camera (seconds)&#9;SMS alert&#9;Dates">Copy header row</button></div>
+      <div class="scroll">
+        <table class="sheet">
+          <thead><tr><th class="rh"></th><th class="req-col">Shift</th><th class="req-col">Analytic</th><th class="req-col">Camera types</th><th class="req-col">Start</th><th class="req-col">End</th><th>Alert gap per camera (seconds)</th><th>SMS alert</th><th>Dates</th></tr></thead>
+          <tbody>
+            <tr><td class="rh">2</td><td>Shift 1</td><td>Scene Classification</td><td>All cameras</td><td>07:45</td><td>08:25</td><td>–</td><td>No</td><td>All exam days</td></tr>
+            <tr><td class="rh">3</td><td>Shift 1</td><td>Monitor Tampering</td><td>Inside Lab</td><td>08:30</td><td>10:15</td><td>60</td><td>No</td><td>All exam days</td></tr>
+            <tr><td class="rh">4</td><td>Shift 1</td><td>Crowd (Entry/Exit)</td><td>Entry/Exit</td><td>09:15</td><td>10:15</td><td>120</td><td>No</td><td>All exam days</td></tr>
+            <tr><td class="rh">5</td><td>Shift 1</td><td>Crowd (Entry/Exit)</td><td>Outside, Biometric</td><td>09:16</td><td>10:16</td><td>120</td><td>Yes</td><td>All exam days</td></tr>
+            <tr><td class="rh">6</td><td>Shift 1</td><td>Proximity</td><td>Inside Lab</td><td>10:00</td><td>11:00</td><td>120</td><td>Yes</td><td>All exam days</td></tr>
+            <tr><td class="rh">7</td><td>Shift 1</td><td>Phone</td><td>Inside Lab</td><td>10:00</td><td>11:00</td><td>120</td><td>Yes</td><td>All exam days</td></tr>
+            <tr><td class="rh">8</td><td>Shift 1</td><td>Phone</td><td>Server Room</td><td>10:01</td><td>10:59</td><td>120</td><td>Yes</td><td>All exam days</td></tr>
+            <tr><td class="rh">9</td><td>Shift 1</td><td>Server Room</td><td>Server Room</td><td>10:00</td><td>11:00</td><td>120</td><td>Yes</td><td>All exam days</td></tr>
+            <tr><td class="rh">10</td><td>Shift 1</td><td>Zero Person</td><td>Inside Lab</td><td>10:00</td><td>11:00</td><td>600</td><td>No</td><td>All exam days</td></tr>
+            <tr><td class="rh">11</td><td>Shift 1</td><td>Invigilator</td><td>Inside Lab</td><td>10:00</td><td>11:00</td><td>420</td><td>Yes</td><td>All exam days</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <ul class="rules">
+        <li><b>Camera types</b>: Inside Lab, Server Room, Entry/Exit, Outside, Biometric, Inside Classroom, Computer Lab, Strong Room or All Cameras. List several separated by commas.</li>
+        <li><b>Times</b> are 24-hour. A typical day for each shift: classification about 2 hours before, Monitor Tampering from 1½ hours before to 15 minutes after the start, Entry/Exit crowd from 45 minutes before, and the in-room analytics for the length of the shift.</li>
+        <li><b>Alert gap</b>: the minimum time between two alerts from the same camera for that analytic. 120 means at most one alert every 2 minutes.</li>
+        <li><b>Same analytic, different camera types</b>: start the rows a minute apart (as with Phone above), so each keeps its own camera types.</li>
+        <li><b>SMS alert</b>: Yes only for analytics whose accepted alerts should reach the centre observers (see 06).</li>
+      </ul>
+    </section>
+
+    <!-- 08 -->
+    <section id="checklist">
+      <div class="sec-head"><span class="num">08</span><h2>Before you send</h2></div>
+      <ul class="checklist">
+        <li><input type="checkbox" id="ck1"><label for="ck1">Every TC code is written the same way in all files, as text (no <span class="mono">.0</span> at the end).</label></li>
+        <li><input type="checkbox" id="ck2"><label for="ck2">Every centre with cameras appears in the centre-wise schedule (RTSP), with YES or NO for every date + shift.</label></li>
+        <li><input type="checkbox" id="ck3"><label for="ck3">Shift times are in 24-hour format (13:30, 17:00) in the exam schedule.</label></li>
+        <li><input type="checkbox" id="ck4"><label for="ck4">Every exam date is listed in the exam schedule; days with no exam are left out or marked No.</label></li>
+        <li><input type="checkbox" id="ck5"><label for="ck5">RTSP: each camera has Device ID, Camera No, TC Code and server address. HLS: each camera has a stream link and ch_no, with one file per shift and date.</label></li>
+        <li><input type="checkbox" id="ck6"><label for="ck6">Every centre with a server room has a limit in the server room sheet.</label></li>
+        <li><input type="checkbox" id="ck7"><label for="ck7">SMS numbers are 10-digit mobiles, one per row, and the SMS templates are DLT-approved.</label></li>
+        <li><input type="checkbox" id="ck8"><label for="ck8">The DVR or stream login for our system is active and reachable from our servers.</label></li>
+        <li><input type="checkbox" id="ck9"><label for="ck9">The analytics plan lists, for each shift, the analytic, camera types, start and end times, and whether SMS is on.</label></li>
+      </ul>
+      <div class="note info"><b>Templates.</b> Blank templates for the exam schedule, centre-wise schedule and server room limits can be downloaded from the Exams page; RTSP and HLS camera templates from the Cameras page. Every upload is checked, and problems (an unknown shift, a bad cell value, a time that looks like night) are reported by row.</div>
+    </section>
+
+    <footer>Prepared by CDIS for client onboarding. Formats match the system's accepted uploads as of October 2026; examples are taken from the SSC CGL 2026 files.</footer>
+  </main>
+</div>
+
+<script>
+document.querySelectorAll('button.copy').forEach((btn) => {
+  btn.addEventListener('click', async () => {
+    const text = btn.dataset.copy.replace(/&#9;/g, '\t');
+    const done = (msg) => { const old = btn.textContent; btn.textContent = msg; setTimeout(() => { btn.textContent = old; }, 1600); };
+    try {
+      await navigator.clipboard.writeText(text);
+      done('Copied — paste into row 1');
+    } catch (e) {
+      const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select();
+      done('Select and copy (Ctrl+C)');
+      setTimeout(() => ta.remove(), 4000);
+    }
+  });
+});
+</script>
+
+</html>

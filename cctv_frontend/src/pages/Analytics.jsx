@@ -32,6 +32,7 @@ import {
 } from '@mui/icons-material';
 import { examsAPI, shiftScriptsAPI } from '../services/api';
 import ShiftScriptManager from '../components/ShiftScriptManager';
+import { SlotRunningChip } from './exams/ScheduleSections';
 import ExamSidebar from '../components/ExamSidebar';
 import { ShiftSvgIcon } from '../components/ShiftSvgIcon';
 
@@ -770,6 +771,20 @@ const Analytics = () => {
                       Add Script
                     </Button>
                   </Box>
+
+                  {/* RTSP exam with a centre schedule: how many centres run in this shift on the chosen
+                      date (today when "all days" or a multi-day range is shown) */}
+                  {String(selectedExam?.link_type || '').toUpperCase() === 'RTSP' && (() => {
+                    const now = new Date();
+                    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+                    const oneDay = !allDays && appliedDateRange.start && (appliedDateRange.end || appliedDateRange.start) === appliedDateRange.start
+                      ? appliedDateRange.start : (!allDays && !appliedDateRange.start ? selectedDate : '');
+                    return (
+                      <Box sx={{ mb: 2 }}>
+                        <SlotRunningChip examId={selectedExamId} date={oneDay || today} shiftId={activeShift.id} shiftName={activeShift.shift_name} />
+                      </Box>
+                    );
+                  })()}
 
                   {/* Hidden mounts — keep every shift's manager alive for prefetch + its own dialog */}
                   {shifts.map((shift) => (

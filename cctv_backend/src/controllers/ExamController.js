@@ -10,6 +10,13 @@ const { Op } = require("sequelize");
 const { getAssignableDates, toDateOnly } = require("./ShiftScriptController");
 const { getAllowedExamIds } = require("../utils/examAccess");
 
+// Every exam response lists its shifts in time order (start time, then id), so the
+// Exams page, the Cameras/Detections shift dropdowns and the client pages all agree.
+const SHIFT_ORDER = [
+    [{ model: ExamShift, as: "examShifts" }, "start_time", "ASC"],
+    [{ model: ExamShift, as: "examShifts" }, "id", "ASC"],
+];
+
 
 exports.createExam = async (req, res) => {
     const {
@@ -43,6 +50,7 @@ exports.createExam = async (req, res) => {
 
         return await Exam.findByPk(exam.id, {
             include: [{ model: ExamShift, as: "examShifts" }],
+            order: SHIFT_ORDER,
             transaction: t,
         });
     });
@@ -86,7 +94,7 @@ exports.getAllExams = async (req, res) => {
     const exams = await Exam.findAll({
         where,
         include: [{ model: ExamShift, as: "examShifts" }],
-        order: [["created_at", "DESC"]],
+        order: [["created_at", "DESC"], ...SHIFT_ORDER],
     });
 
     const examIds = exams.map((exam) => exam.id);
@@ -143,6 +151,7 @@ exports.getExamById = async (req, res) => {
 
     const exam = await Exam.findByPk(id, {
         include: [{ model: ExamShift, as: "examShifts" }],
+        order: SHIFT_ORDER,
     });
 
     if (!exam) {
@@ -221,6 +230,7 @@ exports.updateExam = async (req, res) => {
 
     const exam = await Exam.findByPk(id, {
         include: [{ model: ExamShift, as: "examShifts" }],
+        order: SHIFT_ORDER,
     });
 
     if (!exam) {
@@ -374,6 +384,7 @@ exports.updateExam = async (req, res) => {
 
         return await Exam.findByPk(id, {
             include: [{ model: ExamShift, as: "examShifts" }],
+            order: SHIFT_ORDER,
             transaction: t,
         });
     });
