@@ -137,3 +137,13 @@ Superview_vs_CDIS_*_Report.html
 superview_vs_cdis_report.html
 docs/client_report_*.xlsx
 docs/Events_Report_*.csv
+
+# RF-DETR checkpoint uploads (7 Oct: deployed as script-server/scripts/detection/models/monitor_person_rfdetr.pth)
+checkpoint_best_total.pth.zip
+
+# Model checkpoint uploads (large; deployed to script-server/scripts/detection/models/ on the workers)
+*.pth.zip
+*.pt.zip
+checkpoint_best_total*.zip
+mobile_best*.zip
+*.pth

@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AI Exam Surveillance · SSC CGL 2026</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --navy:#16294a; --navy2:#1f3a66; --ink:#14213d; --muted:#5b6678; --line:#dfe4ec; --card:#ffffff; --soft:#f3f5f9;
+  --orange:#f28c28; --teal:#1fae9a; --teal-soft:#d9f3ee; --blue:#1e3a6e; --amber:#e8a317; --red:#b8322a; --rose:#e88b85;
+}
+@page{size:A4;margin:0}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:210mm;height:297mm;background:#fff}
+body{font-family:"Noto Sans",system-ui,sans-serif;color:var(--ink);font-size:9.6px;line-height:1.35;-webkit-print-color-adjust:exact;print-color-adjust:exact;position:relative;overflow:hidden}
+
+/* header */
+header{background:linear-gradient(120deg,#132442 0%,#1d3760 70%,#22426f 100%);color:#fff;padding:22px 34px 22px;position:relative;overflow:hidden}
+header::after{content:"";position:absolute;right:-60px;top:-40px;width:300px;height:300px;border-radius:50%;border:34px solid rgba(255,255,255,.06)}
+header::before{content:"";position:absolute;right:30px;top:90px;width:170px;height:170px;border-radius:50%;background:rgba(31,174,154,.16)}
+.eyebrow{font-size:10px;font-weight:800;letter-spacing:.14em;color:#f6b26b;display:flex;align-items:center;gap:8px}
+.eyebrow i{width:8px;height:8px;border-radius:50%;background:var(--orange);display:inline-block}
+h1{font-size:27px;font-weight:800;margin:9px 0 7px;letter-spacing:-.01em;position:relative;z-index:1}
+h1 span{color:var(--orange)}
+.lead{font-size:12px;color:#dbe3ef;max-width:600px;position:relative;z-index:1;line-height:1.45}
+.chips{display:flex;gap:7px;margin-top:13px;position:relative;z-index:1;flex-wrap:wrap}
+.chip{border:1px solid rgba(255,255,255,.45);border-radius:999px;padding:4px 12px;font-size:9.6px;font-weight:700;background:rgba(255,255,255,.07)}
+
+main{padding:14px 26px 0}
+/* stat cards */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:9px}
+.stat{background:var(--soft);border-radius:9px;padding:9px 12px;border-left:4px solid var(--blue)}
+.stat:nth-child(2){border-color:var(--teal)} .stat:nth-child(3){border-color:var(--orange)} .stat:nth-child(4){border-color:var(--amber)}
+.stat b{display:block;font-size:19px;font-weight:800;letter-spacing:-.01em}
+.stat span{color:var(--muted);font-size:9.2px;line-height:1.3;display:block;margin-top:1px}
+
+/* sections */
+.sec-h{display:flex;justify-content:space-between;align-items:center;margin:13px 0 6px}
+.sec-h h2{font-size:11px;font-weight:800;letter-spacing:.16em;display:flex;align-items:center;gap:9px}
+.sec-h h2::before{content:"";width:22px;height:4px;border-radius:2px;background:var(--orange)}
+.sec-h small{font-size:8.6px;color:var(--muted);font-weight:700}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.pair .sec-h{margin-bottom:6px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.card h3{font-size:11.6px;font-weight:800}
+.card .sub{color:var(--muted);font-size:8.8px;margin:1px 0 7px}
+
+/* bar list */
+.bars .r{display:grid;grid-template-columns:94px 1fr 72px;align-items:center;gap:6px;margin:3.2px 0}
+.bars .bar{height:9px;background:var(--blue);border-radius:2px 4px 4px 2px}
+.bars .v{text-align:right;font-weight:800}
+.bars .v em{font-style:normal;color:var(--muted);font-weight:500;font-size:8.2px;margin-left:2px}
+.note{background:var(--soft);border-radius:7px;padding:5px 8px;margin-top:6px;font-size:8.8px;color:#38445a}
+.note b{color:var(--ink)}
+
+/* table */
+table{width:100%;border-collapse:collapse}
+th{font-size:7.8px;letter-spacing:.08em;color:var(--muted);font-weight:800;text-align:left;padding:0 0 4px;border-bottom:1.5px solid var(--ink)}
+td{padding:3.4px 0;border-bottom:1px solid #eef1f5;vertical-align:middle}
+tr:last-child td{border-bottom:0}
+td.n{font-weight:800}
+td .m{color:var(--muted);font-weight:500;font-size:8.4px}
+.mini{display:flex;align-items:center;gap:5px;font-weight:800}
+.mini i{display:inline-block;height:8px;border-radius:2px}
+
+/* pipeline steps */
+.steps{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:2px 0 8px;position:relative}
+.step{background:var(--soft);border-radius:8px;padding:7px 4px;text-align:center;position:relative}
+.step:not(:last-child)::after{content:"›";position:absolute;right:-10px;top:30%;color:var(--orange);font-size:15px;font-weight:800}
+.step svg{width:16px;height:16px;stroke:var(--ink);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.step b{display:block;font-size:10px;font-weight:800;margin-top:2px}
+.step span{display:block;color:var(--muted);font-size:8px;line-height:1.25;margin-top:1px}
+.step.dark{background:var(--navy)} .step.dark b{color:#fff} .step.dark span{color:#c8d3e6} .step.dark svg{stroke:#fff}
+
+/* geo */
+.geo{display:grid;grid-template-columns:104px 1fr;gap:10px}
+.legend .r{display:flex;justify-content:space-between;align-items:center;margin:2.6px 0;font-size:8.6px}
+.legend .r span{display:flex;align-items:center;gap:5px}
+.legend i{width:9px;height:9px;border-radius:2px;display:inline-block}
+.bignum{background:var(--navy);color:#fff;border-radius:7px;padding:6px 8px;margin-top:6px}
+.bignum b{font-size:15px;font-weight:800;display:block}
+.bignum span{font-size:8.4px;color:#c8d3e6}
+.pill{display:inline-block;background:var(--teal-soft);color:#11806f;font-weight:800;font-size:8px;border-radius:999px;padding:1px 7px;letter-spacing:.04em}
+.code{font-family:"DejaVu Sans Mono",monospace;font-weight:700;font-size:8.6px}
+
+/* funnel */
+.stack{display:flex;height:22px;border-radius:5px;overflow:hidden;margin:4px 0 6px}
+.stack div{height:100%}
+.leg{display:flex;gap:14px;flex-wrap:wrap}
+.leg div{font-size:8.6px;color:var(--muted)}
+.leg div i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+.leg div b{display:block;color:var(--ink);font-size:11.5px;font-weight:800}
+.flow{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:6px}
+.flow div{background:var(--soft);border-radius:7px;padding:5px 7px}
+.flow b{font-size:13px;font-weight:800;display:block}
+.flow span{font-size:8.2px;color:var(--muted)}
+
+/* columns chart */
+.cols{display:flex;align-items:flex-end;gap:6px;height:94px;margin-top:4px;border-bottom:1.5px solid var(--ink);padding:0 2px}
+.col{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;position:relative}
+.col .t{font-size:7.6px;font-weight:800;margin-bottom:2px}
+.col .b{width:100%;background:var(--blue);border-radius:3px 3px 0 0;position:relative}
+.col .b .p{position:absolute;bottom:0;left:0;right:0;background:var(--orange);border-radius:0}
+.xl{display:flex;gap:6px;padding:3px 2px 0}
+.xl span{flex:1;text-align:center;font-size:7.6px;color:var(--muted)}
+
+/* pillars */
+.pillars{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px}
+.pillar{border-radius:10px;padding:10px 12px;color:#fff;min-height:64px}
+.pillar h4{font-size:12.2px;font-weight:800;display:flex;align-items:center;gap:7px;margin-bottom:3px}
+.pillar svg{width:17px;height:17px;stroke:#fff;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.pillar p{font-size:9px;color:rgba(255,255,255,.88);line-height:1.35}
+.p1{background:#14213d}.p2{background:#1e3a6e}.p3{background:#13876f}.p4{background:#d0711a}
+
+footer{position:absolute;left:0;right:0;bottom:0;height:34px;border-top:4px solid var(--orange);background:var(--soft);display:flex;justify-content:space-between;align-items:center;padding:0 34px;font-size:10px;color:#3d4659}
+footer b{color:var(--ink)}
+</style>
+</head>
+<body>
+<header>
+  <div class="eyebrow"><i></i>CCTV ANALYTICS &nbsp;·&nbsp; STAFF SELECTION COMMISSION × IIT KANPUR</div>
+  <h1>AI Exam Surveillance · <span>SSC CGL 2026</span></h1>
+  <p class="lead">One AI platform watching every exam-centre camera: it labels each room before the shift, checks it for malpractice through the exam, and sends verified alerts to SSC and to on-ground observers.</p>
+  <div class="chips"><span class="chip">Scene Classification</span><span class="chip">Person Analytics</span><span class="chip">Phone Detection</span><span class="chip">Monitor Tampering</span><span class="chip">Review &amp; SMS</span></div>
+</header>
+
+<main>
+  <div class="stats">
+    <div class="stat"><b>3,141</b><span>cameras monitored<br>41 centres · 142 DVRs · 6 states</span></div>
+    <div class="stat"><b>60,826</b><span>AI alerts raised<br>30 Sep – 12 Oct 2026 · 9 exam days</span></div>
+    <div class="stat"><b>10,882</b><span>alerts verified and pushed<br>to SSC (17.9% of all alerts)</span></div>
+    <div class="stat"><b>13</b><span>AI analytics, run on<br>4 NVIDIA H200 GPU servers</span></div>
+  </div>
+
+  <div class="sec-h"><h2>WHAT EVERY CAMERA SEES</h2><small>Every camera is checked again before each shift</small></div>
+  <div class="row">
+    <div class="card bars">
+      <h3>Scene classification</h3>
+      <div class="sub">A vision-language model labels each camera · cameras and share of total</div>
+      <div class="r"><span>Computer Lab</span><div><div class="bar" style="width:100%"></div></div><span class="v">1,738<em>55.3%</em></span></div>
+      <div class="r"><span>Outside Area</span><div><div class="bar" style="width:43.4%"></div></div><span class="v">754<em>24.0%</em></span></div>
+      <div class="r"><span>Server Room</span><div><div class="bar" style="width:10.5%"></div></div><span class="v">182<em>5.8%</em></span></div>
+      <div class="r"><span>Obstructed</span><div><div class="bar" style="width:5.4%"></div></div><span class="v">94<em>3.0%</em></span></div>
+      <div class="r"><span>Outdoor Scene</span><div><div class="bar" style="width:4.9%"></div></div><span class="v">86<em>2.7%</em></span></div>
+      <div class="r"><span>Entry</span><div><div class="bar" style="width:2.8%"></div></div><span class="v">49<em>1.6%</em></span></div>
+      <div class="r"><span>Parking / Biometric</span><div><div class="bar" style="width:2%"></div></div><span class="v">34<em>1.1%</em></span></div>
+      <div class="note"><b>2,685</b> cameras reachable (85.5%) · <b>2,257</b> labels checked by hand</div>
+    </div>
+    <div class="card">
+      <h3>Alerts by analytic</h3>
+      <div class="sub">Top 8 analytics · share of all alerts and how many reached SSC</div>
+      <table>
+        <thead><tr><th>ANALYTIC (alerts)</th><th style="width:86px">SHARE</th><th style="width:66px">PUSHED</th></tr></thead>
+        <tbody>
+          <tr><td class="n">Monitor Tampering <span class="m">21,247</span></td><td><span class="mini"><i style="width:38px;background:var(--teal)"></i>34.9%</span></td><td><span class="mini"><i style="width:2px;background:var(--orange)"></i>9</span></td></tr>
+          <tr><td class="n">Entry / Exit <span class="m">7,313</span></td><td><span class="mini"><i style="width:15px;background:var(--teal)"></i>12.0%</span></td><td><span class="mini"><i style="width:26px;background:var(--orange)"></i>1,753</span></td></tr>
+          <tr><td class="n">Close Proximity <span class="m">7,179</span></td><td><span class="mini"><i style="width:15px;background:var(--teal)"></i>11.8%</span></td><td><span class="mini"><i style="width:6px;background:var(--orange)"></i>360</span></td></tr>
+          <tr><td class="n">Invigilator <span class="m">6,761</span></td><td><span class="mini"><i style="width:14px;background:var(--teal)"></i>11.1%</span></td><td><span class="mini"><i style="width:25px;background:var(--orange)"></i>1,659</span></td></tr>
+          <tr><td class="n">Crowd &lt; 5 <span class="m">5,742</span></td><td><span class="mini"><i style="width:12px;background:var(--teal)"></i>9.4%</span></td><td><span class="mini"><i style="width:29px;background:var(--orange)"></i>1,904</span></td></tr>
+          <tr><td class="n">Zero Person <span class="m">5,527</span></td><td><span class="mini"><i style="width:12px;background:var(--teal)"></i>9.1%</span></td><td><span class="mini"><i style="width:40px;background:var(--orange)"></i>2,729</span></td></tr>
+          <tr><td class="n">Crowd <span class="m">4,181</span></td><td><span class="mini"><i style="width:9px;background:var(--teal)"></i>6.9%</span></td><td><span class="mini"><i style="width:32px;background:var(--orange)"></i>2,139</span></td></tr>
+          <tr><td class="n">Mobile Phone <span class="m">1,869</span></td><td><span class="mini"><i style="width:4px;background:var(--teal)"></i>3.1%</span></td><td><span class="mini"><i style="width:4px;background:var(--orange)"></i>240</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="pair">
+    <div>
+      <div class="sec-h"><h2>HOW AN ALERT IS MADE</h2></div>
+      <div class="card">
+        <h3>From camera frame to verified alert</h3>
+        <div class="sub">One model pass per frame, shared by every analytic on that camera</div>
+        <div class="steps">
+          <div class="step"><svg viewBox="0 0 24 24"><rect x="2" y="6" width="14" height="12" rx="2"/><path d="M16 10l6-3v10l-6-3"/></svg><b>Stream</b><span>Live feed from the centre DVR</span></div>
+          <div class="step"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-5-5"/></svg><b>Detect</b><span>People, phones and monitors</span></div>
+          <div class="step"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg><b>Confirm</b><span>2 hits in a row, then a cooldown</span></div>
+          <div class="step dark"><svg viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0-6 6c0 7-3 8-3 8h18s-3-1-3-8a6 6 0 0 0-6-6"/><path d="M10 21h4"/></svg><b>Review</b><span>Operator pushes to SSC</span></div>
+        </div>
+        <table>
+          <thead><tr><th>MODEL</th><th>USED FOR</th></tr></thead>
+          <tbody>
+            <tr><td class="n">YOLO26m (fine-tuned)</td><td>Person analytics: crowd, proximity, invigilator…</td></tr>
+            <tr><td class="n">RF-DETR (fine-tuned)</td><td>Mobile phone · monitor tampering</td></tr>
+            <tr><td class="n">Qwen3-VL 30B</td><td>Scene classification of every camera</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div>
+      <div class="sec-h"><h2>CENTRE VIEW</h2></div>
+      <div class="card">
+        <h3>Where alerts come from</h3>
+        <div class="sub">Cameras per state and the centres with the most pushed alerts</div>
+        <div class="geo">
+          <div class="legend">
+            <div style="font-size:7.8px;letter-spacing:.08em;font-weight:800;color:var(--muted);margin-bottom:3px">CAMERAS PER STATE</div>
+            <div class="r"><span><i style="background:#2b2a6b"></i>Bihar</span><b>1,318</b></div>
+            <div class="r"><span><i style="background:#4b3fa0"></i>Uttar Pradesh</span><b>1,003</b></div>
+            <div class="r"><span><i style="background:#7b6bc9"></i>Delhi</span><b>340</b></div>
+            <div class="r"><span><i style="background:#a99ae0"></i>Rajasthan</span><b>339</b></div>
+            <div class="r"><span><i style="background:#d6cff3"></i>Uttarakhand · MP</span><b>141</b></div>
+            <div class="bignum"><b>41</b><span>exam centres · 27 cities</span></div>
+          </div>
+          <table>
+            <thead><tr><th>TC CODE</th><th>CITY</th><th>PUSHED</th></tr></thead>
+            <tbody>
+              <tr><td class="code">351601</td><td>Noida</td><td><span class="pill">1,524</span></td></tr>
+              <tr><td class="code">351603</td><td>Noida</td><td><span class="pill">1,499</span></td></tr>
+              <tr><td class="code">50204</td><td>Chhapra</td><td><span class="pill">1,369</span></td></tr>
+              <tr><td class="code">50606</td><td>Muzaffarpur</td><td><span class="pill">1,164</span></td></tr>
+              <tr><td class="code">50106</td><td>Bhagalpur</td><td><span class="pill">764</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="pair">
+    <div>
+      <div class="sec-h"><h2>HUMAN REVIEW</h2></div>
+      <div class="card">
+        <h3>What happens to each alert</h3>
+        <div class="sub">Every alert is checked by an operator before SSC sees it</div>
+        <div class="stack"><div style="width:17.9%;background:var(--teal)"></div><div style="width:2.3%;background:#b9c2cf"></div><div style="width:79.8%;background:var(--rose)"></div></div>
+        <div class="leg">
+          <div><i style="background:var(--teal)"></i>Pushed to SSC<b>10,882</b></div>
+          <div><i style="background:#b9c2cf"></i>Skipped<b>1,382</b></div>
+          <div><i style="background:var(--rose)"></i>Not pushed<b>48,562</b></div>
+        </div>
+        <div class="flow">
+          <div><b>111</b><span>accepted by SSC</span></div>
+          <div><b>94</b><span>SMS sent to centre observers</span></div>
+          <div><b>223</b><span>withdrawn after review</span></div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="sec-h"><h2>EXAM DAYS</h2></div>
+      <div class="card">
+        <h3>Alerts per exam day</h3>
+        <div class="sub">3 shifts a day: 10:00 · 13:30 · 17:00 &nbsp;<span style="color:var(--blue);font-weight:800">■</span> all alerts &nbsp;<span style="color:var(--orange);font-weight:800">■</span> pushed</div>
+        <div class="cols">
+          <div class="col"><span class="t">7.2k</span><div class="b" style="height:66.9%"><div class="p" style="height:14.7%"></div></div></div>
+          <div class="col"><span class="t">10.8k</span><div class="b" style="height:100%"><div class="p" style="height:22.5%"></div></div></div>
+          <div class="col"><span class="t">7.5k</span><div class="b" style="height:69.9%"><div class="p" style="height:17.9%"></div></div></div>
+          <div class="col"><span class="t">7.5k</span><div class="b" style="height:69.8%"><div class="p" style="height:13.3%"></div></div></div>
+          <div class="col"><span class="t">5.9k</span><div class="b" style="height:55%"><div class="p" style="height:18.7%"></div></div></div>
+          <div class="col"><span class="t">5.5k</span><div class="b" style="height:51.6%"><div class="p" style="height:16.4%"></div></div></div>
+          <div class="col"><span class="t">6.2k</span><div class="b" style="height:57.8%"><div class="p" style="height:17.9%"></div></div></div>
+          <div class="col"><span class="t">6.1k</span><div class="b" style="height:56.3%"><div class="p" style="height:18.9%"></div></div></div>
+          <div class="col"><span class="t">4.1k*</span><div class="b" style="height:38%"><div class="p" style="height:19.3%"></div></div></div>
+        </div>
+        <div class="xl"><span>30 Sep</span><span>1 Oct</span><span>5 Oct</span><span>6 Oct</span><span>7 Oct</span><span>8 Oct</span><span>9 Oct</span><span>10 Oct</span><span>12 Oct</span></div>
+        <div style="font-size:7.8px;color:var(--muted);margin-top:4px">* 12 Oct counted until 16:08</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="pillars">
+    <div class="pillar p1"><h4><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>See Every Room</h4><p>Each camera labelled and checked before every shift.</p></div>
+    <div class="pillar p2"><h4><svg viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg>Catch It Live</h4><p>13 analytics run through every exam shift.</p></div>
+    <div class="pillar p3"><h4><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>Human Verified</h4><p>Operators confirm each alert before SSC sees it.</p></div>
+    <div class="pillar p4"><h4><svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Alert the Ground</h4><p>SMS to centre observers for serious alerts.</p></div>
+  </div>
+</main>
+
+<footer><span><b>CCTV Analytics · SSC CGL 2026</b> · CDIS, IIT Kanpur</span><span>Classify · Detect · Verify · Alert</span></footer>
+</body>
+</html>

@@ -77,6 +77,7 @@ def _split_persons(yolo_boxes, frame_w, frame_h, telemetry):
     list of (xyxy_tuple, conf, weight) and seated_count is the sum of weights.
     """
     standing_boxes, standing_confs, seated = [], [], []
+    cand = []
     for box in yolo_boxes:
         if int(box.cls[0]) != 0:
             continue
@@ -84,11 +85,12 @@ def _split_persons(yolo_boxes, frame_w, frame_h, telemetry):
         if conf < crowd_five.CONF_THRESHOLD:
             telemetry['conf_reject'] += 1
             continue
-        coords = box.xyxy[0].cpu().numpy()
-        h = coords[3] - coords[1]
-        w = max(coords[2] - coords[0], 1.0)
-        # Standing: the invigilator rule, unchanged
-        if h >= invigilator.MIN_HEIGHT and (h / w) >= invigilator.STANDING_ASPECT_RATIO:
+        cand.append((box.xyxy[0].cpu().numpy(), conf))
+    # Standing: the shared invigilator rule (sure h/w >= 2.5, or soft >= 2.0 not shorter than its
+    # neighbours; partial boxes at the frame edge are not standing) - see invigilator_tracking
+    flags = invigilator.standing_flags([c for c, _ in cand], frame_w, frame_h)
+    for (coords, conf), is_std in zip(cand, flags):
+        if is_std:
             standing_boxes.append(coords)
             standing_confs.append(conf)
             continue

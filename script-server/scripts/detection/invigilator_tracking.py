@@ -45,6 +45,52 @@ STATIC_MIN_ASPECT_RATIO = 2.0  # STATIC only: h/w still accepted for a person AL
                                # 2.5, so checkpoints missed him and the 7-min timer reset. New anchors
                                # and ABSENT still require STANDING_ASPECT_RATIO.
 
+# 7 Oct 2026 - standing = foreshortened people too. From a ceiling-height camera a standing person
+# is NOT 2.5x taller than wide: on 60 of today's frames the walking / standing staff were h/w
+# 1.9-2.4 and every one was rejected by STANDING_ASPECT_RATIO (ABSENT fired with an invigilator
+# in view). Seated candidates seen from behind reach ~1.7 and a few side views ~1.9-2.0, so the
+# soft rule stops at 2.0 and also needs the person to be at least SOFT_STANDING_REL_MIN x the
+# height of the other people at the same depth in the frame (a seated person is not taller than
+# his neighbours). A box cut by the left/right frame edge is not a reliable person (a person
+# half outside the frame is very narrow, i.e. looks "standing") and is ignored.
+SOFT_STANDING_ASPECT_RATIO = float(os.environ.get("INVIGILATOR_SOFT_ASPECT", "2.0"))
+SOFT_STANDING_REL_MIN      = float(os.environ.get("INVIGILATOR_SOFT_REL_MIN", "1.0"))
+REL_DEPTH_BAND             = 0.15   # neighbours: box centre within 15 % of the frame height
+REL_MIN_NEIGHBOUR_H        = 60     # ...and at least this tall
+EDGE_MARGIN_PX             = 4      # a box touching the left/right edge within this is partial
+
+
+def standing_flags(boxes_xyxy, frame_w=None, frame_h=None):
+    """Which of these person boxes (xyxy, already class/confidence filtered) are STANDING.
+
+    sure   : h >= MIN_HEIGHT and h/w >= STANDING_ASPECT_RATIO
+    soft   : h >= MIN_HEIGHT and h/w >= SOFT_STANDING_ASPECT_RATIO and not shorter than the people
+             around it (see SOFT_STANDING_REL_MIN); the check is skipped when the frame has fewer
+             than 2 neighbours
+    Boxes touching the left/right frame edge are never standing. Returns list[bool]."""
+    boxes = [tuple(float(v) for v in b[:4]) for b in boxes_xyxy]
+    heights = [b[3] - b[1] for b in boxes]
+    out = []
+    for i, (x1, y1, x2, y2) in enumerate(boxes):
+        h = heights[i]; w = max(x2 - x1, 1.0)
+        if h < MIN_HEIGHT or (frame_w and (x1 <= EDGE_MARGIN_PX or x2 >= frame_w - EDGE_MARGIN_PX)):
+            out.append(False); continue
+        if h / w >= STANDING_ASPECT_RATIO:
+            out.append(True); continue
+        if h / w < SOFT_STANDING_ASPECT_RATIO:
+            out.append(False); continue
+        yc = (y1 + y2) / 2.0
+        band = REL_DEPTH_BAND * frame_h if frame_h else None
+        near = [heights[j] for j, b in enumerate(boxes)
+                if j != i and heights[j] >= REL_MIN_NEIGHBOUR_H
+                and (band is None or abs((b[1] + b[3]) / 2.0 - yc) <= band)]
+        if len(near) >= 2:
+            near.sort(); med = near[len(near) // 2]
+            out.append(h >= SOFT_STANDING_REL_MIN * med)
+        else:
+            out.append(True)
+    return out
+
 # --- ABSENT violation (no invigilator in the room) ---
 NO_TARGET_TIME_THRESH = 45     # Seconds of zero-standing-person before ABSENT fires
 
@@ -461,28 +507,32 @@ def _new_tracker(key):
 # =====================================================
 # CORE DETECTION LOGIC
 # =====================================================
-def _split_person_boxes(boxes):
+def _split_person_boxes(boxes, frame_size=None):
     """Person boxes -> (standing, standing_confs, extra, extra_confs).
-    standing : height >= MIN_HEIGHT AND h/w >= STANDING_ASPECT_RATIO — invigilator candidates
-               (per mentor rule); they drive ABSENT and start STATIC anchors. The ratio gate
-               rejects seated torso-above-desk bboxes (h/w ~1.2-1.7) wherever they sit in the frame.
-    extra    : height >= MIN_HEIGHT AND STATIC_MIN_ASPECT_RATIO <= h/w < STANDING_ASPECT_RATIO —
-               only let STATIC keep following an already-anchored person."""
-    standing, standing_confs, extra, extra_confs = [], [], [], []
+    standing : see standing_flags() - sure (h/w >= STANDING_ASPECT_RATIO) or soft (>= 2.0 and not
+               shorter than its neighbours); they drive ABSENT and start STATIC anchors.
+    extra    : height >= MIN_HEIGHT AND STATIC_MIN_ASPECT_RATIO <= h/w < STANDING_ASPECT_RATIO and
+               not standing - only let STATIC keep following an already-anchored person.
+    frame_size : (width, height) of the frame; enables the frame-edge and same-depth checks."""
+    cand = []
     for box in boxes:
         if int(box.cls[0]) != 0 or float(box.conf[0]) < CONF_THRESHOLD:
             continue
-        coords = box.xyxy[0].cpu().numpy()
+        cand.append((box.xyxy[0].cpu().numpy(), float(box.conf[0])))
+    fw, fh = (frame_size if frame_size else (None, None))
+    flags = standing_flags([c for c, _ in cand], fw, fh)
+    standing, standing_confs, extra, extra_confs = [], [], [], []
+    for (coords, conf), is_std in zip(cand, flags):
         h = coords[3] - coords[1]
         w = max(coords[2] - coords[0], 1.0)
         if h < MIN_HEIGHT:
             continue
-        if (h / w) >= STANDING_ASPECT_RATIO:
-            standing.append(coords)
-            standing_confs.append(float(box.conf[0]))
+        if is_std:
+            standing.append(coords); standing_confs.append(conf)
+        elif fw and (coords[0] <= EDGE_MARGIN_PX or coords[2] >= fw - EDGE_MARGIN_PX):
+            continue
         elif (h / w) >= STATIC_MIN_ASPECT_RATIO:
-            extra.append(coords)
-            extra_confs.append(float(box.conf[0]))
+            extra.append(coords); extra_confs.append(conf)
     return standing, standing_confs, extra, extra_confs
 
 
@@ -519,7 +569,7 @@ def detect_invigilator_in_frame(frame, device_id="unknown", camera_no="unknown",
     model = get_yolo_model()
     results = model(frame, conf=CONF_THRESHOLD, verbose=False)[0]
 
-    person_boxes, person_confs, extra_boxes, _ = _split_person_boxes(results.boxes)
+    person_boxes, person_confs, extra_boxes, _ = _split_person_boxes(results.boxes, frame_size=(frame.shape[1], frame.shape[0]))
 
     key = f"{device_id}_{camera_no}"
     with _state_lock:
@@ -566,7 +616,7 @@ def detect_invigilator_batch(items, results=None):
     outputs = []
     for item, result in zip(items, results):
         frame = item['frame'].copy()
-        person_boxes, person_confs, extra_boxes, _ = _split_person_boxes(result.boxes)
+        person_boxes, person_confs, extra_boxes, _ = _split_person_boxes(result.boxes, frame_size=(frame.shape[1], frame.shape[0]))
 
         device_id = item.get('device_id', 'unknown')
         camera_no = item.get('ch_no', 'unknown')

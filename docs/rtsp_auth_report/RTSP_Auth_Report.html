@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RTSP Auth Flow</title>
+<style>
+:root{--bg:#f7f8fa;--card:#fff;--text:#1d2330;--muted:#5d6678;--border:#dde1e8;--accent:#2557d6;--code:#f0f2f6;--warn-bg:#fff6e5;--warn:#9a5b00;--ok:#1d7a46}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#12151b;--card:#1a1e26;--text:#e4e7ee;--muted:#9aa3b5;--border:#2c323e;--accent:#7aa2ff;--code:#232833;--warn-bg:#2e2412;--warn:#f0b65a;--ok:#5fd39a}}
+:root[data-theme="dark"]{--bg:#12151b;--card:#1a1e26;--text:#e4e7ee;--muted:#9aa3b5;--border:#2c323e;--accent:#7aa2ff;--code:#232833;--warn-bg:#2e2412;--warn:#f0b65a;--ok:#5fd39a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.6 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:960px;margin:0 auto;padding:32px 16px 64px}
+h1{font-size:26px;margin:0 0 4px}
+h2{font-size:19px;margin:36px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+h3{font-size:16px;margin:22px 0 8px}
+.sub{color:var(--muted);margin:0 0 20px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px 18px;margin:12px 0}
+.warn{background:var(--warn-bg);border-color:var(--warn);color:var(--text)}
+.warn b{color:var(--warn)}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:top}
+th{color:var(--muted);font-weight:600}
+code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px}
+code{background:var(--code);padding:1px 5px;border-radius:4px}
+pre{background:var(--code);padding:12px 14px;border-radius:8px;overflow-x:auto;margin:8px 0;line-height:1.45}
+.tbl{overflow-x:auto}
+.flow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0}
+.step{background:var(--card);border:1px solid var(--accent);border-radius:8px;padding:8px 12px;font-size:13px}
+.arrow{color:var(--muted)}
+.tag{display:inline-block;font-size:12px;padding:1px 8px;border-radius:10px;border:1px solid var(--border);color:var(--muted)}
+.ok{color:var(--ok);font-weight:600}
+ol li,ul li{margin:4px 0}
+.sec{page-break-inside:avoid;break-inside:avoid}
+.sec>h2:first-child{margin-top:28px}
+@media print{body{background:#fff}}
+</style>
+</head>
+<body>
+<main>
+<h1>RTSP Link Authentication: Credentials &amp; APIs</h1>
+<p class="sub">How the script-server gets a playable RTSP URL from the Camview (Dahua DSS) DVR servers · prepared 10 Oct 2026 from the code in <code>script-server/</code></p>
+
+<div class="card warn"><b>Confidential:</b> this file contains the live DVR password. Do not commit it, publish it or share it outside the team.</div>
+
+<div class="sec">
+<h2>1. Credentials</h2>
+<div class="card tbl">
+<table>
+<tr><th>Item</th><th>Value</th><th>Where it is set</th></tr>
+<tr><td>Username</td><td><code>system</code></td><td><code>CAMVIEW_AUTH_USER</code> in <code>script-server/.env</code></td></tr>
+<tr><td>Password (live)</td><td><code>Coreiseven@@</code></td><td><code>CAMVIEW_AUTH_PASS</code> in <code>script-server/.env</code> (changed 29 Sep 2026)</td></tr>
+<tr><td>Old password (not valid)</td><td><code>Sasd@12345</code></td><td>still hard-coded as the fallback default in many scripts; used only if <code>.env</code> is not loaded</td></tr>
+<tr><td>Per-DVR password override</td><td>none set right now</td><td><code>CAMVIEW_AUTH_PASS_d15=&lt;pwd&gt;</code> applies to <code>d15.camview.io</code> (read by the token server, which does all logins)</td></tr>
+<tr><td>Client type</td><td><code>WINPC_V1</code></td><td>fixed in code</td></tr>
+<tr><td>DVR servers</td><td><code>d1, d2, d7, d8, d11, d14, d15, d16, d23, d24, d25</code> <span class="tag">.camview.io</span></td><td>taken per camera from <code>camera_links_rtsp.cctv_url</code>, which holds the DVR host name (e.g. <code>d14.camview.io</code>; some rows are upper-case like <code>D25.camview.io</code>)</td></tr>
+</table>
+</div>
+<p>The same <code>system</code> account is used on every DVR. <b>Camview allows only one active session per username</b>: a new login kills the previous token. That is why all logins go through one token server (section 4).</p>
+<p>Checked on 10 Oct 2026: there is no other DVR/RTSP user id or password. No per-DVR override is set, and no row in <code>camera_links_rtsp</code> or <code>camera_links_hls</code> has a <code>user:pass@</code> inside its URL. <code>DB_USER</code>/<code>DB_PASSWORD</code> in <code>.env</code> are for MySQL, not cameras.</p>
+</div>
+<div class="sec">
+<h2>2. Flow overview</h2>
+<div class="flow">
+<span class="step">① POST /authorize<br>(get challenge)</span><span class="arrow">→</span>
+<span class="step">② POST /authorize<br>(send signature → token)</span><span class="arrow">→</span>
+<span class="step">③ PUT /keepalive<br>every 22 s</span><span class="arrow">→</span>
+<span class="step">④ POST StartVideo<br>(per camera → RTSP URL)</span><span class="arrow">→</span>
+<span class="step">⑤ open <code>rtsp://…?token=</code><br>in FFmpeg/OpenCV</span>
+</div>
+<p>Steps ①–③ run once per DVR in the token server. Step ④ runs per camera on each worker. Base URL for every call: <code>https://&lt;server&gt;/admin/API/</code>. The token server and classification skip TLS certificate checks (<code>verify=False</code>); detection's StartVideo call uses normal certificate checks.</p>
+</div>
+<div class="sec">
+<h2>3. Camview DVR APIs</h2>
+
+<h3>① Login, step 1: get challenge</h3>
+<pre>POST https://dXX.camview.io/admin/API/accounts/authorize
+Content-Type: application/json
+
+{ "userName": "system", "ipAddress": "", "clientType": "WINPC_V1" }</pre>
+<p>Response (HTTP 401 or 200) gives <code>realm</code>, <code>randomKey</code>, <code>publickey</code>, plus a <code>Set-Cookie</code> header that must go back in step 2.</p>
+</div>
+<div class="sec">
+<h3>② Login, step 2: send signature, get token</h3>
+<p>Signature is a five-round MD5 chain:</p>
+<pre>t1 = md5(password)
+t2 = md5(user + t1)
+t3 = md5(t2)
+t4 = md5(user + ":" + realm + ":" + t3)
+signature = md5(t4 + ":" + randomKey)</pre>
+<pre>POST https://dXX.camview.io/admin/API/accounts/authorize
+Content-Type: application/json
+Cookie: &lt;Set-Cookie from step 1&gt;
+
+{ "mac": "", "signature": "&lt;signature&gt;", "userName": "system",
+  "randomKey": "&lt;randomKey&gt;", "publicKey": "&lt;publickey&gt;",
+  "encryptType": "MD5", "ipAddress": "", "clientType": "WINPC_V1", "userType": "0" }</pre>
+<p>Response: <code>{"token": "..."}</code>. This is the <b>session token</b>.</p>
+<div class="card tbl">
+<table>
+<tr><th>Error code</th><th>Meaning</th><th>What the code does</th></tr>
+<tr><td><code>1101</code></td><td>MD5 rejected (needed for d15)</td><td>gets a fresh challenge and retries with <code>"encryptType": "RSA"</code></td></tr>
+<tr><td><code>2002</code></td><td>account locked (<code>unlockRemainTime</code> in response)</td><td>stops; token server waits 400 s before trying again (lockout is ~300 s)</td></tr>
+</table>
+</div>
+</div>
+<div class="sec">
+<h3>③ Keepalive</h3>
+<pre>PUT https://dXX.camview.io/admin/API/accounts/keepalive
+Content-Type: application/json
+X-Subject-Token: &lt;session token&gt;
+
+{}</pre>
+<p>Sent every 22 s. <code>200</code> = session alive. <code>401</code> = session gone, token dropped, next request logs in again.</p>
+</div>
+<div class="sec">
+<h3>④ StartVideo: get the RTSP URL for one camera</h3>
+<pre>POST https://dXX.camview.io/admin/API/MTS/Video/StartVideo?token=&lt;session token&gt;
+Content-Type: application/json;charset=UTF-8
+X-Subject-Token: &lt;session token&gt;
+
+{ "clientType": "WINPC_V1", "project": "PSDK", "method": "MTS.Video.StartVideo",
+  "data": {
+    "streamType": "1",
+    "optional": "/admin/API/MTS/Video/StartVideo?token=&lt;session token&gt;",
+    "channelId": "&lt;device_id&gt;$1$0$&lt;camera_no&gt;",
+    "dataType": "2",
+    "enableRtsps": "0"
+  } }</pre>
+<ul>
+<li><code>device_id</code> and <code>camera_no</code> come from the <code>camera_links_rtsp</code> row.</li>
+<li>Response <code>data.url</code> (and <code>data.url2</code>) can hold several URLs joined by <code>|</code>. The code splits them; detection also drops URLs whose port is not reachable.</li>
+<li>Response <code>data.token</code> is the <b>stream token</b> (falls back to the session token if missing).</li>
+<li><code>401</code> here means the session token is dead: the worker reports it to the token server (<code>/evict</code>) and fetches a new one. Classification first checks the 401 body, because some firmware returns stream data with a 401.</li>
+<li>Detection caches the result per camera for 180 s (<code>STARTVIDEO_CACHE_TTL</code>).</li>
+</ul>
+</div>
+<div class="sec">
+<h3>⑤ Final RTSP URL</h3>
+<pre>rtsp://&lt;host&gt;:&lt;port&gt;/&lt;path from data.url&gt;?token=&lt;stream token&gt;</pre>
+<p>No username/password goes into the RTSP URL itself; the token is the only auth.</p>
+</div>
+<div class="sec">
+<h2>4. Token server (internal API)</h2>
+<p><code>scripts/detection/camview_token_server.py</code> runs on <b>worker-0 (192.168.19.30), port 8090</b> under pm2 as <code>camview-token-server</code> <span class="ok">(online, checked today)</span>. It is the only process that logs in to the DVRs; every worker asks it for the token.</p>
+<div class="card tbl">
+<table>
+<tr><th>Endpoint</th><th>Purpose</th><th>Response</th></tr>
+<tr><td><code>GET /token?server=d14.camview.io</code></td><td>Return the shared session token; logs in if none is alive. <code>&amp;force=1</code> forces a fresh login.</td><td><code>200 {"token": "..."}</code> or <code>503 {"error": "auth failed"}</code></td></tr>
+<tr><td><code>POST /evict</code> body <code>{"server": "...", "token": "..."}</code></td><td>Worker reports a token that got 401. When the body has <code>token</code> (detection does this), it is evicted only if it is still the current one, so many reports cause one re-login. Classification sends only <code>server</code>, which evicts the current token unconditionally.</td><td><code>{"ok": true, "evicted": true|false}</code></td></tr>
+<tr><td><code>GET /health</code></td><td>Status: active sessions, their age, DVRs in backoff</td><td><code>{"status":"ok","servers":[…],"sessions":{…},"in_backoff":{…}}</code></td></tr>
+</table>
+</div>
+<div class="card tbl">
+<table>
+<tr><th>Setting</th><th>Default</th><th>Meaning</th></tr>
+<tr><td><code>CAMVIEW_TOKEN_SERVER</code></td><td><code>http://localhost:8090</code> on worker-0, <code>http://192.168.19.30:8090</code> elsewhere</td><td>set to <code>""</code> to log in directly (single host only)</td></tr>
+<tr><td><code>CAMVIEW_ALIVE_WINDOW</code></td><td>88 s</td><td>token handed out only if login/keepalive succeeded within this window</td></tr>
+<tr><td><code>CAMVIEW_AUTH_BACKOFF</code></td><td>400 s</td><td>wait after a failed login before retrying that DVR</td></tr>
+<tr><td><code>VISION_TIMEOUT_API</code></td><td>6 s</td><td>HTTP timeout for login calls</td></tr>
+<tr><td><code>TOKEN_SERVER_LOCAL_TTL</code></td><td>20 s</td><td>how long a worker process reuses a token before asking again</td></tr>
+<tr><td><code>TOKEN_SERVER_FAIL_TTL</code></td><td>30 s</td><td>how long a worker waits after the server says a DVR is unavailable</td></tr>
+</table>
+</div>
+</div>
+<div class="sec">
+<h2>5. Where it is in the code</h2>
+<div class="card tbl">
+<table>
+<tr><th>File</th><th>Role</th></tr>
+<tr><td><code>scripts/detection/camview_token_server.py</code></td><td>Login, keepalive, <code>/token</code> <code>/evict</code> <code>/health</code></td></tr>
+<tr><td><code>scripts/detection/pipeline/master_pipeline.py</code></td><td>Detection: <code>get_server_token()</code>, <code>get_rtsp_from_dss()</code> (StartVideo), <code>invalidate_server_token()</code></td></tr>
+<tr><td><code>scripts/detection/vision_classification_rtsp.py</code></td><td>Classification: same token-server client</td></tr>
+<tr><td><code>scripts/detection/utils/dss_stream.py</code>, <code>fetch_rtsp_url.py</code></td><td>Stand-alone/debug versions that log in directly with the <b>old</b> hard-coded password <code>Sasd@12345</code></td></tr>
+<tr><td><code>script-server/.env</code></td><td><code>CAMVIEW_AUTH_USER</code>, <code>CAMVIEW_AUTH_PASS</code></td></tr>
+</table>
+</div>
+</div>
+<div class="sec">
+<h2>6. Things to watch</h2>
+<ul>
+<li>Debug scripts (<code>dss_stream.py</code>, <code>fetch_rtsp_url.py</code>, <code>test_camera_frame_capture.py</code>, <code>test_rtsp_from_excel.py</code>) do not load <code>.env</code> and have the old password hard-coded, so their login now fails (<code>test_camera_frame_capture.py</code> uses <code>CAMVIEW_AUTH_PASS</code> only if it is exported in the shell). Repeated failed logins can lock the shared <code>system</code> account on that DVR for the whole fleet. Update them to read <code>.env</code> before using them. With the right password, a direct login would instead kill the shared session and every worker would get 401 until the token server logs in again.</li>
+<li>Repeated bad logins lock the <code>system</code> account for ~5 min (code 2002) on that DVR.</li>
+<li>Only the token server (worker-0) logs in, so a password change takes effect after updating <code>script-server/.env</code> on worker-0 and running <code>pm2 restart camview-token-server</code>. Keep <code>.env</code> on the other workers in sync too, for the direct-login fallback.</li>
+</ul>
+</div>
+</main>
+</body>
+</html>
