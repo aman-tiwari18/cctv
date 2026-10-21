@@ -97,6 +97,11 @@ DEFAULT_EXAM_DATE: str = datetime.now().strftime("%Y-%m-%d")
 
 VISION_ASSIGNMENT_PAYLOAD: Optional[str] = os.getenv("VISION_ASSIGNMENT_PAYLOAD")
 
+# 15 Oct 2026: same rule as RTSP (vision_classification_rtsp.py). Only cameras with no label or an
+# "Uncertain" label go to vLLM; a labelled or manually verified camera keeps its label and only
+# gets the accessibility check + a fresh frame. CLASSIFY_ONLY_UNLABELED=0 relabels every camera.
+CLASSIFY_ONLY_UNLABELED: bool = os.getenv("CLASSIFY_ONLY_UNLABELED", "1").strip().lower() not in ("0", "false", "no")
+
 SAVE_FOLDER         = os.path.join(PROJECT_ROOT, "results/tcs_classification")
 CHECKPOINT_FILE     = "checkpoint_progress.json"
 CHECKPOINT_INTERVAL = 500
@@ -629,18 +634,37 @@ async def _check_rtsp_camera(
 # Pass-2: frame capture + VLM
 # ===========================================================================
 
+def _needs_classification(cam: dict) -> bool:
+    """
+    Does this reachable camera still need a label from vLLM? (same rule as RTSP)
+      - manually verified            -> never (a person's label wins)
+      - label empty / null           -> yes
+      - label starts with "uncertain" -> yes
+      - any other label              -> no (kept; only status + frame are refreshed)
+    CLASSIFY_ONLY_UNLABELED=0 -> every camera.
+    """
+    if not CLASSIFY_ONLY_UNLABELED:
+        return True
+    if str(cam.get("manually_verified") or "0").strip().lower() in ("1", "true"):
+        return False
+    label = str(cam.get("classification") or "").strip().lower()
+    return (not label) or label.startswith("uncertain")
+
+
 async def _process_camera(
     access_result: dict,
     session: aiohttp.ClientSession,
     sem: asyncio.Semaphore,
     is_rtsp: bool = False,
     frames_dir: str = FRAMES_FOLDER,
+    classify: bool = True,
 ) -> dict:
     """
     Semaphore limits concurrent Ollama requests to MAX_WORKERS_VLM.
     The captured frame is saved under frames_dir (an assignment_<id> subdir of
     FRAMES_FOLDER) so its path can be persisted to camera_links_hls.frame_path /
     camera_classification_hls (mirrors RTSP).
+    classify=False: a kept camera — capture + save the frame only, keep its existing label.
     """
     cam_id = access_result["camera_id"]
     cam    = access_result["cam"]
@@ -661,6 +685,18 @@ async def _process_camera(
                 }
 
             frame_path = await _save_frame_to_disk(jpeg, cam_id, frames_dir)
+
+            if not classify:
+                return {
+                    "camera_id":      cam_id,
+                    "camera_pk":      cam.get("id"),
+                    "camera_name":    cam.get("camera_name"),
+                    "classification": str(cam.get("classification") or "").strip(),
+                    "status":         "Accessible",
+                    "detail":         "kept_label",
+                    "frame_path":     frame_path,
+                    "kept":           True,
+                }
 
             label, reason = await _classify_with_vlm(jpeg, session)
             return {
@@ -940,15 +976,44 @@ async def run_assignment_mode() -> dict:
                 "persisted_classification_updates": 0,
             }
 
+        # ── Which reachable cameras need a label? (same rule as RTSP) ────
+        to_classify = [r for r in accessible if _needs_classification(r.get("cam") or {})]
+        kept        = [r for r in accessible if r not in to_classify]
+        logger.info(
+            f"Classification needed for {len(to_classify)} of {len(accessible)} reachable cameras "
+            f"({len(kept)} keep their label — verified, or already labelled)"
+            + ("" if CLASSIFY_ONLY_UNLABELED else " [CLASSIFY_ONLY_UNLABELED=0: all]")
+        )
+
+        # vLLM is started only now, and only if something needs it: a run with nothing to
+        # label never loads it (~79 GB of GPU, a few minutes). No model server = the cameras
+        # that need a label are left as they are (no "Uncertain" written); kept ones still run.
+        vllm_unavailable = False
+        if to_classify:
+            _ensure_vllm_running()
+            try:
+                vllm_ok = requests.get("http://localhost:8001/health", timeout=3).status_code == 200
+            except Exception:
+                vllm_ok = False
+            if not vllm_ok:
+                logger.error(f"vLLM server is not available; {len(to_classify)} unlabelled cameras are "
+                             f"not classified this run (their labels are left untouched).")
+                vllm_unavailable = True
+                to_classify = []
+
         # ── Pass-2 ────────────────────────────────────────────────────────
         frames_dir = _frames_dir_for_assignment(runtime.get("assignment_id"))
         logger.info(
-            f"Pass-2 | {len(accessible)} cameras | "
-            f"{MAX_WORKERS_VLM} concurrent VLM | model={VLLM_MODEL}"
+            f"Pass-2 | {len(to_classify)} cameras to vLLM ({MAX_WORKERS_VLM} concurrent, model={VLLM_MODEL}) "
+            f"+ {len(kept)} kept (frame only)"
         )
+        sem_kept = asyncio.Semaphore(32)
         p2_coros = [
             _process_camera(r, session, sem_vlm, is_rtsp=is_rtsp, frames_dir=frames_dir)
-            for r in accessible
+            for r in to_classify
+        ] + [
+            _process_camera(r, session, sem_kept, is_rtsp=is_rtsp, frames_dir=frames_dir, classify=False)
+            for r in kept
         ]
         classifications: List[dict] = []
         p2_start = time.time()
@@ -966,14 +1031,24 @@ async def run_assignment_mode() -> dict:
                 "classification": res["classification"],
                 "status":         res.get("status"),
                 "frame_path":     res.get("frame_path"),
+                "kept":           bool(res.get("kept")),
             })
             if res.get("status") != "Accessible":
                 failed.append({"camera_id": res["camera_id"], "reason": res.get("detail")})
 
         logger.info(f"Pass-2 done {time.time()-p2_start:.1f}s")
 
-    # Bulk persist — one round-trip at the end
-    updated = _bulk_persist(runtime, classifications)
+    # A camera that passed Pass-1 but gave no frame in Pass-2 is not reachable after all:
+    # set its status back to Not Accessible and do not write a label for it (like RTSP).
+    pass2_failed = [{"camera_id": c["camera_id"], "status": "Not Accessible"}
+                    for c in classifications if c.get("status") != "Accessible"]
+    if pass2_failed:
+        logger.info(f"Pass-2: {len(pass2_failed)} cameras gave no frame — status back to Not Accessible")
+        _bulk_persist_status(runtime, pass2_failed)
+
+    # Bulk persist — one round-trip at the end. Kept cameras rewrite their own label (so the
+    # verification stays) with the fresh frame, and get this run's history row.
+    updated = _bulk_persist(runtime, [c for c in classifications if c.get("status") == "Accessible"])
 
     return {
         "assignment_id":                    runtime["assignment_id"],
@@ -982,6 +1057,7 @@ async def run_assignment_mode() -> dict:
         "failed":                           failed,
         "classifications":                  classifications,
         "persisted_classification_updates": updated,
+        "vllm_unavailable":                 vllm_unavailable,
     }
 
 
@@ -1315,6 +1391,44 @@ def _handle_shutdown_signal(signum, frame):
     raise SystemExit(128 + signum)
 
 
+def _gpu_memory_gb() -> Optional[Tuple[float, float]]:
+    """(free_gb, total_gb) of GPU 0, or None when nvidia-smi is unavailable."""
+    try:
+        out = subprocess.run(["nvidia-smi", "--query-gpu=memory.free,memory.total", "--format=csv,noheader,nounits"],
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=10).stdout
+        free_mb, total_mb = [float(x) for x in out.strip().splitlines()[0].split(",")]
+        return free_mb / 1024.0, total_mb / 1024.0
+    except Exception:
+        return None
+
+
+def _wait_for_free_gpu_memory() -> None:
+    """Block (up to VLLM_WAIT_FREE_MEM_S, default 15 min) until vLLM's memory request fits on the GPU."""
+    try:
+        util = float(os.getenv("VLLM_GPU_MEMORY_UTILIZATION", "0.55"))
+    except ValueError:
+        util = 0.55
+    limit = float(os.getenv("VLLM_WAIT_FREE_MEM_S", "900"))
+    deadline = time.time() + limit
+    announced = False
+    while True:
+        mem = _gpu_memory_gb()
+        if mem is None:
+            return
+        free, total = mem
+        need = util * total + 1.0
+        if free >= need:
+            return
+        if time.time() >= deadline:
+            logger.error(f"GPU memory still short after {limit:.0f}s (free {free:.0f} GB, vLLM needs {need:.0f} GB); starting anyway.")
+            return
+        if not announced:
+            logger.warning(f"Waiting for GPU memory before starting vLLM: free {free:.0f} GB, needs {need:.0f} GB "
+                           f"(another job is using the card); will wait up to {limit:.0f}s.")
+            announced = True
+        time.sleep(20)
+
+
 def _ensure_vllm_running():
     global _VLLM_PROC
     try:
@@ -1326,6 +1440,12 @@ def _ensure_vllm_running():
             return None
     except Exception:
         pass
+
+    # vLLM refuses to start unless the GPU has gpu-memory-utilization x total memory free. Another
+    # exam's detectors can still be holding the card when this run begins (14 Oct 2026 10:50: SSC's
+    # session held ~70 GB, vLLM crashed, and every camera was then saved as "Uncertain"). Wait for the
+    # memory to come free instead of starting a server that is bound to crash.
+    _wait_for_free_gpu_memory()
 
     logger.info("Starting temporary vLLM server process. Please wait (~20 seconds)...")
     _vllm_script = os.getenv("VLLM_START_SCRIPT", os.path.join(PROJECT_ROOT, "start_vllm.sh"))
@@ -1363,12 +1483,31 @@ if __name__ == "__main__":
     logger.info("TCS Camera Classification — starting")
     logger.info("=" * 80)
 
-    _ensure_vllm_running()
+    # Assignment mode starts vLLM itself, after Pass-1, and only when some camera needs a label.
+    # Default mode classifies everything, so it needs the model server up front.
+    if not VISION_ASSIGNMENT_PAYLOAD:
+        _ensure_vllm_running()
+
+        # No model server = no classification. Carrying on would label every camera "Uncertain" and
+        # overwrite the labels it already has, so stop here without touching the database; the failed
+        # exit lets the scheduler retry inside the window.
+        try:
+            _vllm_ok = requests.get("http://localhost:8001/health", timeout=3).status_code == 200
+        except Exception:
+            _vllm_ok = False
+        if not _vllm_ok:
+            logger.error("vLLM server is not available; aborting classification so existing labels are not overwritten.")
+            _shutdown_vllm("vLLM unavailable")
+            sys.exit(3)
 
     try:
         if VISION_ASSIGNMENT_PAYLOAD:
             result = asyncio.run(run_assignment_mode())
             print(json.dumps(result, indent=2))
+            if result.get("vllm_unavailable"):
+                # statuses, frames and the kept cameras are saved; the unlabelled ones were not classified
+                _shutdown_vllm("vLLM unavailable")
+                sys.exit(3)
         else:
             main()
         logger.info("Done.")

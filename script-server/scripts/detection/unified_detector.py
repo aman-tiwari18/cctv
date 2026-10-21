@@ -69,6 +69,12 @@ CONF_THRESHOLD = 0.45          # base detector confidence; per-rule filters tigh
 
 # Analytics that only look at person boxes (class 0). They can read either
 # yolov10m (COCO) or the fine-tuned person+monitor model, whose person is also class 0.
+# 15 Oct 2026: "new" = the Proximity_New_Script logic (proximity_new_det.py: own yolo11m + pose models,
+# closeness rules, pair confirmed over two samples); "old" = close_proximity.py on the shared person model.
+PROXIMITY_ENGINE = os.environ.get("PROXIMITY_ENGINE", "new").strip().lower()
+if PROXIMITY_ENGINE not in ("new", "old"):
+    PROXIMITY_ENGINE = "new"
+
 PERSON_ANALYTICS = {
     "crowd", "crowd_zero", "crowd_five", "crowd_biometric", "proximity", "intruder",
     "entry_exit", "server", "invigilator", "strongroom", "blind_spot",
@@ -107,6 +113,8 @@ def model_for(script):
         return "mobile_rfdetr" if PHONE_MODEL == "rfdetr" else "mobile"
     if script == "monitor_tamper":
         return "person_monitor_rfdetr" if MONITOR_MODEL == "rfdetr" else "person_monitor_yolo26m"
+    if script == "proximity" and PROXIMITY_ENGINE == "new":
+        return "proximity_people"
     if script in PERSON_ANALYTICS and PERSON_MODEL == "rfdetr":
         return "person_monitor_rfdetr"
     if script in PERSON_ANALYTICS and PERSON_MODEL == "finetuned":
@@ -168,6 +176,11 @@ COOLDOWNS = {
                             default if key in _OWN_COOLDOWN_ONLY else (_GLOBAL_COOLDOWN or default)))
     for key, default in _COOLDOWN_DEFAULTS.items()
 }
+# Blind spot fires on edge strips / people near the frame edge, which is true for most lab cameras
+# almost all the time (14 Oct 2026: ~100 alerts a minute). Whatever the assignment's Frequency says,
+# one camera never alerts more often than this (seconds).
+BLIND_SPOT_MIN_COOLDOWN = int(os.environ.get("BLIND_SPOT_MIN_COOLDOWN", "420"))
+COOLDOWNS["blind_spot"] = max(COOLDOWNS["blind_spot"], BLIND_SPOT_MIN_COOLDOWN)
 
 RESULTS_ROOT = os.path.join(BASE_DIR, "results")
 
@@ -192,20 +205,23 @@ def class_from_result(result, class_ids, conf=CONF_THRESHOLD):
 # ============================================================
 def _save_and_report(frame, *, folder, script_name, device_id, camera_no,
                      exam_id, shift_id, source_type="RTSP", violation_count=None,
-                     violation_chain=None):
+                     violation_chain=None, issue=""):
     """Save the annotated detection and report it, using the schema-correct identifier:
        - RTSP: device_id + camera_no  (filename `{dev}_{camera_no}`, report_to_db_rtsp)
        - HLS : ch_code (= camera_no)  (filename `ch{ch_code}`,        report_to_db_hls)
     Matches the convention used by the per-script workers."""
     ts = time.strftime("%Y%m%d_%H%M%S")
     uid = str(uuid.uuid4())
+    # Event of the alert (invigilator: static_person / no_targets) sits in the name, after the gpu token,
+    # where the Detections list reads it; empty for every other script, so their names do not change.
+    issue_tok = f"_{issue}" if issue else ""
 
     if str(source_type).upper() == "HLS":
         save_folder = os.path.join(RESULTS_ROOT, "tcs_detections", folder)
-        fname = f"{script_name}_ch{camera_no}_exam{exam_id}_shift{shift_id}_gpu{_DET_GPU_ID}_{ts}_{uid}.jpg"
+        fname = f"{script_name}_ch{camera_no}_exam{exam_id}_shift{shift_id}_gpu{_DET_GPU_ID}{issue_tok}_{ts}_{uid}.jpg"
     else:
         save_folder = os.path.join(RESULTS_ROOT, folder)
-        fname = f"{script_name}_{device_id}_{camera_no}_exam{exam_id}_shift{shift_id}_gpu{_DET_GPU_ID}_{ts}_{uid}.jpg"
+        fname = f"{script_name}_{device_id}_{camera_no}_exam{exam_id}_shift{shift_id}_gpu{_DET_GPU_ID}{issue_tok}_{ts}_{uid}.jpg"
 
     os.makedirs(save_folder, exist_ok=True)
     path = os.path.join(save_folder, fname)
@@ -347,6 +363,7 @@ def _make_evaluator(module_name, fn_name, folder, script_code):
             source_type=item.get("source_type", "RTSP"),
             violation_count=violation_count,
             violation_chain=violation_chain,
+            issue=(getattr(out, "issue", "") or "") if script_code == "invigilator" else "",
         )
 
     return _eval
@@ -368,10 +385,14 @@ def _make_stateful_evaluator(module_name, folder, script_code):
         return mod
 
     def _report(state, alerts):
-        for annotated, _event_type in alerts:
-            _save_and_report(annotated, folder=folder, script_name=script_code, **state["report_to"])
+        # an alert is (frame, event_type) or (frame, event_type, {extra _save_and_report fields}),
+        # e.g. proximity's violation_count / violation_chain
+        for alert in alerts:
+            extra = alert[2] if len(alert) > 2 else {}
+            _save_and_report(alert[0], folder=folder, script_name=script_code, **state["report_to"], **extra)
 
     def _eval(result, item, state):
+        state["posture"] = item.get("posture")      # RF-DETR posture boxes of this frame, None = not run
         exam_id, shift_id = item.get("exam_id", "0"), item.get("shift_id", "0")
         state["report_to"] = dict(device_id=item["device_id"], camera_no=item["camera_no"],
                                   exam_id=exam_id, shift_id=shift_id,
@@ -394,6 +415,10 @@ def _make_stateful_evaluator(module_name, folder, script_code):
 STATEFUL_SPEC = {
     "monitor_tamper": ("monitor_tamper_det", "monitor_tamper_detection"),
 }
+if PROXIMITY_ENGINE == "new":
+    ANALYTIC_SPEC.pop("proximity", None)
+    PERSON_ANALYTICS.discard("proximity")      # it has its own model, not the shared person result
+    STATEFUL_SPEC["proximity"] = ("proximity_new_det", "proximity_detection")
 
 # Registry: script_code -> evaluator (all analytics, driven by the shared inference).
 EVALUATORS = {
@@ -425,6 +450,36 @@ def _flush_stateful(states, now):
             logger.error(f"[Unified] flush '{script}' error ({dev}_{cam_no}): {e}")
 
 
+# 14 Oct 2026: the invigilator scripts also get the posture model's boxes (item["posture"]) and fire
+# STATIC only on a person it calls standing. INVIGILATOR_POSTURE_GATE=0 switches the pass off.
+POSTURE_SCRIPTS = {"invigilator", "crowd_five_invigilator"}
+POSTURE_MODEL = "posture_rfdetr"
+POSTURE_GATE = os.environ.get("INVIGILATOR_POSTURE_GATE", "1").strip() not in ("0", "false", "no", "")
+# 15 Oct 2026: the new proximity (PROXIMITY_ENGINE=new) also gets the posture boxes and does not report a pair
+# in which someone is standing: standing people behind desks pass the script's own ankle check.
+PROXIMITY_POSTURE = (PROXIMITY_ENGINE == "new"
+                     and os.environ.get("PROXIMITY_POSTURE", "1").strip() not in ("0", "false", "no", ""))
+
+
+# 14 Oct 2026: Crowd on LAB cameras also counts standing people with the posture model (Crowd_det_complete).
+CROWD_LAB_POSTURE = os.environ.get("CROWD_LAB_POSTURE", "1").strip() not in ("0", "false", "no", "")
+_LAB_TYPES = ("computer lab", "inside lab", "classroom", "exam lab")
+
+
+def _is_lab(classification):
+    c = str(classification or "").lower()
+    return any(t in c for t in _LAB_TYPES)
+
+
+def _posture_boxes(result):
+    """RF-DETR posture result -> [(xyxy, class_id, conf)]."""
+    try:
+        return [(tuple(float(v) for v in b), int(c), float(s))
+                for b, c, s in zip(result.xyxy, result.class_id, result.confidence)]
+    except Exception:
+        return None
+
+
 def _plan_batch(batch):
     """Map each (frame, analytic) to its model. Analytics whose model isn't loaded are
     skipped for this batch. Returns ({model: [frame idx]}, {(idx, script): model})."""
@@ -439,6 +494,10 @@ def _plan_batch(batch):
                 continue
             assign[(idx, script)] = model
             need.setdefault(model, set()).add(idx)
+            if BACKENDS[POSTURE_MODEL].ready() and (
+                    (POSTURE_GATE and script in POSTURE_SCRIPTS) or (script == "proximity" and PROXIMITY_POSTURE)
+                    or (script == "crowd" and CROWD_LAB_POSTURE and _is_lab(pkt.get("classification")))):
+                need.setdefault(POSTURE_MODEL, set()).add(idx)
     for model, scripts in skipped.items():
         _log_skipped(model, scripts)
     return {m: sorted(idxs) for m, idxs in need.items()}, assign
@@ -472,7 +531,7 @@ def _person_view(result):
     return result[result.boxes.conf >= CONF_THRESHOLD]
 
 
-def unified_worker(frame_queue, scripts=None):
+def unified_worker(frame_queue, scripts=None, session=None):
     """
     RTSP worker entry (drop-in replacement for the N per-script workers).
 
@@ -482,19 +541,37 @@ def unified_worker(frame_queue, scripts=None):
 
     `scripts` = every analytic in this run. Only the models those analytics read are
     loaded, before the first frame (None = load each model the first time a frame needs it).
+
+    `session` (shift-session mode, master_pipeline.run_rtsp_session): this process's name and
+    the shared arrays the camera producers read. After each analytic's verdict the worker asks
+    for the confirming frame soon (first hit: "confirm") or tells the producer to skip that
+    camera until the cooldown ends (alert saved: "hold"); it also publishes a load factor that
+    stretches the producers' intervals while its queue is backed up, and drops stale frames.
     """
     from concurrent.futures import ThreadPoolExecutor
 
-    logger.info(f"🟢 [Unified] worker started (person model: {PERSON_MODEL}, monitor model: {MONITOR_MODEL})")
+    sess = session or {}
+    tag = f"[Unified {sess['name']}]" if sess.get("name") else "[Unified]"
+    fb_idx = sess.get("idx") or {}
+    no_hold, no_feedback = set(sess.get("no_hold") or []), set(sess.get("no_feedback") or [])
+    max_age = float(sess.get("max_age_s") or 0)
+    qmax = int(sess.get("qmax") or 0)
+    stale = 0
+    last_load = time.time()
+    logger.info(f"🟢 {tag} worker started (person model: {PERSON_MODEL}, monitor model: {MONITOR_MODEL})")
     by_model = {}
     for s in scripts or []:
         if s in EVALUATORS:
             by_model.setdefault(model_for(s), []).append(s)
+    _posture_users = ((POSTURE_SCRIPTS if POSTURE_GATE else set()) | ({"crowd"} if CROWD_LAB_POSTURE else set())
+                      | ({"proximity"} if PROXIMITY_POSTURE else set()))
+    if _posture_users & set(scripts or []):
+        by_model.setdefault(POSTURE_MODEL, []).extend(sorted(_posture_users & set(scripts or [])))
     for name, users in sorted(by_model.items()):
         if BACKENDS[name].load_now():
-            logger.info(f"[Unified] {name} loaded for {sorted(users)}")
+            logger.info(f"{tag} {name} loaded for {sorted(users)}")
         else:
-            logger.error(f"[Unified] {name} FAILED to load — {sorted(users)} will not run until it does")
+            logger.error(f"{tag} {name} FAILED to load — {sorted(users)} will not run until it does")
     pool = ThreadPoolExecutor(max_workers=len(BACKENDS), thread_name_prefix="unified-model")
     stats, last_stats = {}, time.time()
     last_flush = time.time()
@@ -503,6 +580,19 @@ def unified_worker(frame_queue, scripts=None):
 
     def state_for(dev, ch, script):
         return states.setdefault((dev, ch, script), {})
+
+    def feedback(pkt, script, st, consec_before, save_before):
+        """Tell the camera's producer what this verdict means for its next frame."""
+        slot, i = pkt.get("slot"), fb_idx.get(script)
+        if slot is None or i is None or script in no_feedback:
+            return
+        k = slot * len(fb_idx) + i
+        now = time.time()
+        if st.get("last_save", 0) != save_before:
+            if script not in no_hold:          # alert saved: nothing new before its cooldown ends
+                sess["hold"][k] = now + max(COOLDOWNS.get(script, 120) - sess.get("confirm_s", 10), 0)
+        elif consec_before == 0 and st.get("consec", 0) == 1:
+            sess["confirm"][k] = now + sess.get("confirm_s", 10)   # first hit: confirm it soon
 
     while True:
         # Also runs while no frames arrive, so a held alert is not stuck waiting for
@@ -518,6 +608,11 @@ def unified_worker(frame_queue, scripts=None):
             continue
         if pkt is None:
             break
+        if max_age and pkt.get("captured_at") and time.time() - pkt["captured_at"] > max_age:
+            stale += 1                         # waited too long in the queue: a newer frame is coming
+            continue
+        if pkt.get("cooldowns"):              # shift session: each analytic's frequency from the session file
+            COOLDOWNS.update(pkt["cooldowns"])
         batch.append(pkt)
 
         stop = False
@@ -528,9 +623,23 @@ def unified_worker(frame_queue, scripts=None):
                 if nxt is None:        # shutdown sentinel mid-batch: process what we have, then stop
                     stop = True
                     break
+                if max_age and nxt.get("captured_at") and time.time() - nxt["captured_at"] > max_age:
+                    stale += 1
+                    continue
+                if nxt.get("cooldowns"):
+                    COOLDOWNS.update(nxt["cooldowns"])
                 batch.append(nxt)
             except queue_module.Empty:
                 time.sleep(0.002)
+
+        # shift session: producers send the small substream frame and ask for the zoom here,
+        # so the queue carries ~0.3 MB per frame instead of ~3.7 MB
+        for p in batch:
+            zw = p.pop("zoom", 0)
+            f = p["frame"]
+            if zw and f.shape[1] < zw:
+                h, w = f.shape[:2]
+                p["frame"] = cv2.resize(f, (zw, int(round(h * zw / w))), interpolation=cv2.INTER_LINEAR)
 
         # ---- each needed model runs once, in parallel, over only its frames ----
         frames = [p["frame"] for p in batch]
@@ -561,9 +670,14 @@ def unified_worker(frame_queue, scripts=None):
                 # on ANY single person. The per-script workers pass it, so the
                 # unified path has to as well.
                 "tc_code":     pkt.get("tc_code", ""),
+                # Camera type (Entry / Outside / Computer Lab ...): the crowd rule counts people differently outdoors.
+                "classification": pkt.get("classification", ""),
                 # Set by the producers; stateful analytics time their rules on it.
                 "captured_at": pkt.get("captured_at"),
             }
+            # Posture boxes for the invigilator STATIC gate; None = posture model not run / not ready.
+            _pr = out.get((POSTURE_MODEL, idx))
+            item["posture"] = _posture_boxes(_pr) if _pr is not None else None
             for script in pkt.get("enabled_scripts", []):
                 model = assign.get((idx, script))
                 result = out.get((model, idx)) if model else None
@@ -574,12 +688,28 @@ def unified_worker(frame_queue, scripts=None):
                         if idx not in person_views:
                             person_views[idx] = _person_view(result)
                         result = person_views[idx]
-                    EVALUATORS[script](result, item, state_for(dev, cam_no, script))
+                    st = state_for(dev, cam_no, script)
+                    consec_before, save_before = st.get("consec", 0), st.get("last_save", 0)
+                    EVALUATORS[script](result, item, st)
+                    if sess:
+                        feedback(pkt, script, st, consec_before, save_before)
                 except Exception as e:
                     logger.error(f"[Unified] evaluator '{script}' error ({dev}_{cam_no}): {e}")
 
         for p in batch:
             p.pop("frame", None)
+
+        if sess.get("load") is not None and qmax and time.time() - last_load >= 2.0:
+            last_load = time.time()
+            try:
+                backlog_now = frame_queue.qsize()
+            except Exception:
+                backlog_now = 0
+            li = sess["load_i"]
+            if backlog_now > 0.75 * qmax:      # behind: producers stretch their intervals
+                sess["load"][li] = min(sess["load"][li] * 1.15, 4.0)
+            elif backlog_now < 0.25 * qmax:
+                sess["load"][li] = max(sess["load"][li] / 1.15, 1.0)
 
         if time.time() - last_stats >= STATS_EVERY_S:
             elapsed = time.time() - last_stats
@@ -589,7 +719,11 @@ def unified_worker(frame_queue, scripts=None):
                 backlog = frame_queue.qsize()
             except Exception:
                 backlog = "?"
-            logger.info(f"[Unified] last {elapsed:.0f}s — queue backlog {backlog} — " + "; ".join(parts))
+            extra = ""
+            if sess:
+                extra = f" — stale dropped {stale}, load x{sess['load'][sess['load_i']]:.2f}"
+                stale = 0
+            logger.info(f"{tag} last {elapsed:.0f}s — queue backlog {backlog}{extra} — " + "; ".join(parts))
             stats.clear(); last_stats = time.time()
 
         if stop:
@@ -597,4 +731,4 @@ def unified_worker(frame_queue, scripts=None):
 
     _flush_stateful(states, None)
     pool.shutdown(wait=False)
-    logger.info("🔴 [Unified] worker stopped")
+    logger.info(f"🔴 {tag} worker stopped")

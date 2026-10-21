@@ -340,6 +340,53 @@ function hlsDeviceAndCameraNo(row) {
 
 // ─── Controller ───────────────────────────────────────────────────────────────
 
+/**
+ * House style of the downloaded reports (same as the classification reports): navy header row
+ * with white bold text, frozen header, filter arrows on table sheets; the Analysis sheet gets
+ * bold section titles. Takes / returns an xlsx buffer (sheets are built with SheetJS, which
+ * cannot style cells). Any styling error returns the plain workbook unchanged.
+ */
+async function applyReportTheme(buffer) {
+    try {
+        const wb = new ExcelJS.Workbook();
+        await wb.xlsx.load(buffer);
+        const HEAD = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E78' } };
+        wb.eachSheet((ws) => {
+            if (ws.name === 'Analysis') {
+                ws.eachRow((row) => {
+                    const a = String(row.getCell(1).value ?? '');
+                    if (/ANALYSIS$|^OVERALL SUMMARY$/.test(a)) {
+                        row.getCell(1).font = { bold: true, size: 12, color: { argb: 'FFFFFFFF' } };
+                        row.getCell(1).fill = HEAD; row.getCell(2).fill = HEAD;
+                    } else if (/^Top \d+ /.test(a)) {
+                        row.getCell(1).font = { bold: true };
+                    }
+                });
+                return;
+            }
+            const cols = ws.getRow(1).cellCount;
+            if (!cols) return;
+            ws.getRow(1).eachCell((c) => {
+                c.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+                c.fill = HEAD;
+                c.alignment = { vertical: 'middle', wrapText: true };
+            });
+            ws.views = [{ state: 'frozen', ySplit: 1 }];
+            if (ws.rowCount > 1) ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: ws.rowCount, column: cols } };
+            ws.eachRow((row, n) => {
+                if (n === 1) return;
+                row.eachCell((c) => {
+                    if (c.value && typeof c.value === 'object' && c.value.hyperlink) c.font = { underline: true, color: { argb: 'FF0563C1' } };
+                });
+            });
+        });
+        return Buffer.from(await wb.xlsx.writeBuffer());
+    } catch (e) {
+        console.error('[ReportController] theme failed, sending plain workbook:', e.message);
+        return buffer;
+    }
+}
+
 exports.downloadReport = async (req, res) => {
     const rawDate = req.query.date;
     const examId = req.query.exam_id;
@@ -415,7 +462,7 @@ exports.downloadReport = async (req, res) => {
             : camerasForShiftAndDate(masterCameras, sid, mysqlDate));
 
         // ── 4. Fetch All Detections for exam + date ───────────────────────────
-        const detections = isRTSP ? await query(
+        let detections = isRTSP ? await query(
             `SELECT id, shift_id, city, center_name, camera_id, camera_name, camera_no,
                     '' as camera_category, tc_code, device_id, state, camera_status,
                     events, rejected_events, date_time, imageurl, detection_type,
@@ -434,6 +481,15 @@ exports.downloadReport = async (req, res) => {
             ORDER BY shift_id ASC, created_at ASC`,
             [examId, searchDate]
         );
+
+        // One shift picked (not "All shifts"): the report carries only that shift - its sheet, its
+        // detections and its analysis. All shifts: the full consolidated report.
+        const onlyShiftId = (req.query.all_shifts !== 'true' && req.query.shift_id && shifts.some(s => Number(s.id) === Number(req.query.shift_id)))
+            ? Number(req.query.shift_id) : null;
+        const reportShifts = onlyShiftId ? shifts.filter(s => Number(s.id) === onlyShiftId) : shifts;
+        if (onlyShiftId) {
+            detections = detections.filter(d => Number((d.shift_id != null) ? d.shift_id : determineShiftId(d.date_time, shifts)) === onlyShiftId);
+        }
 
         // ── 4b. Server-address (cctv_url) lookup from camera_links ───────────
         // The report tables don't carry the server URL, so map it per camera.
@@ -508,7 +564,8 @@ exports.downloadReport = async (req, res) => {
 
 
         // ── 7. Shift Sheets (Shift 1, 2, 3...) ──────────────────────────────────
-        shifts.forEach((shiftMeta, idx) => {
+        reportShifts.forEach((shiftMeta) => {
+            const idx = shiftMap[shiftMeta.id].index - 1;
             const shiftId = shiftMeta.id;
             const sheetName = `Shift ${idx + 1}`;
             const shiftCams = shiftCamsOf(shiftId);
@@ -680,7 +737,8 @@ exports.downloadReport = async (req, res) => {
             return (h * 60) + m;
         };
 
-        shifts.forEach((shiftMeta, idx) => {
+        reportShifts.forEach((shiftMeta) => {
+            const idx = shiftMap[shiftMeta.id].index - 1;
             const shiftId = shiftMeta.id;
 
             // Calculate duration for this shift
@@ -741,23 +799,26 @@ exports.downloadReport = async (req, res) => {
 
         const totalHours = (totalDurationMinutes / 60).toFixed(1);
 
-        analysisData.push(['OVERALL SUMMARY', '']);
-        analysisData.push(['Total Unique Cameras Online Today', uniqueOnline]);
-        analysisData.push(['Total Online Cameras (Sum of Shifts)', cumulativeOnline]);
-        // With an uploaded schedule only detections of scheduled centres/shifts count (same
-        // rule as each shift's total); without one this is every detection, as before.
-        const anyRestricted = !!(rtspShift && Object.values(rtspShift.scopeByShift).some(sc => sc && sc.restricted));
-        analysisData.push(['Total Detections (All Shifts)', anyRestricted ? scheduledDetections : detections.length]);
-        analysisData.push(['Total Scheduled Duration (Active Shifts)', `${totalHours} hours`]);
+        if (!onlyShiftId) {
+            analysisData.push(['OVERALL SUMMARY', '']);
+            analysisData.push(['Total Unique Cameras Online Today', uniqueOnline]);
+            analysisData.push(['Total Online Cameras (Sum of Shifts)', cumulativeOnline]);
+            // With an uploaded schedule only detections of scheduled centres/shifts count (same
+            // rule as each shift's total); without one this is every detection, as before.
+            const anyRestricted = !!(rtspShift && Object.values(rtspShift.scopeByShift).some(sc => sc && sc.restricted));
+            analysisData.push(['Total Detections (All Shifts)', anyRestricted ? scheduledDetections : detections.length]);
+            analysisData.push(['Total Scheduled Duration (Active Shifts)', `${totalHours} hours`]);
+        }
 
         const analysisWs = XLSX.utils.aoa_to_sheet(analysisData);
         analysisWs['!cols'] = [{ wch: 40 }, { wch: 60 }];
         XLSX.utils.book_append_sheet(wb, analysisWs, 'Analysis');
 
         // ── 10. Stream to client ──────────────────────────────────────────────
-        const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+        const buffer = await applyReportTheme(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
         const safeName = sanitizeFilename(examName);
-        const filename = `${safeName}_Report_${mysqlDate}.xlsx`;
+        const shiftTag = onlyShiftId ? `_Shift${shiftMap[onlyShiftId].index}` : '_AllShifts';
+        const filename = `${safeName}_Report_${mysqlDate}${shiftTag}.xlsx`;
 
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -876,7 +937,7 @@ exports.downloadClientReport = async (req, res) => {
         // Carry remove_from_client through so the aggregated "Rejected Events"
         // count can use it, and accepted_by_client so the Detections List can
         // resolve the per-row Status (Accepted / Rejected / Not Verified).
-        const detections = isRTSP ? await query(
+        let detections = isRTSP ? await query(
             `SELECT id, shift_id, city, center_name, camera_id, camera_name, camera_no,
                     '' as camera_category, tc_code, device_id, state, camera_status,
                     events, rejected_events, date_time, imageurl, detection_type,
@@ -899,6 +960,15 @@ exports.downloadClientReport = async (req, res) => {
              ORDER BY shift_id ASC, created_at ASC`,
             [examId, searchDate]
         );
+
+        // One shift picked (not "All shifts"): the report carries only that shift - its sheet, its
+        // detections and its analysis. All shifts: the full consolidated report.
+        const onlyShiftId = (req.query.all_shifts !== 'true' && req.query.shift_id && shifts.some(s => Number(s.id) === Number(req.query.shift_id)))
+            ? Number(req.query.shift_id) : null;
+        const reportShifts = onlyShiftId ? shifts.filter(s => Number(s.id) === onlyShiftId) : shifts;
+        if (onlyShiftId) {
+            detections = detections.filter(d => Number((d.shift_id != null) ? d.shift_id : determineShiftId(d.date_time, shifts)) === onlyShiftId);
+        }
 
         // ── 4b. Server-address (cctv_url) lookup from camera_links ───────────
         // The report tables don't carry the server URL, so map it per camera.
@@ -957,7 +1027,8 @@ exports.downloadClientReport = async (req, res) => {
             ? [15, 30, 15, 12, 11, 22, 35, 15, 12, 28, 16, 15]
             : [15, 30, 15, 18, 35, 15, 12, 28, 16, 15];
 
-        shifts.forEach((shiftMeta, idx) => {
+        reportShifts.forEach((shiftMeta) => {
+            const idx = shiftMap[shiftMeta.id].index - 1;
             const shiftId = shiftMeta.id;
             const sheetName = `Shift ${idx + 1}`;
             const shiftCams = shiftCamsOf(shiftId);
@@ -1128,7 +1199,8 @@ exports.downloadClientReport = async (req, res) => {
             return (h * 60) + m;
         };
 
-        shifts.forEach((shiftMeta, idx) => {
+        reportShifts.forEach((shiftMeta) => {
+            const idx = shiftMap[shiftMeta.id].index - 1;
             const shiftId = shiftMeta.id;
 
             const shiftScope = rtspShift ? rtspShift.scopeByShift[shiftId] : null;
@@ -1181,23 +1253,26 @@ exports.downloadClientReport = async (req, res) => {
         const uniqueOnline = uniqueOnlineKeys.size;
         const totalHours = (totalDurationMinutes / 60).toFixed(1);
 
-        analysisData.push(['OVERALL SUMMARY', '']);
-        analysisData.push(['Total Unique Cameras Online Today', uniqueOnline]);
-        analysisData.push(['Total Online Cameras (Sum of Shifts)', cumulativeOnline]);
-        // With an uploaded schedule only detections of scheduled centres/shifts count (same
-        // rule as each shift's total); without one this is every detection, as before.
-        const anyRestricted = !!(rtspShift && Object.values(rtspShift.scopeByShift).some(sc => sc && sc.restricted));
-        analysisData.push(['Total Detections (All Shifts)', anyRestricted ? scheduledDetections : detections.length]);
-        analysisData.push(['Total Scheduled Duration (Active Shifts)', `${totalHours} hours`]);
+        if (!onlyShiftId) {
+            analysisData.push(['OVERALL SUMMARY', '']);
+            analysisData.push(['Total Unique Cameras Online Today', uniqueOnline]);
+            analysisData.push(['Total Online Cameras (Sum of Shifts)', cumulativeOnline]);
+            // With an uploaded schedule only detections of scheduled centres/shifts count (same
+            // rule as each shift's total); without one this is every detection, as before.
+            const anyRestricted = !!(rtspShift && Object.values(rtspShift.scopeByShift).some(sc => sc && sc.restricted));
+            analysisData.push(['Total Detections (All Shifts)', anyRestricted ? scheduledDetections : detections.length]);
+            analysisData.push(['Total Scheduled Duration (Active Shifts)', `${totalHours} hours`]);
+        }
 
         const analysisWs = XLSX.utils.aoa_to_sheet(analysisData);
         analysisWs['!cols'] = [{ wch: 40 }, { wch: 60 }];
         XLSX.utils.book_append_sheet(wb, analysisWs, 'Analysis');
 
         // ── 9. Stream ────────────────────────────────────────────────────────
-        const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+        const buffer = await applyReportTheme(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
         const safeName = sanitizeFilename(examName);
-        const filename = `${safeName}_Client_Report_${mysqlDate}.xlsx`;
+        const shiftTag = onlyShiftId ? `_Shift${shiftMap[onlyShiftId].index}` : '_AllShifts';
+        const filename = `${safeName}_Client_Report_${mysqlDate}${shiftTag}.xlsx`;
 
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);

@@ -6,7 +6,7 @@ import {
   DialogContent, DialogActions, TextField, MenuItem, Chip,
   CircularProgress, Alert, Tooltip, Divider, Stack, TablePagination,
   FormControl, InputLabel, Select, InputAdornment, TableSortLabel,
-  useMediaQuery, useTheme,
+  useMediaQuery, useTheme, Autocomplete, Checkbox, ListItemText, Popover, Menu, Drawer,
 } from '@mui/material';
 import {
   Add, Edit, Delete, Upload, CloudUpload, Download,
@@ -16,6 +16,14 @@ import {
   ImageNotSupported as ImageNotSupportedIcon,
   CheckCircle as CheckCircleIcon,
   VerifiedRounded as VerifiedRoundedIcon,
+  FilterAltOff as FilterAltOffIcon,
+  Tune as TuneIcon,
+  Close as CloseIcon,
+  MoreVert as MoreVertIcon,
+  InfoOutlined as InfoOutlinedIcon,
+  EventBusy as EventBusyIcon,
+  KeyboardArrowDown as KeyboardArrowDownIcon,
+  ErrorOutline as ErrorOutlineIcon,
 } from '@mui/icons-material';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import { DatePicker, LocalizationProvider } from '@mui/x-date-pickers';
@@ -125,6 +133,29 @@ const RTSP_EMPTY = {
 };
 
 // ─────────────────────────────────────────────────────────────
+
+/* Accent colours per link type (same palette as the RTSP / HLS chips): HLS = app blue, RTSP = periwinkle + navy text. */
+const TYPE_THEME = {
+  hls:  { solid: '#3c81f6', onSolid: '#ffffff', solidHover: '#2f6fdb', text: '#1d4ed8', border: '#3c81f6', soft: '#eff6ff' },
+  rtsp: { solid: '#a4b5fe', onSolid: '#384b91', solidHover: '#93a6fd', text: '#384b91', border: '#a4b5fe', soft: '#eef0ff' },
+};
+
+/* One row of the Download / template menus: coloured icon tile, title + hint, count pill. */
+const DlItem = ({ icon, color, bg, title, sub, count, onClick, disabled }) => (
+  <MenuItem onClick={onClick} disabled={disabled} sx={{ gap: 1.5, py: 1, px: 1.25, mx: 0.75, my: 0.25, borderRadius: 1.75, alignItems: 'center', '&:hover': { bgcolor: '#f1f5f9' } }}>
+    <Box sx={{ width: 36, height: 36, borderRadius: '10px', bgcolor: bg, color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{icon}</Box>
+    <Box sx={{ flex: 1, minWidth: 0 }}>
+      <Typography sx={{ fontSize: '0.88rem', fontWeight: 600, color: '#0f172a', lineHeight: 1.25 }}>{title}</Typography>
+      {sub && <Typography sx={{ fontSize: '0.72rem', color: '#64748b', lineHeight: 1.3 }}>{sub}</Typography>}
+    </Box>
+    {count != null && (
+      <Box sx={{ px: 1.1, py: 0.2, borderRadius: '999px', bgcolor: bg, color, fontSize: '0.78rem', fontWeight: 700 }}>{Number(count).toLocaleString()}</Box>
+    )}
+  </MenuItem>
+);
+const MENU_PAPER = { sx: { mt: 0.75, borderRadius: 3, minWidth: { xs: 250, sm: 300 }, maxWidth: 'calc(100vw - 24px)', py: 0.75, boxShadow: '0 16px 40px rgba(15,23,42,0.18)', border: '1px solid #e2e8f0' } };
+const MENU_HEAD = { px: 2.25, pt: 0.75, pb: 0.5, fontSize: '0.66rem', fontWeight: 700, letterSpacing: '0.09em', color: '#94a3b8' };
+
 const Cameras = () => {
   const theme = useTheme();
   const isSmDown = useMediaQuery(theme.breakpoints.down('sm'));
@@ -146,6 +177,10 @@ const Cameras = () => {
   const [examLinkType, setExamLinkType] = useState(null);
   // RTSP: what the exam schedule did to the list for the chosen date + shift / run (null = nothing chosen)
   const [scheduleInfo, setScheduleInfo] = useState(null);
+  const [serverStats, setServerStats] = useState(null);          // RTSP: not-accessible cameras per camview server
+  const [dlAnchor, setDlAnchor] = useState(null);                 // Download Cameras menu
+  const [tplAnchor, setTplAnchor] = useState(null);               // template (3-dot) menu
+  const [dvOpen, setDvOpen] = useState(false);                    // DV details side panel
   const [loading, setLoading] = useState(false);
   const [statusCounts, setStatusCounts] = useState({ accessible: 0, notAccessible: 0, unknown: 0 });
   const [visionSummary, setVisionSummary] = useState(null);
@@ -160,10 +195,19 @@ const Cameras = () => {
   const [filterExamDate, setFilterExamDate] = useState('');
   const [filterClassification, setFilterClassification] = useState('');
   const [filterRegion, setFilterRegion] = useState('');
+  // Cameras-tab filters (server side): status, manual verification, classification(s), centre(s).
+  const [filterStatus, setFilterStatus] = useState('');          // '' | accessible | not_accessible | unknown
+  const [filterVerified, setFilterVerified] = useState('');      // '' | yes | no
+  const [filterClasses, setFilterClasses] = useState([]);        // values; '__unclassified__' = no label
+  const [filterCentres, setFilterCentres] = useState([]);        // [{value,label,count}]
+  const [facets, setFacets] = useState(null);                    // options + counts from the API
+  const [advAnchor, setAdvAnchor] = useState(null);              // Advanced filter panel anchor
 
   /* ── Classification run picker ── */
   const [classificationRuns, setClassificationRuns] = useState([]);
   const [selectedRunKey, setSelectedRunKey] = useState(''); // runKey(run) = "<shift_id>|<started_at>", or '' = latest/live
+  const userPickedRun = useRef(false);
+  const [dayInfo, setDayInfo] = useState(null);           // backend: is the chosen date an exam day (+ cameras / centres scheduled)   // once the user picks a run (or 'Latest (live)') stop auto-selecting the newest run
 
 
   const [page, setPage] = useState(0);
@@ -262,7 +306,12 @@ const Cameras = () => {
     defaultDateFor.current = null;          // pick the default date again for this exam
     setFilterClassification('');
     setFilterRegion('');
+    setFilterStatus('');
+    setFilterVerified('');
+    setFilterClasses([]);
+    setFilterCentres([]);
     setSelectedRunKey('');
+    userPickedRun.current = false;
     setSearchQuery('');
     setDebouncedSearchQuery('');
     setPage(0);
@@ -271,7 +320,10 @@ const Cameras = () => {
   const loadClassificationRuns = useCallback(() => {
     if (!selectedExamId) return;
     camerasAPI.getClassificationRuns(selectedExamId)
-      .then((res) => setClassificationRuns(Array.isArray(res?.data?.data) ? res.data.data : []))
+      .then((res) => {
+        const list = Array.isArray(res?.data?.data) ? res.data.data : [];
+        setClassificationRuns(list);
+      })
       .catch(() => setClassificationRuns([]));
   }, [selectedExamId]);
 
@@ -288,7 +340,28 @@ const Cameras = () => {
 
   useEffect(() => {
     if (selectedExamId) loadCameras();
-  }, [page, rowsPerPage, filterShiftId, filterExamDate, filterClassification, filterRegion, selectedRunKey, debouncedSearchQuery, orderBy, order]);
+  }, [page, rowsPerPage, filterShiftId, filterExamDate, filterClassification, filterRegion, filterStatus, filterVerified, filterClasses, filterCentres, selectedRunKey, debouncedSearchQuery, orderBy, order]);
+
+  /* Status / verified / classification / centre filters as API params (list + Excel download). */
+  const extraFilterParams = useCallback(() => {
+    const p = {};
+    if (filterStatus) p.status = filterStatus;
+    if (filterVerified) p.verified = filterVerified;
+    if (filterClasses.length) p.classification = filterClasses.join(',');
+    if (filterCentres.length) p.tc_code = filterCentres.map((c) => c.value).join(',');
+    return p;
+  }, [filterStatus, filterVerified, filterClasses, filterCentres]);
+
+  const activeFilterCount = (filterStatus ? 1 : 0) + (filterVerified ? 1 : 0) + filterClasses.length
+    + filterCentres.length + (searchQuery.trim() ? 1 : 0) + (filterRegion ? 1 : 0);
+
+  const advancedFilterCount = (filterStatus ? 1 : 0) + (filterVerified ? 1 : 0) + filterClasses.length
+    + filterCentres.length + (filterRegion ? 1 : 0);
+
+  const clearAllFilters = () => {
+    setFilterStatus(''); setFilterVerified(''); setFilterClasses([]); setFilterCentres([]);
+    setFilterRegion(''); setSearchQuery(''); setDebouncedSearchQuery(''); setPage(0);
+  };
 
   const loadCameras = useCallback(async () => {
     if (!selectedExamId) return;
@@ -299,21 +372,26 @@ const Cameras = () => {
       if (filterExamDate) params.exam_date = parseDDMMYYYYToISO(filterExamDate);
       if (filterClassification) params.classification = filterClassification;
       if (filterRegion) params.region = filterRegion;
+      Object.assign(params, extraFilterParams());
       if (selectedRunKey) {
         const run = classificationRuns.find((r) => runKey(r) === selectedRunKey);
         if (run) { params.run_start = run.started_at; params.run_end = run.ended_at; if (run.shift_id != null) params.run_shift_id = run.shift_id; }
       }
+      if (filterExamDate && !selectedRunKey) params.raw = '1';      // no classification ran that day: no status from another day
       if (debouncedSearchQuery.trim()) params.search = debouncedSearchQuery.trim();
       if (orderBy) { params.sort_by = orderBy; params.sort_order = order; }
       const res = await camerasAPI.getByExam(selectedExamId, params);
+      setDayInfo(res.data.day || null);
       setCameras(res.data.data || []);
       setTotalCount(res.data.totalCount || (res.data.data || []).length);
       setExamLinkType(res.data.linkType);
       setScheduleInfo(res.data.schedule || null);
       setStatusCounts(res.data.statusCounts || { accessible: 0, notAccessible: 0, unknown: 0 });
+      setServerStats(res.data.serverStats || null);
+      setFacets(res.data.facets || null);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }, [selectedExamId, page, rowsPerPage, filterShiftId, filterExamDate, filterClassification, filterRegion, selectedRunKey, classificationRuns, debouncedSearchQuery, orderBy, order]);
+  }, [selectedExamId, page, rowsPerPage, filterShiftId, filterExamDate, filterClassification, filterRegion, extraFilterParams, selectedRunKey, classificationRuns, debouncedSearchQuery, orderBy, order]);
 
   /* ── Derived ── */
   const selectedExamData = exams.find((e) => String(e.id) === String(selectedExamId));
@@ -337,8 +415,131 @@ const Cameras = () => {
     const [y, m, d] = iso.split('-');
     if (y && m && d) { setFilterExamDate(`${d}-${m}-${y}`); setPage(0); }
   }, [selectedExamData]);
+  /* Classification runs follow the chosen date (and shift): only that day's runs are offered and the
+     newest one is selected automatically; a day with no run shows the scheduled cameras without status. */
+  const runDay = (r) => { try { return format(new Date(r.started_at), 'yyyy-MM-dd'); } catch { return ''; } };
+  const filterIso = filterExamDate ? parseDDMMYYYYToISO(filterExamDate) : '';
+  const runsForDay = useMemo(() => (filterIso
+    ? classificationRuns.filter((r) => runDay(r) === filterIso && (!filterShiftId || String(r.shift_id) === String(filterShiftId)))
+    : classificationRuns), [classificationRuns, filterIso, filterShiftId]);
+  const runScopeRef = useRef('');
+  useEffect(() => {
+    const scope = `${filterIso}|${filterShiftId}`;
+    if (runScopeRef.current !== scope) { runScopeRef.current = scope; userPickedRun.current = false; }
+    if (userPickedRun.current && (selectedRunKey === '' || runsForDay.some((r) => runKey(r) === selectedRunKey))) return;
+    const want = runsForDay.length ? runKey(runsForDay[0]) : '';
+    if (want !== selectedRunKey) { setSelectedRunKey(want); setPage(0); }
+  }, [runsForDay, filterIso, filterShiftId]);
+  const noRunForDay = !!filterExamDate && !selectedRunKey;
+  const noExamDay = dayInfo?.runs === false || (!!scheduleInfo && scheduleInfo.applied && !scheduleInfo.exam_runs);
+
   const isHLS = examLinkType === 'HLS' || selectedExamData?.link_type?.toUpperCase() === 'HLS';
+  const tc = isHLS ? TYPE_THEME.hls : TYPE_THEME.rtsp;   // accent colours of this exam's link type
   const shifts = selectedExamData?.examShifts || [];
+
+  /* All cameras in the current scope (shift / date / filters / selected classification run),
+     as the table shows them, for the Excel downloads. */
+  const fetchScopeCameras = async () => {
+    const params = { is_active: true, page: 1, limit: 1000000 };
+    if (filterShiftId) params.shift_id = filterShiftId;
+    if (filterExamDate) params.exam_date = parseDDMMYYYYToISO(filterExamDate);
+    if (filterClassification) params.classification = filterClassification;
+    if (filterRegion) params.region = filterRegion;
+    Object.assign(params, extraFilterParams());
+    if (debouncedSearchQuery.trim()) params.search = debouncedSearchQuery.trim();
+    // Which classification feeds the download: the run shown (picked or the day's newest); for a date
+    // whose shift has no run, the newest earlier run of that day (previous shift); none -> scheduled
+    // cameras without status.
+    let run = selectedRunKey ? (classificationRuns.find((r) => runKey(r) === selectedRunKey) || null) : null;
+    let fallback = false;
+    if (!run && filterIso) {
+      run = classificationRuns.find((r) => runDay(r) === filterIso) || null;
+      fallback = true;
+    }
+    if (!run && filterIso) params.raw = '1';
+    if (run) { params.run_start = run.started_at; params.run_end = run.ended_at; if (run.shift_id != null) params.run_shift_id = run.shift_id; }
+    const res = await camerasAPI.getByExam(selectedExamId, params);
+    let rows = res.data.data || [];
+    const hls = (res.data.linkType === 'HLS') || isHLS;
+
+    return { rows, hls, run, fallback };
+  };
+
+  /* One "Cameras" worksheet in the table's columns; Not Accessible sheets drop Classification + View. */
+  const mapCameraRows = (rows, hls, dropClassView) => {
+    // Full, openable frame URL (same domain convention as the detections export).
+    const toAbsFrame = (fp) => {
+      const rel = buildFrameImageUrl(fp);
+      if (!rel) return '';
+      return /^https?:/i.test(rel)
+        ? rel
+        : `http://www.examscctvmonitoring.com${rel.startsWith('/') ? '' : '/'}${rel}`;
+    };
+
+
+    let sheetRows, viewCol, cols;
+    if (hls) {
+      sheetRows = rows.map((cam) => ({
+        'Centre Name': cam.centre_name || '-',
+        'TC Code': cam.tc_code || '-',
+        'State': cam.state || '-',
+        'Camera Name': cam.camera_name || '-',
+        'Ch Code': cam.ch_code || '-',
+        'Camera Category': cam.camera_category || 'N/A',
+        ...(dropClassView ? {} : { 'Classification': cam.classification || '-' }),
+        'Status': cam.status || '-',
+        'Exam Date': formatDateDDMMYYYY(cam.exam_date) || '-',
+        'Shift': cam.shift_id
+          ? (shifts.find((s) => s.id === cam.shift_id)?.shift_name || `#${cam.shift_id}`)
+          : 'All shifts',
+        ...(dropClassView ? {} : { 'View': toAbsFrame(cam.frame_path) }),
+      }));
+      viewCol = dropClassView ? -1 : 11;
+      cols = dropClassView
+        ? [{ wch: 30 }, { wch: 14 }, { wch: 18 }, { wch: 22 }, { wch: 12 }, { wch: 18 }, { wch: 16 }, { wch: 14 }, { wch: 16 }]
+        : [{ wch: 30 }, { wch: 14 }, { wch: 18 }, { wch: 22 }, { wch: 12 }, { wch: 18 }, { wch: 18 }, { wch: 16 }, { wch: 14 }, { wch: 16 }, { wch: 60 }];
+    } else {
+      sheetRows = rows.map((cam) => ({
+        'Device ID': cam.device_id || '-',
+        'Camera No': cam.camera_no ?? '-',
+        'TC Code': cam.tc_code || '-',
+        'Camera Name': cam.camera_name || '-',
+        'Centre Name': cam.centre_name || cam.tc_name || '-',
+        'State': cam.state || '-',
+        'Region': cam.region || '-',
+        ...(dropClassView ? {} : { 'Classification': cam.classification || '-' }),
+        'Status': cam.status || '-',
+        ...(dropClassView ? {} : { 'View': toAbsFrame(cam.frame_path) }),
+        'CCTV URL': cam.cctv_url || cam.url || '-',
+      }));
+      viewCol = dropClassView ? -1 : 10;
+      cols = dropClassView
+        ? [{ wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 22 }, { wch: 34 }, { wch: 16 }, { wch: 12 }, { wch: 16 }, { wch: 60 }]
+        : [{ wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 22 }, { wch: 34 }, { wch: 16 }, { wch: 12 }, { wch: 18 }, { wch: 16 }, { wch: 12 }, { wch: 60 }];
+    }
+
+    return { sheetRows, viewCol, cols };
+  };
+
+  const makeCameraSheet = (rows, hls, dropClassView) => {
+    const { sheetRows, viewCol, cols } = mapCameraRows(rows, hls, dropClassView);
+    const ws = XLSX.utils.json_to_sheet(sheetRows);
+    ws['!cols'] = cols;
+
+    // "View" column → short clickable "View" link to the frame URL (when present).
+    if (viewCol >= 0) {
+      const range = XLSX.utils.decode_range(ws['!ref']);
+      for (let R = range.s.r + 1; R <= range.e.r; R++) {
+        const addr = XLSX.utils.encode_cell({ r: R, c: viewCol });
+        const url = sheetRows[R - 1]['View'];
+        ws[addr] = url
+          ? { v: 'View', t: 's', l: { Target: url, Tooltip: 'Open frame' } }
+          : { v: '-', t: 's' };
+      }
+    }
+
+    return ws;
+  };
 
   /* ── Download cameras sheet by status ──
      statusKey: 'accessible' | 'notAccessible' | 'total'
@@ -348,18 +549,7 @@ const Cameras = () => {
   const downloadStatusSheet = async (statusKey) => {
     if (!selectedExamId) return;
     try {
-      const params = { is_active: true, page: 1, limit: 1000000 };
-      if (filterShiftId) params.shift_id = filterShiftId;
-      if (filterExamDate) params.exam_date = parseDDMMYYYYToISO(filterExamDate);
-      if (filterClassification) params.classification = filterClassification;
-      if (filterRegion) params.region = filterRegion;
-      if (selectedRunKey) {
-        const run = classificationRuns.find((r) => runKey(r) === selectedRunKey);
-        if (run) { params.run_start = run.started_at; params.run_end = run.ended_at; if (run.shift_id != null) params.run_shift_id = run.shift_id; }
-      }
-      const res = await camerasAPI.getByExam(selectedExamId, params);
-      let rows = res.data.data || [];
-      const hls = (res.data.linkType === 'HLS') || isHLS;
+      let { rows, hls, run: usedRun } = await fetchScopeCameras();
 
       if (statusKey === 'accessible') {
         rows = rows.filter((c) => String(c.status || '').toLowerCase() === 'accessible');
@@ -368,86 +558,9 @@ const Cameras = () => {
       }
       if (rows.length === 0) return;
 
-      // Full, openable frame URL (same domain convention as the detections export).
-      const toAbsFrame = (fp) => {
-        const rel = buildFrameImageUrl(fp);
-        if (!rel) return '';
-        return /^https?:/i.test(rel)
-          ? rel
-          : `http://www.examscctvmonitoring.com${rel.startsWith('/') ? '' : '/'}${rel}`;
-      };
-
       // Not Accessible cameras have no classification and no captured frame,
       // so drop the Classification and View columns from that sheet.
-      const dropClassView = statusKey === 'notAccessible';
-
-      // Per-camera classification timestamp when a specific run is selected
-      // (falls back to '-' for the live/latest view, or if this camera wasn't
-      // part of the selected run).
-      const runTimeLabel = (cam) => {
-        if (!cam.classification_run_at) return '-';
-        try { return format(new Date(cam.classification_run_at), 'dd MMM yyyy, HH:mm:ss'); }
-        catch { return '-'; }
-      };
-
-      let sheetRows, viewCol, cols;
-      if (hls) {
-        sheetRows = rows.map((cam) => ({
-          'Centre Name': cam.centre_name || '-',
-          'TC Code': cam.tc_code || '-',
-          'State': cam.state || '-',
-          'Camera Name': cam.camera_name || '-',
-          'Ch Code': cam.ch_code || '-',
-          'Camera Category': cam.camera_category || 'N/A',
-          ...(dropClassView ? {} : { 'Classification': cam.classification || '-' }),
-          'Classification Run': runTimeLabel(cam),
-          'Status': cam.status || '-',
-          'Exam Date': formatDateDDMMYYYY(cam.exam_date) || '-',
-          'Shift': cam.shift_id
-            ? (shifts.find((s) => s.id === cam.shift_id)?.shift_name || `#${cam.shift_id}`)
-            : 'All shifts',
-          ...(dropClassView ? {} : { 'View': toAbsFrame(cam.frame_path) }),
-        }));
-        viewCol = dropClassView ? -1 : 11;
-        cols = dropClassView
-          ? [{ wch: 30 }, { wch: 14 }, { wch: 18 }, { wch: 22 }, { wch: 12 }, { wch: 18 }, { wch: 20 }, { wch: 16 }, { wch: 14 }, { wch: 16 }]
-          : [{ wch: 30 }, { wch: 14 }, { wch: 18 }, { wch: 22 }, { wch: 12 }, { wch: 18 }, { wch: 18 }, { wch: 20 }, { wch: 16 }, { wch: 14 }, { wch: 16 }, { wch: 60 }];
-      } else {
-        sheetRows = rows.map((cam) => ({
-          'Device ID': cam.device_id || '-',
-          'Camera No': cam.camera_no ?? '-',
-          'TC Code': cam.tc_code || '-',
-          'Camera Name': cam.camera_name || '-',
-          'Centre Name': cam.centre_name || cam.tc_name || '-',
-          'State': cam.state || '-',
-          'Region': cam.region || '-',
-          ...(dropClassView ? {} : { 'Classification': cam.classification || '-' }),
-          'Classification Run': runTimeLabel(cam),
-          'Status': cam.status || '-',
-          ...(dropClassView ? {} : { 'View': toAbsFrame(cam.frame_path) }),
-          'CCTV URL': cam.cctv_url || cam.url || '-',
-        }));
-        viewCol = dropClassView ? -1 : 10;
-        cols = dropClassView
-          ? [{ wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 22 }, { wch: 34 }, { wch: 16 }, { wch: 12 }, { wch: 20 }, { wch: 16 }, { wch: 60 }]
-          : [{ wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 22 }, { wch: 34 }, { wch: 16 }, { wch: 12 }, { wch: 18 }, { wch: 20 }, { wch: 16 }, { wch: 12 }, { wch: 60 }];
-      }
-
-      const ws = XLSX.utils.json_to_sheet(sheetRows);
-      ws['!cols'] = cols;
-
-      // "View" column → short clickable "View" link to the frame URL (when present).
-      if (viewCol >= 0) {
-        const range = XLSX.utils.decode_range(ws['!ref']);
-        for (let R = range.s.r + 1; R <= range.e.r; R++) {
-          const addr = XLSX.utils.encode_cell({ r: R, c: viewCol });
-          const url = sheetRows[R - 1]['View'];
-          ws[addr] = url
-            ? { v: 'View', t: 's', l: { Target: url, Tooltip: 'Open frame' } }
-            : { v: '-', t: 's' };
-        }
-      }
-
+      const ws = makeCameraSheet(rows, hls, statusKey === 'notAccessible');
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Cameras');
       const label = statusKey === 'accessible' ? 'Accessible'
@@ -457,17 +570,66 @@ const Cameras = () => {
       // Only append a timestamp when a specific classification run is selected;
       // otherwise keep the original filename format unchanged.
       let fileStamp = '';
-      if (selectedRunKey) {
-        const run = classificationRuns.find((r) => runKey(r) === selectedRunKey);
-        if (run) {
-          try { fileStamp = '_' + format(new Date(run.started_at), 'ddMMMyyyy_HHmmss'); }
-          catch { fileStamp = ''; }
-        }
+      if (usedRun) {
+        try { fileStamp = '_' + format(new Date(usedRun.started_at), 'ddMMMyyyy_HHmmss'); }
+        catch { fileStamp = ''; }
       }
 
       XLSX.writeFile(wb, `${examName}_${label}_cameras${fileStamp}.xlsx`);
     } catch (e) {
       console.error('Camera status download failed:', e);
+    }
+  };
+
+  /* ── Camera Summary (admin) ──
+     One workbook for the selected classification run (or the live status when none is picked):
+     Summary (run, totals, per-centre counts, labels), Accessible, Not Accessible and All Cameras —
+     the same columns as the single-status downloads. */
+  const [summaryBusy, setSummaryBusy] = useState(false);
+  const downloadCameraSummary = async () => {
+    if (!selectedExamId || summaryBusy) return;
+    setSummaryBusy(true);
+    try {
+      const { rows, hls, run, fallback } = await fetchScopeCameras();
+      if (rows.length === 0) return;
+      const isAcc = (c) => String(c.status || '').toLowerCase() === 'accessible';
+      const isNot = (c) => String(c.status || '').toLowerCase() === 'not accessible';
+      const acc = rows.filter(isAcc);
+      const notAcc = rows.filter(isNot);
+      const unknown = rows.length - acc.length - notAcc.length;
+
+      const fmt = (v, f) => { try { return format(new Date(v), f); } catch { return '-'; } };
+      const shiftId = run?.shift_id || filterShiftId;
+      const shiftName = shiftId ? (shifts.find((x) => String(x.id) === String(shiftId))?.shift_name || `#${shiftId}`) : 'All shifts';
+      const dateLabel = filterExamDate || (run ? fmt(run.started_at, 'dd-MM-yyyy') : '-');
+      const fmtRun = (x) => { try { return format(new Date(x.started_at), 'dd MMM yyyy, HH:mm'); } catch { return '-'; } };
+      const note = !fallback ? '' : run
+        ? `No classification ran in this shift - status from the previous classification (${run.shift_name ? `${run.shift_name}, ` : ''}${fmtRun(run)}).`
+        : 'No classification ran on this date - cameras listed without status.';
+
+      // Styled workbook (ExcelJS, loaded only now): dashboard Summary + coloured Accessible / Not Accessible / All Cameras
+      const [{ default: ExcelJSMod }, { buildCameraSummaryWorkbook, saveWorkbook }] = await Promise.all([
+        import('exceljs'),
+        import('../utils/cameraSummaryWorkbook'),
+      ]);
+      const ExcelJS = ExcelJSMod || (await import('exceljs'));
+      const wb = buildCameraSummaryWorkbook(ExcelJS, {
+        examName: selectedExamData ? `${selectedExamData.exam_name} (${selectedExamData.exam_body})` : 'Exam',
+        accent: hls ? 'FF3C81F6' : 'FF384B91',
+        shiftName, dateLabel, note, isHls: hls,
+        accessibleRows: mapCameraRows(acc, hls, false).sheetRows,
+        notAccessibleRows: mapCameraRows(notAcc, hls, true).sheetRows,
+        allRows: mapCameraRows(rows, hls, false).sheetRows,
+      });
+
+      const examName = (selectedExamData?.exam_name || 'exam').replace(/[^\w]+/g, '_');
+      const stamp = run ? fmt(run.started_at, 'ddMMMyyyy_HHmm') : (filterExamDate || '').replace(/-/g, '');
+      const shiftTok = shiftId ? `_${shiftName.replace(/[^\w]+/g, '')}` : '';
+      await saveWorkbook(wb, `${examName}_Camera_Summary${shiftTok}${stamp ? `_${stamp}` : ''}.xlsx`);
+    } catch (e) {
+      console.error('Camera summary download failed:', e);
+    } finally {
+      setSummaryBusy(false);
     }
   };
 
@@ -656,24 +818,26 @@ const Cameras = () => {
           ) : (
             <>
               {/* ── Title row ── */}
-              <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'stretch', md: 'flex-start' }, mb: 2, flexWrap: 'wrap', gap: 2 }}>
-                <Box>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5, flexWrap: 'wrap' }}>
-                    <Typography variant="h6" sx={{ fontWeight: 600, color: '#0f172a', fontSize: { xs: '1.15rem', sm: '1.5rem' } }}>
-                      {selectedExamData ? `${selectedExamData.exam_name} (${selectedExamData.exam_body})` : 'Cameras'}
-                    </Typography>
+              <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'stretch', md: 'center' }, mb: 2, flexWrap: { xs: 'wrap', md: 'nowrap' }, gap: 2 }}>
+                <Box sx={{ minWidth: 0, flex: { md: '1 1 0' } }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5, flexWrap: 'nowrap', minWidth: 0 }}>
+                    <Tooltip title={selectedExamData ? `${selectedExamData.exam_name} (${selectedExamData.exam_body})` : ''} arrow placement="bottom-start">
+                      <Typography variant="h6" sx={{ fontWeight: 600, color: '#0f172a', fontSize: { xs: '1.15rem', sm: '1.5rem' }, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {selectedExamData ? `${selectedExamData.exam_name} (${selectedExamData.exam_body})` : 'Cameras'}
+                      </Typography>
+                    </Tooltip>
                     {selectedExamData && (
                       <Chip
                         label={examLinkType || selectedExamData.link_type}
                         size="small"
                         sx={{
-                          fontWeight: 700, fontSize: '0.7rem', height: 20, borderRadius: '6px',
+                          flexShrink: 0, fontWeight: 700, fontSize: '0.7rem', height: 20, borderRadius: '6px',
                           bgcolor: isHLS ? 'primary.main' : '#a4b5fe', color: isHLS ? '#fff' : '#384b91'
                         }}
                       />
                     )}
                     {selectedExamData?.is_active === false && (
-                      <Chip label="Archived" size="small" color="error" sx={{ fontWeight: 600, height: 24, fontSize: '0.7rem' }} />
+                      <Chip label="Archived" size="small" color="error" sx={{ flexShrink: 0, fontWeight: 600, height: 24, fontSize: '0.7rem' }} />
                     )}
                   </Box>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
@@ -735,12 +899,64 @@ const Cameras = () => {
                   </Box>
                 </Box>
 
-                {/* Far-right: filters + action buttons */}
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap', flexShrink: 0, width: { xs: '100%', md: 'auto' } }}>
+                {/* Far-right: Upload / Download Cameras / template menu */}
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, flexWrap: 'wrap', flexShrink: 0, width: { xs: '100%', md: 'auto' } }}>
+                  <Button variant="outlined" startIcon={<CloudUpload />}
+                    onClick={() => { setOpenUpload(true); setUploadError(''); setUploadFile(null); setUploadShiftId(''); setUploadDate(''); }}
+                    sx={{ height: 40, flex: { xs: '1 1 auto', sm: '0 0 auto' }, textTransform: 'none', fontWeight: 600, borderRadius: 2, borderColor: tc.border, color: tc.text, '&:hover': { bgcolor: tc.soft, borderColor: tc.border } }}>
+                    Upload Excel
+                  </Button>
+                  <Button variant="contained" disableElevation startIcon={<Download />} endIcon={<KeyboardArrowDownIcon />}
+                    onClick={(e) => setDlAnchor(e.currentTarget)}
+                    sx={{ height: 40, flex: { xs: '1 1 auto', sm: '0 0 auto' }, textTransform: 'none', fontWeight: 600, borderRadius: 2 }}>
+                    Download Cameras
+                  </Button>
+                  <Tooltip title="Download link templates">
+                    <IconButton onClick={(e) => setTplAnchor(e.currentTarget)}
+                      sx={{ width: 40, height: 40, borderRadius: 2, border: `1px solid ${tc.border}`, color: tc.text, '&:hover': { bgcolor: tc.soft } }}>
+                      <MoreVertIcon />
+                    </IconButton>
+                  </Tooltip>
+                  <Menu anchorEl={dlAnchor} open={Boolean(dlAnchor)} onClose={() => setDlAnchor(null)}
+                    anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }} transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+                    PaperProps={MENU_PAPER} MenuListProps={{ sx: { py: 0 } }}>
+                    <Typography sx={MENU_HEAD}>DOWNLOAD (EXCEL) · SELECTED DATE / SHIFT</Typography>
+                    {user?.role === 'ADMIN' && (
+                      <DlItem icon={<TableChart sx={{ fontSize: 20 }} />} color={tc.text} bg={tc.soft}
+                        title={summaryBusy ? 'Preparing…' : 'Camera Summary'} sub="Summary + all status sheets in one file"
+                        disabled={summaryBusy} onClick={() => { setDlAnchor(null); downloadCameraSummary(); }} />
+                    )}
+                    {user?.role === 'ADMIN' && <Divider sx={{ my: 0.5, mx: 1.5 }} />}
+                    <DlItem icon={<CheckCircleIcon sx={{ fontSize: 20 }} />} color={tc.text} bg={tc.soft}
+                      title="Accessible" sub="Reachable in the last check" count={statusCounts.accessible}
+                      disabled={!statusCounts.accessible} onClick={() => { setDlAnchor(null); downloadStatusSheet('accessible'); }} />
+                    <DlItem icon={<ErrorOutlineIcon sx={{ fontSize: 20 }} />} color="#dc2626" bg="#fef2f2"
+                      title="Not Accessible" sub="Cameras that could not be reached" count={statusCounts.notAccessible}
+                      disabled={!statusCounts.notAccessible} onClick={() => { setDlAnchor(null); downloadStatusSheet('notAccessible'); }} />
+                    <DlItem icon={<VideocamIcon sx={{ fontSize: 20 }} />} color="#16a34a" bg="#f0fdf4"
+                      title="Total" sub={statusCounts.unknown > 0 ? `Incl. ${statusCounts.unknown.toLocaleString()} not checked yet` : "Every camera in this view"} count={statusCounts.accessible + statusCounts.notAccessible + statusCounts.unknown}
+                      disabled={!(statusCounts.accessible + statusCounts.notAccessible + statusCounts.unknown)} onClick={() => { setDlAnchor(null); downloadStatusSheet('total'); }} />
+                  </Menu>
+                  <Menu anchorEl={tplAnchor} open={Boolean(tplAnchor)} onClose={() => setTplAnchor(null)}
+                    anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }} transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+                    PaperProps={MENU_PAPER} MenuListProps={{ sx: { py: 0 } }}>
+                    <Typography sx={MENU_HEAD}>LINK TEMPLATES</Typography>
+                    {(isHLS ? ['hls', 'rtsp'] : ['rtsp', 'hls']).map((t) => (
+                      <DlItem key={t} icon={<Download sx={{ fontSize: 20 }} />}
+                        color={TYPE_THEME[t].text} bg={TYPE_THEME[t].soft}
+                        title={`${t.toUpperCase()} template`} sub={(t === 'hls') === isHLS ? "This exam's link type" : 'Excel format for uploading links'}
+                        onClick={() => { setTplAnchor(null); handleDownloadTemplate(t); }} />
+                    ))}
+                  </Menu>
+                </Box>
+              </Box>
+
+              {/* ── Filters row ── */}
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap', mb: 2 }}>
                   {/* Search */}
                   <TextField
                     size="small"
-                    placeholder="Search center, state..."
+                    placeholder="Search camera (1000700_12), centre, TC code, name..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     InputProps={{
@@ -764,53 +980,8 @@ const Cameras = () => {
                         '& input': { color: '#334155', '&::placeholder': { color: '#94a3b8', opacity: 1 } }
                       }
                     }}
-                    sx={{ flex: { xs: '1 1 100%', sm: '0 0 auto' }, minWidth: { xs: '100%', sm: 260 }, maxWidth: { xs: '100%', sm: 300 } }}
+                    sx={{ flex: { xs: '1 1 100%', sm: '1 1 260px' }, minWidth: { xs: '100%', sm: 260 }, maxWidth: { xs: '100%', sm: 420 } }}
                   />
-
-                  {/* Classification filter — applies to both HLS and RTSP */}
-                  {SHOW_CLASSIFICATION_FILTER && (
-                    <FormControl size="small" sx={{ minWidth: { xs: 0, sm: 160 }, flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' } }}>
-                      <InputLabel id="cam-classification-label" sx={{ fontSize: '0.85rem' }}>Classification</InputLabel>
-                      <Select
-                        labelId="cam-classification-label"
-                        value={filterClassification}
-                        label="Classification"
-                        onChange={(e) => { setFilterClassification(e.target.value); setPage(0); }}
-                        sx={{
-                          borderRadius: 2, fontSize: '0.85rem', bgcolor: '#f1f5f9',
-                          height: 40,
-                          '& fieldset': { border: '1px solid #e2e8f0' },
-                          '&:hover fieldset': { borderColor: '#cbd5e1 !important' },
-                        }}
-                      >
-                        <MenuItem value="">All classifications</MenuItem>
-                        {classOptions.map((c) => <MenuItem key={c} value={c}>{c}</MenuItem>)}
-                      </Select>
-                    </FormControl>
-                  )}
-
-                  {/* Region filter — RTSP cameras only; empty options list (HLS
-                      exam, or exam with no region data) hides it entirely. */}
-                  {regionOptions.length > 0 && (
-                    <FormControl size="small" sx={{ minWidth: { xs: 0, sm: 140 }, flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' } }}>
-                      <InputLabel id="cam-region-label" sx={{ fontSize: '0.85rem' }}>Region</InputLabel>
-                      <Select
-                        labelId="cam-region-label"
-                        value={filterRegion}
-                        label="Region"
-                        onChange={(e) => { setFilterRegion(e.target.value); setPage(0); }}
-                        sx={{
-                          borderRadius: 2, fontSize: '0.85rem', bgcolor: '#f1f5f9',
-                          height: 40,
-                          '& fieldset': { border: '1px solid #e2e8f0' },
-                          '&:hover fieldset': { borderColor: '#cbd5e1 !important' },
-                        }}
-                      >
-                        <MenuItem value="">All regions</MenuItem>
-                        {regionOptions.map((r) => <MenuItem key={r} value={r}>{r}</MenuItem>)}
-                      </Select>
-                    </FormControl>
-                  )}
 
                   {/* Classification run picker — how many times classification has run;
                       selecting one scopes the table to that run's results.
@@ -825,7 +996,7 @@ const Cameras = () => {
                     sx={{
                       minWidth: { xs: 0, sm: 190 },
                       flex: { xs: '1 1 100%', sm: '0 0 auto' },
-                      display: classificationRuns.length > 0 ? 'flex' : 'none',
+                      display: classificationRuns.length > 0 && !noExamDay ? 'flex' : 'none',
                     }}
                   >
                     <InputLabel id="cam-run-label" sx={{ fontSize: '0.85rem' }}>Classification Run</InputLabel>
@@ -833,7 +1004,7 @@ const Cameras = () => {
                       labelId="cam-run-label"
                       value={selectedRunKey}
                       label="Classification Run"
-                      onChange={(e) => { setSelectedRunKey(e.target.value); setPage(0); }}
+                      onChange={(e) => { userPickedRun.current = true; setSelectedRunKey(e.target.value); setPage(0); }}
                       sx={{
                         borderRadius: 2, fontSize: '0.85rem', bgcolor: '#f1f5f9',
                         height: 40,
@@ -841,8 +1012,8 @@ const Cameras = () => {
                         '&:hover fieldset': { borderColor: '#cbd5e1 !important' },
                       }}
                     >
-                      <MenuItem value="">Latest (live)</MenuItem>
-                      {classificationRuns.map((r) => (
+                      <MenuItem value="">{filterExamDate ? 'No classification (scheduled cameras)' : 'Latest (live)'}</MenuItem>
+                      {runsForDay.map((r) => (
                         <MenuItem key={runKey(r)} value={runKey(r)}>
                           {r.shift_name ? `${r.shift_name} · ` : ''}{format(new Date(r.started_at), 'dd MMM, HH:mm')} · {r.total_cameras ?? r.camera_count} cameras
                           {r.total_cameras != null && ` (${r.camera_count} classified)`}
@@ -937,165 +1108,274 @@ const Cameras = () => {
                     </>
                   )}
 
-                  <Tooltip title="Download HLS Template">
-                    <Button variant="outlined" size="small" startIcon={<Download />}
-                      onClick={() => handleDownloadTemplate('hls')}
-                      sx={{ flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' }, borderColor: 'primary.main', color: 'primary.main', '&:hover': { bgcolor: '#ecfeff' }, textTransform: 'none', fontWeight: 600 }}>
-                      HLS
-                    </Button>
+                  {/* Advanced filter — icon only, right after the Shift filter; opens the panel below */}
+                  <Tooltip title="Advanced filter">
+                    <IconButton
+                      onClick={(e) => setAdvAnchor(e.currentTarget)}
+                      sx={{
+                        position: 'relative', width: 40, height: 40, borderRadius: 2, color: '#334155',
+                        border: '1px solid', borderColor: advancedFilterCount > 0 ? tc.border : '#e2e8f0',
+                        bgcolor: advancedFilterCount > 0 ? tc.soft : '#f1f5f9',
+                        '&:hover': { bgcolor: '#e2e8f0' },
+                      }}
+                    >
+                      <TuneIcon sx={{ fontSize: 20 }} />
+                      {advancedFilterCount > 0 && (
+                        <Box component="span" sx={{
+                          position: 'absolute', top: -6, right: -6, minWidth: 18, height: 18, px: 0.5, borderRadius: '9px',
+                          bgcolor: tc.solid, color: tc.onSolid, fontSize: 11, fontWeight: 700,
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        }}>{advancedFilterCount}</Box>
+                      )}
+                    </IconButton>
                   </Tooltip>
-                  <Tooltip title="Download RTSP Template">
-                    <Button variant="outlined" size="small" startIcon={<Download />}
-                      onClick={() => handleDownloadTemplate('rtsp')}
-                      sx={{ flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' }, borderColor: 'buttonrtsp.bg', color: 'buttonrtsp.text', '&:hover': { bgcolor: '#f5f3ff' }, textTransform: 'none', fontWeight: 600 }}>
-                      RTSP
+                  {activeFilterCount > 0 && (
+                    <Button
+                      size="small"
+                      color="inherit"
+                      onClick={clearAllFilters}
+                      sx={{ height: 40, borderRadius: 2, textTransform: 'none', fontSize: '0.85rem', color: '#64748b', px: 1 }}
+                    >
+                      Clear
                     </Button>
-                  </Tooltip>
+                  )}
+                  {(() => {
+                    const fieldSx = {
+                      '& .MuiInputBase-root': { borderRadius: 2, fontSize: '0.84rem', bgcolor: '#f8fafc', minHeight: 38 },
+                      '& .MuiInputLabel-root': { fontSize: '0.875rem' },
+                    };
+                    const body = (
+                      <Box sx={{ p: { xs: 1.5, sm: 2 }, width: { xs: '100%', sm: 440 }, maxWidth: '100%', boxSizing: 'border-box' }}>
+                        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1.25 }}>
+                          <TextField select size="small" fullWidth label="Region" value={filterRegion} sx={fieldSx}
+                            disabled={regionOptions.length === 0}
+                            helperText={regionOptions.length === 0 ? 'No region data for this exam' : undefined}
+                            onChange={(e) => { setFilterRegion(e.target.value); setPage(0); }}>
+                            <MenuItem value="">All regions</MenuItem>
+                            {regionOptions.map((r) => <MenuItem key={r} value={r}>{r}</MenuItem>)}
+                          </TextField>
 
-                  <Button variant="outlined" startIcon={<CloudUpload />}
-                    onClick={() => { setOpenUpload(true); setUploadError(''); setUploadFile(null); setUploadShiftId(''); setUploadDate(''); }}
-                    sx={{ flex: { xs: '1 1 100%', sm: '0 0 auto' }, textTransform: 'none', fontWeight: 600 }}>
-                    Upload Excel
-                  </Button>
+                          <TextField select size="small" fullWidth label="Status" value={filterStatus} sx={fieldSx}
+                            onChange={(e) => { setFilterStatus(e.target.value); setPage(0); }}>
+                            <MenuItem value="">All statuses</MenuItem>
+                            <MenuItem value="accessible">Accessible ({statusCounts.accessible})</MenuItem>
+                            <MenuItem value="not_accessible">Not accessible ({statusCounts.notAccessible})</MenuItem>
+                            {statusCounts.unknown > 0 && <MenuItem value="unknown">Unknown ({statusCounts.unknown})</MenuItem>}
+                          </TextField>
 
-                </Box>
-              </Box>
+                          <TextField select size="small" fullWidth label="Verification" value={filterVerified} sx={fieldSx}
+                            onChange={(e) => { setFilterVerified(e.target.value); setPage(0); }}>
+                            <MenuItem value="">All</MenuItem>
+                            <MenuItem value="yes">Verified{facets?.verified ? ` (${facets.verified.yes})` : ''}</MenuItem>
+                            <MenuItem value="no">Not verified{facets?.verified ? ` (${facets.verified.no})` : ''}</MenuItem>
+                          </TextField>
 
-              {!isHLS && filterExamDate && !filterShiftId && !selectedRunKey && (
-                <Alert severity="info" sx={{ mb: 2 }}>Now pick a shift to see only the centres scheduled on this date.</Alert>
-              )}
-              {!isHLS && scheduleInfo && (
-                <Alert severity={scheduleInfo.applied ? (scheduleInfo.exam_runs ? 'info' : 'warning') : 'info'} sx={{ mb: 2 }}>
-                  {!scheduleInfo.applied
-                    ? 'This exam has no schedule uploaded (Exams → Edit), so every camera is shown.'
-                    : !scheduleInfo.exam_runs
-                      ? `The exam does not run on ${scheduleInfo.date} in this shift (exam date & shift schedule) — no cameras are scheduled.`
-                      : scheduleInfo.centres != null
-                        ? `Showing only the cameras of the ${scheduleInfo.centres} centres scheduled on ${scheduleInfo.date} in this shift${selectedRunKey ? ' (plus any camera this run recorded)' : ''}. Other centres are not scheduled and are not checked or classified then.`
-                        : 'Every centre runs on this date and shift.'}
-                </Alert>
-              )}
+                          <TextField select size="small" fullWidth label="Classification (type)" value={filterClasses} sx={fieldSx}
+                            SelectProps={{
+                              multiple: true,
+                              renderValue: (sel) => (sel.length ? sel.map((v) => (v === '__unclassified__' ? 'Unclassified' : v)).join(', ') : ''),
+                              MenuProps: { PaperProps: { sx: { maxHeight: 360 } } },
+                            }}
+                            onChange={(e) => { const v = e.target.value; setFilterClasses(typeof v === 'string' ? v.split(',') : v); setPage(0); }}>
+                            {(facets?.classifications || []).map((c) => (
+                              <MenuItem key={c.value} value={c.value} dense>
+                                <Checkbox size="small" checked={filterClasses.includes(c.value)} sx={{ p: 0.5, mr: 1 }} />
+                                <ListItemText
+                                  primary={c.label}
+                                  secondary={`${c.count} cameras · ${c.count - c.verified} not verified`}
+                                  primaryTypographyProps={{ fontSize: '0.85rem' }}
+                                  secondaryTypographyProps={{ fontSize: '0.72rem' }}
+                                />
+                              </MenuItem>
+                            ))}
+                          </TextField>
 
-              {cameras.length > 0 && cameras.some(cam => cam.status !== null && cam.status !== undefined) && (
-                <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap', justifyContent: { xs: 'flex-start', sm: 'flex-end' } }}>
-
-                  <Box
-                    onClick={() => downloadStatusSheet('accessible')}
-                    title="Download Accessible cameras sheet"
-                    sx={{
-                    flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' },
-                    height: 30,
-                    px: 1,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 1,
-                    borderRadius: 2,
-                    border: '1px solid #3c81f6',
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease',
-                    '&:hover': { bgcolor: '#eff6ff', boxShadow: '0 1px 4px rgba(60,129,246,0.25)' },
-                  }}>
-                    <Download sx={{ fontSize: 14, color: 'primary.main' }} />
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <Typography sx={{ fontSize: '0.75rem', color: 'primary.main', fontWeight: 600 }}>
-                        Accessible
-                      </Typography>
-                      <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, color: 'primary.main' }}>
-                        {statusCounts.accessible}
-                      </Typography>
-                    </Box>
-                  </Box>
-
-                  <Box
-                    onClick={() => downloadStatusSheet('notAccessible')}
-                    title="Download Not Accessible cameras sheet"
-                    sx={{
-                    flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' },
-                    height: 30,
-                    px: 1,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 1,
-                    borderRadius: 2,
-                    border: '1px solid #333',
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease',
-                    '&:hover': { bgcolor: '#f3f4f6', boxShadow: '0 1px 4px rgba(0,0,0,0.18)' },
-                  }}>
-                    <Download sx={{ fontSize: 14, color: '#777' }} />
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <Typography sx={{ fontSize: '0.75rem', color: '#777', fontWeight: 600 }}>
-                        Not Accessible
-                      </Typography>
-                      <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, color: '#777' }}>
-                        {statusCounts.notAccessible}
-                      </Typography>
-                    </Box>
-                  </Box>
-
-                  <Box
-                    onClick={() => downloadStatusSheet('total')}
-                    title="Download all cameras sheet"
-                    sx={{
-                    flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' },
-                    height: 30,
-                    px: 1,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 1,
-                    borderRadius: 2,
-                    border: '1px solid #16a34a',
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease',
-                    '&:hover': { bgcolor: '#f0fdf4', boxShadow: '0 1px 4px rgba(22,163,74,0.25)' },
-                  }}>
-                    <Download sx={{ fontSize: 14, color: '#16a34a' }} />
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <Typography sx={{ fontSize: '0.75rem', color: '#16a34a', fontWeight: 600 }}>
-                        Total
-                      </Typography>
-                      <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, color: '#16a34a' }}>
-                        {statusCounts.accessible + statusCounts.notAccessible + statusCounts.unknown}
-                      </Typography>
-                    </Box>
-                  </Box>
-
-                  {/* Unknown */}
-                  {statusCounts.unknown > 0 && (
-                    <Box sx={{
-                      flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' },
-                      px: 2,
-                      height: 30,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 1.1,
-                      borderRadius: 2,
-                      border: '1px solid #e5e7eb',
-                      bgcolor: '#f9fafb'
-                    }}>
-                      <Box sx={{
-                        width: 6,
-                        height: 6,
-                        borderRadius: '50%',
-                        bgcolor: '#9ca3af'
-                      }} />
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <Typography sx={{ fontSize: '0.75rem', color: '#4b5563', fontWeight: 600 }}>
-                          Unknown
-                        </Typography>
-                        <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, color: '#6b7280' }}>
-                          {statusCounts.unknown}
-                        </Typography>
+                          <Autocomplete
+                            multiple
+                            size="small"
+                            disableCloseOnSelect
+                            options={facets?.centres || []}
+                            value={filterCentres}
+                            onChange={(_, v) => { setFilterCentres(v); setPage(0); }}
+                            isOptionEqualToValue={(o, v) => o.value === v.value}
+                            getOptionLabel={(o) => o.label}
+                            renderOption={(props, o) => (
+                              <li {...props} key={o.value} style={{ fontSize: '0.82rem' }}>
+                                <Box sx={{ flex: 1 }}>{o.label}</Box>
+                                <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>{o.count}</Typography>
+                              </li>
+                            )}
+                            renderInput={(params) => <TextField {...params} label="TC code / centre" sx={fieldSx} />}
+                            sx={{ gridColumn: { xs: 'auto', sm: '1 / -1' } }}
+                          />
+                        </Box>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 1.25 }}>
+                          <Button size="small" color="inherit" startIcon={<FilterAltOffIcon sx={{ fontSize: 18 }} />}
+                            disabled={advancedFilterCount === 0}
+                            onClick={() => { setFilterRegion(''); setFilterStatus(''); setFilterVerified(''); setFilterClasses([]); setFilterCentres([]); setPage(0); }}
+                            sx={{ textTransform: 'none', color: '#475569' }}>
+                            Reset
+                          </Button>
+                          <Button variant="contained" size="small" onClick={() => setAdvAnchor(null)} sx={{ textTransform: 'none', borderRadius: 2, px: 3, boxShadow: 'none' }}>
+                            Done
+                          </Button>
+                        </Box>
                       </Box>
+                    );
+                    return isSmDown ? (
+                      <Dialog open={Boolean(advAnchor)} onClose={() => setAdvAnchor(null)} fullScreen>
+                        <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontWeight: 700 }}>
+                          Advanced filter
+                          <IconButton onClick={() => setAdvAnchor(null)} size="small"><CloseIcon /></IconButton>
+                        </DialogTitle>
+                        <DialogContent dividers sx={{ p: 0 }}>{body}</DialogContent>
+                      </Dialog>
+                    ) : (
+                      <Popover
+                        open={Boolean(advAnchor)}
+                        anchorEl={advAnchor}
+                        onClose={() => setAdvAnchor(null)}
+                        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                        transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+                        PaperProps={{ sx: { borderRadius: 3, mt: 1, boxShadow: '0 12px 32px rgba(15,23,42,0.18)' } }}
+                      >
+                        <Box sx={{ px: 2, pt: 1.5, pb: 0, fontWeight: 700, fontSize: '0.95rem', color: '#0f172a' }}>Advanced filter</Box>
+                        {body}
+                      </Popover>
+                    );
+                  })()}
+
+
+                  {/* Active advanced filters, removable — own row under the toolbar */}
+                  {advancedFilterCount > 0 && (
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, width: '100%', justifyContent: { md: 'flex-end' } }}>
+                      {filterRegion && <Chip size="small" variant="outlined" label={`Region: ${filterRegion}`} onDelete={() => { setFilterRegion(''); setPage(0); }} />}
+                      {filterStatus && <Chip size="small" variant="outlined" label={`Status: ${{ accessible: 'Accessible', not_accessible: 'Not accessible', unknown: 'Unknown' }[filterStatus] || filterStatus}`} onDelete={() => { setFilterStatus(''); setPage(0); }} />}
+                      {filterVerified && <Chip size="small" variant="outlined" label={filterVerified === 'yes' ? 'Verified' : 'Not verified'} onDelete={() => { setFilterVerified(''); setPage(0); }} />}
+                      {filterClasses.map((c) => (
+                        <Chip key={`cl-${c}`} size="small" variant="outlined" label={c === '__unclassified__' ? 'Type: Unclassified' : `Type: ${c}`}
+                          onDelete={() => { setFilterClasses((p) => p.filter((x) => x !== c)); setPage(0); }} />
+                      ))}
+                      {filterCentres.map((c) => (
+                        <Chip key={`tc-${c.value}`} size="small" variant="outlined" label={`TC: ${c.label}`}
+                          onDelete={() => { setFilterCentres((p) => p.filter((x) => x.value !== c.value)); setPage(0); }} />
+                      ))}
                     </Box>
                   )}
 
+              </Box>
+
+              {/* ── Info row: schedule note (left) + not-accessible cameras per DV (right, RTSP only; HLS shows just the schedule note) ── */}
+              {(() => {
+                const needShift = filterExamDate && !filterShiftId && !selectedRunKey;
+                const fmtDay = (d) => { try { return format(new Date(d), 'dd MMM yyyy'); } catch { return d; } };
+                let left = null, leftTip = '', leftSeverity = 'info';
+                if (filterShiftId && !filterExamDate && !selectedRunKey) {
+                left = 'Pick a date to see the total centres scheduled in this shift';
+                leftTip = 'Total centres is shown for a date + shift. Choose an exam date as well.';
+              } else if (needShift && dayInfo?.scheduled && dayInfo.runs) {
+                  left = `Total centres: ${dayInfo.centres} (${fmtDay(dayInfo.date)}, all shifts)`;
+                  leftTip = `${dayInfo.cameras} cameras of the ${dayInfo.centres} centres scheduled on ${dayInfo.date} in any shift. Pick a shift to narrow the list.`;
+              } else if (needShift) {
+                  left = 'Pick a shift to see only the centres scheduled on this date';
+                  leftTip = 'Choose a shift to limit the list to the centres scheduled on this date and shift.';
+                } else if (scheduleInfo) {
+                  if (!scheduleInfo.applied) {
+                    left = 'No schedule uploaded - every camera is shown';
+                    leftTip = 'This exam has no schedule uploaded (Exams → Edit), so every camera is shown.';
+                  } else if (!scheduleInfo.exam_runs) {
+                    left = `Exam does not run on ${fmtDay(scheduleInfo.date)} in this shift`; leftSeverity = 'warning';
+                    leftTip = `The exam does not run on ${scheduleInfo.date} in this shift (exam date & shift schedule) — no cameras are scheduled.`;
+                  } else if (scheduleInfo.centres != null) {
+                    left = `Total centres: ${scheduleInfo.centres} (${fmtDay(scheduleInfo.date)})`;
+                    leftTip = `Showing only the cameras of the ${scheduleInfo.centres} centres scheduled on ${scheduleInfo.date} in this shift${selectedRunKey ? ' (plus any camera this run recorded)' : ''}. Other centres are not scheduled and are not checked or classified then.`;
+                  } else {
+                    left = 'Every centre runs on this date and shift'; leftTip = left;
+                  }
+                }
+                const nDv = serverStats?.servers?.length || 0;
+                const nNot = serverStats?.totalNotAccessible || 0;
+                const allOk = nNot === 0 && statusCounts.accessible > 0 && statusCounts.notAccessible === 0 && statusCounts.unknown === 0;
+                const unchecked = nNot === 0 && !allOk && (statusCounts.accessible + statusCounts.notAccessible + statusCounts.unknown) > 0;
+                const showRight = !noExamDay && (noRunForDay || (!isHLS && (nNot > 0 || allOk || unchecked)));
+                if (noExamDay) return null;            // the "no exam on this day" panel below says it all
+                if (!left && !showRight) return null;
+                return (
+                  <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap', alignItems: 'stretch' }}>
+                    {left && (
+                      <Box sx={{ flex: '1 1 260px', minWidth: 0, display: 'flex', alignItems: 'center', gap: 1.25, px: 2, py: 1.25, borderRadius: 2,
+                        bgcolor: leftSeverity === 'warning' ? '#fffbeb' : '#eff6ff', color: leftSeverity === 'warning' ? '#92400e' : '#1e3a8a' }}>
+                        <Tooltip title={leftTip} arrow placement="bottom-start">
+                          <InfoOutlinedIcon sx={{ fontSize: 22, color: leftSeverity === 'warning' ? '#d97706' : '#2563eb', cursor: 'help' }} />
+                        </Tooltip>
+                        <Typography sx={{ fontSize: '0.92rem', fontWeight: 600, minWidth: 0, overflowWrap: 'anywhere' }}>{left}</Typography>
+                      </Box>
+                    )}
+                    {showRight && (
+                    <Box sx={{ flex: '1 1 260px', minWidth: 0, display: 'flex', alignItems: 'center', gap: 1.25, px: 2, py: 1.25, borderRadius: 2,
+                      bgcolor: noRunForDay ? '#fffbeb' : nNot > 0 ? '#fef2f2' : allOk ? '#f0fdf4' : '#f8fafc', color: noRunForDay ? '#92400e' : nNot > 0 ? '#7f1d1d' : allOk ? '#14532d' : '#475569' }}>
+                      {noRunForDay ? (
+                        <>
+                          <InfoOutlinedIcon sx={{ fontSize: 22, color: '#d97706' }} />
+                          <Typography sx={{ fontSize: '0.92rem', fontWeight: 600, minWidth: 0, overflowWrap: 'anywhere' }}>
+                            No classification ran on {fmtDay(filterIso)}{filterShiftId ? ' in this shift' : ''} - showing the scheduled cameras without status
+                          </Typography>
+                        </>
+                      ) : nNot > 0 ? (
+                        <>
+                          <Tooltip title="Show the not-accessible cameras per DV (camview server)" arrow>
+                            <IconButton size="small" onClick={() => setDvOpen(true)} sx={{ p: 0 }}>
+                              <ErrorOutlineIcon sx={{ fontSize: 24, color: '#dc2626' }} />
+                            </IconButton>
+                          </Tooltip>
+                          <Typography sx={{ fontSize: '0.92rem', fontWeight: 600, minWidth: 0, overflowWrap: 'anywhere' }}>
+                            {nNot.toLocaleString()} non-accessible camera{nNot !== 1 ? 's' : ''} in {nDv} DV{nDv !== 1 ? 's' : ''}
+                          </Typography>
+                        </>
+                      ) : allOk ? (
+                        <>
+                          <CheckCircleIcon sx={{ fontSize: 22, color: '#16a34a' }} />
+                          <Typography sx={{ fontSize: '0.92rem', fontWeight: 600, minWidth: 0, overflowWrap: 'anywhere' }}>All cameras in this view were accessible in the last check</Typography>
+                        </>
+                      ) : (
+                        <>
+                          <InfoOutlinedIcon sx={{ fontSize: 22, color: '#64748b' }} />
+                          <Typography sx={{ fontSize: '0.92rem', fontWeight: 600, minWidth: 0, overflowWrap: 'anywhere' }}>Accessibility not checked yet{statusCounts.unknown ? ` - ${statusCounts.unknown.toLocaleString()} camera${statusCounts.unknown !== 1 ? 's' : ''} unchecked` : ''}</Typography>
+                        </>
+                      )}
+                    </Box>
+                    )}
+                  </Box>
+                );
+              })()}
+
+              {/* DV details side panel */}
+              <Drawer anchor="right" open={dvOpen} onClose={() => setDvOpen(false)} PaperProps={{ sx: { width: { xs: '100%', sm: 340 }, p: 2.5, bgcolor: '#f8fafc' } }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
+                  <Typography sx={{ fontWeight: 700, fontSize: '1.15rem', color: '#0f172a' }}>DV Details</Typography>
+                  <IconButton size="small" onClick={() => setDvOpen(false)}><CloseIcon /></IconButton>
                 </Box>
-              )}
+                <Typography sx={{ fontSize: '0.85rem', color: '#64748b', mb: 2 }}>Non-accessible cameras found in the following DVs.</Typography>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, overflowY: 'auto' }}>
+                  {(serverStats?.servers || []).map((sv) => {
+                    const num = String(sv.server).replace(/^[a-z]+/i, '');
+                    const all = sv.notAccessible === sv.total;
+                    return (
+                      <Box key={sv.server} sx={{ display: 'flex', alignItems: 'center', gap: 2, p: 1.5, borderRadius: 2, bgcolor: '#fef2f2', border: '1px solid #fecaca' }}>
+                        <Typography sx={{ minWidth: 54, textAlign: 'center', fontWeight: 800, fontSize: '1.6rem', color: '#dc2626' }}>{sv.notAccessible}</Typography>
+                        <Box sx={{ borderLeft: '1px solid #fca5a5', pl: 2 }}>
+                          <Typography sx={{ fontWeight: 700, color: '#0f172a' }}>{/^\d+$/.test(num) ? `DV ${num}` : sv.server}</Typography>
+                          <Chip size="small" label={all ? 'All non-accessible' : `of ${sv.total} cameras`}
+                            sx={{ mt: 0.5, height: 22, fontSize: '0.72rem', fontWeight: 600, bgcolor: all ? '#fee2e2' : '#fff', color: '#b91c1c' }} />
+                        </Box>
+                      </Box>
+                    );
+                  })}
+                  {(!serverStats?.servers || serverStats.servers.length === 0) && (
+                    <Typography sx={{ color: '#64748b', fontSize: '0.9rem' }}>No non-accessible cameras in this view.</Typography>
+                  )}
+                </Box>
+              </Drawer>
 
               {/* Upload result alert */}
               {uploadResult && (
@@ -1120,6 +1400,16 @@ const Cameras = () => {
               {/* ── Table ── */}
               {loading ? (
                 <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}><CircularProgress /></Box>
+              ) : noExamDay ? (
+                <Box sx={{ textAlign: 'center', py: 8, px: 2, border: '1px dashed #cbd5e1', borderRadius: 3, bgcolor: '#f8fafc' }}>
+                  <EventBusyIcon sx={{ fontSize: 48, color: '#94a3b8', mb: 1 }} />
+                  <Typography sx={{ fontWeight: 700, color: '#334155', fontSize: '1.05rem' }}>
+                    No exam cameras are scheduled on {(() => { try { return format(new Date(filterIso), 'dd MMM yyyy'); } catch { return filterExamDate; } })()}{filterShiftId ? ' in this shift' : ''}
+                  </Typography>
+                  <Typography sx={{ color: '#64748b', mt: 0.5, fontSize: '0.9rem' }}>
+                    Choose another date{filterShiftId ? ' or shift' : ''} to see the cameras and their classification.
+                  </Typography>
+                </Box>
               ) : cameras.length > 0 ? (
                 <>
                   <TableContainer component={Paper} sx={{ borderRadius: 2.5, border: '1px solid #e8ecf1', boxShadow: 'none', maxWidth: '100%', overflowX: 'auto' }}>

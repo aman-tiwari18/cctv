@@ -81,6 +81,7 @@ const Executions = () => {
   /* ── Filters (right-panel, far right) ── */
   const [selectedDate, setSelectedDate] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
+  const [shiftFilter, setShiftFilter] = useState('ALL');      // client-side: one shift's analytics, or all
 
   /* ── Dialogs / feedback ── */
   const [selectedExecution, setSelectedExecution] = useState(null);
@@ -228,8 +229,17 @@ const Executions = () => {
   }, [executions, exams, selectedExamId]);
 
   /* ── Filter rows (only search filter now, date and status are backend-filtered) ── */
+  const shiftKey = (e) => String(e.shift?.id ?? e.shift_id ?? '');
+  const shiftOptions = useMemo(() => {
+    const m = new Map();
+    executions.forEach((e) => { const k = shiftKey(e); if (k && !m.has(k)) m.set(k, e.shift?.shift_name || `Shift #${k}`); });
+    return [...m.entries()].sort((a, b) => a[1].localeCompare(b[1], undefined, { numeric: true }));
+  }, [executions]);
+  useEffect(() => { setShiftFilter('ALL'); }, [selectedExamId]);
+
   const visibleRows = useMemo(() => {
     let filtered = executions;
+    if (shiftFilter !== 'ALL') filtered = filtered.filter((e) => shiftKey(e) === shiftFilter);
 
     // Search filter (client-side for better UX)
     if (searchQuery.trim()) {
@@ -275,7 +285,7 @@ const Executions = () => {
     }
 
     return filtered;
-  }, [executions, searchQuery, orderBy, order]);
+  }, [executions, searchQuery, orderBy, order, shiftFilter]);
 
   const handleRequestSort = (property) => {
     const isAsc = orderBy === property && order === 'asc';
@@ -411,6 +421,20 @@ const Executions = () => {
                     </Select>
                   </FormControl>
                 )}
+
+                <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 140 }, flex: { xs: '1 1 100%', sm: '0 0 auto' } }}>
+                  <InputLabel id="exec-shift-label">Shift</InputLabel>
+                  <Select
+                    labelId="exec-shift-label"
+                    value={shiftOptions.some(([k]) => k === shiftFilter) ? shiftFilter : 'ALL'}
+                    label="Shift"
+                    onChange={(e) => setShiftFilter(e.target.value)}
+                    sx={{ borderRadius: 2, fontSize: '0.85rem', bgcolor: '#fff', height: 40 }}
+                  >
+                    <MenuItem value="ALL">All shifts</MenuItem>
+                    {shiftOptions.map(([k, name]) => <MenuItem key={k} value={k}>{name}</MenuItem>)}
+                  </Select>
+                </FormControl>
 
                 <FormControl size="small" sx={{ minWidth: { xs: '100%', sm: 140 }, flex: { xs: '1 1 100%', sm: '0 0 auto' } }}>
                   <InputLabel id="exec-status-label">Status</InputLabel>

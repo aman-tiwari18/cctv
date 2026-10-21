@@ -532,6 +532,17 @@ const ShiftScriptManager = ({
             setError('Set START and END time for at least one script window.');
             return;
         }
+        // An end at or before the start is read as "tomorrow" by the scheduler, which keeps a live shift
+        // running for hours. Block it here; the server rejects it too.
+        {
+            const bad = [...toCreate, ...toUpdate.map((u) => u.fields)].find(
+                (f) => f.custom_start_time && f.custom_end_time && String(f.custom_end_time) <= String(f.custom_start_time)
+            );
+            if (bad) {
+                setError(`End time (${String(bad.custom_end_time).slice(0, 5)}) must be after the start time (${String(bad.custom_start_time).slice(0, 5)}).`);
+                return;
+            }
+        }
         setSubmitting(true); setError('');
         try {
             if (toUpdate.length) {

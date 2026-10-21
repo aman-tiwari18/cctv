@@ -24,8 +24,10 @@ const APP_BAR_HEIGHT = 64;
 /**
  * Reusable collapsible exam sidebar component.
  *
- * Desktop (md+): inline collapsible rail — 56px collapsed, 280px expanded,
- * pushing the page content. Controlled via the `open` / `onToggle` props.
+ * Desktop (md+): a 56px rail that stays in the page layout. Hovering it (or tabbing
+ * into it) slides a 280px panel out OVER the page content; moving away shrinks it
+ * back. The page never reflows. `open` / `onToggle` are kept for compatibility but
+ * no longer drive the desktop width.
  *
  * Mobile (< md): the inline footprint stays a fixed 56px rail (the expand
  * trigger); expanding opens the full panel as a temporary Drawer overlay with
@@ -86,14 +88,24 @@ const ExamSidebar = ({
     else onToggle();
   };
 
+  // Desktop hover-expand: a short delay each way so a cursor passing by does not flicker the panel.
+  const [hover, setHover] = React.useState(false);
+  const hoverTimer = React.useRef(null);
+  const setHoverSoon = (v, ms) => {
+    clearTimeout(hoverTimer.current);
+    hoverTimer.current = setTimeout(() => setHover(v), ms);
+  };
+  React.useEffect(() => () => clearTimeout(hoverTimer.current), []);
+
   // Selecting an exam closes the overlay on mobile so the content is visible.
   const handleSelect = (id) => {
     onSelectExam(id);
     if (isMobile) setMobileOpen(false);
+    else { clearTimeout(hoverTimer.current); setHover(false); }
   };
 
   // ── Header (icon + title + expand/collapse button) ──
-  const renderHeader = (expanded) => (
+  const renderHeader = (expanded, showToggle = true) => (
     <Box
       sx={{
         px: expanded ? 2.5 : 1,
@@ -101,7 +113,7 @@ const ExamSidebar = ({
         pb: 1.5,
         display: 'flex',
         alignItems: 'center',
-        justifyContent: expanded ? 'space-between' : 'center',
+        justifyContent: expanded && showToggle ? 'space-between' : expanded ? 'flex-start' : 'center',
         flexShrink: 0,
       }}
     >
@@ -121,6 +133,14 @@ const ExamSidebar = ({
           </Typography>
         </Box>
       )}
+      {!expanded && !showToggle && (
+        <Tooltip title="Hover to see exams" placement="right">
+          <Box sx={{ width: 34, height: 34, borderRadius: 2, bgcolor: '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <IconComponent sx={{ fontSize: 20, color: '#3b82f6' }} />
+          </Box>
+        </Tooltip>
+      )}
+      {showToggle && (
       <Tooltip title={expanded ? 'Collapse sidebar' : 'Expand sidebar'} placement="right">
         <IconButton
           size="small"
@@ -150,6 +170,7 @@ const ExamSidebar = ({
           )}
         </IconButton>
       </Tooltip>
+      )}
     </Box>
   );
 
@@ -296,20 +317,49 @@ const ExamSidebar = ({
 
   return (
     <>
-      {/* ── Desktop (md+): inline collapsible rail, pushes content ── */}
+      {/* ── Desktop (md+): 56px rail in the layout; the full panel slides out over the page on hover ── */}
       <Box
         sx={{
-          width: open ? { xs: 200, sm: 280 } : 56,
+          position: 'relative',
+          width: 56,
           flexShrink: 0,
-          borderRight: '1px solid #e8ecf1',
-          bgcolor: '#fff',
-          display: { xs: 'none', md: 'flex' },
-          flexDirection: 'column',
-          overflow: 'hidden',
-          transition: 'width 0.22s cubic-bezier(0.4,0,0.2,1)',
+          display: { xs: 'none', md: 'block' },
+          zIndex: 30,
         }}
+        onMouseEnter={() => setHoverSoon(true, 80)}
+        onMouseLeave={() => setHoverSoon(false, 160)}
+        onFocus={() => setHoverSoon(true, 0)}
+        onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setHoverSoon(false, 0); }}
       >
-        {open ? expandedContent : collapsedContent}
+        <Box
+          sx={{
+            position: 'absolute',
+            top: 0,
+            bottom: 0,
+            left: 0,
+            width: hover ? 280 : 56,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            bgcolor: '#fff',
+            borderRight: '1px solid #e8ecf1',
+            boxShadow: hover ? '10px 0 28px rgba(15,23,42,0.14)' : 'none',
+            transition: 'width 0.2s cubic-bezier(0.4,0,0.2,1), box-shadow 0.2s ease',
+          }}
+        >
+          {hover ? (
+            <>
+              {renderHeader(true, false)}
+              {renderExamList(true)}
+              {renderArchivedToggle()}
+            </>
+          ) : (
+            <>
+              {renderHeader(false, false)}
+              {renderExamList(false)}
+            </>
+          )}
+        </Box>
       </Box>
 
       {/* ── Mobile (< md): fixed 56px rail acts as the expand trigger ── */}

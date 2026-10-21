@@ -185,7 +185,8 @@ def get_worker_info(analytic_name, mode="rtsp"):
 
 
 # ================= CAMERA LOADER (DB-driven) =================
-from utils.camera_loader import load_all_pending_cameras, load_cameras_for_execution
+from utils.camera_loader import load_all_pending_cameras, load_cameras_for_execution, _camera_matches_script
+from utils.db_client import rtsp_server_tag
 
 
 # ================= CONFIG =================
@@ -226,6 +227,63 @@ GST_PIPELINE_TEMPLATE = os.environ.get(
 # minute or two can never satisfy. Their cameras get a stream held open for the whole run
 # (SAMPLE_FPS frames/s); every other camera stays on round-robin.
 CONTINUOUS_SCRIPTS = {s.strip() for s in os.environ.get("CONTINUOUS_SCRIPTS", "monitor_tamper").split(",") if s.strip()}
+
+# ── Shift session (branch new_architectured_stream, docs/SHARED_STREAM_SESSION_PLAN.md) ──
+# SHIFT_SESSION=1: one run per (exam, shift, day) holds ONE kept-open stream per camera for the
+# whole shift; every analytic reads the frames it needs from it, inside its own time window and
+# at its own pace. The analytics, their windows, frequencies and camera types come from
+# SESSION_FILE (written by the poller, re-read every SESSION_RELOAD_S, so analytics that start
+# later in the shift join the running session without a restart). SHIFT_SESSION=0 = old path.
+SHIFT_SESSION          = os.environ.get("SHIFT_SESSION", "0") == "1"
+
+# 13 Oct: every kept-open camera is its own process and the parent holds pipes / sockets for each;
+# the container's soft open-files limit is 1024 (hard 524288), so raise it for ~800 cameras.
+try:
+    import resource
+    _soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    resource.setrlimit(resource.RLIMIT_NOFILE, (min(max(_soft, 65536), _hard), _hard))
+except Exception:
+    pass
+SESSION_FILE           = os.environ.get("SESSION_FILE", "").strip()
+SESSION_MAX_STREAMS    = int(os.environ.get("SESSION_MAX_STREAMS", "800"))
+SESSION_RELOAD_S       = float(os.environ.get("SESSION_RELOAD_S", "10"))
+# How often an analytic looks at one camera: see _session_interval. Cameras are spread evenly over
+# each interval, so at any moment only a slice of them hands a frame on.
+SESSION_MIN_INTERVAL_S = float(os.environ.get("SESSION_MIN_INTERVAL_S", "10"))
+SESSION_MAX_INTERVAL_S = float(os.environ.get("SESSION_MAX_INTERVAL_S", "600"))
+SESSION_MONITOR_INTERVAL_S = float(os.environ.get("SESSION_MONITOR_INTERVAL_S", "10"))
+SESSION_TRACK_INTERVAL_S   = float(os.environ.get("SESSION_TRACK_INTERVAL_S", "60"))
+SESSION_TRACKING = {"invigilator", "crowd_five_invigilator"}   # follow a camera for minutes; never held
+# A positive frame asks for the confirming frame this soon (the detector alerts on 2 hits in a row).
+SESSION_CONFIRM_S = float(os.environ.get("SESSION_CONFIRM_S", "10"))
+# Zero Person: after an alert a camera is not looked at again for this long (30 min).
+SESSION_ZERO_COOLDOWN_S = int(os.environ.get("SESSION_ZERO_COOLDOWN_S", "1800"))
+# Detector processes: person analytics split over this many (by camera), Phone and Monitor one each.
+SESSION_PERSON_PROCS = int(os.environ.get("SESSION_PERSON_PROCS", "2"))
+SESSION_MONITOR_PROCS = int(os.environ.get("SESSION_MONITOR_PROCS", "2"))
+SESSION_QUEUE_SIZE = int(os.environ.get("SESSION_QUEUE_SIZE", "96"))
+SESSION_MAX_FRAME_AGE_S = float(os.environ.get("SESSION_MAX_FRAME_AGE_S", "20"))
+# Frames narrower than this are enlarged (aspect kept) in the detector, before the models: every
+# analytic's pixel limits (Invigilator/Crowd standing height >= 100 px, Zero Person/Proximity box
+# area >= 1500 px², ...) were tuned on 1280 px main-stream frames, and substreams are often 352 px.
+SESSION_ZOOM_W = int(os.environ.get("SESSION_ZOOM_W", "1280") or 0)
+# A camera's stream opens this long before its first window and closes this long after its last.
+SESSION_OPEN_LEAD_S  = float(os.environ.get("SESSION_OPEN_LEAD_S", "180"))
+SESSION_IDLE_CLOSE_S = float(os.environ.get("SESSION_IDLE_CLOSE_S", "120"))
+SESSION_CAMERA_REFRESH_S = float(os.environ.get("SESSION_CAMERA_REFRESH_S", "600"))
+# Stop opening more streams when the host has less free memory than this (GB).
+SESSION_MIN_FREE_MEM_GB = float(os.environ.get("SESSION_MIN_FREE_MEM_GB", "6"))
+SESSION_START_STAGGER_S = float(os.environ.get("SESSION_START_STAGGER_S", "0.05"))
+# Reconnect after a dropped stream: random delay, so a DVR dropping all its cameras at once does
+# not reconnect them all in the same second; repeated failures back off up to the cap.
+SESSION_RECONNECT_MIN_S = float(os.environ.get("SESSION_RECONNECT_MIN_S", "5"))
+SESSION_RECONNECT_MAX_S = float(os.environ.get("SESSION_RECONNECT_MAX_S", "30"))
+SESSION_BACKOFF_CAP_S   = float(os.environ.get("SESSION_BACKOFF_CAP_S", "300"))
+# DVR stream: "1" main, "2" substream. Session mode uses the substream for every analytic.
+DSS_STREAM_TYPE = os.environ.get("DSS_STREAM_TYPE", "2" if SHIFT_SESSION else "1").strip() or "1"
+# Classical-CV analytics with their own worker (fed from the same stream); every other analytic
+# goes to the unified detector.
+SESSION_SIDE_SCRIPTS = ("tamper", "inversion")
 CONTINUOUS_RETRY_SECONDS = float(os.environ.get("CONTINUOUS_RETRY_SECONDS", "15"))
 
 # Sampling rate per camera. Default 5 fps = current behavior (0.2s). Scaling Path A
@@ -868,7 +926,7 @@ def get_rtsp_from_dss(device_id, camera_no, token, server):
             "project":    "PSDK",
             "method":     "MTS.Video.StartVideo",
             "data": {
-                "streamType":  "1",
+                "streamType":  DSS_STREAM_TYPE,
                 "optional":    f"/admin/API/MTS/Video/StartVideo?token={token}",
                 "channelId":   f"{device_id}$1$0${camera_no}",
                 "dataType":    "2",
@@ -1278,6 +1336,555 @@ def rtsp_producer(cam_configs, queues, pre_fetched_token=None, enabled_scripts=N
 # ============================================================
 # RTSP PIPELINE RUNNER — FIXED: Better concurrency and lifecycle management
 # ============================================================
+class _SessionConfig:
+    """The session's analytics, re-read from SESSION_FILE when it changes (checked every
+    SESSION_RELOAD_S). {script: {"windows": [[start_epoch, end_epoch], ...], "freq": s, "cls": [...]}}"""
+
+    def __init__(self, path):
+        self.path, self.mtime, self.data, self.next_check = path, None, {}, 0.0
+
+    def get(self):
+        now = time.time()
+        if now >= self.next_check:
+            self.next_check = now + SESSION_RELOAD_S
+            try:
+                m = os.path.getmtime(self.path)
+                if m != self.mtime:
+                    with open(self.path) as f:
+                        self.data = (json.load(f) or {}).get("analytics") or {}
+                    self.mtime = m
+            except Exception as e:
+                _warn_rl(f"sessionfile:{self.path}", f"[session] cannot read {self.path}: {e}")
+        return self.data
+
+
+def _session_group(script):
+    """Which detector process an analytic's frames go to (one model per process kind)."""
+    if script in SESSION_SIDE_SCRIPTS:
+        return "side"
+    if script == "phone":
+        return "phone"
+    if script == "monitor_tamper":
+        return "monitor"
+    return "person"
+
+
+def _session_script_index():
+    """Fixed slot of each analytic in the shared feedback arrays (same order in every process)."""
+    return {s: i for i, s in enumerate(sorted(set(UNIFIED_SCRIPTS) | set(SESSION_SIDE_SCRIPTS)))}
+
+
+def _session_interval(script, freq):
+    """How often an analytic looks at one camera. The cameras are spread evenly over this
+    interval (see _session_phase), so the load is flat instead of every camera at once.
+      - monitor_tamper: SESSION_MONITOR_INTERVAL_S (10 s). Its alerts need the monitor seen in
+        several frames while it is carried (held-monitor fallback, carry evidence); the old
+        continuous feed gave each camera a frame every ~1.5-10 s (exam 42, 7 Oct).
+      - invigilator / crowd_five_invigilator: follow a person for 7 min with a checkpoint at least
+        every 180 s (invigilator_tracking.MAX_CHECK_GAP_SEC): freq/3, at most SESSION_TRACK_INTERVAL_S
+        (60 s: the script's own checkpoint rate, so one lost frame does not reset the 7-min count;
+        every other look shares the frame of the 120 s analytics).
+      - every other analytic: once per its alert frequency; a positive frame asks for the
+        confirming frame SESSION_CONFIRM_S later (the detector needs 2 hits in a row), so an
+        alert still comes once per frequency."""
+    if script == "monitor_tamper":
+        return max(SESSION_MONITOR_INTERVAL_S, 1.0)
+    try:
+        f = float(freq) if freq else 120.0
+    except (TypeError, ValueError):
+        f = 120.0
+    if script in SESSION_TRACKING:
+        f = min(f / 3.0, SESSION_TRACK_INTERVAL_S)
+    return min(max(f, SESSION_MIN_INTERVAL_S), SESSION_MAX_INTERVAL_S)
+
+
+def _session_cooldown(script, freq):
+    """Seconds between saved alerts per camera that the detector applies in a session."""
+    try:
+        f = int(float(freq))
+    except (TypeError, ValueError):
+        return None
+    if script == "crowd_zero":
+        return max(f, SESSION_ZERO_COOLDOWN_S)
+    return f
+
+
+def _session_phase(label):
+    """This camera's fixed place (0..1) inside every interval: cameras are spread evenly over
+    the interval, and all analytics of one camera land on the same frame when their intervals
+    match (one inference serves them all). Stable across restarts."""
+    import zlib
+    return zlib.crc32(label.encode()) / 2 ** 32
+
+
+def _grid_next(now, interval, phase, strictly_after):
+    """Next time on this camera's grid (phase * interval + k * interval)."""
+    import math
+    off = phase * interval
+    k = (now - off) / interval
+    k = math.floor(k) + 1 if strictly_after else math.ceil(k)
+    return off + k * interval
+
+
+def _window_parts(sc, w):
+    if isinstance(w, dict):
+        return w.get("start"), w.get("end"), w.get("freq"), w.get("cls")
+    if isinstance(w, (list, tuple)) and len(w) == 2:     # older format: [start, end] + analytic-wide freq/cls
+        return w[0], w[1], sc.get("freq"), sc.get("cls")
+    return None, None, None, None
+
+
+def _session_active(classification, conf, now, lead=0.0):
+    """{script: freq} of the analytics with a window open now (or opening within `lead` s)
+    whose camera types match this camera. Two windows of one analytic: the shorter freq."""
+    active = {}
+    for script, sc in conf.items():
+        for w in sc.get("windows") or []:
+            s0, e0, wf, wc = _window_parts(sc, w)
+            if s0 is None or e0 is None or not (s0 - lead <= now <= e0):
+                continue
+            if not _camera_matches_script(classification, script, wc or None):
+                continue
+            try:
+                f = float(wf) if wf else None
+            except (TypeError, ValueError):
+                f = None
+            if script not in active or (f and (active[script] is None or f < active[script])):
+                active[script] = f
+    return active
+
+
+class _CameraSchedule:
+    """When each active analytic next looks at one camera (see _session_interval), adjusted by
+    the detectors' feedback (confirm / hold) and load factor."""
+
+    def __init__(self, label, cls, conf_src, fb, slot, shard):
+        self.label, self.cls, self.conf_src, self.fb, self.shard = label, cls, conf_src, fb, shard
+        self.idx = fb["idx"]
+        self.base = slot * len(self.idx)
+        self.next_due = {}
+        self.phase = _session_phase(label)
+
+    def load_factor(self, group):
+        li = self.fb["load_i"].get(group)     # {"person": [i...], "phone": [i], "monitor": [i...]}
+        return self.fb["load"][li[self.shard % len(li)]] if li else 1.0
+
+    def plan(self, now):
+        """({detector group: [scripts]}, {script: cooldown}) to serve with a frame taken now, or None."""
+        fb, base, next_due = self.fb, self.base, self.next_due
+        active = _session_active(self.cls, self.conf_src.get(), now)
+        for s in list(next_due):
+            if s not in active:
+                del next_due[s]                  # window closed: re-phased if it opens again
+        due = []
+        for script, freq in active.items():
+            interval = _session_interval(script, freq) * self.load_factor(_session_group(script))
+            nd = next_due.get(script)
+            if nd is None:
+                nd = _grid_next(now, interval, self.phase, strictly_after=False)
+            i = self.idx.get(script)
+            if i is not None:
+                c = fb["confirm"][base + i]
+                if c and c < nd:
+                    nd = c                       # first positive frame: confirm it soon
+                    fb["confirm"][base + i] = 0.0
+                h = fb["hold"][base + i]
+                if h > nd:
+                    nd = h                       # alert saved: nothing new before its cooldown ends
+            next_due[script] = nd
+            if nd <= now:
+                due.append((script, freq, interval))
+        if not due:
+            return None
+        out, cooldowns = {}, {}
+        for script, freq, interval in due:
+            next_due[script] = _grid_next(now, interval, self.phase, strictly_after=True)
+            out.setdefault(_session_group(script), []).append(script)
+            cd = _session_cooldown(script, freq)
+            if cd is not None and script != "monitor_tamper":   # monitor_tamper groups its own incidents
+                cooldowns[script] = cd
+        return out, cooldowns
+
+
+def session_producer(cfg, queues, session_file, slot, fb):
+    """One camera of a shift session: keep its (sub)stream open while any analytic needs it,
+    drain it continuously, and hand a frame on only when an analytic is due for this camera.
+
+    queues = {"person": [q, ...], "phone": [q], "monitor": [q, ...], "side": {script: q}};
+    fb = shared arrays the detectors write: "confirm" (take a frame for this analytic at t),
+    "hold" (alert saved: nothing before t) and "load" (per detector queue: stretch intervals
+    by this factor while the detector is behind)."""
+    import random
+    device_id    = cfg.get("camera_id") or cfg.get("device_id", "")
+    camera_no    = cfg.get("ch_no") or cfg.get("camera_no", "1")
+    camera_id_pk = cfg.get("camera_id_pk", "")
+    exam_id      = cfg.get("exam_id", "0")
+    shift_id     = cfg.get("shift_id") or os.environ.get("SHIFT_ID", "0")
+    tc_code      = cfg.get("tc_code") or ""
+    cls          = cfg.get("classification") or ""
+    pkt_dev      = cfg.get("pkt_dev") or device_id    # device id the detectors see (server-tagged when shared)
+    server       = cfg.get("server_ip") or cfg.get("cctv_url", "")
+    if "://" in str(server):
+        server = urllib.parse.urlparse(str(server)).netloc
+    direct_url   = cfg.get("cctv_url") or cfg.get("stream_url", "")
+    use_dss      = bool(server and not str(direct_url).startswith("rtsp://"))
+    label        = f"{pkt_dev}_{camera_no}"
+    conf_src     = _SessionConfig(session_file)
+    shard        = slot                    # each detector group takes slot % its number of processes
+    failures     = 0
+
+    sched        = _CameraSchedule(label, cls, conf_src, fb, slot, shard)
+
+    def backoff():
+        nonlocal failures
+        failures += 1
+        delay = min(SESSION_RECONNECT_MAX_S * (2 ** min(failures - 1, 6)), SESSION_BACKOFF_CAP_S)
+        time.sleep(random.uniform(SESSION_RECONNECT_MIN_S, max(SESSION_RECONNECT_MIN_S, delay)))
+
+    while not STOP:
+        if use_dss:
+            token = get_server_token(server)
+            if not token:
+                backoff(); continue
+            result = get_rtsp_from_dss(device_id, camera_no, token, server)   # fresh stream link every (re)connect
+            if result is None:
+                backoff(); continue
+            urls, stream_token = result
+            stream_urls = [add_token_to_url(u, stream_token) for u in order_urls(urls)]
+        else:
+            stream_urls = [direct_url] if direct_url else []
+        stream_urls = [u for u in stream_urls if not is_private_ip_url(u)]
+        if not stream_urls:
+            backoff(); continue
+
+        connected = False
+        for stream_url in stream_urls:
+            cap = open_video_capture(stream_url)
+            if not cap.isOpened():
+                cap.release()
+                continue
+            last_good, next_plan = time.time(), 0.0
+            while not STOP:
+                if not cap.grab():
+                    if time.time() - last_good > 15:          # no frame for 15 s: stream is dead
+                        break
+                    time.sleep(0.2)
+                    continue
+                last_good = time.time()
+                if not connected:
+                    connected = True
+                    failures = 0
+                    logger.info(f"[session] stream open → {label}")
+                if last_good < next_plan:
+                    continue                                    # keep draining; plan 4x a second
+                next_plan = last_good + 0.25
+                todo = sched.plan(last_good)
+                if not todo:
+                    continue
+                by_group, cooldowns = todo
+                ok, frame = cap.retrieve()
+                if not ok or frame is None or frame.ndim != 3 or frame.size == 0:
+                    continue
+                for group, scripts in by_group.items():
+                    if group == "side":
+                        for s_ in scripts:
+                            q = (queues.get("side") or {}).get(s_)
+                            if q is not None:
+                                try:
+                                    q.put((frame, pkt_dev, camera_no, camera_id_pk, exam_id), timeout=0.05)
+                                except queue_module.Full:
+                                    pass
+                        continue
+                    gq = queues.get(group) or []
+                    if not gq:
+                        continue
+                    q = gq[shard % len(gq)]               # a camera always goes to the same process
+                    pkt = {"frame": frame, "device_id": pkt_dev, "ch_no": camera_no, "camera_no": camera_no,
+                           "camera_id_pk": camera_id_pk, "exam_id": exam_id, "shift_id": shift_id,
+                           "tc_code": tc_code, "source_type": "RTSP", "enabled_scripts": scripts,
+                           "captured_at": last_good, "slot": slot, "classification": cls}
+                    if SESSION_ZOOM_W:
+                        pkt["zoom"] = SESSION_ZOOM_W            # enlarged in the detector, not on the queue
+                    cds = {s_: cooldowns[s_] for s_ in scripts if s_ in cooldowns}
+                    if cds:
+                        pkt["cooldowns"] = cds
+                    try:
+                        q.put(pkt, timeout=0.05)
+                    except queue_module.Full:
+                        pass                                    # detector busy: next interval
+            cap.release()
+            if connected or STOP:
+                break
+        if STOP:
+            break
+        if connected:
+            logger.warning(f"[session] stream dropped → {label}, reconnecting")
+            time.sleep(random.uniform(SESSION_RECONNECT_MIN_S, SESSION_RECONNECT_MAX_S))
+        else:
+            backoff()
+    logger.info(f"[session] producer stopped → {label}")
+
+
+def _host_free_mem_gb():
+    try:
+        import psutil
+        return psutil.virtual_memory().available / 1e9
+    except Exception:
+        return float("inf")
+
+
+def run_rtsp_session(exam_id, shift_id):
+    """Shift session: a camera's stream is opened shortly before the first analytic window that
+    needs it and kept open while any window does; a script that starts later reuses the streams
+    already open and only opens the cameras still missing. Closed again SESSION_IDLE_CLOSE_S after
+    its last window. Frames go to one detector process per model kind (person: several, split by
+    camera; phone; monitor) so a slow model never holds up the others."""
+    conf_watch = _SessionConfig(SESSION_FILE)
+    pool = _session_camera_pool(exam_id, shift_id)
+    if not pool:
+        logger.info("[session] no accessible cameras for this exam — nothing to stream")
+        return
+    pool_at = time.time()
+    servers = set()
+    for c in pool.values():
+        srv = c.get("cctv_url", "")
+        if "://" in str(srv):
+            srv = urllib.parse.urlparse(str(srv)).netloc
+        if srv and not str(c.get("cctv_url", "")).startswith("rtsp://"):
+            servers.add(srv)
+    for srv in servers:
+        if STOP:
+            return
+        logger.info(f"[session] pre-auth {srv}: {'ok' if get_server_token(srv) else 'FAILED'}")
+
+    # ---- detector processes (started when their first analytic appears) and shared feedback ----
+    idx = _session_script_index()
+    n_person, n_monitor = max(SESSION_PERSON_PROCS, 1), max(SESSION_MONITOR_PROCS, 1)
+    q_names = ([f"person-{k + 1}" for k in range(n_person)] + ["phone"]
+               + [f"monitor-{k + 1}" for k in range(n_monitor)])
+    qs = {name: mp.Queue(maxsize=SESSION_QUEUE_SIZE) for name in q_names}
+    fb = {
+        "idx": idx,
+        "confirm": mp.Array("d", SESSION_MAX_STREAMS * len(idx), lock=False),
+        "hold": mp.Array("d", SESSION_MAX_STREAMS * len(idx), lock=False),
+        "load": mp.Array("d", [1.0] * len(q_names), lock=False),
+        "load_i": {g: [i for i, n in enumerate(q_names) if n.startswith(g)] for g in ("person", "phone", "monitor")},
+    }
+    queues = {g: [qs[n] for n in q_names if n.startswith(g)] for g in ("person", "phone", "monitor")}
+    queues.update({
+              # every side queue exists from the start: producers keep the queues they were started with
+              "side": {s: mp.Queue(maxsize=QUEUE_SIZE * 2) for s in SESSION_SIDE_SCRIPTS}})
+    detectors, side_workers = {}, {}
+
+    def scripts_of(conf, group):
+        return sorted(s for s in conf if _session_group(s) == group and s in UNIFIED_SCRIPTS)
+
+    def ensure_workers(conf):
+        for group in ("person", "phone", "monitor"):
+            scripts = scripts_of(conf, group)
+            if not scripts:
+                continue
+            names = [n for n in q_names if n.startswith(group)]
+            for name in names:
+                if name in detectors and detectors[name].is_alive():
+                    continue
+                if name in detectors:
+                    logger.error(f"[session] detector {name} died — restarting")
+                    _unregister_child_process(detectors[name])
+                opts = {"name": name, "confirm": fb["confirm"], "hold": fb["hold"], "idx": idx,
+                        "load": fb["load"], "load_i": q_names.index(name), "qmax": SESSION_QUEUE_SIZE,
+                        "confirm_s": SESSION_CONFIRM_S, "max_age_s": SESSION_MAX_FRAME_AGE_S,
+                        "no_hold": sorted(SESSION_TRACKING | {"monitor_tamper"}),
+                        "no_feedback": ["monitor_tamper"]}
+                p = mp.Process(target=_worker_process_entry,
+                               args=("unified_detector", "unified_worker", qs[name], scripts, opts),
+                               name=f"Worker-{name}", daemon=True)
+                p.start(); _register_child_process(p); detectors[name] = p
+                logger.info(f"[session] detector {name} started for {scripts}")
+        for script in SESSION_SIDE_SCRIPTS:
+            if script not in conf or script in side_workers:
+                continue
+            module_name, fn_name = get_worker_info(script, mode="rtsp")
+            if not module_name:
+                continue
+            q = queues["side"][script]
+            sp = mp.Process(target=_worker_process_entry, args=(module_name, fn_name, q),
+                            name=f"Worker-{script}", daemon=True)
+            sp.start(); _register_child_process(sp); side_workers[script] = (sp, q)
+
+    logger.info(f"[session] exam {exam_id} shift {shift_id}: {len(pool)} accessible cameras; "
+                f"stream type {DSS_STREAM_TYPE} ({'substream' if DSS_STREAM_TYPE == '2' else 'main'}), "
+                f"zoom {SESSION_ZOOM_W or 'off'} px, {n_person} person + {n_monitor} monitor detector(s), "
+                f"monitor every {SESSION_MONITOR_INTERVAL_S:g} s, invigilator every <= {SESSION_TRACK_INTERVAL_S:g} s, "
+                f"others once per their frequency (+confirm after {SESSION_CONFIRM_S:g} s), "
+                f"open {SESSION_OPEN_LEAD_S:g} s early, close {SESSION_IDLE_CLOSE_S:g} s after the last window")
+
+    producers = {}                     # camera key -> (process, slot)
+    free_slots = list(range(SESSION_MAX_STREAMS - 1, -1, -1))
+    last_needed = {}
+    opened = closed = 0
+    capped_warned = mem_warned = False
+    last_stats = last_plan = 0.0
+    grace = float(os.environ.get("SESSION_END_GRACE_S", "60"))
+
+    closing = []                       # (process, terminated at): reaped without blocking the loop
+
+    def stop_producer(key):
+        p, slot = producers.pop(key)
+        if p.is_alive():
+            p.terminate()
+        closing.append((p, time.time()))
+        base = slot * len(idx)
+        for i in range(len(idx)):
+            fb["confirm"][base + i] = 0.0
+            fb["hold"][base + i] = 0.0
+        free_slots.append(slot)
+
+    while not STOP:
+        now = time.time()
+        if now - last_plan >= SESSION_RELOAD_S:
+            last_plan = now
+            conf = conf_watch.get()
+            ends = [e for sc in conf.values() for w in (sc.get("windows") or [])
+                    for e in [_window_parts(sc, w)[1]] if e]
+            if ends and now > max(ends) + grace:
+                logger.info("[session] every analytic window has ended — closing the session")
+                break
+            ensure_workers(conf)
+            if now - pool_at >= SESSION_CAMERA_REFRESH_S:
+                fresh = _session_camera_pool(exam_id, shift_id)
+                if fresh:
+                    pool, pool_at = fresh, now
+            # cameras some analytic needs now (or within the open lead), most-needed first
+            wanted = []
+            for key, cam in pool.items():
+                n = len(_session_active(cam.get("classification") or "", conf, now, SESSION_OPEN_LEAD_S))
+                if n:
+                    wanted.append((n, key))
+                    last_needed[key] = now
+            wanted.sort(reverse=True)
+            for key in [k for k, (p, _s) in producers.items() if not p.is_alive()]:
+                stop_producer(key)                         # died: reopened below if still wanted
+            for key in [k for k in producers if now - last_needed.get(k, 0) > SESSION_IDLE_CLOSE_S]:
+                stop_producer(key); closed += 1
+            started = 0
+            for _n, key in wanted:
+                if STOP or key in producers:
+                    continue
+                if not free_slots:
+                    if not capped_warned:
+                        logger.warning(f"[session] {len(wanted)} cameras wanted > SESSION_MAX_STREAMS="
+                                       f"{SESSION_MAX_STREAMS}: the cameras fewest analytics need wait for a free stream")
+                        capped_warned = True
+                    break
+                if _host_free_mem_gb() < SESSION_MIN_FREE_MEM_GB:
+                    if not mem_warned:
+                        logger.error(f"[session] free memory below {SESSION_MIN_FREE_MEM_GB:g} GB — "
+                                     f"not opening more streams ({len(producers)} open)")
+                        mem_warned = True
+                    break
+                slot = free_slots.pop()
+                pp = mp.Process(target=session_producer, args=(pool[key], queues, SESSION_FILE, slot, fb),
+                                name=f"Session-{key}", daemon=True)
+                pp.start(); _register_child_process(pp); producers[key] = (pp, slot)
+                opened += 1; started += 1
+                if started % 100 == 0:
+                    logger.info(f"[session] {started} new streams started ({len(producers)} open)")
+                time.sleep(SESSION_START_STAGGER_S)
+            if started:
+                logger.info(f"[session] opened {started} new streams, {len(producers)} open")
+                _publish_camera_count(len(producers), sorted(conf.keys()))
+        for item in list(closing):
+            p, t0 = item
+            p.join(timeout=0)
+            if p.is_alive() and time.time() - t0 > 10:
+                p.kill(); p.join(timeout=1)
+            if not p.is_alive():
+                _unregister_child_process(p); closing.remove(item)
+        if time.time() - last_stats >= 60:      # `now` is stale after a long round of stream starts
+            last_stats = time.time()
+            sizes = []
+            for k, name in enumerate(q_names):
+                try:
+                    qn = qs[name].qsize()
+                except Exception:
+                    qn = "?"
+                sizes.append(f"{name} {qn} (x{fb['load'][k]:.2f})")
+            logger.info(f"[session] streams open {len(producers)} (opened {opened}, closed {closed} so far), "
+                        f"detector queues: {', '.join(sizes)}, free mem {_host_free_mem_gb():.0f} GB, "
+                        f"analytics now {sorted(conf_watch.get().keys())}")
+        time.sleep(1.0)
+
+    for key in list(producers):                 # close every stream
+        p, _slot = producers[key]
+        if p.is_alive():
+            p.terminate()
+    for key in list(producers):
+        stop_producer(key)
+    deadline = time.time() + 10
+    for p, _t0 in closing:
+        p.join(timeout=max(0.1, deadline - time.time()))
+        if p.is_alive():
+            p.kill()
+        _unregister_child_process(p)
+    for q in list(qs.values()) + list(queues["side"].values()):
+        try:
+            q.put(None)
+        except Exception:
+            pass
+    for w in list(detectors.values()) + [p for p, _q in side_workers.values()]:
+        w.join(timeout=10)
+        if w.is_alive():
+            w.terminate()
+        _unregister_child_process(w)
+
+
+def _session_camera_pool(exam_id, shift_id):
+    """{camera key: cfg} of every scheduled, accessible RTSP camera of this worker (schedule and
+    worker split already applied by the loader). Which of them stream is decided per window."""
+    try:
+        from utils.db_client import get_rtsp_cameras_accessible
+    except ImportError:
+        from db_client import get_rtsp_cameras_accessible
+    try:
+        rows = get_rtsp_cameras_accessible(exam_id) or []
+    except Exception as e:
+        logger.error(f"[session] camera list failed: {e}")
+        return {}
+    pool = {}
+    # 16 Oct 2026: one device id + camera no can be two different cameras on two camview servers
+    # (e.g. 1000103/0 on d15 and on d16). The oldest row (lowest id) keeps the plain key; any other
+    # gets the server tag in its id (1000103d16), which every detector, cooldown, monitor-tamper
+    # memory, proximity count and image name then uses. The stream still uses the real device id,
+    # and report_to_db_rtsp reads the tag to find that camera's own row.
+    rows = sorted(rows, key=lambda r: int(r.get("id") or 0))
+    for r in rows:
+        dev = str(r.get("device_id") or "").strip()
+        if not dev or not r.get("cctv_url"):
+            continue
+        cam_no = str(r.get("camera_no") or "").strip()
+        cam_no = cam_no if cam_no.lower() not in ("", "none", "null") else "1"
+        pkt_dev = dev
+        key = f"{dev}_{cam_no}"
+        tag = rtsp_server_tag(r["cctv_url"])
+        if key in pool:
+            if tag == pool[key]["server_tag"]:
+                continue                     # same camera listed twice on one server: a true duplicate
+            pkt_dev = dev + tag
+            key = f"{pkt_dev}_{cam_no}"
+            if not tag or key in pool:
+                continue
+        pool[key] = {
+            "server_tag": tag,
+            "pkt_dev": pkt_dev,
+            "cctv_url": r["cctv_url"], "camera_id": dev, "camera_id_pk": str(r.get("id") or ""),
+            "camera_no": cam_no, "ch_no": cam_no, "classification": str(r.get("classification") or ""),
+            "link_type": "RTSP", "camera_name": r.get("camera_name"), "centre_name": r.get("centre_name"),
+            "tc_code": r.get("tc_code"), "exam_id": exam_id, "shift_id": shift_id,
+        }
+    return pool
+
+
 def run_rtsp_pipeline(camera_group, max_concurrent=MAX_CONCURRENT, unified=None):
     """
     FIXED: 
@@ -1380,6 +1987,10 @@ def run_rtsp_pipeline(camera_group, max_concurrent=MAX_CONCURRENT, unified=None)
         grouped.setdefault(label, []).append(c)
 
     logger.info(f"Launching producers for {len(grouped)} camera groups (max_concurrent={max_concurrent})")
+    _per_r = {}
+    for _c in camera_group:
+        _per_r.setdefault(_c.get("script_code"), set()).add(f"{_c['camera_id']}_{_c.get('ch_no') or _c.get('camera_no', '1')}")
+    _publish_camera_count(len(grouped), {k for k in _per_r if k}, per_analytic={k: len(v) for k, v in _per_r.items() if k})
 
     # 5a. ROUND-ROBIN mode (Scaling Path A): rotate cameras over a bounded pool — except
     # cameras running a CONTINUOUS_SCRIPTS analytic (monitor_tamper), which get a
@@ -1675,6 +2286,38 @@ def _run_round_robin(grouped, server_tokens_map, unified_queue, script_queues=No
 
 
 # ============================================================
+def _publish_camera_count(n_cameras, analytics, per_analytic=None, unified=None):
+    """Record how many cameras this job runs on, for the GPU Monitor page.
+
+    One JSON file per pid under /tmp/detection_camera_counts/ that the worker
+    API (app/gpu_monitor.py) reads; entries are only looked up for live pids.
+    `per_analytic` = {script: cameras}; `unified` = shared-capture stats
+    {pairs, distinct}. Repeated calls merge (later fields win).
+    """
+    import json as _json
+    # One file per pid: jobs start simultaneously, and a shared read-modify-write file lost entries.
+    d = "/tmp/detection_camera_counts"
+    try:
+        os.makedirs(d, exist_ok=True)
+        path = os.path.join(d, f"{os.getpid()}.json")
+        try:
+            with open(path) as f:
+                rec = _json.load(f)
+        except Exception:
+            rec = {}
+        rec.update({"cameras": int(n_cameras), "analytics": sorted(analytics)})
+        if per_analytic is not None:
+            rec["per_analytic"] = {k: int(v) for k, v in per_analytic.items()}
+        if unified is not None:
+            rec["unified"] = unified
+        with open(path + ".tmp", "w") as f:
+            _json.dump(rec, f)
+        os.replace(path + ".tmp", path)
+    except Exception as exc:
+        logger.debug(f"camera-count publish failed: {exc}")
+    logger.info("[GPU-MONITOR] %d cameras running analytics: %s", n_cameras, ", ".join(sorted(analytics)))
+
+
 # HLS PIPELINE RUNNER — unchanged, handles HLS cameras separately
 # ============================================================
 # ============================================================
@@ -1964,6 +2607,9 @@ def run_hls_pipeline(camera_group):
             (len(unified_cams) + len(side_cams)) / max(len(unified_configs), 1), all_scripts, side_scripts,
         )
 
+        _per_u = {sc: sum(1 for c in unified_configs if sc in c["enabled_scripts"]) for sc in all_scripts}
+        _publish_camera_count(len(unified_configs), all_scripts, per_analytic=_per_u,
+                              unified={"pairs": len(unified_cams), "distinct": len(unified_configs)})
         unified_queue = None
         if all_scripts:
             unified_queue = mp.Queue(maxsize=int(os.environ.get("UNIFIED_QUEUE_SIZE", "256")))
@@ -2061,6 +2707,12 @@ def main():
     shift_id  = os.environ.get("SHIFT_ID", "").strip()
     link_type = os.environ.get("LINK_TYPE", "").strip().upper()
 
+    if SHIFT_SESSION and SESSION_FILE and exam_id and shift_id and link_type == "RTSP":
+        logger.info(f"[session] exam {exam_id} shift {shift_id} (session file {SESSION_FILE})")
+        run_rtsp_session(exam_id, shift_id)
+        logger.info("MASTER PIPELINE (shift session) COMPLETED")
+        os._exit(0)
+
     if exam_id and shift_id and link_type:
         parser = argparse.ArgumentParser()
         parser.add_argument("--analytics", nargs="+", default=[])
@@ -2089,6 +2741,13 @@ def main():
             cameras = load_cameras_for_execution(execution)
             if cameras: 
                 results.append((execution, cameras))
+
+        # Tell the GPU Monitor how many cameras this job runs on, whatever capture path it takes.
+        _key = lambda c: (c.get("camera_id"), c.get("ch_no") or c.get("camera_no"))
+        _distinct = {_key(c) for _, cams in results for c in cams}
+        _per = {ex["script_code"]: len({_key(c) for c in cams}) for ex, cams in results}
+        if _distinct:
+            _publish_camera_count(len(_distinct), script_codes, per_analytic=_per)
     else:
         results = load_all_pending_cameras()
 

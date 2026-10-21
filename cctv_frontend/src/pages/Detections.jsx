@@ -26,6 +26,7 @@ import { reportAPI, examsAPI } from '../services/api';
 import { API_BASE_1, IMG_BASE } from '../constants/data';
 import { useDetectionCounts } from '../contexts/DetectionCountsContext';
 import { useAuth } from '../contexts/AuthContext';
+import { useDetectionNav, DetectionDialog } from '../components/DetectionNav';
 import { useSocket } from '../contexts/SocketContext';
 import * as XLSX from 'xlsx';
 
@@ -468,41 +469,35 @@ function DetectionCard({ item, onClick, onPushToClient, isPushing, isPushed, onS
   );
 }
 
-function Lightbox({ item, onClose, onPushToClient, isPushing, isPushed, pendingLiveCount = 0 }) {
-  const theme = useTheme();
-  const isSmDown = useMediaQuery(theme.breakpoints.down('sm'));
+function Lightbox({ item, onClose, onPushToClient, onSkip, isPushing, isPushed, pendingLiveCount = 0, index = -1, count = 0, onNavigate = () => {}, neighbourUrls = [] }) {
+  // Left / Right keys and the two arrow buttons step through the grid the card was opened from.
+  useDetectionNav({ index: item ? index : -1, count, onNavigate, neighbourUrls });
   if (!item) return null;
   const meta = TYPE_META[item.type] || {};
   const invigilatorEventLabel = item.type === 'invigilator'
     ? (item.issueLabel || (item.issueType ? String(item.issueType).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : ''))
     : '';
+  const skipped = item.skipped === 1 || item.skipped === true;
+  const where = [
+    item.centerName && `${item.centerName}${item.city ? ` — ${item.city}` : ''}${item.state ? `, ${item.state}` : ''}`,
+    item.tcCode && `TC: ${item.tcCode}`,
+    (item.shiftName || item.shift_name || item.shift_id) && `Shift: ${getDetectionShiftName(item)}`,
+  ].filter(Boolean).join('  ·  ');
   return (
-    <Dialog open onClose={onClose} maxWidth="lg" fullWidth fullScreen={isSmDown}>
-      <DialogContent sx={{ p: 0, bgcolor: '#0f172a', position: 'relative', display: 'flex', flexDirection: 'column', maxHeight: { xs: '100dvh', sm: '90vh' } }}>
-        <IconButton
-          onClick={onClose}
-          sx={{
-            position: 'absolute', top: 8, right: 8, zIndex: 10, color: '#fff', bgcolor: 'rgba(0,0,0,0.5)',
-            width: { xs: 44, sm: 40 }, height: { xs: 44, sm: 40 },
-            '&:hover': { bgcolor: 'rgba(0,0,0,0.7)' },
-          }}
-        >
-          <Close sx={{ fontSize: { xs: 26, sm: 24 } }} />
-        </IconButton>
-        {pendingLiveCount > 0 && (
-          <Chip
-            label={`${pendingLiveCount} new detection${pendingLiveCount > 1 ? 's' : ''} waiting`}
-            size="small"
-            sx={{ position: 'absolute', top: 8, left: 8, zIndex: 10, bgcolor: '#f59e0b', color: '#fff', fontWeight: 700 }}
-          />
-        )}
-        <Box
-          component="img"
-          src={`${IMG_BASE}${item.image_url}`}
-          alt={item.camera_id}
-          sx={{ width: '100%', maxHeight: { xs: '70vh', sm: '80vh' }, objectFit: 'contain', display: 'block', flexShrink: 0 }}
+    <DetectionDialog
+      onClose={onClose}
+      imageSrc={`${IMG_BASE}${item.image_url}`}
+      alt={item.camera_id}
+      nav={{ index, count, onNavigate }}
+      banner={pendingLiveCount > 0 ? (
+        <Chip
+          label={`${pendingLiveCount} new detection${pendingLiveCount > 1 ? 's' : ''} waiting`}
+          size="small"
+          sx={{ bgcolor: '#f59e0b', color: '#fff', fontWeight: 700 }}
         />
-        <Box sx={{ p: { xs: 1.5, sm: 2 }, color: '#fff', overflowY: 'auto' }}>
+      ) : null}
+      info={(
+        <>
           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
             <Chip label={meta.label} size="small" sx={{ bgcolor: meta.color, color: '#fff', fontWeight: 700 }} />
             {invigilatorEventLabel && (
@@ -516,16 +511,24 @@ function Lightbox({ item, onClose, onPushToClient, isPushing, isPushed, pendingL
               <Chip label={`Confidence: ${(item.confidence * 100).toFixed(1)}%`} size="small" sx={{ bgcolor: '#334155', color: '#fff' }} />
             )}
           </Box>
-          <Typography variant="h6" sx={{ mt: 1, fontWeight: 700 }}>{item.cameraName || item.camera_id}</Typography>
-          <Typography variant="body2" color="#94a3b8">{item.detected_at}</Typography>
-          {item.centerName && (
-            <Typography variant="body2" color="#94a3b8">
-              {item.centerName}{item.city ? ` — ${item.city}` : ''}{item.state ? `, ${item.state}` : ''}
-            </Typography>
-          )}
-          {item.tcCode && <Typography variant="body2" color="#94a3b8">TC: {item.tcCode}</Typography>}
-          {(item.shiftName || item.shift_name || item.shift_id) && (
-            <Typography variant="body2" color="#94a3b8">Shift: {getDetectionShiftName(item)}</Typography>
+          <Typography variant="subtitle1" sx={{ mt: 0.75, fontWeight: 700, lineHeight: 1.3 }}>
+            {item.cameraName || item.camera_id}
+            <Typography component="span" variant="body2" sx={{ ml: 1.5, color: '#94a3b8', fontWeight: 400 }}>{item.detected_at}</Typography>
+          </Typography>
+          {where && <Typography variant="body2" sx={{ color: '#94a3b8' }}>{where}</Typography>}
+        </>
+      )}
+      actions={(
+        <>
+          {onSkip && !isPushed && (
+            <Button
+              variant="outlined"
+              disableElevation
+              onClick={() => onSkip(item)}
+              sx={{ borderColor: '#64748b', color: '#e2e8f0', fontWeight: 900, borderRadius: 3, textTransform: 'none', '&:hover': { bgcolor: '#334155', borderColor: '#94a3b8' } }}
+            >
+              {skipped ? 'Unskip' : 'Skip'}
+            </Button>
           )}
           {onPushToClient && (
             <Button
@@ -534,15 +537,7 @@ function Lightbox({ item, onClose, onPushToClient, isPushing, isPushed, pendingL
               onClick={() => { if (!isPushing && !isPushed) onPushToClient([item]); }}
               disabled={isPushing || isPushed}
               sx={{
-                mt: 1.5,
-                bgcolor: isPushed ? '#94a3b8' : '#3c81f6',
-                color: '#fff',
-                fontWeight: 900,
-                height: 40,
-                px: 3,
-                borderRadius: 2,
-                textTransform: 'none',
-                width: { xs: '100%', sm: 'auto' },
+                bgcolor: isPushed ? '#94a3b8' : '#3c81f6', color: '#fff', fontWeight: 900, borderRadius: 3, textTransform: 'none', whiteSpace: 'nowrap',
                 '&:hover': { bgcolor: isPushed ? '#94a3b8' : '#1e40af' },
                 '&.Mui-disabled': { bgcolor: '#94a3b8', color: '#ffffff' },
               }}
@@ -550,9 +545,9 @@ function Lightbox({ item, onClose, onPushToClient, isPushing, isPushed, pendingL
               {isPushing ? 'Pushing...' : (isPushed ? 'Pushed to client' : 'Push to client')}
             </Button>
           )}
-        </Box>
-      </DialogContent>
-    </Dialog>
+        </>
+      )}
+    />
   );
 }
 
@@ -1071,7 +1066,7 @@ export default function Detections() {
   // List view relies on keyboard navigation (↑↓ → ←) which is irrelevant on
   // touch devices, so we force Grid view and hide the toggle below md.
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  const { setAllCounts, setUnfilteredCounts, typeFilter, setTypeFilter, setExportToExcel, setDownloadConsolidatedReport, setReportValidationError } = useDetectionCounts();
+  const { setAllCounts, setUnfilteredCounts, typeFilter, setTypeFilter, invigilatorIssue, setInvigilatorIssueCounts, setExportToExcel, setDownloadConsolidatedReport, setReportValidationError } = useDetectionCounts();
   const [searchParams] = useSearchParams();
 
   const [data, setData] = useState([]);
@@ -1232,6 +1227,7 @@ export default function Detections() {
   const buildDetectionParams = useCallback((pg = 1, rpp = rowsPerPage) => {
     const params = new URLSearchParams({ page: pg, limit: rpp });
     if (typeFilter.length > 0) params.append('type', typeFilter.join(','));
+    if (invigilatorIssue && typeFilter.includes('invigilator')) params.append('issue', invigilatorIssue);
     if (dateFilter) params.append('date', parseDateForQuery(dateFilter));
     if (debouncedSearch.trim()) params.append('search', debouncedSearch.trim()); // Use debounced search
     if (examFilter) params.append('exam_id', examFilter);
@@ -1245,7 +1241,7 @@ export default function Detections() {
       params.append('gpu_id', user.gpu_id);
     }
     return params;
-  }, [typeFilter, dateFilter, debouncedSearch, examFilter, shiftFilter, regionFilter, appliedStartTime, appliedEndTime, rowsPerPage, user]);
+  }, [typeFilter, invigilatorIssue, dateFilter, debouncedSearch, examFilter, shiftFilter, regionFilter, appliedStartTime, appliedEndTime, rowsPerPage, user]);
 
 
   // Optimized fetch with abort controller and request deduplication
@@ -1306,6 +1302,7 @@ export default function Detections() {
         }
         setCounts(detectionsRes.data.counts || {});
         setAllCounts(detectionsRes.data.counts || {});
+        setInvigilatorIssueCounts(detectionsRes.data.invigilatorIssueCounts || {});
         // Backend now always returns counts for ALL types (not just the
         // filtered type), so we can always drive the sidebar from this response.
         setUnfilteredCounts(detectionsRes.data.counts || {});
@@ -1325,6 +1322,21 @@ export default function Detections() {
 
   // Optimized: Only filter on server-side, remove client-side filtering
   const filteredData = useMemo(() => data, [data]); // Server already filtered
+
+  // Open card: position in the grid, so the card can step to the previous / next detection.
+  const selectedIndex = useMemo(() => {
+    if (!selected) return -1;
+    const key = getDetectionKey(selected);
+    return filteredData.findIndex((d) => getDetectionKey(d) === key);
+  }, [selected, filteredData, getDetectionKey]);
+  // The open card shows the row as the list holds it now (a Skip or a push shows straight away).
+  const openItem = selectedIndex >= 0 ? filteredData[selectedIndex] : selected;
+  const navigateSelected = useCallback((i) => {
+    const next = filteredData[i];
+    if (next) setSelected(next);
+  }, [filteredData]);
+  const neighbourUrls = selectedIndex < 0 ? [] : [filteredData[selectedIndex - 1], filteredData[selectedIndex + 1]]
+    .filter(Boolean).map((d) => `${IMG_BASE}${d.image_url}`);
 
   // List view is a one-by-one review workflow, so it always holds new items;
   // off page 1, prepending live items would put them on the wrong page.
@@ -1480,7 +1492,8 @@ export default function Detections() {
       // Sidebar counts are per-type totals ignoring the type filter, so count
       // them before the type check.
       countsDeltaRef.current[item.type] = (countsDeltaRef.current[item.type] || 0) + 1;
-      if (typeFilter.length === 0 || typeFilter.includes(item.type)) {
+      const issueOk = !(item.type === 'invigilator' && invigilatorIssue) || item.issueType === invigilatorIssue;
+      if ((typeFilter.length === 0 || typeFilter.includes(item.type)) && issueOk) {
         incomingRef.current.push(item);
       }
 
@@ -1491,7 +1504,7 @@ export default function Detections() {
 
     socket.on('detection:new', handleNewDetection);
     return () => socket.off('detection:new', handleNewDetection);
-  }, [socket, typeFilter, matchesNonTypeFilters]);
+  }, [socket, typeFilter, invigilatorIssue, matchesNonTypeFilters]);
 
   // "Reviewing" signals only decide whether a quiet trickle may land directly
   // on page 1. They never reveal the backlog on their own — that only
@@ -1532,11 +1545,15 @@ export default function Detections() {
 
         setCounts(res.data.counts || {});
         setAllCounts(res.data.counts || {});
+        setInvigilatorIssueCounts(res.data.invigilatorIssueCounts || {});
         setUnfilteredCounts(res.data.counts || {});
 
         // Filter polled detections by typeFilter before merging
         const filteredData = (res.data.data || []).filter(item => {
           if (typeFilter.length > 0 && !typeFilter.includes(item.type)) {
+            return false;
+          }
+          if (item.type === 'invigilator' && invigilatorIssue && item.issueType !== invigilatorIssue) {
             return false;
           }
           return true;
@@ -1573,7 +1590,7 @@ export default function Detections() {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [loading, page, connected, rowsPerPage, buildDetectionParams, isReviewing, getDetectionKey, setAllCounts, setUnfilteredCounts, typeFilter]);
+  }, [loading, page, connected, rowsPerPage, buildDetectionParams, isReviewing, getDetectionKey, setAllCounts, setUnfilteredCounts, typeFilter, invigilatorIssue]);
 
   // Debounced fetch on filter changes
   useEffect(() => {
@@ -1856,6 +1873,7 @@ export default function Detections() {
     try {
       const params = {};
       if (typeFilter.length > 0) params.type = typeFilter.join(',');
+      if (invigilatorIssue && typeFilter.includes('invigilator')) params.issue = invigilatorIssue;
       if (dateFilter) params.date = parseDateForQuery(dateFilter);
       if (search.trim()) params.search = search.trim();
       if (examFilter) params.exam_id = examFilter;
@@ -1869,7 +1887,7 @@ export default function Detections() {
       const link = document.createElement('a');
       link.href = url;
       const downloadDate = dateFilter ? parseDateForQuery(dateFilter) : formatDateDDMMYYYY(new Date());
-      link.setAttribute('download', `detection_report_${downloadDate}.xlsx`);
+      link.setAttribute('download', `detection_report_${downloadDate}${shiftFilter && !allShifts ? `_shift${shiftFilter}` : '_all_shifts'}.xlsx`);
       document.body.appendChild(link);
       link.click();
       link.parentNode.removeChild(link);
@@ -1883,7 +1901,7 @@ export default function Detections() {
       console.error('Download report failed:', error);
       setReportValidationError('Failed to download report. Please try again.');
     }
-  }, [typeFilter, dateFilter, search, examFilter, shiftFilter, appliedStartTime, appliedEndTime]);
+  }, [typeFilter, invigilatorIssue, dateFilter, search, examFilter, shiftFilter, allShifts, appliedStartTime, appliedEndTime]);
 
   useEffect(() => {
     setExportToExcel(() => exportToExcel);
@@ -2320,12 +2338,17 @@ export default function Detections() {
 
 
       <Lightbox
-        item={selected}
+        item={openItem}
         onClose={() => setSelected(null)}
         onPushToClient={pushToClient}
-        isPushing={selected ? copyingId === (selected.uid || selected.id || selected.image_url) : false}
-        isPushed={selected ? (pushedUids.has(selected.uid || selected.id || selected.image_url) || selected.pushed_to_client === 1 || selected.pushed_to_client === true) : false}
+        onSkip={handleSkipLocally}
+        isPushing={openItem ? copyingId === (openItem.uid || openItem.id || openItem.image_url) : false}
+        isPushed={openItem ? (pushedUids.has(openItem.uid || openItem.id || openItem.image_url) || openItem.pushed_to_client === 1 || openItem.pushed_to_client === true) : false}
         pendingLiveCount={pendingLiveCount}
+        index={selectedIndex}
+        count={filteredData.length}
+        onNavigate={navigateSelected}
+        neighbourUrls={neighbourUrls}
       />
 
       <Snackbar

@@ -254,10 +254,11 @@ exports.acceptDetection = async (req, res) => {
             smsReason = 'no_exam';
         } else {
             const examRows = await query(
-                'SELECT exam_body FROM exams WHERE id = ? LIMIT 1',
+                'SELECT exam_body, observer_phone FROM exams WHERE id = ? LIMIT 1',
                 [row.exam_id]
             );
             const examBody = examRows && examRows[0] ? examRows[0].exam_body : null;
+            const examObserverPhone = examRows && examRows[0] ? examRows[0].observer_phone : null;
 
             const configRows = await query(
                 'SELECT * FROM sms_configs WHERE exam_body = ? AND enabled = 1 LIMIT 1',
@@ -275,14 +276,18 @@ exports.acceptDetection = async (req, res) => {
             // Without (1) every exam shared one committed spreadsheet, so a client
             // whose centres were not in it had every tc_code miss and the alert
             // dropped outright.
+            // 14 Oct 2026: the static sheet is the NTA (UGC NET June 2026) observer list. It must only
+            // serve NTA exams: a UPCISB / SSC centre whose TC code happens to be in that sheet sent the
+            // alert to the NTA observer instead of the exam's own people. Other exam bodies go
+            // exam_observer_numbers -> the exam's own observer_phone -> the client's default_recipients.
             const examNumbers = await getExamObserverNumbers(row.exam_id, row.tc_code);
-            const observerNumbers = examNumbers.length ? examNumbers : getObserverNumbers(row.tc_code);
+            const staticNumbers = (!examNumbers.length && String(examBody || '').toUpperCase() === 'NTA')
+                ? getObserverNumbers(row.tc_code) : [];
+            const splitList = (s) => String(s || '').split(',').map((n) => n.trim()).filter(Boolean);
+            const observerNumbers = examNumbers.length ? examNumbers : staticNumbers;
             const recipients = observerNumbers.length
                 ? observerNumbers
-                : String(clientConfig?.default_recipients || '')
-                      .split(',')
-                      .map((n) => n.trim())
-                      .filter(Boolean);
+                : (splitList(examObserverPhone).length ? splitList(examObserverPhone) : splitList(clientConfig?.default_recipients));
 
             if (!clientConfig) {
                 smsReason = 'no_client_config';

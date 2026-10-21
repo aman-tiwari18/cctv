@@ -51,10 +51,13 @@ async function getExam(examId) {
     return exam;
 }
 
-function requireRtsp(exam) {
-    if (String(exam.link_type).toUpperCase() !== 'RTSP') {
-        throw new S.ScheduleError(`The centre schedule applies to RTSP exams only; "${exam.exam_name}" is ${exam.link_type}.`, 400);
-    }
+// 13 Oct 2026: the centre schedule applies to HLS exams too (UPCISB). HLS camera rows are stored once
+// per date + shift, so a camera is counted once per channel (ch_code), not once per row.
+const isHls = (exam) => String(exam.link_type).toUpperCase() === 'HLS';
+const camTable = (exam) => (isHls(exam) ? 'camera_links_hls' : 'camera_links_rtsp');
+const camCountExpr = (exam, alias) => (isHls(exam) ? `COUNT(DISTINCT ${alias ? alias + '.' : ''}ch_code)` : `COUNT(${alias ? alias + '.id' : '*'})`);
+async function camerasByTc(exam) {
+    return query(`SELECT tc_code, ${camCountExpr(exam)} AS n FROM ${camTable(exam)} WHERE exam_id = ? AND is_active = 1 GROUP BY tc_code`, [exam.id]);
 }
 
 const isoDay = (d) => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d || '').slice(0, 10));
@@ -164,7 +167,7 @@ exports.deleteSlotSchedule = async (req, res) => {
     } catch (e) { return fail(res, e, 'Clearing the slot schedule'); }
 };
 
-// ── centre schedule (RTSP) ──────────────────────────────────────────────────
+// ── centre schedule (RTSP + HLS) ──────────────────────────────────────────────────
 async function centrePreview(exam, parsed) {
     const errors = [...parsed.errors];
     const warnings = [...parsed.warnings];
@@ -178,14 +181,13 @@ async function centrePreview(exam, parsed) {
     const skipped = dates.filter((d) => exam.skip_dates.includes(d));
     if (skipped.length) warnings.push(`Dates the exam lists as skipped but the sheet schedules: ${head(skipped)}`);
 
-    const cams = await query(
-        'SELECT tc_code, COUNT(*) AS n FROM camera_links_rtsp WHERE exam_id = ? AND is_active = 1 GROUP BY tc_code', [exam.id]);
+    const cams = await camerasByTc(exam);
     const camByTc = new Map(cams.map((r) => [S.normalizeTc(r.tc_code), Number(r.n)]));
     const sheetTcs = new Set(parsed.centres.map((c) => c.tc_code));
     let noCams = [];
     let unlisted = [];
     if (camByTc.size === 0) {
-        warnings.push('This exam has no RTSP cameras yet, so TC codes could not be checked against cameras. Upload the cameras, then re-check the schedule.');
+        warnings.push(`This exam has no ${exam.link_type} cameras yet, so TC codes could not be checked against cameras. Upload the cameras, then re-check the schedule.`);
     } else {
         noCams = [...sheetTcs].filter((t) => !camByTc.has(t));
         unlisted = [...camByTc.keys()].filter((t) => !sheetTcs.has(t));
@@ -230,7 +232,6 @@ exports.uploadCentreSchedule = async (req, res) => {
     try {
         if (!req.file) throw new S.ScheduleError('No file uploaded (send the Excel file in the "file" field)');
         const exam = await getExam(req.params.examId);
-        requireRtsp(exam);
         const parsed = S.parseCentreSchedule(req.file.path);
         const pre = await centrePreview(exam, parsed);
         const canCommit = pre.errors.length === 0;
@@ -268,7 +269,7 @@ exports.getCentreSchedule = async (req, res) => {
         const { shifts } = await S.resolveShiftMap(exam.id);
         const cells = await query('SELECT tc_code, exam_date, shift_id, is_running, source FROM exam_centre_schedule WHERE exam_id = ?', [exam.id]);
         const info = await query('SELECT tc_code, centre_name, region, city, state FROM exam_centre_info WHERE exam_id = ?', [exam.id]);
-        const cams = await query('SELECT tc_code, COUNT(*) AS n FROM camera_links_rtsp WHERE exam_id = ? AND is_active = 1 GROUP BY tc_code', [exam.id]);
+        const cams = await camerasByTc(exam);
         const camBy = new Map(cams.map((r) => [S.normalizeTc(r.tc_code), Number(r.n)]));
         const infoBy = new Map(info.map((r) => [r.tc_code, r]));
         const slotKeys = new Map();
@@ -302,7 +303,6 @@ exports.getCentreSchedule = async (req, res) => {
 exports.setCentreCell = async (req, res) => {
     try {
         const exam = await getExam(req.params.examId);
-        requireRtsp(exam);
         const b = req.body || {};
         const date = S.toIsoDate(b.date);
         const shiftId = parseInt(b.shift_id, 10);
@@ -355,12 +355,12 @@ exports.getSlotSummary = async (req, res) => {
         const [cAny] = await query('SELECT COUNT(*) AS n FROM exam_centre_schedule WHERE exam_id = ?', [exam.id]);
         const centreRestricted = Number(cAny.n) > 0;
         let centres = null; let cameras = null;
-        const [tot] = await query('SELECT COUNT(*) AS n FROM camera_links_rtsp WHERE exam_id = ? AND is_active = 1', [exam.id]);
+        const [tot] = await query(`SELECT ${camCountExpr(exam)} AS n FROM ${camTable(exam)} WHERE exam_id = ? AND is_active = 1`, [exam.id]);
         if (centreRestricted) {
             const [r] = await query(
-                `SELECT COUNT(DISTINCT cs.tc_code) AS centres, COUNT(c.id) AS cameras
+                `SELECT COUNT(DISTINCT cs.tc_code) AS centres, ${camCountExpr(exam, 'c')} AS cameras
                    FROM exam_centre_schedule cs
-                   LEFT JOIN camera_links_rtsp c ON c.exam_id = cs.exam_id AND c.tc_code = cs.tc_code AND c.is_active = 1
+                   LEFT JOIN ${camTable(exam)} c ON c.exam_id = cs.exam_id AND c.tc_code = cs.tc_code AND c.is_active = 1
                   WHERE cs.exam_id = ? AND cs.exam_date = ? AND cs.shift_id = ? AND cs.is_running = 1`, [exam.id, date, shiftId]);
             centres = Number(r.centres); cameras = Number(r.cameras);
         }

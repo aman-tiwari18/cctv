@@ -175,7 +175,8 @@ exports.getPending = async (req, res) => {
         // Detect overnight shift: if end time is earlier than start time,
         // the script runs past midnight → end_at is on the NEXT day.
         let endDateStr = assignmentDate;
-        if (endTimeStr && startTimeStr && endTimeStr <= startTimeStr) {
+        const shiftOvernight = !row.shift_start_time || !row.shift_end_time || row.shift_end_time <= row.shift_start_time;
+        if (endTimeStr && startTimeStr && endTimeStr <= startTimeStr && shiftOvernight) {
             const tomorrow = new Date(`${assignmentDate}T00:00:00Z`);
             tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
             endDateStr = tomorrow.toISOString().split("T")[0];
@@ -285,7 +286,8 @@ exports.getRunning = async (req, res) => {
         const endTimeStr   = row.custom_end_time   || row.shift_end_time;
 
         let endDateStr = assignmentDate;
-        if (endTimeStr && startTimeStr && endTimeStr <= startTimeStr) {
+        const shiftOvernight = !row.shift_start_time || !row.shift_end_time || row.shift_end_time <= row.shift_start_time;
+        if (endTimeStr && startTimeStr && endTimeStr <= startTimeStr && shiftOvernight) {
             const tomorrow = new Date(`${assignmentDate}T00:00:00Z`);
             tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
             endDateStr = tomorrow.toISOString().split("T")[0];

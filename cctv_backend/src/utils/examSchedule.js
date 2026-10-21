@@ -35,7 +35,8 @@ function toIsoDate(v) {
         return p ? ok(p.y, p.m, p.d) : null;
     }
     if (v instanceof Date) return ok(v.getFullYear(), v.getMonth() + 1, v.getDate());
-    const s = String(v).trim();
+    // "14th October 2026" -> "14 October 2026"
+    const s = String(v).trim().replace(/(\d)(st|nd|rd|th)\b/gi, '$1');
     let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
     if (m) return ok(+m[1], +m[2], +m[3]);
     m = s.match(/^(\d{1,2})[-/.\s](\d{1,2})[-/.\s](\d{2,4})$/);
@@ -61,7 +62,7 @@ function toYesNo(v) {
     if (v === false || v === 0) return false;
     const s = String(v == null ? '' : v).trim().toUpperCase();
     if (['YES', 'Y', 'TRUE', '1', 'RUN', 'RUNNING'].includes(s)) return true;
-    if (['NO', 'N', 'FALSE', '0', '-', 'NOT RUNNING'].includes(s)) return false;
+    if (['NO', 'N', 'FALSE', '0', '-', 'NOT RUNNING', 'NA', 'N/A', 'N.A.', 'NIL', 'NONE'].includes(s)) return false;
     return null;
 }
 
@@ -82,6 +83,24 @@ function readSheet(filePath) {
 const norm = (s) => String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 const SLOT_HEADER = /(\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}|\d{1,2}[-/.\s][A-Za-z]{3,9}[-/.\s,]*\d{2,4}|\d{4}-\d{1,2}-\d{1,2})\s*[,-]?\s*shift\s*(\d+)/i;
 
+/**
+ * "<date> Shift <n>" column header -> [whole, dateText, shiftNo] or null. Accepts the plain form
+ * ("30-9-26 Shift 1", "5-Oct-26 Shift 2") and the client form with line breaks, a "Date" prefix,
+ * an ordinal day, "Shift-1" and the timing in brackets:
+ *   "Date 14th October 2026\nShift-1\n(08:00:00 to 10:40:00)"
+ */
+function slotMatch(h) {
+    if (h == null) return null;
+    const s = String(h)
+        .replace(/\([^)]*\)/g, ' ')                       // "(08:00:00 to 10:40:00)"
+        .replace(/\s+/g, ' ')
+        .replace(/^\s*date\s*[:\-]?\s*/i, '')               // "Date 14th ..."
+        .replace(/(\d)(st|nd|rd|th)\b/gi, '$1')             // "14th" -> "14"
+        .replace(/shift\s*[-–:#.]?\s*(\d+)/i, 'Shift $1')   // "Shift-1" -> "Shift 1"
+        .trim();
+    return s.match(SLOT_HEADER);
+}
+
 function findHeaderRow(rows, test) {
     for (let i = 0; i < Math.min(rows.length, 12); i++) if (test((rows[i] || []).map(norm))) return i;
     return -1;
@@ -99,7 +118,7 @@ function parseCentreSchedule(filePath) {
     const hnorm = header.map(norm);
     const col = (...names) => { for (const n of names) { const i = hnorm.indexOf(n); if (i >= 0) return i; } return -1; };
     const c = {
-        tc: col('tc code'), name: col('centre name', 'center name'), region: col('region'),
+        tc: col('tc code'), name: col('centre name', 'center name', 'test center name', 'test centre name'), region: col('region'),
         city: col('actual city', 'city'), state: col('actual state', 'state'), part: col('part of cctv analytics'),
     };
 
@@ -108,7 +127,7 @@ function parseCentreSchedule(filePath) {
     const slotCols = [];
     header.forEach((h, i) => {
         if (h == null) return;
-        const m = String(h).match(SLOT_HEADER);
+        const m = slotMatch(h);
         if (!m) return;
         const date = toIsoDate(m[1]);
         if (!date) { errors.push(`Column ${i + 1}: "${String(h).trim()}" has an unreadable date`); return; }
@@ -206,8 +225,10 @@ function parseSlotSchedule(filePath) {
     return { slots, dates, shifts: shifts.map(({ col, ...s }) => s), errors, warnings };
 }
 
+const NOT_SCHEDULED = new Set(['NA', 'N/A', 'N.A.', 'NIL', 'NONE', '-', '--', 'NO']);
 const num = (v) => {
     if (v == null || String(v).trim() === '') return null;
+    if (NOT_SCHEDULED.has(String(v).trim().toUpperCase())) return null;      // "NA" = not scheduled in that sitting
     const n = typeof v === 'number' ? v : parseFloat(String(v).replace(/,/g, ''));
     return Number.isFinite(n) ? n : NaN;
 };
@@ -230,7 +251,7 @@ function parseThresholds(filePath) {
     const col = (pred) => hnorm.findIndex(pred);
     const c = {
         tc: col((h) => h === 'tc code'),
-        name: col((h) => h === 'centre name' || h === 'center name'),
+        name: col((h) => ['centre name', 'center name', 'test center name', 'test centre name'].includes(h)),
         region: col((h) => h === 'region'),
         nodes: col((h) => h === 'exam nodes' || h === 'exam node'),
         min: col((h) => h.startsWith('minimum required')),
@@ -239,7 +260,7 @@ function parseThresholds(filePath) {
     };
     const slotCols = [];
     header.forEach((h, i) => {
-        const m = String(h == null ? '' : h).match(SLOT_HEADER);
+        const m = slotMatch(h);
         const date = m && toIsoDate(m[1]);
         if (date) slotCols.push({ i, date, shift_no: parseInt(m[2], 10), label: String(h).trim() });
     });
@@ -468,6 +489,7 @@ async function scheduledTcCodesNow(examId, today, nowTime) {
 }
 
 module.exports = {
+    slotMatch,
     rtspScheduleClauseShiftExpr, rtspRunsOnDateSql, scheduledExamIds, rtspScheduledCounts,
     rtspScheduledCountsPerShift, scheduledTcCodesNow,
     runningScope, scheduleTablesExist, rtspScheduleClause,

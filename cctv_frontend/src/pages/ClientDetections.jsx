@@ -62,6 +62,7 @@ import { useSocket } from '../contexts/SocketContext';
 import { useSearchParams } from 'react-router-dom';
 import { examsAPI, reportAPI, clientDetectionsAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import { useDetectionNav, DetectionDialog } from '../components/DetectionNav';
 import * as XLSX from 'xlsx';
 
 const TYPE_META = {
@@ -476,43 +477,38 @@ function DetectionCard({ item, onClick, onRemove, onUndo, onAccept, isRemoving, 
   );
 }
 
-function Lightbox({ item, onClose, pendingLiveCount = 0 }) {
-  const theme = useTheme();
+function Lightbox({ item, onClose, pendingLiveCount = 0, index = -1, count = 0, onNavigate = () => {}, neighbourUrls = [],
+  onAccept, onRemove, onUndo, isAccepting = false, isAccepted = false, isRemoving = false, isPendingRemoval = false }) {
   const { user } = useAuth();
-  const isSmDown = useMediaQuery(theme.breakpoints.down('sm'));
+  // Left / Right keys and the two arrow buttons step through the grid the card was opened from.
+  useDetectionNav({ index: item ? index : -1, count, onNavigate, neighbourUrls });
   if (!item) return null;
   const meta = TYPE_META[item.type] || {};
   const pushedBy = canViewPushedBy(user?.role) ? getDetectionPushedBy(item) : null;
   const invigilatorEventLabel = item.type === 'invigilator'
     ? (item.issueLabel || (item.issueType ? String(item.issueType).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : ''))
     : '';
+  const where = [
+    item.centerName && `${item.centerName}${item.city ? ` — ${item.city}` : ''}${item.state ? `, ${item.state}` : ''}`,
+    item.tcCode && `TC: ${item.tcCode}`,
+    (item.shiftName || item.shift_name || item.shift_id) && `Shift: ${getDetectionShiftName(item)}`,
+    pushedBy && `Pushed by: ${pushedBy}`,
+  ].filter(Boolean).join('  ·  ');
   return (
-    <Dialog open onClose={onClose} maxWidth="lg" fullWidth fullScreen={isSmDown}>
-      <DialogContent sx={{ p: 0, bgcolor: '#0f172a', position: 'relative', display: 'flex', flexDirection: 'column', maxHeight: { xs: '100dvh', sm: '90vh' } }}>
-        <IconButton
-          onClick={onClose}
-          sx={{
-            position: 'absolute', top: 8, right: 8, zIndex: 10, color: '#fff', bgcolor: 'rgba(0,0,0,0.5)',
-            width: { xs: 44, sm: 40 }, height: { xs: 44, sm: 40 },
-            '&:hover': { bgcolor: 'rgba(0,0,0,0.7)' },
-          }}
-        >
-          <Close sx={{ fontSize: { xs: 26, sm: 24 } }} />
-        </IconButton>
-        {pendingLiveCount > 0 && (
-          <Chip
-            label={`${pendingLiveCount} new detection${pendingLiveCount > 1 ? 's' : ''} waiting`}
-            size="small"
-            sx={{ position: 'absolute', top: 8, left: 8, zIndex: 10, bgcolor: '#f59e0b', color: '#fff', fontWeight: 700 }}
-          />
-        )}
-        <Box
-          component="img"
-          src={item.image_url}
-          alt={item.camera_id}
-          sx={{ width: '100%', maxHeight: { xs: '70vh', sm: '80vh' }, objectFit: 'contain', display: 'block', flexShrink: 0 }}
+    <DetectionDialog
+      onClose={onClose}
+      imageSrc={item.image_url}
+      alt={item.camera_id}
+      nav={{ index, count, onNavigate }}
+      banner={pendingLiveCount > 0 ? (
+        <Chip
+          label={`${pendingLiveCount} new detection${pendingLiveCount > 1 ? 's' : ''} waiting`}
+          size="small"
+          sx={{ bgcolor: '#f59e0b', color: '#fff', fontWeight: 700 }}
         />
-        <Box sx={{ p: { xs: 1.5, sm: 2 }, color: '#fff', overflowY: 'auto' }}>
+      ) : null}
+      info={(
+        <>
           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
             <Chip label={meta.label} size="small" sx={{ bgcolor: meta.color, color: '#fff', fontWeight: 700 }} />
             {invigilatorEventLabel && (
@@ -526,23 +522,58 @@ function Lightbox({ item, onClose, pendingLiveCount = 0 }) {
               <Chip label={`Confidence: ${(item.confidence * 100).toFixed(1)}%`} size="small" sx={{ bgcolor: '#334155', color: '#fff' }} />
             )}
           </Box>
-          <Typography variant="h6" sx={{ mt: 1, fontWeight: 700 }}>{item.cameraName || item.camera_id}</Typography>
-          <Typography variant="body2" color="#94a3b8">{item.detected_at}</Typography>
-          {item.centerName && (
-            <Typography variant="body2" color="#94a3b8">
-              {item.centerName}{item.city ? ` — ${item.city}` : ''}{item.state ? `, ${item.state}` : ''}
-            </Typography>
+          <Typography variant="subtitle1" sx={{ mt: 0.75, fontWeight: 700, lineHeight: 1.3 }}>
+            {item.cameraName || item.camera_id}
+            <Typography component="span" variant="body2" sx={{ ml: 1.5, color: '#94a3b8', fontWeight: 400 }}>{item.detected_at}</Typography>
+          </Typography>
+          {where && <Typography variant="body2" sx={{ color: '#94a3b8' }}>{where}</Typography>}
+        </>
+      )}
+      actions={isPendingRemoval ? (
+        // 15 s undo window after Remove, like the card
+        onUndo && (
+          <Button
+            variant="contained"
+            disableElevation
+            startIcon={<UndoIcon sx={{ fontSize: 18 }} />}
+            onClick={() => onUndo(item)}
+            sx={{ bgcolor: '#2563eb', color: '#fff', fontWeight: 900, borderRadius: 3, textTransform: 'none', '&:hover': { bgcolor: '#1d4ed8' } }}
+          >
+            Undo remove
+          </Button>
+        )
+      ) : (
+        <>
+          {onAccept && (
+            <Button
+              variant="contained"
+              disableElevation
+              startIcon={isAccepted ? <Check sx={{ fontSize: 18 }} /> : null}
+              onClick={() => { if (!isAccepting && !isAccepted) onAccept(item); }}
+              disabled={isAccepting || isAccepted}
+              sx={{
+                bgcolor: '#098466', color: '#fff', fontWeight: 900, borderRadius: 3, textTransform: 'none', whiteSpace: 'nowrap',
+                '&:hover': { bgcolor: '#086e55' },
+                '&.Mui-disabled': { bgcolor: isAccepted ? '#098466' : '#475569', color: '#fff', opacity: isAccepted ? 0.9 : 0.7 },
+              }}
+            >
+              {isAccepted ? 'Accepted' : isAccepting ? 'Accepting...' : 'Accept'}
+            </Button>
           )}
-          {item.tcCode && <Typography variant="body2" color="#94a3b8">TC: {item.tcCode}</Typography>}
-          {(item.shiftName || item.shift_name || item.shift_id) && (
-            <Typography variant="body2" color="#94a3b8">Shift: {getDetectionShiftName(item)}</Typography>
+          {onRemove && (
+            <Button
+              variant="contained"
+              disableElevation
+              onClick={() => { if (!isRemoving) onRemove(item); }}
+              disabled={isRemoving}
+              sx={{ bgcolor: '#f3404a', color: '#fff', fontWeight: 900, borderRadius: 3, textTransform: 'none', whiteSpace: 'nowrap', '&:hover': { bgcolor: '#a51f24' }, '&.Mui-disabled': { bgcolor: '#475569', color: '#fff' } }}
+            >
+              {isRemoving ? 'Removing...' : 'Remove'}
+            </Button>
           )}
-          {pushedBy && (
-            <Typography variant="body2" color="#94a3b8">Pushed by: {pushedBy}</Typography>
-          )}
-        </Box>
-      </DialogContent>
-    </Dialog>
+        </>
+      )}
+    />
   );
 }
 
@@ -1475,6 +1506,7 @@ const ClientDetections = () => {
     setReportValidationError('');
     try {
       const params = { exam_id: examFilter, date: parseDateForQuery(dateFilter) };
+      if (shiftFilter) params.shift_id = shiftFilter;   // one shift -> that shift only; none -> all shifts (consolidated)
       if (typeFilter.length > 0) params.type = typeFilter.join(',');
       if (search.trim()) params.search = search.trim();
       if (appliedStartTime) params.start_time = appliedStartTime;
@@ -1484,7 +1516,7 @@ const ClientDetections = () => {
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `client_report_${parseDateForQuery(dateFilter)}.xlsx`);
+      link.setAttribute('download', `client_report_${parseDateForQuery(dateFilter)}${shiftFilter ? `_shift${shiftFilter}` : '_all_shifts'}.xlsx`);
       document.body.appendChild(link);
       link.click();
       link.parentNode.removeChild(link);
@@ -1493,7 +1525,7 @@ const ClientDetections = () => {
       console.error('Download client report failed:', err);
       setReportValidationError('Failed to download report. Please try again.');
     }
-  }, [examFilter, dateFilter, typeFilter, search, appliedStartTime, appliedEndTime, setReportValidationError]);
+  }, [examFilter, dateFilter, typeFilter, search, shiftFilter, appliedStartTime, appliedEndTime, setReportValidationError]);
 
   useEffect(() => {
     setDownloadConsolidatedReport(() => handleDownloadClientReport);
@@ -1891,6 +1923,33 @@ const ClientDetections = () => {
   const filteredImages = useMemo(() => {
     return images.filter(item => !confirmedRemoved.has(item.uid) && !confirmedAccepted.has(item.uid));
   }, [images, confirmedRemoved, confirmedAccepted]);
+
+  // Open card: position in the grid, so the card can step to the previous / next detection.
+  const selectedIndex = useMemo(() => {
+    if (!selected) return -1;
+    const key = selected.uid || selected.filename || selected.image_url;
+    return filteredImages.findIndex((d) => (d.uid || d.filename || d.image_url) === key);
+  }, [selected, filteredImages]);
+  // The open card shows the row as the list holds it now (Accept / Remove show straight away).
+  const openItem = selectedIndex >= 0 ? filteredImages[selectedIndex] : selected;
+  const navigateSelected = useCallback((i) => {
+    const next = filteredImages[i];
+    if (next) setSelected(next);
+  }, [filteredImages]);
+  // A detection that leaves the list while its card is open (removal confirmed, accepted into the
+  // accepted list): move on to the one now in its place, or close the card when the list is empty.
+  const lastOpenIndexRef = useRef(-1);
+  useEffect(() => {
+    if (!selected) { lastOpenIndexRef.current = -1; return; }
+    if (selectedIndex >= 0) { lastOpenIndexRef.current = selectedIndex; return; }
+    const was = lastOpenIndexRef.current;
+    if (was < 0) return;
+    lastOpenIndexRef.current = -1;
+    const next = filteredImages[Math.min(was, filteredImages.length - 1)];
+    setSelected(next || null);
+  }, [selected, selectedIndex, filteredImages]);
+  const neighbourUrls = selectedIndex < 0 ? [] : [filteredImages[selectedIndex - 1], filteredImages[selectedIndex + 1]]
+    .filter(Boolean).map((d) => d.image_url);
 
   // Clear any in-flight removal timers on unmount so we don't setState on a
   // dead component after the user navigates away mid-undo-window.
@@ -2443,7 +2502,22 @@ const ClientDetections = () => {
         />
       )}
 
-      <Lightbox item={selected} onClose={() => setSelected(null)} pendingLiveCount={pendingLiveCount} />
+      <Lightbox
+        item={openItem}
+        onClose={() => setSelected(null)}
+        pendingLiveCount={pendingLiveCount}
+        onAccept={onAcceptStable}
+        onRemove={onRemoveStable}
+        onUndo={onUndoStable}
+        isAccepting={Boolean(openItem) && acceptingId === openItem.uid}
+        isAccepted={Boolean(openItem) && isDetectionAccepted(openItem)}
+        isRemoving={Boolean(openItem) && removingId === openItem.uid}
+        isPendingRemoval={Boolean(openItem) && pendingRemovals.has(openItem.uid)}
+        index={selectedIndex}
+        count={filteredImages.length}
+        onNavigate={navigateSelected}
+        neighbourUrls={neighbourUrls}
+      />
 
       <Snackbar
         open={snackbar.open}

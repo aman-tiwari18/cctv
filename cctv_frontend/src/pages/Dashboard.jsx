@@ -765,27 +765,63 @@ export const DetectionDistributionCard = ({ distribution = [], loading }) => {
 // is cached in localStorage and only refetched when stale, so the dashboard paints the
 // last known value instantly and never blocks first load on the network. Not live —
 // refreshed "time to time" (every few minutes).
-const AVG_GPU_CACHE_KEY  = 'cctv:avgGpuUtil:v1';
-const AVG_GPU_REFRESH_MS = 5 * 60 * 1000; // 5 min
+const AVG_GPU_CACHE_KEY  = 'cctv:fleetGpu:v3';
+const AVG_GPU_REFRESH_MS = 30 * 1000; // 30 s — five tiny Prometheus instant queries
 
 const readCachedAvgGpu = () => {
     try {
         const c = JSON.parse(localStorage.getItem(AVG_GPU_CACHE_KEY) || 'null');
-        if (c && typeof c.value === 'number' && typeof c.ts === 'number') return c;
+        if (c && typeof c.util === 'number' && typeof c.ts === 'number') return c;
     } catch { /* ignore corrupt cache */ }
     return null;
 };
 
-const fetchAvgGpuUtil = async () => {
+// One instant query -> number (null when Prometheus has no value / is unreachable).
+const promScalar = async (query) => {
     try {
-        const res = await axios.get(`${API_BASE_1}/prometheus-api/query`, {
-            params: { query: 'avg(gpu_utilization_percent)' },
-            timeout: 8000,
-        });
+        const res = await axios.get(`${API_BASE_1}/prometheus-api/query`, { params: { query }, timeout: 8000 });
         const num = Number(res?.data?.data?.result?.[0]?.value?.[1]);
-        if (Number.isFinite(num)) return Math.round(num * 10) / 10; // 1 decimal
-    } catch { /* keep last cached value on any failure */ }
-    return null;
+        return Number.isFinite(num) ? num : null;
+    } catch { return null; }
+};
+
+// Fleet snapshot, all aggregated by Prometheus:
+//   util   = average GPU utilization over the last 5 min (an instantaneous sample of a bursty
+//            inference load reads ~0 between batches, so the 5-min mean is the honest figure)
+//   memUsedGb / memTotalGb = VRAM across every scraped GPU, gpus = number of GPUs reporting.
+// Instant query returning one value per GPU, keyed by its server_id label.
+const promByServer = async (query) => {
+    try {
+        const res = await axios.get(`${API_BASE_1}/prometheus-api/query`, { params: { query }, timeout: 8000 });
+        const out = {};
+        for (const r of res?.data?.data?.result || []) {
+            const n = Number(r?.value?.[1]);
+            if (r?.metric?.server_id && Number.isFinite(n)) out[r.metric.server_id] = n;
+        }
+        return out;
+    } catch { return {}; }
+};
+
+const fetchFleetGpu = async () => {
+    // NOTE: only plain selectors / avg_over_time are sent — queries containing sum( or count( never
+    // reach the server through the public site (filtered in front of it), so the fleet totals are
+    // added up here from the per-GPU values.
+    const [util, usedBy, totalBy] = await Promise.all([
+        promScalar('avg(avg_over_time(gpu_utilization_percent[5m]))'),
+        promByServer('gpu_memory_used_mb'),
+        promByServer('gpu_memory_total_mb'),
+    ]);
+    const ids = Object.keys(usedBy);
+    if (util == null && ids.length === 0) return null;
+    const used = ids.reduce((s, id) => s + usedBy[id], 0);
+    const total = Object.values(totalBy).reduce((s, v) => s + v, 0);
+    return {
+        util: util == null ? 0 : Math.round(util * 10) / 10,
+        memUsedGb: used / 1024,
+        memTotalGb: total / 1024,
+        gpus: ids.length,
+        ts: Date.now(),
+    };
 };
 
 
@@ -809,36 +845,31 @@ const buildGaugeSegments = (value) => {
     return segments;
 };
 
-const GpuPerformanceCard = () => {
-    // Avg GPU utilization across all GPUs. Initial value comes straight from the
-    // localStorage cache (instant paint); a background effect refreshes it only when
-    // stale. Falls back to 0 until the first sample lands.
-    const [utilization, setUtilization] = useState(() => readCachedAvgGpu()?.value ?? 0);
+const GpuPerformanceCard = ({ accessibleCameras = 0 }) => {
+    // Fleet GPU snapshot. Painted instantly from the localStorage cache, then refreshed every 30 s.
+    const [fleet, setFleet] = useState(() => readCachedAvgGpu() || { util: 0, memUsedGb: 0, memTotalGb: 0, gpus: 0, ts: 0 });
 
     useEffect(() => {
         let cancelled = false;
         const refresh = async () => {
-            const cached = readCachedAvgGpu();
-            if (cached && Date.now() - cached.ts < AVG_GPU_REFRESH_MS) {
-                if (!cancelled) setUtilization(cached.value); // fresh enough — no network call
-                return;
-            }
-            const val = await fetchAvgGpuUtil();
-            if (val != null && !cancelled) {
-                setUtilization(val);
-                try {
-                    localStorage.setItem(AVG_GPU_CACHE_KEY, JSON.stringify({ value: val, ts: Date.now() }));
-                } catch { /* ignore quota/serialization errors */ }
+            const snap = await fetchFleetGpu();
+            if (snap && !cancelled) {
+                setFleet(snap);
+                try { localStorage.setItem(AVG_GPU_CACHE_KEY, JSON.stringify(snap)); } catch { /* ignore quota errors */ }
             }
         };
-        refresh();                                          // on mount: fetches only if stale
-        const id = setInterval(refresh, AVG_GPU_REFRESH_MS); // periodic, lightweight
+        refresh();
+        const id = setInterval(refresh, AVG_GPU_REFRESH_MS);
         return () => { cancelled = true; clearInterval(id); };
     }, []);
 
+    const utilization = fleet.util;
+    const memPct = fleet.memTotalGb > 0 ? Math.round((fleet.memUsedGb / fleet.memTotalGb) * 100) : 0;
+    const lastUpdate = fleet.ts ? new Date(fleet.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--';
+
     const gaugeData = buildGaugeSegments(utilization);
-    // Optimal Efficiency mini gauge — visual only, ~82% filled.
-    const miniData = buildGaugeSegments(82);
+    // Mini gauge = fleet VRAM in use (%).
+    const miniData = buildGaugeSegments(memPct);
 
     // Gauges measure their own containers via ResponsiveContainer.onResize and
     // derive radii from the live width/height. With cy=100%, the arc occupies
@@ -888,7 +919,7 @@ const GpuPerformanceCard = () => {
                         fontWeight: 400,
                         lineHeight: '18px',
                     }}>
-                        Average GPU Utilization Across Active Nodes
+                        Average GPU Utilization Across Active Nodes · last 5 min
                     </Typography>
                 </Box>
 
@@ -979,7 +1010,7 @@ const GpuPerformanceCard = () => {
                                 fontWeight: 400,
                                 lineHeight: '18px',
                             }}>
-                                Camera Capacity
+                                Fleet
                             </Typography>
                             <Typography sx={{
                                 color: '#191B23',
@@ -990,7 +1021,7 @@ const GpuPerformanceCard = () => {
                                 letterSpacing: '0.5px',
                                 textTransform: 'uppercase',
                             }}>
-                                MIN 4 • MAX 3688
+                                {fleet.gpus} GPU{fleet.gpus === 1 ? '' : 's'} online
                             </Typography>
                         </Box>
                     </Grid>
@@ -1047,7 +1078,7 @@ const GpuPerformanceCard = () => {
                                         fontWeight: 600,
                                         lineHeight: 1.25,
                                     }}>
-                                        Optimal
+                                        {memPct}%
                                     </Typography>
                                     <Typography sx={{
                                         color: '#5C5F61',
@@ -1058,7 +1089,7 @@ const GpuPerformanceCard = () => {
                                         letterSpacing: '0.5px',
                                         textTransform: 'uppercase',
                                     }}>
-                                        Efficiency
+                                        VRAM in use
                                     </Typography>
                                 </Box>
                             </Box>
@@ -1107,7 +1138,7 @@ const GpuPerformanceCard = () => {
                                     fontWeight: 800,
                                     lineHeight: '26px',
                                 }}>
-                                    1,234
+                                    {Number(accessibleCameras).toLocaleString()}
                                 </Typography>
                             </Paper>
 
@@ -1146,7 +1177,7 @@ const GpuPerformanceCard = () => {
                                     fontWeight: 800,
                                     lineHeight: '26px',
                                 }}>
-                                    14.2 GB / 24 GB
+                                    {fleet.memUsedGb.toFixed(1)} GB / {Math.round(fleet.memTotalGb)} GB
                                 </Typography>
                             </Paper>
                         </Stack>
@@ -1183,7 +1214,7 @@ const GpuPerformanceCard = () => {
                         lineHeight: '14px',
                         whiteSpace: 'nowrap',
                     }}>
-                        Independent of selected filters | Last Update 10:20:34 AM
+                        Independent of selected filters | Last Update {lastUpdate}
                     </Typography>
                 </Stack>
             </CardContent>
@@ -2364,7 +2395,7 @@ const Dashboard = () => {
                         />
                     </Grid>
                     <Grid item xs={12} md={6}>
-                        <GpuPerformanceCard />
+                        <GpuPerformanceCard accessibleCameras={cameras.accessible} />
                     </Grid>
                 </Grid>
 

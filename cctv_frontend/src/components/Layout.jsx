@@ -133,7 +133,7 @@ const operatorMenuItems = [
 ];
 
 /* ── Detection Sub-Items (multi-select) ── */
-function DetectionSubItems({ counts, typeFilter, onTypeSelect }) {
+function DetectionSubItems({ counts, typeFilter, onTypeSelect, issue = '', onIssueSelect = () => { }, issueCounts = {}, showIssueFilter = false }) {
   // Log when counts change
   React.useEffect(() => {
     console.log('[DetectionSubItems] Counts updated:', counts);
@@ -147,11 +147,13 @@ function DetectionSubItems({ counts, typeFilter, onTypeSelect }) {
         const IconComp = meta.icon;
 
         return (
-          <ListItem key={key} disablePadding sx={{ px: 1, mb: 0.5 }}>
+          <React.Fragment key={key}>
+          <ListItem disablePadding sx={{ px: 1, mb: 0.5 }}>
             <ListItemButton
               selected={isActive}
               onClick={() => {
                 if (isActive) {
+                  if (key === 'invigilator') onIssueSelect('');
                   onTypeSelect(typeFilter.filter((t) => t !== key));
                 } else {
                   onTypeSelect([...typeFilter, key]);
@@ -204,6 +206,48 @@ function DetectionSubItems({ counts, typeFilter, onTypeSelect }) {
               </Typography>
             </ListItemButton>
           </ListItem>
+          {key === 'invigilator' && showIssueFilter && [
+            ['static_person', 'Not moving (static)'],
+            ['no_targets', 'Absent (no invigilator)'],
+          ].map(([ik, label]) => {
+            const on = issue === ik && isActive;
+            return (
+              <ListItem key={ik} disablePadding sx={{ px: 1, mb: 0.25 }}>
+                <ListItemButton
+                  selected={on}
+                  onClick={() => {
+                    if (on) {
+                      onIssueSelect('');
+                    } else {
+                      if (!typeFilter.includes('invigilator')) onTypeSelect([...typeFilter, 'invigilator']);
+                      onIssueSelect(ik);
+                    }
+                  }}
+                  sx={{
+                    minHeight: 28, py: 0.5, pl: 8, pr: 1.5, borderRadius: 1,
+                    ...(on && { bgcolor: sidebarPalette.subItemActiveBg }),
+                    '&.Mui-selected': { bgcolor: sidebarPalette.subItemActiveBg, '&:hover': { bgcolor: sidebarPalette.subItemActiveBg } },
+                    '&:hover': { bgcolor: sidebarPalette.itemHoverBg },
+                  }}
+                >
+                  <ListItemText
+                    primary={label}
+                    sx={{ my: 0, mr: 1 }}
+                    primaryTypographyProps={{
+                      fontSize: '0.75rem',
+                      fontWeight: on ? 700 : 500,
+                      color: on ? sidebarPalette.subItemActiveText : sidebarPalette.subItemText,
+                      sx: { whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.3 },
+                    }}
+                  />
+                  <Typography variant="caption" fontWeight={700} sx={{ flexShrink: 0 }} color={on ? sidebarPalette.subItemActiveText : 'text.secondary'}>
+                    {issueCounts[ik] || 0}
+                  </Typography>
+                </ListItemButton>
+              </ListItem>
+            );
+          })}
+          </React.Fragment>
         );
       })}
     </List>
@@ -217,7 +261,7 @@ const adminFooterItems = [
 
 /* ── Sidebar Content ── */
 function SidebarContent({ items, currentPath, onNavigate, user }) {
-  const { unfilteredCounts, typeFilter, setTypeFilter, } = useDetectionCounts();
+  const { unfilteredCounts, typeFilter, setTypeFilter, invigilatorIssue, setInvigilatorIssue, invigilatorIssueCounts } = useDetectionCounts();
   const [detectionsOpen, setDetectionsOpen] = useState(false);
 
   const isDetectionPage = currentPath === '/detections' || currentPath === '/client-detections' || currentPath === '/detections/removed' || currentPath === '/detections/accepted';
@@ -332,6 +376,10 @@ function SidebarContent({ items, currentPath, onNavigate, user }) {
                     counts={unfilteredCounts}
                     typeFilter={typeFilter}
                     onTypeSelect={setTypeFilter}
+                    issue={invigilatorIssue}
+                    onIssueSelect={setInvigilatorIssue}
+                    issueCounts={invigilatorIssueCounts}
+                    showIssueFilter={user?.role !== 'VIEWER' && item.path === '/detections'}
                   />
                 </Collapse>
               )}

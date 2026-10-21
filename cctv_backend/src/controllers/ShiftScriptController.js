@@ -90,6 +90,22 @@ const pickConfigFields = (source) =>
 exports.getAssignableDates = getAssignableDates;
 exports.toDateOnly = toDateOnly;
 
+/**
+ * A window's end must be after its start. An end at or before the start used to be read as
+ * "overnight" (end = next day) by the poller, so a mistyped 00:00 end became "tomorrow 00:00" and kept a
+ * live shift session running for hours (15 Oct 2026). Only a shift that is itself overnight
+ * (end_time <= start_time) may have a window that crosses midnight.
+ * @returns {string|null} an error message, or null when the window is fine
+ */
+const hhmmss = (v) => (v == null || v === "" ? null : String(v).length === 5 ? `${v}:00` : String(v));
+function windowOrderError(start, end, shift) {
+    const s = hhmmss(start), e = hhmmss(end);
+    if (!s || !e || e > s) return null;
+    const shiftOvernight = shift && shift.start_time && shift.end_time && hhmmss(shift.end_time) <= hhmmss(shift.start_time);
+    if (shiftOvernight) return null;
+    return `End time (${e.slice(0, 5)}) must be after start time (${s.slice(0, 5)}). A window cannot end at or before it starts on a same-day shift.`;
+}
+
 
 /**
  * Assign a script to a shift
@@ -111,6 +127,11 @@ exports.assignScript = async (req, res) => {
             success: false,
             message: "Shift not found",
         });
+    }
+
+    {
+        const orderErr = windowOrderError(custom_start_time, custom_end_time, shift);
+        if (orderErr) return res.status(400).json({ success: false, message: orderErr });
     }
 
     // Verify exam exists and has a date range
@@ -292,6 +313,13 @@ exports.bulkAssign = async (req, res) => {
             success: false,
             message: "No valid scripts found in request",
         });
+    }
+
+    for (const s of prepared) {
+        const orderErr = windowOrderError(s.custom_start_time, s.custom_end_time, shift);
+        if (orderErr) {
+            return res.status(400).json({ success: false, message: `Script ${s.script_id}: ${orderErr}` });
+        }
     }
 
     const existingAssignments = await ShiftScriptAssignment.findAll({
@@ -482,6 +510,15 @@ exports.updateAssignment = async (req, res) => {
             success: false,
             message: "Assignment not found",
         });
+    }
+
+    {
+        const body = req.body || {};
+        const newStart = "custom_start_time" in body ? body.custom_start_time : assignment.custom_start_time;
+        const newEnd = "custom_end_time" in body ? body.custom_end_time : assignment.custom_end_time;
+        const shiftRow = await ExamShift.findByPk(assignment.shift_id);
+        const orderErr = windowOrderError(newStart, newEnd, shiftRow);
+        if (orderErr) return res.status(400).json({ success: false, message: orderErr });
     }
 
     await assignment.update(req.body);

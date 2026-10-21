@@ -6,7 +6,7 @@ const fs = require("fs");
 const path = require("path");
 const { fetchFrameFromAnyWorker } = require("../utils/workerFrameFetch");
 const logger = require("../utils/logger");
-const { runningScope, toIsoDate } = require("../utils/examSchedule");
+const { runningScope, toIsoDate, scheduledExamIds, rtspScheduleClauseShiftExpr } = require("../utils/examSchedule");
 
 // All classification frames live on NFS at this root (script-server side
 // symlinks `scripts/detection/results` and `script-server/results/classification_frames`
@@ -61,6 +61,16 @@ const normalizeHeaderKey = (key) =>
         .trim()
         .toLowerCase()
         .replace(/[^a-z0-9]/g, "");
+
+// 16 Oct 2026: a camera's "Server Address" must be a host like d16.camview.io (or a full
+// rtsp/http URL). Rows that were pasted one column off carried "New" / "Updated" there and the
+// real server in the next column, and were saved with "New" as the server.
+const looksLikeServer = (value) => {
+    const v = String(value || "").trim();
+    if (!v) return false;
+    if (/^(rtsp|https?):\/\//i.test(v)) return true;
+    return /^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d+)?(\/\S*)?$/i.test(v);
+};
 
 const normalizeCellValue = (value) => {
     if (typeof value === "string") return value.trim();
@@ -157,6 +167,8 @@ exports.uploadCameras = async (req, res) => {
 
         const validRecords = [];
         let missingChCode = 0; // HLS rows whose channel id header could not be resolved
+        let serverRecovered = 0;      // RTSP rows whose server sat in another column (sheet pasted one column off)
+        const badServerRows = [];     // RTSP rows with no usable server anywhere in the row: not imported
 
         for (const row of data) {
             if (linkType === "HLS") {
@@ -226,7 +238,7 @@ exports.uploadCameras = async (req, res) => {
                 );
                 const camera_name = pick(row, "Camera Name", "camera_name");
                 const camera_no = pick(row, "Camera No", "camera_no", "CameraNo", "Camera Number", "camera_number");
-                const cctv_url = pick(row, "Server Address", "CCTV URL", "cctv_url", "url", "URL", "Link");
+                let cctv_url = pick(row, "Server Address", "CCTV URL", "cctv_url", "url", "URL", "Link");
                 const classification = pick(
                     row,
                     "Classification",
@@ -257,6 +269,21 @@ exports.uploadCameras = async (req, res) => {
 
                 if (!device_id || !cctv_url) continue;
 
+                // The server column holds something else ("New", "Updated"...): take the one cell of the
+                // row that is a server address; with none (or several) the row is not imported.
+                let region = pick(row, "Region", "region", "REGION") || null;
+                if (!looksLikeServer(cctv_url)) {
+                    const found = [...new Set(Object.values(row).map((v) => String(v || "").trim()).filter(looksLikeServer))];
+                    if (found.length === 1) {
+                        cctv_url = found[0];
+                        serverRecovered++;
+                    } else {
+                        badServerRows.push(`${device_id}/${camera_no || "-"} ("${cctv_url}")`);
+                        continue;
+                    }
+                }
+                if (region && looksLikeServer(region)) region = null;
+
                 validRecords.push({
                     exam_id: examId,
                     device_id,
@@ -266,7 +293,7 @@ exports.uploadCameras = async (req, res) => {
                     camera_no: camera_no !== "" ? camera_no : null,
                     city: pick(row, "City", "city", "CITY"),
                     state: pick(row, "State", "state", "STATE"),
-                    region: pick(row, "Region", "region", "REGION") || null,
+                    region,
                     cctv_url,
                     classification,  // ← ADDED classification field
                     is_active: true,
@@ -405,6 +432,10 @@ exports.uploadCameras = async (req, res) => {
 
             console.log(`[DUPLICATE CHECK] Existing unique keys:`, Array.from(existingMap.keys()).slice(0, 5));
 
+            // A camera is server + device + camera no (device ids repeat across camview servers).
+            // The same camera listed twice in one sheet is imported once (first row wins).
+            const seenInSheet = new Set();
+
             // Separate records into insert vs update
             for (const record of validRecords) {
                 if (!record.device_id) {
@@ -414,6 +445,12 @@ exports.uploadCameras = async (req, res) => {
 
                 const deviceId = String(record.device_id).trim();
                 const cameraNo = record.camera_no != null ? String(record.camera_no).trim() : '';
+                const sheetKey = `${String(record.cctv_url).trim().toLowerCase()}|${deviceId}|${cameraNo}`;
+                if (seenInSheet.has(sheetKey)) {
+                    sheetDuplicates.push(`${deviceId}/${cameraNo}`);
+                    continue;
+                }
+                seenInSheet.add(sheetKey);
                 const tcCode = record.tc_code ? normalizeTcCode(record.tc_code) : '';
                 const uniqueKey = `${deviceId}_${cameraNo}_${tcCode}`;
                 const existingCamera = existingMap.get(uniqueKey);
@@ -497,7 +534,16 @@ exports.uploadCameras = async (req, res) => {
 
         if (sheetDuplicates.length > 0) {
             const sample = sheetDuplicates.slice(0, 5).join(', ');
-            message += ` ${sheetDuplicates.length} row${sheetDuplicates.length !== 1 ? 's' : ''} in the Excel repeat a CH NO already listed in the same file (e.g. ${sample}) - only the first was kept.`;
+            const what = linkType === "RTSP" ? "camera (server + device + camera no)" : "CH NO";
+            message += ` ${sheetDuplicates.length} row${sheetDuplicates.length !== 1 ? 's' : ''} in the Excel repeat a ${what} already listed in the same file (e.g. ${sample}) - only the first was kept.`;
+        }
+
+        if (serverRecovered > 0) {
+            message += ` ${serverRecovered} row${serverRecovered !== 1 ? 's' : ''} had the server address in another column (e.g. "New"/"Updated" in Server Address) - the server was taken from that column.`;
+        }
+
+        if (badServerRows.length > 0) {
+            message += ` ${badServerRows.length} row${badServerRows.length !== 1 ? 's' : ''} NOT imported: no valid server address (e.g. ${badServerRows.slice(0, 5).join(', ')}).`;
         }
 
         console.log(`[UPLOAD SUMMARY] Inserted: ${recordsToInsert.length}, Updated: ${recordsToUpdate.length} (${newClassifications} new, ${overwrittenClassifications} overwritten), Skipped: ${skipped}, In-sheet duplicates: ${sheetDuplicates.length}`);
@@ -579,7 +625,7 @@ exports.createCamera = async (req, res) => {
  */
 exports.getByExam = async (req, res) => {
     const { examId } = req.params;
-    const { is_active = true, shift_id, exam_date, search, classification, region, run_start, run_end, run_shift_id, page = 1, limit = 50, sort_by, sort_order = 'asc' } = req.query;
+    const { is_active = true, shift_id, exam_date, search, classification, region, run_start, run_end, run_shift_id, raw, page = 1, limit = 50, sort_by, sort_order = 'asc', status, verified, tc_code, camera } = req.query;
     const { Model, linkType } = await getModelByExam(examId);
 
     const where = {
@@ -587,8 +633,34 @@ exports.getByExam = async (req, res) => {
         is_active: is_active === "true" || is_active === true,
     };
 
-    if (classification && classification.trim()) {
-        where.classification = classification.trim();
+    // Extra filters (Cameras tab). Every condition goes into Op.and so it combines with the
+    // search (Op.or) and the schedule scope below instead of overwriting them.
+    const andConds = [];
+    const csv = (v) => String(v || '').split(',').map((x) => x.trim()).filter(Boolean);
+
+    // classification: one value or a comma list; "__unclassified__" = no label yet (NULL or blank)
+    if (classification && String(classification).trim()) {
+        const vals = csv(classification);
+        const named = vals.filter((v) => v !== '__unclassified__');
+        const ors = [];
+        if (named.length) ors.push({ classification: { [Op.in]: named } });
+        if (vals.includes('__unclassified__')) ors.push({ classification: null }, { classification: '' });
+        if (ors.length) andConds.push({ [Op.or]: ors });
+    }
+    // manual verification: yes | no
+    if (verified === 'yes') andConds.push({ manually_verified: 1 });
+    if (verified === 'no') andConds.push({ [Op.or]: [{ manually_verified: 0 }, { manually_verified: null }] });
+    // centre(s) by TC code
+    if (tc_code && String(tc_code).trim()) andConds.push({ tc_code: { [Op.in]: csv(tc_code) } });
+    // one exact camera: RTSP "device_camera" (e.g. 1000700_12) / HLS ch_code
+    if (camera && String(camera).trim()) {
+        const c = String(camera).trim();
+        if (linkType === "RTSP") {
+            const m = c.match(/^(\d+)\s*[_/:\- ]\s*(\d+)$/);
+            andConds.push(m ? { device_id: m[1], camera_no: m[2] } : { device_id: c });
+        } else {
+            andConds.push({ ch_code: c });
+        }
     }
 
     // Region is RTSP-only (no region column on camera_links_hls).
@@ -608,16 +680,37 @@ exports.getByExam = async (req, res) => {
         const runShift = run_shift_id !== undefined && run_shift_id !== '' ? Number(run_shift_id) : null;
         const runRows = await query(
             `SELECT DISTINCT camera_id FROM ${historyTable} WHERE created_at BETWEEN ? AND ?`
+            + ` AND NOT (classification = 'Uncertain' AND (frame_path IS NULL OR frame_path = ''))`   // frame_capture_failed rows are not classified cameras
             + (runShift !== null ? ` AND COALESCE(shift_id, 0) = ?` : ''),
             runShift !== null ? [run_start, run_end, runShift] : [run_start, run_end]
         );
         runCameraIds = runRows.map((r) => r.camera_id);
     }
 
+    // A selected classification run belongs to ONE shift and ONE day: list only that shift's cameras
+    // (not every shift of the exam), unless the Shift / Date filters say otherwise.
+    const runHasScope = !!(run_start && run_end);
+    const hlsShift = shift_id || ((runHasScope && run_shift_id !== undefined && run_shift_id !== '' && Number(run_shift_id) > 0) ? Number(run_shift_id) : undefined);
+    const hlsDate = exam_date || (runHasScope ? toIsoDate(new Date(run_start)) : undefined);
+
     if (linkType === "HLS") {
-        const hlsScope = buildHlsCameraScope({ shiftId: shift_id, examDate: exam_date });
+        const hlsScope = buildHlsCameraScope({ shiftId: hlsShift, examDate: hlsDate });
         if (hlsScope.length > 0) {
             where[Op.and] = hlsScope;
+        }
+    }
+
+    // status: accessible | not_accessible | unknown (in a run view: classified in that run or not)
+    if (status) {
+        if (runCameraIds) {
+            const ids = runCameraIds.length ? runCameraIds : [0];
+            if (status === 'accessible') andConds.push({ id: { [Op.in]: ids } });
+            if (status === 'not_accessible') andConds.push({ id: { [Op.notIn]: ids } });
+            if (status === 'unknown') andConds.push({ id: 0 });
+        } else {
+            if (status === 'accessible') andConds.push({ status: 'Accessible' });
+            if (status === 'not_accessible') andConds.push({ status: 'Not Accessible' });
+            if (status === 'unknown') andConds.push({ [Op.or]: [{ status: null }, { status: { [Op.notIn]: ['Accessible', 'Not Accessible'] } }] });
         }
     }
 
@@ -626,8 +719,9 @@ exports.getByExam = async (req, res) => {
     // scheduled centres' cameras are listed/counted; in a run view cameras that nevertheless have
     // a history row in that run stay visible. No uploaded schedule = no restriction.
     let scheduleInfo = null;
+    let dayScopeIds = null;
     let scheduleCond = null;
-    if (linkType === "RTSP") {
+    if (linkType === "RTSP" || linkType === "HLS") {     // 13 Oct 2026: HLS exams have a centre schedule too
         let schedDate = null;
         let schedShift = null;
         if (run_start && run_end) {
@@ -658,8 +752,48 @@ exports.getByExam = async (req, res) => {
         }
     }
 
+    // Date chosen (no shift, no run): is it an exam day, and which cameras are scheduled in ANY shift that
+    // day. With an uploaded schedule (slot / centre) only those cameras are listed; without one the exam's
+    // date range (or its shift dates) decides. dayInfo.runs=false -> the UI says "no exam on this day".
+    let dayInfo = null;
+    if (exam_date) {
+        const day = toIsoDate(exam_date);
+        try {
+            const T0 = linkType === "RTSP" ? "camera_links_rtsp" : "camera_links_hls";
+            if ((await scheduledExamIds([examId])).size) {
+                const dayRows = await query(
+                    `SELECT c.id, c.tc_code FROM ${T0} c WHERE c.exam_id = ? AND c.is_active = 1 AND EXISTS (
+                        SELECT 1 FROM exam_shifts s_ WHERE s_.exam_id = c.exam_id AND s_.is_active = 1
+                          AND ${rtspScheduleClauseShiftExpr('c', 's_.id')})`, [examId, day, day]);
+                const ids = dayRows.map((r) => r.id);
+                dayInfo = { date: day, scheduled: true, runs: ids.length > 0, cameras: ids.length,
+                            centres: new Set(dayRows.map((r) => r.tc_code)).size };
+                if (!shift_id && !(run_start && run_end)) {
+                    where[Op.and] = [...(where[Op.and] || []), { id: { [Op.in]: ids.length ? ids : [0] } }];
+                    dayScopeIds = ids;
+                }
+            } else {
+                const exam = await Exam.findByPk(examId, { attributes: ['start_date', 'end_date'], raw: true });
+                const sd = exam?.start_date ? toIsoDate(exam.start_date) : null;
+                const ed = exam?.end_date ? toIsoDate(exam.end_date) : null;
+                const shiftDates = (await ExamShift.findAll({ where: { exam_id: examId }, attributes: ['exam_date'], raw: true }))
+                    .map((x) => (x.exam_date ? toIsoDate(x.exam_date) : null)).filter(Boolean);
+                let runs = null;
+                if (sd || ed) runs = (!sd || day >= sd) && (!ed || day <= ed);
+                if (shiftDates.length && linkType === "HLS") runs = shiftDates.includes(day);
+                dayInfo = { date: day, scheduled: false, runs };
+            }
+        } catch (e) {
+            logger.warn(`[cameras] day scope failed: ${e.message}`);
+        }
+    }
+
     // Add search functionality
-    if (search && search.trim()) {
+    const camKey = search && linkType === "RTSP" ? String(search).trim().match(/^(\d+)\s*[_/:\- ]\s*(\d+)$/) : null;
+    if (camKey) {
+        // "1000700_12" / "1000700/12" / "1000700 12": that exact camera
+        andConds.push({ device_id: camKey[1], camera_no: camKey[2] });
+    } else if (search && search.trim()) {
         const searchTerm = `%${search.trim()}%`;
         where[Op.or] = [
             { centre_name: { [Op.like]: searchTerm } },
@@ -672,6 +806,7 @@ exports.getByExam = async (req, res) => {
         // Add device_id for RTSP
         if (linkType === "RTSP") {
             where[Op.or].push({ device_id: { [Op.like]: searchTerm } });
+            where[Op.or].push({ classification: { [Op.like]: searchTerm } });
             where[Op.or].push({ region: { [Op.like]: searchTerm } });
         }
 
@@ -680,6 +815,8 @@ exports.getByExam = async (req, res) => {
             where[Op.or].push({ ch_code: { [Op.like]: searchTerm } });
         }
     }
+
+    if (andConds.length) where[Op.and] = [...(where[Op.and] || []), ...andConds];
 
     const parsedLimit = parseInt(limit, 10) || 50;
     const parsedPage = parseInt(page, 10) || 1;
@@ -711,12 +848,13 @@ exports.getByExam = async (req, res) => {
     };
 
     if (linkType === "HLS") {
-        const hlsScope = buildHlsCameraScope({ shiftId: shift_id, examDate: exam_date });
+        const hlsScope = buildHlsCameraScope({ shiftId: hlsShift, examDate: hlsDate });
         if (hlsScope.length > 0) {
             statusCountsWhere[Op.and] = hlsScope;
         }
     }
     if (scheduleCond) statusCountsWhere[Op.and] = [...(statusCountsWhere[Op.and] || []), scheduleCond];
+    if (dayScopeIds) statusCountsWhere[Op.and] = [...(statusCountsWhere[Op.and] || []), { id: { [Op.in]: dayScopeIds.length ? dayScopeIds : [0] } }];
 
     let accessibleCount, notAccessibleCount, unknownCount;
     if (runCameraIds) {
@@ -772,11 +910,16 @@ exports.getByExam = async (req, res) => {
         data = data.map((c) => {
             const plain = c.get({ plain: true });
             const runRow = byCameraId.get(plain.id);
+            // A history row with label "Uncertain" and NO frame is the classifier's marker for
+            // "stream opened but no frame could be grabbed" (frame_capture_failed): not a real
+            // classification, so it must not show as Accessible with an empty preview.
+            const captureFailed = !!runRow && !runRow.frame_path && runRow.classification === "Uncertain";
+            const ok = !!runRow && !captureFailed;
             return {
                 ...plain,
-                classification: runRow?.classification ?? null,
-                status: runRow ? "Accessible" : "Not Accessible",
-                frame_path: runRow?.frame_path ?? plain.frame_path,
+                classification: ok ? runRow.classification : null,
+                status: ok ? "Accessible" : "Not Accessible",
+                frame_path: ok ? (runRow.frame_path ?? plain.frame_path) : null,
                 // Exact time this camera's classification was recorded within the
                 // selected run (may differ slightly per-camera inside the burst).
                 classification_run_at: runRow?.created_at ?? null,
@@ -784,8 +927,63 @@ exports.getByExam = async (req, res) => {
         });
     }
 
+    // Filter options with counts over the exam's scope (exam + date/shift/schedule), not just this
+    // page: classification (incl. unclassified), centres and verification — for the filter dropdowns.
+    let facets = null;
+    let serverStats = null;      // RTSP: cameras + not-accessible cameras per camview server (d11, d12 ...)
+    try {
+        const T = linkType === "RTSP" ? "camera_links_rtsp" : "camera_links_hls";
+        const scopeIds = (await Model.findAll({ where: statusCountsWhere, attributes: ['id'], raw: true })).map((r) => r.id);
+        if (scopeIds.length && linkType === "RTSP") {
+            const runSet = runCameraIds ? new Set(runCameraIds) : null;
+            const rows = await query(`SELECT id, cctv_url, status FROM ${T} WHERE id IN (?)`, [scopeIds]);
+            const by = new Map();
+            for (const r of rows) {
+                const host = String(r.cctv_url || '').toLowerCase().replace(/^[a-z]+:\/\//, '').split('/')[0];
+                const key = host.split('.')[0] || 'unknown';
+                const e = by.get(key) || { server: key, total: 0, notAccessible: 0 };
+                e.total += 1;
+                const notAcc = runSet ? !runSet.has(r.id) : String(r.status || '').toLowerCase() === 'not accessible';
+                if (notAcc) e.notAccessible += 1;
+                by.set(key, e);
+            }
+            const list = [...by.values()].filter((e) => e.notAccessible > 0)
+                .sort((a, b) => b.notAccessible - a.notAccessible);
+            serverStats = { servers: list, totalNotAccessible: list.reduce((a, e) => a + e.notAccessible, 0) };
+        }
+        if (scopeIds.length) {
+            const cls = await query(`SELECT NULLIF(TRIM(classification),'') AS v, COUNT(*) AS n,
+                       SUM(manually_verified = 1) AS verified FROM ${T} WHERE id IN (?) GROUP BY v ORDER BY n DESC`, [scopeIds]);
+            const cen = await query(`SELECT tc_code AS v, MAX(centre_name) AS name, COUNT(*) AS n FROM ${T}
+                       WHERE id IN (?) GROUP BY tc_code ORDER BY name`, [scopeIds]);
+            const ver = await query(`SELECT SUM(manually_verified = 1) AS yes, SUM(COALESCE(manually_verified,0) = 0) AS no
+                       FROM ${T} WHERE id IN (?)`, [scopeIds]);
+            facets = {
+                classifications: cls.map((r) => ({ value: r.v || '__unclassified__', label: r.v || 'Unclassified',
+                                                   count: Number(r.n), verified: Number(r.verified || 0) })),
+                centres: cen.map((r) => ({ value: r.v, label: r.name ? `${r.v} · ${r.name}` : String(r.v), count: Number(r.n) })),
+                verified: { yes: Number(ver[0]?.yes || 0), no: Number(ver[0]?.no || 0) },
+            };
+        }
+    } catch (e) {
+        console.error('[cameras] facets failed:', e.message);
+    }
+
+    // raw=1 (no classification ran on the chosen day): list the scheduled cameras without any
+    // status / frame from another day's classification.
+    const rawView = (raw === '1' || raw === 'true') && !runCameraIds;
+    if (rawView) {
+        data = data.map((c) => ({ ...(c.get ? c.get({ plain: true }) : c), status: null, frame_path: null }));
+        unknownCount = accessibleCount + notAccessibleCount + unknownCount;
+        accessibleCount = 0;
+        notAccessibleCount = 0;
+        serverStats = null;
+    }
+
     res.json({
         success: true,
+        facets,
+        day: dayInfo,
         totalCount: result.count,
         count: result.rows.length,
         totalPages: Math.ceil(result.count / parsedLimit),
@@ -796,6 +994,7 @@ exports.getByExam = async (req, res) => {
             notAccessible: notAccessibleCount,
             unknown: unknownCount
         },
+        serverStats,
         // RTSP: set when a date + shift (or a run) was chosen — says whether the exam schedule
         // restricted the list, so the UI can explain why some cameras are not shown.
         schedule: scheduleInfo,
@@ -950,8 +1149,12 @@ exports.getRegionOptions = async (req, res) => {
 // camera_classification_hls/rtsp, all within a tight burst (workers process
 // cameras a few seconds apart). Consecutive rows more than RUN_GAP_SECONDS
 // apart are treated as separate runs (script re-triggered later, e.g. per the
-// shift's frequency_minutes).
-const RUN_GAP_SECONDS = 90;
+// shift's frequency_minutes). With several workers each worker classifies its own
+// share of the cameras and starts at its own pace (vLLM warm-up differs by minutes),
+// so the gap must be longer than the spread between workers (14 Oct 2026: worker-5
+// wrote its rows 164 s after the others and showed up as a separate 69-camera run).
+// Real re-runs of the same shift are hours apart.
+const RUN_GAP_SECONDS = Number(process.env.CLASSIFICATION_RUN_GAP_SECONDS) || 420;
 
 /**
  * Distinct classification "runs" for a given exam — groups rows in the
@@ -995,7 +1198,8 @@ exports.getClassificationRuns = async (req, res) => {
             FROM runs
             GROUP BY sid, run_seq
         )
-        SELECT b.sid, es.shift_name, b.started_at, b.ended_at, COUNT(DISTINCT cc.camera_id) AS camera_count
+        SELECT b.sid, es.shift_name, b.started_at, b.ended_at,
+               COUNT(DISTINCT CASE WHEN NOT (cc.classification = 'Uncertain' AND (cc.frame_path IS NULL OR cc.frame_path = '')) THEN cc.camera_id END) AS camera_count
         FROM bounds b
         JOIN ${historyTable} cc ON cc.created_at BETWEEN b.started_at AND b.ended_at
              AND COALESCE(cc.shift_id, 0) = b.sid
@@ -1050,22 +1254,33 @@ exports.getClassificationRuns = async (req, res) => {
             if (schedTotals.get(key) != null) total = Math.max(schedTotals.get(key), Number(r.camera_count));
         }
         if (linkType === "HLS") {
-            // The run's shift/date = the most common one among its cameras.
-            const [scope] = await query(
-                `SELECT cl.shift_id, cl.exam_date, COUNT(*) AS n
-                 FROM camera_classification_hls cc
-                 JOIN camera_links_hls cl ON cl.id = cc.camera_id AND cl.exam_id = ?
-                 WHERE cc.created_at BETWEEN ? AND ? AND COALESCE(cc.shift_id, 0) = ?
-                 GROUP BY cl.shift_id, cl.exam_date
-                 ORDER BY n DESC LIMIT 1`,
-                [examId, r.started_at, r.ended_at, Number(r.sid) || 0]
-            );
+            // A run belongs to ONE shift and ONE day: count only that shift's cameras on that day,
+            // and, when a centre schedule is uploaded, only the centres scheduled in it (same rule
+            // the loader applies). Taking it from the run's own shift_id (not from a join on the
+            // run's time window) keeps this correct when workers finish minutes apart.
+            const sid = Number(r.sid) || 0;
+            const day = toIsoDate(r.started_at);
             const conds = ["exam_id = ?", "is_active = 1"];
             const params = [examId];
-            if (scope?.shift_id != null) { conds.push("(shift_id = ? OR shift_id IS NULL)"); params.push(scope.shift_id); }
-            if (scope?.exam_date != null) { conds.push("(exam_date = ? OR exam_date IS NULL)"); params.push(scope.exam_date); }
+            if (sid > 0) { conds.push("shift_id = ?"); params.push(sid); }
+            if (day) { conds.push("exam_date = ?"); params.push(day); }
+            try {
+                if (sid > 0 && day) {
+                    const scope = await runningScope(examId, day, sid);
+                    if (scope.restricted) {
+                        if (!scope.examRuns) { conds.push("1 = 0"); }
+                        else if (scope.centres) {
+                            const codes = [...scope.centres];
+                            if (codes.length) { conds.push("tc_code IN (?)"); params.push(codes); }
+                            else conds.push("1 = 0");
+                        }
+                    }
+                }
+            } catch (e) {
+                logger.warn(`[cameras] HLS run total: schedule lookup failed: ${e.message}`);
+            }
             const [t] = await query(`SELECT COUNT(*) AS c FROM camera_links_hls WHERE ${conds.join(" AND ")}`, params);
-            total = Number(t?.c || 0);
+            total = Math.max(Number(t?.c || 0), Number(r.camera_count));
         }
         data.push({
             started_at: r.started_at,

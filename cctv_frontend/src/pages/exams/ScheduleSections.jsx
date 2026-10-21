@@ -11,7 +11,7 @@ import { examsAPI } from '../../services/api';
  * Docs: backend/docs/EXAM_SCHEDULE_AND_THRESHOLDS.md
  *
  *   1. Exam date & shift schedule   (exam level, RTSP + HLS)   — which dates/shifts the exam runs
- *   2. Centre-wise schedule          (RTSP exams only)          — which centres run in which date + shift
+ *   2. Centre-wise schedule          (RTSP + HLS)               — which centres run in which date + shift
  *   3. Server room thresholds        (RTSP + HLS)               — person limit per centre
  *
  * Every upload is previewed first (nothing is saved until the admin confirms); every error the
@@ -479,7 +479,6 @@ export function SlotRunningChip({ examId, date, shiftId, shiftName }) {
 // ── the three sections ───────────────────────────────────────────────────────
 export default function ExamScheduleSections({ exam, linkType, notify }) {
   const examId = exam?.id;
-  const isRtsp = String(linkType || exam?.link_type).toUpperCase() === 'RTSP';
   const [slots, setSlots] = useState(null);
   const [centres, setCentres] = useState(null);
   const [thr, setThr] = useState(null);
@@ -494,7 +493,7 @@ export default function ExamScheduleSections({ exam, linkType, notify }) {
     setLoadErr(null);
     const calls = [
       examsAPI.getSlotSchedule(examId),
-      isRtsp ? examsAPI.getCentreSchedule(examId) : Promise.resolve(null),
+      examsAPI.getCentreSchedule(examId),
       examsAPI.getThresholds(examId, { limit: 1 }),
     ];
     const [a, b, c] = await Promise.allSettled(calls);
@@ -503,7 +502,7 @@ export default function ExamScheduleSections({ exam, linkType, notify }) {
     setThr(c.status === 'fulfilled' ? c.value.data : null);
     const bad = [a, b, c].find((x) => x.status === 'rejected');
     if (bad) setLoadErr(describeError(bad.reason, 'Could not load the schedule status'));
-  }, [examId, isRtsp]);
+  }, [examId]);
   useEffect(() => { refresh(); }, [refresh]);
 
   const slotPick = useSheetPicker((file) => setPreview({ kind: 'slots', file }));
@@ -562,11 +561,10 @@ export default function ExamScheduleSections({ exam, linkType, notify }) {
         </Box>
       </Box>
 
-      {/* 2. centre-wise schedule (RTSP only) */}
-      {isRtsp ? (
-        <>
+      {/* 2. centre-wise schedule (RTSP + HLS) */}
+      <>
           <Heading right={<Button onClick={() => dl(examsAPI.centreScheduleTemplate(), 'centre_schedule_template.xlsx')} startIcon={<Download sx={{ fontSize: 16 }} />} sx={{ color: BLUE, fontWeight: 700, fontSize: '0.75rem', textTransform: 'none' }}>Template</Button>}>
-            CENTRE-WISE SCHEDULE (RTSP)
+            CENTRE-WISE SCHEDULE
           </Heading>
           <Box sx={cardSx}>
             <Typography sx={{ fontSize: '0.8rem', color: MUTED, mb: 1.2 }}>
@@ -587,10 +585,7 @@ export default function ExamScheduleSections({ exam, linkType, notify }) {
               <Alert severity="warning" sx={{ mt: 1.5 }}>{centres.cameras_not_in_schedule} TC code(s) with cameras are not in this schedule and will not run in any shift.</Alert>
             )}
           </Box>
-        </>
-      ) : (
-        <Alert severity="info" sx={{ mt: 2 }}>The centre-wise schedule applies to RTSP exams only (HLS cameras already carry their own date and shift).</Alert>
-      )}
+      </>
 
       {/* 3. server room thresholds */}
       <Heading right={<Button onClick={() => dl(examsAPI.thresholdTemplate(), 'server_room_threshold_template.xlsx')} startIcon={<Download sx={{ fontSize: 16 }} />} sx={{ color: BLUE, fontWeight: 700, fontSize: '0.75rem', textTransform: 'none' }}>Template</Button>}>

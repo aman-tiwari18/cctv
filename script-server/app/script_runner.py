@@ -201,6 +201,10 @@ class ScriptRunner:
         named_log.info(header)
 
         timeout_s = _compute_timeout(execution)
+        if execution.get("_session_file"):
+            # Shift session: the pipeline ends itself after the last window in its session file
+            # (analytics that join later extend it); this is only a safety cap.
+            timeout_s = float(os.environ.get("SESSION_SAFETY_TIMEOUT_S", str(16 * 3600)))
         if timeout_s:
             named_log.info(f"  Timeout  : {timeout_s:.0f}s ({timeout_s/60:.1f} min)")
         named_log.info(f"  Pipeline : {full_script_path.relative_to(self.scripts_dir)}")
@@ -240,6 +244,11 @@ class ScriptRunner:
         env["LINK_TYPE"] = str(meta.get("link_type") or execution.get("link_type") or "")
         env["CAMERA_NAME"] = str(meta.get("camera_name") or execution.get("camera_name") or "")
         env["CAMERA_CLASSIFICATION"] = str(meta.get("classification") or execution.get("classification") or "")
+
+        # Shift session (poller): the running pipeline reads its analytics/windows from this file.
+        if execution.get("_session_file"):
+            env["SESSION_FILE"] = execution["_session_file"]
+            env["SHIFT_SESSION"] = "1"
 
         # Pass custom frequency as COOLDOWN_TIME (seconds) so workers override their
         # default. For a single-analytic execution this is the only cooldown the
@@ -304,7 +313,11 @@ class ScriptRunner:
             env=env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            start_new_session=True
+            start_new_session=True,
+            # 16 Oct 2026: tqdm progress bars rewrite one line with "\r" and no newline; on a long
+            # classification (1,180 cameras) that "line" passed the default 64 KB limit, readline()
+            # raised, and the run was marked FAILED while the script kept going.
+            limit=8 * 1024 * 1024,
         )
 
         # Register so cancel() can reach this process. For a grouped detection run
@@ -319,7 +332,13 @@ class ScriptRunner:
             """Read output line by line, writing to both named log and log_manager."""
             data_chunks = []
             while True:
-                line = await stream.readline()
+                try:
+                    line = await stream.readline()
+                except ValueError:
+                    # Over-long line (no newline within the limit): asyncio already dropped it from
+                    # the buffer; skip it instead of failing the run.
+                    logger.warning(f"Script {execution_id}: skipped an over-long output line")
+                    continue
                 if not line:
                     break
                 text = line.decode("utf-8", errors="replace").rstrip()

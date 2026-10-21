@@ -17,6 +17,36 @@ IS_MAIN_WORKER = WORKER_ID in ("worker-0", "main")
 # master_pipeline process per worker (shared YOLO, fan-out to every analytic)
 # instead of one process per analytic. Set GROUP_DETECTION_ANALYTICS=0 to revert.
 GROUP_DETECTION_ANALYTICS = os.environ.get("GROUP_DETECTION_ANALYTICS", "1") == "1"
+# Shift session (branch new_architectured_stream, docs/SHARED_STREAM_SESSION_PLAN.md): RTSP
+# detection analytics of one (exam, shift, day) run as ONE session that keeps every camera's
+# stream open; each analytic keeps its own window (written to a session file the running pipeline
+# re-reads), analytics that appear later JOIN the session (no relaunch), and each analytic's
+# status goes RUNNING / COMPLETED at its own start / end. SHIFT_SESSION=0 = window-key grouping.
+SHIFT_SESSION = os.environ.get("SHIFT_SESSION", "0") == "1"
+SESSION_DIR = os.environ.get("SESSION_DIR", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                                         "scripts", "logs", "sessions"))
+
+
+def _to_epoch(value):
+    """Backend datetime (naive = IST, or ISO with zone / Z) -> epoch seconds, or None."""
+    if not value:
+        return None
+    try:
+        v = str(value)
+        if v.endswith("Z"):
+            v = v[:-1] + "+00:00"
+        dt = datetime.fromisoformat(v)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=IST)
+        return dt.timestamp()
+    except Exception:
+        return None
+
+
+def _iso_ist(epoch):
+    return datetime.fromtimestamp(epoch, IST).replace(tzinfo=None).isoformat(timespec="seconds")
+
+
 
 class Poller:
     def __init__(self):
@@ -46,6 +76,8 @@ class Poller:
         self.group_members = {}      # group_key -> [member execution_ids] (grouped detection)
         self.group_analytics = {}    # group_key -> set(analytics) currently launched
         self.group_relaunching = set()  # group_keys mid-relaunch (membership grew)
+        # Shift sessions: key -> {"members": {id: {...}}, "file": path, "status": {id: "RUNNING"|"COMPLETED"}}
+        self.sessions = {}
         self._poll_task = None
 
         # --- Crash backoff tracking (merged from worker poller) ---
@@ -101,12 +133,28 @@ class Poller:
             sched = a.get("scheduled_at") or meta.get("scheduled_at") or ""
             end   = (a.get("end_at") or meta.get("end_at")
                      or a.get("custom_end_time") or a.get("shift_end_time") or "")
-            key   = f"grp-{exam}-{shift}-{link}-{sched}-{end}"
+            session = SHIFT_SESSION and link == "RTSP"
+            if session:
+                day = str(meta.get("assignment_date") or a.get("assignment_date") or sched)[:10]
+                key = f"ses-{exam}-{shift}-{day}"
+            else:
+                key = f"grp-{exam}-{shift}-{link}-{sched}-{end}"
             g = groups.get(key)
             if g is None:
                 g = groups[key] = {"rep": a, "members": [], "analytics": [], "freq_by_script": {},
-                                   "cls_by_script": {}}
+                                   "cls_by_script": {}, "session": session, "windows": {}}
             g["members"].append(str(a["id"]))
+            if session:
+                # The session must outlive the shift's later analytics (they are fetched only a
+                # few minutes before they start), so it runs at least to the shift's end.
+                sh_end = a.get("shift_end_time") or meta.get("shift_end_time")
+                if sh_end and len(str(day)) == 10:
+                    g["shift_end"] = max(g.get("shift_end") or 0, _to_epoch(f"{day}T{sh_end}") or 0)
+                g["windows"][str(a["id"])] = {
+                    "code": code, "start": _to_epoch(sched), "end": _to_epoch(end),
+                    "freq": meta.get("custom_frequency_minutes") or a.get("custom_frequency_minutes"),
+                    "cls": meta.get("camera_classifications") or a.get("camera_classifications"),
+                }
             if code not in g["analytics"]:
                 g["analytics"].append(code)
             # Each merged analytic keeps its OWN DB-configured frequency (the
@@ -126,7 +174,7 @@ class Poller:
                 g["cls_by_script"][code] = cls
         combined = []
         for key, g in groups.items():
-            if len(g["members"]) == 1:
+            if len(g["members"]) == 1 and not g["session"]:
                 combined.append(g["rep"])          # nothing to merge
                 continue
             rep = dict(g["rep"])                    # shallow copy — keeps exam/shift/link/scheduled_at/metadata
@@ -135,9 +183,120 @@ class Poller:
             rep["_analytics"]  = g["analytics"]
             rep["_freq_by_script"] = g["freq_by_script"]
             rep["_cls_by_script"]  = g["cls_by_script"]
+            if g["session"]:
+                rep["_session"] = g["windows"]
+                starts = [w["start"] for w in g["windows"].values() if w["start"]]
+                ends = [w["end"] for w in g["windows"].values() if w["end"]]
+                if starts:
+                    rep["scheduled_at"] = _iso_ist(min(starts))
+                if g.get("shift_end"):
+                    ends.append(g["shift_end"])
+                if ends:
+                    rep["end_at"] = _iso_ist(max(ends))
+                rep["_shift_end"] = g.get("shift_end")
             combined.append(rep)
             logger.info(f"[group] {key}: {len(g['members'])} analytics → one master_pipeline ({g['analytics']})")
         return passthrough + combined
+
+    # ── shift sessions ────────────────────────────────────────────────────
+    def _session_write(self, key, rec):
+        """Rewrite the session file from rec["members"] (the pipeline re-reads it every few seconds)."""
+        os.makedirs(SESSION_DIR, exist_ok=True)
+        rec["file"] = os.path.join(SESSION_DIR, f"{key}.json")
+        analytics = {}
+        import json as _json
+        for m in rec["members"].values():
+            name = script_runner.ANALYTICS_ARG_OVERRIDES.get(m["code"], m["code"])
+            if not name or not m.get("start") or not m.get("end"):
+                continue
+            cls = m.get("cls")
+            if isinstance(cls, str):
+                try:
+                    cls = _json.loads(cls)
+                except Exception:
+                    cls = [cls]
+            cls = [str(c).strip() for c in (cls or []) if str(c).strip()] or None
+            # one entry per member window: the same analytic can run with different camera
+            # types / frequencies in different windows (e.g. Crowd on Lab AND on Outside)
+            a = analytics.setdefault(name, {"windows": []})
+            a["windows"].append({"start": m["start"], "end": m["end"], "freq": m.get("freq"), "cls": cls})
+        tmp = rec["file"] + ".tmp"
+        with open(tmp, "w") as f:
+            _json.dump({"session": key, "updated": time.time(), "analytics": analytics}, f, indent=1)
+        os.replace(tmp, rec["file"])
+
+    async def _session_prune(self, client):
+        """Drop session windows whose assignment was deleted, cancelled or deactivated.
+
+        15 Oct 2026: assignments of a live shift were deleted and re-created; their old windows stayed
+        in rec["members"] for the life of the poller, one of them (05:24 -> next day 00:00) kept the
+        intruder analytic running for 5 hours and made the poller relaunch the session after it was
+        stopped. A member is dropped only on an explicit answer from the backend (404, CANCELLED /
+        STOPPED, or is_active = 0); a failed or timed-out request never drops anything.
+        """
+        now = time.time()
+        if now - getattr(self, "_last_session_prune", 0) < 60:
+            return
+        self._last_session_prune = now
+        for key, rec in list(self.sessions.items()):
+            dropped = []
+            for mid in list(rec["members"].keys()):
+                if not str(mid).isdigit():
+                    continue
+                try:
+                    r = await client.get(f"{self.backend_url}/executions/{mid}",
+                                         headers={"X-API-Key": self.api_key}, timeout=10)
+                except Exception:
+                    continue
+                if r.status_code == 404:
+                    dropped.append((mid, "deleted"))
+                elif r.status_code == 200:
+                    data = (r.json() or {}).get("data") or {}
+                    status = str(data.get("status", "")).upper()
+                    if status in ("CANCELLED", "CANCELED", "STOPPED"):
+                        dropped.append((mid, status.lower()))
+                    elif data.get("is_active") in (0, False, "0"):
+                        dropped.append((mid, "inactive"))
+            if dropped:
+                for mid, why in dropped:
+                    m = rec["members"].pop(mid, None) or {}
+                    logger.warning(f"[session] {key}: dropped window of assignment {mid} ({why}) "
+                                   f"{m.get('code')} start={m.get('start')} end={m.get('end')}")
+                try:
+                    self._session_write(key, rec)
+                except Exception as e:
+                    logger.error(f"[session] {key}: could not rewrite session file after pruning: {e}")
+
+    def _session_merge(self, assignment):
+        """Merge this poll's members into the session record and rewrite its file. Returns the record."""
+        key = str(assignment["id"])
+        rec = self.sessions.setdefault(key, {"members": {}, "status": {}, "file": None})
+        rec["members"].update(assignment.get("_session") or {})
+        self._session_write(key, rec)
+        assignment["_session_file"] = rec["file"]
+        assignment["_member_ids"] = list(rec["members"].keys())
+        # the run lasts from the first window's start to the last window's end
+        rec["shift_end"] = max(rec.get("shift_end") or 0, assignment.get("_shift_end") or 0)
+        ends = [m["end"] for m in rec["members"].values() if m.get("end")] + ([rec["shift_end"]] if rec["shift_end"] else [])
+        if ends:
+            assignment["end_at"] = _iso_ist(max(ends))
+        return rec
+
+    async def _session_status_tick(self):
+        """Each member of a running session: RUNNING at its own start, COMPLETED at its own end."""
+        if not (SHIFT_SESSION and IS_MAIN_WORKER):
+            return
+        now = time.time()
+        for key, rec in list(self.sessions.items()):
+            running = key in self.running_scripts
+            for mid, m in rec["members"].items():
+                st = rec["status"].get(mid)
+                if st != "COMPLETED" and m.get("end") and now >= m["end"] and (running or st == "RUNNING"):
+                    await self.update_assignment_status(mid, "COMPLETED", {"result_data": {"note": "analytic window ended (shift session)"}})
+                    rec["status"][mid] = "COMPLETED"
+                elif st is None and running and m.get("start") and m["start"] <= now < (m.get("end") or now + 1):
+                    await self.update_assignment_status(mid, "RUNNING")
+                    rec["status"][mid] = "RUNNING"
 
     def _status_targets(self, assignment):
         """The real backend execution_ids whose status this job represents — the
@@ -145,6 +304,16 @@ class Poller:
         return assignment.get("_member_ids") or [str(assignment.get("id"))]
 
     async def _update_status_all(self, assignment, status, data=None):
+        if assignment.get("_session") is not None and status == "RUNNING":
+            await self._session_status_tick()       # members go RUNNING at their own start
+            return
+        if assignment.get("_session") is not None and status == "COMPLETED":
+            rec = self.sessions.get(str(assignment["id"])) or {}
+            for mid in (rec.get("members") or {}):
+                if (rec.get("status") or {}).get(mid) != "COMPLETED":
+                    await self.update_assignment_status(mid, status, data)
+                    rec.setdefault("status", {})[mid] = status
+            return
         for tid in self._status_targets(assignment):
             await self.update_assignment_status(tid, status, data)
 
@@ -244,6 +413,7 @@ class Poller:
             async with httpx.AsyncClient() as client:
                 # 0. Enforce cancellations on anything we're running locally.
                 await self._enforce_cancellations(client)
+                await self._session_prune(client)
 
                 # 1. Fetch PENDING tasks
                 pending_response = await client.get(
@@ -297,6 +467,7 @@ class Poller:
                 if all_data:
                     logger.info(f"Fetched {len(all_data)} assignment(s) (Pending: {len(pending_data)}, Running: {len(running_data)})")
                     # Capture-once: merge a shift's detection analytics into one job/worker.
+                    await self._session_status_tick()
                     for assignment in self._group_detection_assignments(all_data):
                         # Filter assignments based on camera distribution
                         if should_process_camera(assignment):
@@ -320,6 +491,15 @@ class Poller:
         # Grouped detection: if more analytics for this (exam,shift,link) appeared
         # after the group was already queued/running, relaunch with the FULL set —
         # otherwise the late analytics never run (each later poll just "skips").
+        if assignment.get("_session") is not None:
+            before = set((self.sessions.get(assignment_id) or {}).get("members", {}).keys())
+            self._session_merge(assignment)
+            if assignment_id in self.running_scripts or assignment_id in self.scheduled_scripts:
+                added = set(assignment["_session"]) - before
+                if added:
+                    logger.info(f"[session] {assignment_id}: {len(added)} analytic(s) joined the running session "
+                                f"({sorted({assignment['_session'][i]['code'] for i in added})}) — no restart")
+                return
         if grouped and (assignment_id in self.running_scripts or assignment_id in self.scheduled_scripts):
             current   = set(grouped)
             committed = self.group_analytics.get(assignment_id, set())

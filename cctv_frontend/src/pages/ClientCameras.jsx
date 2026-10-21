@@ -28,6 +28,10 @@ import {
   DialogActions,
   useMediaQuery,
   useTheme,
+  Menu,
+  Drawer,
+  ListItemText,
+  Divider,
 } from '@mui/material';
 import {
   Search,
@@ -35,6 +39,13 @@ import {
   Visibility as VisibilityIcon,
   CheckCircle as CheckCircleIcon,
   ImageNotSupported as ImageNotSupportedIcon,
+  MoreVert as MoreVertIcon,
+  InfoOutlined as InfoOutlinedIcon,
+  EventBusy as EventBusyIcon,
+  KeyboardArrowDown as KeyboardArrowDownIcon,
+  ErrorOutline as ErrorOutlineIcon,
+  Close as CloseIcon,
+  Videocam as VideocamIcon,
 } from '@mui/icons-material';
 import { useSearchParams } from 'react-router-dom';
 import { examsAPI, camerasAPI, clientDashboardAPI, executionsAPI } from '../services/api';
@@ -117,6 +128,29 @@ const parseDDMMYYYYToISO = (value) => {
   return `${yyyy}-${mm}-${dd}`;
 };
 
+
+/* Accent colours per link type (same palette as the RTSP / HLS chips): HLS = app blue, RTSP = periwinkle + navy text. */
+const TYPE_THEME = {
+  hls:  { solid: '#3c81f6', onSolid: '#ffffff', solidHover: '#2f6fdb', text: '#1d4ed8', border: '#3c81f6', soft: '#eff6ff' },
+  rtsp: { solid: '#a4b5fe', onSolid: '#384b91', solidHover: '#93a6fd', text: '#384b91', border: '#a4b5fe', soft: '#eef0ff' },
+};
+
+/* One row of the Download / template menus: coloured icon tile, title + hint, count pill. */
+const DlItem = ({ icon, color, bg, title, sub, count, onClick, disabled }) => (
+  <MenuItem onClick={onClick} disabled={disabled} sx={{ gap: 1.5, py: 1, px: 1.25, mx: 0.75, my: 0.25, borderRadius: 1.75, alignItems: 'center', '&:hover': { bgcolor: '#f1f5f9' } }}>
+    <Box sx={{ width: 36, height: 36, borderRadius: '10px', bgcolor: bg, color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{icon}</Box>
+    <Box sx={{ flex: 1, minWidth: 0 }}>
+      <Typography sx={{ fontSize: '0.88rem', fontWeight: 600, color: '#0f172a', lineHeight: 1.25 }}>{title}</Typography>
+      {sub && <Typography sx={{ fontSize: '0.72rem', color: '#64748b', lineHeight: 1.3 }}>{sub}</Typography>}
+    </Box>
+    {count != null && (
+      <Box sx={{ px: 1.1, py: 0.2, borderRadius: '999px', bgcolor: bg, color, fontSize: '0.78rem', fontWeight: 700 }}>{Number(count).toLocaleString()}</Box>
+    )}
+  </MenuItem>
+);
+const MENU_PAPER = { sx: { mt: 0.75, borderRadius: 3, minWidth: { xs: 250, sm: 300 }, maxWidth: 'calc(100vw - 24px)', py: 0.75, boxShadow: '0 16px 40px rgba(15,23,42,0.18)', border: '1px solid #e2e8f0' } };
+const MENU_HEAD = { px: 2.25, pt: 0.75, pb: 0.5, fontSize: '0.66rem', fontWeight: 700, letterSpacing: '0.09em', color: '#94a3b8' };
+
 const ClientCameras = () => {
   const theme = useTheme();
   const isSmDown = useMediaQuery(theme.breakpoints.down('sm'));
@@ -144,6 +178,11 @@ const ClientCameras = () => {
   const [camFilterExamDate, setCamFilterExamDate] = useState('');
   // RTSP: what the exam schedule did to the list for the chosen date + shift (null = nothing chosen)
   const [camScheduleInfo, setCamScheduleInfo] = useState(null);
+  const [camDayInfo, setCamDayInfo] = useState(null);   // is the chosen date an exam day
+  const [camServerStats, setCamServerStats] = useState(null);      // RTSP: not-accessible cameras per camview server
+  const [dlAnchor, setDlAnchor] = useState(null);                 // Download Cameras menu
+  const [tplAnchor, setTplAnchor] = useState(null);               // template (3-dot) menu
+  const [dvOpen, setDvOpen] = useState(false);                    // DV details side panel
   // exam whose default date was already applied (so clearing the date by hand is respected)
   const defaultDateFor = useRef(null);
   const [camFilterRegion, setCamFilterRegion] = useState('');
@@ -203,6 +242,8 @@ const ClientCameras = () => {
       setCamExamLinkType(res.data.linkType);
       setCamStatusCounts(res.data.statusCounts || { accessible: 0, notAccessible: 0, unknown: 0 });
       setCamScheduleInfo(res.data.schedule || null);
+      setCamDayInfo(res.data.day || null);
+      setCamServerStats(res.data.serverStats || null);
     } catch (e) { console.error(e); }
     finally { setCamLoading(false); }
   }, [selectedCamExamId, camPage, camRowsPerPage, camFilterShiftId, camFilterExamDate, camFilterRegion, camDebouncedSearch]);
@@ -255,6 +296,7 @@ const ClientCameras = () => {
 
   const selectedCamExamData = camExams.find(e => String(e.id) === String(selectedCamExamId));
   const isHLS = camExamLinkType === 'HLS' || selectedCamExamData?.link_type?.toUpperCase() === 'HLS';
+  const tc = isHLS ? TYPE_THEME.hls : TYPE_THEME.rtsp;   // accent colours of this exam's link type
   const camShifts = selectedCamExamData?.examShifts || [];
 
   /* Date filter: limited to the exam's dates, and preselected (same rule as the admin Cameras tab).
@@ -425,13 +467,15 @@ const ClientCameras = () => {
           </Box>
         ) : (
           <>
-            <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'stretch', md: 'flex-start' }, mb: 2, flexWrap: 'wrap', gap: 2 }}>
-              <Box>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5, flexWrap: 'wrap' }}>
-                  <Typography variant="h6" sx={{ fontWeight: 600, color: '#0f172a', fontSize: { xs: '1.15rem', sm: '1.5rem' } }}>
-                    {selectedCamExamData ? `${selectedCamExamData.exam_name} (${selectedCamExamData.exam_body})` : 'Cameras'}
-                  </Typography>
-                  {selectedCamExamData && <Chip label={camExamLinkType || selectedCamExamData.link_type} size="small" sx={{ fontWeight: 700, fontSize: '0.7rem', height: 20, borderRadius: '6px', bgcolor: isHLS ? '#3b82f6' : '#a4b5fe', color: isHLS ? '#fff' : '#384b91' }} />}
+            <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'stretch', md: 'center' }, mb: 2, flexWrap: { xs: 'wrap', md: 'nowrap' }, gap: 2 }}>
+              <Box sx={{ minWidth: 0, flex: { md: '1 1 0' } }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5, flexWrap: 'nowrap', minWidth: 0 }}>
+                  <Tooltip title={selectedCamExamData ? `${selectedCamExamData.exam_name} (${selectedCamExamData.exam_body})` : ''} arrow placement="bottom-start">
+                    <Typography variant="h6" sx={{ fontWeight: 600, color: '#0f172a', fontSize: { xs: '1.15rem', sm: '1.5rem' }, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {selectedCamExamData ? `${selectedCamExamData.exam_name} (${selectedCamExamData.exam_body})` : 'Cameras'}
+                    </Typography>
+                  </Tooltip>
+                  {selectedCamExamData && <Chip label={camExamLinkType || selectedCamExamData.link_type} size="small" sx={{ flexShrink: 0, fontWeight: 700, fontSize: '0.7rem', height: 20, borderRadius: '6px', bgcolor: isHLS ? '#3b82f6' : '#a4b5fe', color: isHLS ? '#fff' : '#384b91' }} />}
                 </Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
                   <Typography sx={{ fontSize: '0.9rem', color: '#64748b' }}>{camTotal} camera{camTotal !== 1 ? 's' : ''} • {isHLS ? 'HLS streams' : 'RTSP streams'}</Typography>
@@ -467,11 +511,53 @@ const ClientCameras = () => {
                 </Box>
               </Box>
 
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap', flexShrink: 0, width: { xs: '100%', md: 'auto' } }}>
+              {/* Far-right: Download Cameras / template menu */}
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, flexWrap: 'wrap', flexShrink: 0, width: { xs: '100%', md: 'auto' } }}>
+                <Button variant="contained" disableElevation startIcon={<Download />} endIcon={<KeyboardArrowDownIcon />}
+                  onClick={(e) => setDlAnchor(e.currentTarget)}
+                  sx={{ height: 40, flex: { xs: '1 1 auto', sm: '0 0 auto' }, textTransform: 'none', fontWeight: 600, borderRadius: 2 }}>
+                  Download Cameras
+                </Button>
+                <Tooltip title="Download link templates">
+                  <IconButton onClick={(e) => setTplAnchor(e.currentTarget)}
+                    sx={{ width: 40, height: 40, borderRadius: 2, border: `1px solid ${tc.border}`, color: tc.text, '&:hover': { bgcolor: tc.soft } }}>
+                    <MoreVertIcon />
+                  </IconButton>
+                </Tooltip>
+                <Menu anchorEl={dlAnchor} open={Boolean(dlAnchor)} onClose={() => setDlAnchor(null)}
+                  anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }} transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+                  PaperProps={MENU_PAPER} MenuListProps={{ sx: { py: 0 } }}>
+                  <Typography sx={MENU_HEAD}>DOWNLOAD (EXCEL) · SELECTED DATE / SHIFT</Typography>
+                  <DlItem icon={<CheckCircleIcon sx={{ fontSize: 20 }} />} color={tc.text} bg={tc.soft}
+                    title="Accessible" sub="Reachable in the last check" count={camStatusCounts.accessible}
+                    disabled={!camStatusCounts.accessible} onClick={() => { setDlAnchor(null); downloadStatusSheet('accessible'); }} />
+                  <DlItem icon={<ErrorOutlineIcon sx={{ fontSize: 20 }} />} color="#dc2626" bg="#fef2f2"
+                    title="Not Accessible" sub="Cameras that could not be reached" count={camStatusCounts.notAccessible}
+                    disabled={!camStatusCounts.notAccessible} onClick={() => { setDlAnchor(null); downloadStatusSheet('notAccessible'); }} />
+                  <DlItem icon={<VideocamIcon sx={{ fontSize: 20 }} />} color="#16a34a" bg="#f0fdf4"
+                    title="Total" sub={camStatusCounts.unknown > 0 ? `Incl. ${camStatusCounts.unknown.toLocaleString()} not checked yet` : "Every camera in this view"} count={camStatusCounts.accessible + camStatusCounts.notAccessible + camStatusCounts.unknown}
+                    disabled={!(camStatusCounts.accessible + camStatusCounts.notAccessible + camStatusCounts.unknown)} onClick={() => { setDlAnchor(null); downloadStatusSheet('total'); }} />
+                </Menu>
+                <Menu anchorEl={tplAnchor} open={Boolean(tplAnchor)} onClose={() => setTplAnchor(null)}
+                  anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }} transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+                  PaperProps={MENU_PAPER} MenuListProps={{ sx: { py: 0 } }}>
+                  <Typography sx={MENU_HEAD}>LINK TEMPLATES</Typography>
+                  {(isHLS ? ['hls', 'rtsp'] : ['rtsp', 'hls']).map((t) => (
+                    <DlItem key={t} icon={<Download sx={{ fontSize: 20 }} />}
+                      color={TYPE_THEME[t].text} bg={TYPE_THEME[t].soft}
+                      title={`${t.toUpperCase()} template`} sub={(t === 'hls') === isHLS ? "This exam's link type" : 'Excel format for uploading links'}
+                      onClick={() => { setTplAnchor(null); handleDownloadTemplate(t); }} />
+                  ))}
+                </Menu>
+              </Box>
+            </Box>
+
+            {/* Filters row */}
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap', mb: 2 }}>
                 <TextField
                   size="small" placeholder="Search center, state..." value={camSearchQuery} onChange={(e) => setCamSearchQuery(e.target.value)}
                   InputProps={{ startAdornment: <InputAdornment position="start"><Search sx={{ fontSize: 18, color: '#94a3b8' }} /></InputAdornment>, endAdornment: camSearchQuery !== camDebouncedSearch ? <InputAdornment position="end"><CircularProgress size={16} sx={{ color: '#94a3b8' }} /></InputAdornment> : null, sx: { borderRadius: '8px', bgcolor: '#f8fafc', height: 40, fontSize: 14, '& fieldset': { border: '1px solid #e2e8f0' } } }}
-                  sx={{ flex: { xs: '1 1 100%', sm: '0 0 auto' }, minWidth: { xs: '100%', sm: 260 }, maxWidth: { xs: '100%', sm: 300 } }}
+                  sx={{ flex: { xs: '1 1 100%', sm: '1 1 260px' }, minWidth: { xs: '100%', sm: 260 }, maxWidth: { xs: '100%', sm: 420 } }}
                 />
                 {camRegionOptions.length > 0 && (
                   <FormControl size="small" sx={{ flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' }, minWidth: { sm: 130 } }}>
@@ -508,83 +594,121 @@ const ClientCameras = () => {
                   </Tooltip>
                 )}
 
-                <Tooltip title="Download HLS Template">
-                  <Button variant="outlined" size="small" startIcon={<Download />}
-                    onClick={() => handleDownloadTemplate('hls')}
-                    sx={{ flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' }, height: 40, borderColor: '#3b82f6', color: '#3b82f6', '&:hover': { bgcolor: '#eff6ff' }, textTransform: 'none', fontWeight: 600, whiteSpace: 'nowrap' }}>
-                    HLS
-                  </Button>
-                </Tooltip>
-                <Tooltip title="Download RTSP Template">
-                  <Button variant="outlined" size="small" startIcon={<Download />}
-                    onClick={() => handleDownloadTemplate('rtsp')}
-                    sx={{ flex: { xs: '1 1 calc(50% - 6px)', sm: '0 0 auto' }, height: 40, borderColor: '#6366f1', color: '#6366f1', '&:hover': { bgcolor: '#eef2ff' }, textTransform: 'none', fontWeight: 600, whiteSpace: 'nowrap' }}>
-                    RTSP
-                  </Button>
-                </Tooltip>
-              </Box>
             </Box>
 
-            {!isHLS && camFilterExamDate && !camFilterShiftId && (
-              <Alert severity="info" sx={{ mb: 2 }}>Pick a shift to see only the centres scheduled on this date.</Alert>
-            )}
-            {!isHLS && camScheduleInfo && (
-              <Alert severity={camScheduleInfo.applied && !camScheduleInfo.exam_runs ? 'warning' : 'info'} sx={{ mb: 2 }}>
-                {!camScheduleInfo.applied
-                  ? 'No centre schedule is set for this exam, so every camera is shown.'
-                  : !camScheduleInfo.exam_runs
-                    ? `The exam does not run on ${camScheduleInfo.date} in this shift — no cameras are scheduled.`
-                    : camScheduleInfo.centres != null
-                      ? `Showing only the cameras of the ${camScheduleInfo.centres} centres scheduled on ${camScheduleInfo.date} in this shift.`
-                      : 'Every centre runs on this date and shift.'}
-              </Alert>
-            )}
-            {cameras.length > 0 && cameras.some(cam => cam.status !== null && cam.status !== undefined) && (
-              <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap', justifyContent: { xs: 'flex-start', sm: 'flex-end' } }}>
-                <Button
-                  variant="outlined"
-                  size="small"
-                  onClick={() => downloadStatusSheet('accessible')}
-                  startIcon={<Download sx={{ fontSize: 16 }} />}
-                  sx={{ flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' }, height: 32, px: 2, borderRadius: 2, borderColor: '#3b82f6', color: '#3b82f6', textTransform: 'none', whiteSpace: 'nowrap', '&:hover': { bgcolor: '#eff6ff' } }}
-                >
-                  <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, mr: 1, whiteSpace: 'nowrap' }}>Accessible</Typography>
-                  <Typography sx={{ fontSize: '0.75rem', fontWeight: 700 }}>{camStatusCounts.accessible}</Typography>
-                </Button>
-
-                <Button
-                  variant="outlined"
-                  size="small"
-                  onClick={() => downloadStatusSheet('notAccessible')}
-                  startIcon={<Download sx={{ fontSize: 16 }} />}
-                  sx={{ flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' }, height: 32, px: 2, borderRadius: 2, borderColor: '#333', color: '#333', textTransform: 'none', whiteSpace: 'nowrap', '&:hover': { bgcolor: '#f3f4f6' } }}
-                >
-                  <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, mr: 1, whiteSpace: 'nowrap' }}>Not Accessible</Typography>
-                  <Typography sx={{ fontSize: '0.75rem', fontWeight: 700 }}>{camStatusCounts.notAccessible}</Typography>
-                </Button>
-
-                <Button
-                  variant="outlined"
-                  size="small"
-                  onClick={() => downloadStatusSheet('total')}
-                  startIcon={<Download sx={{ fontSize: 16 }} />}
-                  sx={{ flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' }, height: 32, px: 2, borderRadius: 2, borderColor: '#16a34a', color: '#16a34a', textTransform: 'none', whiteSpace: 'nowrap', '&:hover': { bgcolor: '#f0fdf4' } }}
-                >
-                  <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, mr: 1, whiteSpace: 'nowrap' }}>Total</Typography>
-                  <Typography sx={{ fontSize: '0.75rem', fontWeight: 700 }}>{camStatusCounts.accessible + camStatusCounts.notAccessible + camStatusCounts.unknown}</Typography>
-                </Button>
-
-                {camStatusCounts.unknown > 0 && (
-                  <Box sx={{ flex: { xs: '1 1 calc(50% - 8px)', sm: '0 0 auto' }, height: 32, px: 2, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1, borderRadius: 2, border: '1px solid #e5e7eb', bgcolor: '#f9fafb', whiteSpace: 'nowrap' }}>
-                    <Typography sx={{ fontSize: '0.75rem', color: '#4b5563', fontWeight: 600, whiteSpace: 'nowrap' }}>Unknown</Typography>
-                    <Typography sx={{ fontSize: '0.75rem', fontWeight: 600, color: '#6b7280' }}>{camStatusCounts.unknown}</Typography>
+            {/* Info row: schedule note (left) + not-accessible cameras per DV (right, RTSP only; HLS shows just the schedule note) */}
+            {(() => {
+              const needShift = camFilterExamDate && !camFilterShiftId;
+              const fmtDay = (d) => { try { return format(new Date(d), 'dd MMM yyyy'); } catch { return d; } };
+              let left = null, leftTip = '', warn = false;
+              if (camFilterShiftId && !camFilterExamDate) {
+                left = 'Pick a date to see the total centres scheduled in this shift';
+                leftTip = 'Total centres is shown for a date + shift. Choose an exam date as well.';
+              } else if (needShift) {
+                left = 'Pick a shift to see only the centres scheduled on this date';
+                leftTip = 'Choose a shift to limit the list to the centres scheduled on this date and shift.';
+              } else if (camScheduleInfo) {
+                if (!camScheduleInfo.applied) {
+                  left = 'No centre schedule is set - every camera is shown';
+                  leftTip = 'No centre schedule is set for this exam, so every camera is shown.';
+                } else if (!camScheduleInfo.exam_runs) {
+                  left = `Exam does not run on ${fmtDay(camScheduleInfo.date)} in this shift`; warn = true;
+                  leftTip = `The exam does not run on ${camScheduleInfo.date} in this shift — no cameras are scheduled.`;
+                } else if (camScheduleInfo.centres != null) {
+                  left = `Total centres: ${camScheduleInfo.centres} (${fmtDay(camScheduleInfo.date)})`;
+                  leftTip = `Showing only the cameras of the ${camScheduleInfo.centres} centres scheduled on ${camScheduleInfo.date} in this shift.`;
+                } else {
+                  left = 'Every centre runs on this date and shift'; leftTip = left;
+                }
+              }
+              const nDv = camServerStats?.servers?.length || 0;
+              const nNot = camServerStats?.totalNotAccessible || 0;
+              const allOk = nNot === 0 && camStatusCounts.accessible > 0 && camStatusCounts.notAccessible === 0 && camStatusCounts.unknown === 0;
+              const unchecked = nNot === 0 && !allOk && (camStatusCounts.accessible + camStatusCounts.notAccessible + camStatusCounts.unknown) > 0;
+              const showRight = !isHLS && (nNot > 0 || allOk || unchecked);
+              if (!left && !showRight) return null;
+              return (
+                <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap', alignItems: 'stretch' }}>
+                  {left && (
+                    <Box sx={{ flex: '1 1 260px', minWidth: 0, display: 'flex', alignItems: 'center', gap: 1.25, px: 2, py: 1.25, borderRadius: 2,
+                      bgcolor: warn ? '#fffbeb' : '#eff6ff', color: warn ? '#92400e' : '#1e3a8a' }}>
+                      <Tooltip title={leftTip} arrow placement="bottom-start">
+                        <InfoOutlinedIcon sx={{ fontSize: 22, color: warn ? '#d97706' : '#2563eb', cursor: 'help' }} />
+                      </Tooltip>
+                      <Typography sx={{ fontSize: '0.92rem', fontWeight: 600, minWidth: 0, overflowWrap: 'anywhere' }}>{left}</Typography>
+                    </Box>
+                  )}
+                  {showRight && (
+                  <Box sx={{ flex: '1 1 260px', minWidth: 0, display: 'flex', alignItems: 'center', gap: 1.25, px: 2, py: 1.25, borderRadius: 2,
+                    bgcolor: nNot > 0 ? '#fef2f2' : allOk ? '#f0fdf4' : '#f8fafc', color: nNot > 0 ? '#7f1d1d' : allOk ? '#14532d' : '#475569' }}>
+                    {nNot > 0 ? (
+                      <>
+                        <Tooltip title="Show the not-accessible cameras per DV (camview server)" arrow>
+                          <IconButton size="small" onClick={() => setDvOpen(true)} sx={{ p: 0 }}>
+                            <ErrorOutlineIcon sx={{ fontSize: 24, color: '#dc2626' }} />
+                          </IconButton>
+                        </Tooltip>
+                        <Typography sx={{ fontSize: '0.92rem', fontWeight: 600, minWidth: 0, overflowWrap: 'anywhere' }}>
+                          {nNot.toLocaleString()} non-accessible camera{nNot !== 1 ? 's' : ''} in {nDv} DV{nDv !== 1 ? 's' : ''}
+                        </Typography>
+                      </>
+                    ) : allOk ? (
+                      <>
+                        <CheckCircleIcon sx={{ fontSize: 22, color: '#16a34a' }} />
+                        <Typography sx={{ fontSize: '0.92rem', fontWeight: 600, minWidth: 0, overflowWrap: 'anywhere' }}>All cameras in this view were accessible in the last check</Typography>
+                      </>
+                    ) : (
+                      <>
+                        <InfoOutlinedIcon sx={{ fontSize: 22, color: '#64748b' }} />
+                        <Typography sx={{ fontSize: '0.92rem', fontWeight: 600, minWidth: 0, overflowWrap: 'anywhere' }}>Accessibility not checked yet{camStatusCounts.unknown ? ` - ${camStatusCounts.unknown.toLocaleString()} camera${camStatusCounts.unknown !== 1 ? 's' : ''} unchecked` : ''}</Typography>
+                      </>
+                    )}
                   </Box>
+                  )}
+                </Box>
+              );
+            })()}
+
+            {/* DV details side panel */}
+            <Drawer anchor="right" open={dvOpen} onClose={() => setDvOpen(false)} PaperProps={{ sx: { width: { xs: '100%', sm: 340 }, p: 2.5, bgcolor: '#f8fafc' } }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
+                <Typography sx={{ fontWeight: 700, fontSize: '1.15rem', color: '#0f172a' }}>DV Details</Typography>
+                <IconButton size="small" onClick={() => setDvOpen(false)}><CloseIcon /></IconButton>
+              </Box>
+              <Typography sx={{ fontSize: '0.85rem', color: '#64748b', mb: 2 }}>Non-accessible cameras found in the following DVs.</Typography>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, overflowY: 'auto' }}>
+                {(camServerStats?.servers || []).map((sv) => {
+                  const num = String(sv.server).replace(/^[a-z]+/i, '');
+                  const all = sv.notAccessible === sv.total;
+                  return (
+                    <Box key={sv.server} sx={{ display: 'flex', alignItems: 'center', gap: 2, p: 1.5, borderRadius: 2, bgcolor: '#fef2f2', border: '1px solid #fecaca' }}>
+                      <Typography sx={{ minWidth: 54, textAlign: 'center', fontWeight: 800, fontSize: '1.6rem', color: '#dc2626' }}>{sv.notAccessible}</Typography>
+                      <Box sx={{ borderLeft: '1px solid #fca5a5', pl: 2 }}>
+                        <Typography sx={{ fontWeight: 700, color: '#0f172a' }}>{/^\d+$/.test(num) ? `DV ${num}` : sv.server}</Typography>
+                        <Chip size="small" label={all ? 'All non-accessible' : `of ${sv.total} cameras`}
+                          sx={{ mt: 0.5, height: 22, fontSize: '0.72rem', fontWeight: 600, bgcolor: all ? '#fee2e2' : '#fff', color: '#b91c1c' }} />
+                      </Box>
+                    </Box>
+                  );
+                })}
+                {(!camServerStats?.servers || camServerStats.servers.length === 0) && (
+                  <Typography sx={{ color: '#64748b', fontSize: '0.9rem' }}>No non-accessible cameras in this view.</Typography>
                 )}
               </Box>
-            )}
+            </Drawer>
 
             {camLoading ? (
               <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}><CircularProgress /></Box>
+            ) : (camDayInfo?.runs === false || (camScheduleInfo?.applied && !camScheduleInfo.exam_runs)) ? (
+              <Box sx={{ textAlign: 'center', py: 8, px: 2, border: '1px dashed #cbd5e1', borderRadius: 3, bgcolor: '#f8fafc' }}>
+                <EventBusyIcon sx={{ fontSize: 48, color: '#94a3b8', mb: 1 }} />
+                <Typography sx={{ fontWeight: 700, color: '#334155', fontSize: '1.05rem' }}>
+                  No exam cameras are scheduled on {camFilterExamDate}{camFilterShiftId ? ' in this shift' : ''}
+                </Typography>
+                <Typography sx={{ color: '#64748b', mt: 0.5, fontSize: '0.9rem' }}>
+                  Choose another date{camFilterShiftId ? ' or shift' : ''} to see the cameras.
+                </Typography>
+              </Box>
             ) : sortedCameras.length > 0 ? (
               <>
                 <TableContainer component={Paper} sx={{ borderRadius: 2.5, border: '1px solid #e8ecf1', boxShadow: 'none', maxWidth: '100%', overflowX: 'auto' }}>
