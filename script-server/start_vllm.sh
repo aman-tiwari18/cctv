@@ -8,6 +8,8 @@
 # - Bumped --gpu-memory-utilization 0.25 → 0.55 to give the bigger model and
 #   the wider KV cache enough headroom. On a 144 GB H200 this is ~79 GB.
 export HF_HOME=/data/hf_cache
+# Weights are already on disk; never let a slow/blocked huggingface.co lookup stall startup (16 Oct 11:40 failure).
+export HF_HUB_OFFLINE=1
 export VLLM_USE_V1=0
 # Give the APIServer extra time to complete multi-modal warmup before
 # EngineCore times out waiting for the initial IPC connection.

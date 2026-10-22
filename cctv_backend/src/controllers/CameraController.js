@@ -685,6 +685,21 @@ exports.getByExam = async (req, res) => {
             runShift !== null ? [run_start, run_end, runShift] : [run_start, run_end]
         );
         runCameraIds = runRows.map((r) => r.camera_id);
+        // HLS rows are per shift + day, so for the NEWEST run of a shift the cameras' saved status is exactly
+        // what that run found — use it (history rows only appear after labelling, minutes later).
+        if (linkType === "HLS" && runShift) {
+            const endMs = new Date(run_end).getTime() + RUN_GAP_SECONDS * 1000;
+            const later = await query(
+                `SELECT 1 FROM ${historyTable} WHERE COALESCE(shift_id, 0) = ? AND created_at > ? LIMIT 1`,
+                [runShift, new Date(endMs).toISOString()]
+            );
+            const laterRun = later.length ? later : await query(
+                `SELECT 1 FROM shift_script_assignments a JOIN scripts s ON s.id = a.script_id
+                 WHERE a.shift_id = ? AND s.name = 'Scene Classification' AND a.started_at > ? LIMIT 1`,
+                [runShift, new Date(endMs).toISOString()]
+            );
+            if (!laterRun.length) runCameraIds = null;
+        }
     }
 
     // A selected classification run belongs to ONE shift and ONE day: list only that shift's cameras
@@ -1211,6 +1226,35 @@ exports.getClassificationRuns = async (req, res) => {
         [examId, RUN_GAP_SECONDS, examId]
     );
 
+    // A run that reached no camera writes no history row, so it is missing above and the page
+    // claimed "no classification ran". Add every classification assignment that started and is
+    // not already covered by a history run of its shift, as a run with 0 accessible cameras
+    // (every camera a run reaches gets a history row — a new label or a kept label with a fresh frame).
+    try {
+        const ran = await query(
+            `SELECT a.shift_id AS sid, es.shift_name, a.started_at, a.completed_at,
+                    TIMESTAMPDIFF(SECOND, a.custom_start_time, a.custom_end_time) AS window_s
+             FROM shift_script_assignments a
+             JOIN exam_shifts es ON es.id = a.shift_id
+             JOIN scripts s ON s.id = a.script_id
+             WHERE es.exam_id = ? AND s.name = 'Scene Classification' AND a.started_at IS NOT NULL`,
+            [examId]
+        );
+        const historyRuns = rows.slice();
+        for (const a of ran) {
+            const start = new Date(a.started_at);
+            const end = a.completed_at ? new Date(a.completed_at)
+                : new Date(start.getTime() + Math.max(0, Number(a.window_s) || 0) * 1000);
+            const covered = historyRuns.some((r) => Number(r.sid) === Number(a.sid)
+                && new Date(r.started_at).getTime() <= end.getTime() + RUN_GAP_SECONDS * 1000
+                && new Date(r.ended_at).getTime() >= start.getTime() - RUN_GAP_SECONDS * 1000);
+            if (!covered) rows.push({ sid: a.sid, shift_name: a.shift_name, started_at: start, ended_at: end, camera_count: 0, no_history: true });
+        }
+        rows.sort((x, y) => new Date(y.started_at) - new Date(x.started_at));
+    } catch (e) {
+        logger.warn(`[cameras] classification runs: assignment lookup failed: ${e.message}`);
+    }
+
     // camera_count above = cameras that got a history row in the run, i.e. were
     // reachable and classified — it varies with DVR accessibility even though
     // every run attempts every active camera. total_cameras is the exam's real
@@ -1227,6 +1271,7 @@ exports.getClassificationRuns = async (req, res) => {
 
     const data = [];
     const schedTotals = new Map();       // "date#shift" -> scheduled camera count (RTSP)
+    const newestSeen = new Set();        // HLS shifts whose newest run was already handled
     for (const r of rows) {
         let total = rtspTotal;
         if (linkType === "RTSP" && Number(r.sid) > 0) {
@@ -1281,6 +1326,11 @@ exports.getClassificationRuns = async (req, res) => {
             }
             const [t] = await query(`SELECT COUNT(*) AS c FROM camera_links_hls WHERE ${conds.join(" AND ")}`, params);
             total = Math.max(Number(t?.c || 0), Number(r.camera_count));
+            if (sid > 0 && !newestSeen.has(sid)) {     // rows are newest first: this is the shift's latest run
+                newestSeen.add(sid);
+                const [acc] = await query(`SELECT COUNT(*) AS c FROM camera_links_hls WHERE ${conds.join(" AND ")} AND status = 'Accessible'`, params);
+                r.camera_count = Number(acc?.c || 0);
+            }
         }
         data.push({
             started_at: r.started_at,

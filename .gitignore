@@ -147,3 +147,12 @@ checkpoint_best_total.pth.zip
 checkpoint_best_total*.zip
 mobile_best*.zip
 *.pth
+
+# proximity engine test output (images from replaying recorded videos)
+proximity_test_results/
+
+# report screenshots / exported CSVs / test images: keep out of git
+docs/report_mod/
+docs/proximity_temporal_test_*/
+/UPCISB_*SCHEDULING*.xlsx
+docs/superview_detection_reports/**/*.csv
