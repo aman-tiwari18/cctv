@@ -1,0 +1,254 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CDIS vs Superview Report</title><style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#1b2430;--mut:#667085;--line:#e4e7ec;--grid:#eef0f3;--acc:#2456d6;
+--cd:#2a78d6;--sv:#eb6834;--np:#c3c9d2;--ok:#1a7f4b;--warn:#c98a00;--bad:#c0392b;--up:#1a7f4b;--down:#c0392b}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12161c;--card:#1a2029;--ink:#e8ecf2;--mut:#98a2b3;--line:#2a3340;--grid:#222a35;--acc:#6f9bff;
+--cd:#3987e5;--sv:#d95926;--np:#4a5463;--ok:#4cc38a;--warn:#e0a800;--bad:#ef6b5b;--up:#4cc38a;--down:#ef6b5b}}
+:root[data-theme="dark"]{--bg:#12161c;--card:#1a2029;--ink:#e8ecf2;--mut:#98a2b3;--line:#2a3340;--grid:#222a35;--acc:#6f9bff;
+--cd:#3987e5;--sv:#d95926;--np:#4a5463;--ok:#4cc38a;--warn:#e0a800;--bad:#ef6b5b;--up:#4cc38a;--down:#ef6b5b}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,Segoe UI,Roboto,sans-serif}.w{max-width:1280px;margin:0 auto;padding:24px 16px 60px}
+h1{margin:0 0 4px;font-size:26px}h2{margin:36px 0 10px;font-size:20px}h3{margin:20px 0 6px;font-size:16px}small{color:var(--mut);font-weight:400}.sub{color:var(--mut)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:14px 0}.k{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}.k b{display:block;font-size:28px;line-height:1.1;font-variant-numeric:tabular-nums}.k span{color:var(--mut);font-size:13px}.k em{display:block;font-style:normal;font-size:12.5px;margin-top:4px;color:var(--mut)}
+.k i.sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:0}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;overflow:auto}
+table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}th:first-child,td:first-child{text-align:left}
+th{color:var(--mut);font-weight:600;background:var(--card);text-align:center}td.sep,th.sep{border-left:2px solid var(--line)}th.grp{color:var(--ink);font-size:13.5px}tr.tot td{font-weight:700;border-top:2px solid var(--line)}td b{font-weight:700}tr.dim td{color:var(--mut)}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 12px}.tabs button,.seg button{border:1px solid var(--line);background:var(--card);color:var(--ink);padding:6px 12px;border-radius:8px;cursor:pointer;font:inherit;font-size:13.5px}.tabs button.on,.seg button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+.tab{display:none}.tab.on{display:block}.seg{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}
+.cg{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media(max-width:900px){.cg{grid-template-columns:1fr}}
+.ct{font-weight:600;margin:0 0 2px}.cs{color:var(--mut);font-size:12.5px;margin:0 0 8px}
+.leg{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12.5px;color:var(--mut);margin:0 0 6px}.leg i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}.leg i.ln{height:3px;border-radius:2px;vertical-align:2px;width:14px}.leg i.dash{height:0;border-top:2px dashed;width:14px;vertical-align:3px;border-radius:0;background:none!important}
+svg{display:block;width:100%;height:auto;overflow:visible}svg text{font:11px system-ui,Segoe UI,Roboto,sans-serif;fill:var(--mut)}svg .gl{stroke:var(--grid)}svg .ax{stroke:var(--line)}svg text.dl{fill:var(--ink);font-weight:600}
+.tip{position:fixed;pointer-events:none;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12.5px;box-shadow:0 4px 16px rgba(0,0,0,.18);display:none;z-index:9;max-width:320px}.tip b{display:block;margin-bottom:2px}.tip div{display:flex;justify-content:space-between;gap:14px}
+.hm td{text-align:center;font-size:12px;padding:5px 4px;border:2px solid var(--card);min-width:46px;cursor:default}.hm td:first-child{text-align:left;border:0;border-bottom:1px solid var(--line);padding-right:10px}.hm th{font-size:12px}
+.delta.up{color:var(--up);font-weight:600}.delta.down{color:var(--down);font-weight:600}
+select{font:inherit;font-size:13.5px;padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+.note{font-size:13px;color:var(--mut)}.note li{margin:4px 0}.obs li{margin:6px 0}
+</style></head><body><div class="w">
+<h1>CDIS vs Superview Report</h1>
+<div class="sub" id="subt"></div>
+
+<h2>1 · Overview <small>(all days)</small></h2>
+<div class="kpis" id="kpis"></div>
+
+<h2>2 · Day-wise comparison</h2>
+<div class="cg">
+ <div class="panel"><p class="ct">Detections per day</p><p class="cs">Superview events vs CDIS detections pushed to the client</p><div class="leg"><span><i style="background:var(--sv)"></i>Superview</span><span><i style="background:var(--cd)"></i>CDIS</span></div><div id="c_vol"></div></div>
+ <div class="panel"><p class="ct">Accepted % per day</p><p class="cs">Accepted ÷ total detections of that system</p><div class="leg"><span><i class="ln" style="background:var(--sv)"></i>Superview</span><span><i class="ln" style="background:var(--cd)"></i>CDIS</span></div><div id="c_acc"></div></div>
+ <div class="panel"><p class="ct">Rejected % per day</p><p class="cs">Rejected ÷ total detections of that system (lower is better)</p><div class="leg"><span><i class="ln" style="background:var(--sv)"></i>Superview</span><span><i class="ln" style="background:var(--cd)"></i>CDIS</span></div><div id="c_rej"></div></div>
+ <div class="panel"><p class="ct">Online cameras per day</p><p class="cs">Superview: dashboard "online" tile · CDIS: average per shift of cameras with a classified frame</p><div class="leg"><span><i style="background:var(--sv)"></i>Superview</span><span><i style="background:var(--cd)"></i>CDIS</span></div><div id="c_cam"></div></div>
+ <div class="panel"><p class="ct">Superview: outcome of events</p><p class="cs">Share of each day's Superview events</p><div class="leg"><span><i style="background:var(--ok)"></i>Accepted</span><span><i style="background:var(--warn)"></i>Pending</span><span><i style="background:var(--bad)"></i>Rejected</span></div><div id="c_osv"></div></div>
+ <div class="panel"><p class="ct">CDIS: outcome of pushed detections</p><p class="cs">Share of each day's CDIS detections</p><div class="leg"><span><i style="background:var(--ok)"></i>Accepted</span><span><i style="background:var(--warn)"></i>Pending</span><span><i style="background:var(--bad)"></i>Rejected</span></div><div id="c_ocd"></div></div>
+ <div class="panel"><p class="ct">Same-event matches per day</p><p class="cs">Same camera, same script, within ±3 minutes, summed over shifts</p><div class="leg"><span><i style="background:var(--cd)"></i>Matched events</span></div><div id="c_mt"></div></div>
+ <div class="panel"><p class="ct">Cameras reported per shift (average)</p><p class="cs">Cameras with at least one detection in the shift, averaged over the day's shifts</p><div class="leg"><span><i style="background:var(--sv)"></i>Superview only</span><span><i style="background:var(--ok)"></i>Reported by both</span><span><i style="background:var(--cd)"></i>CDIS only</span></div><div id="c_cov"></div></div>
+</div>
+<h3>Day summary</h3>
+<div class="panel"><table id="t_days"></table></div>
+
+<h2>3 · Script-wise comparison</h2>
+<p class="note" style="margin-top:0">Each cell is one script on one day. Darker = higher. Empty cells mean that system had no detections for the script that day.</p>
+<div class="seg" id="hm_seg"></div>
+<div class="panel"><table class="hm" id="hm"></table></div>
+
+<h3>Script drill-down</h3>
+<div style="margin:0 0 10px"><select id="sel"></select></div>
+<div class="cg">
+ <div class="panel"><p class="ct" id="dd_t1"></p><div class="leg"><span><i style="background:var(--sv)"></i>Superview</span><span><i style="background:var(--cd)"></i>CDIS</span></div><div id="dd_vol"></div></div>
+ <div class="panel"><p class="ct" id="dd_t2"></p><div class="leg"><span><i class="ln" style="background:var(--sv)"></i>Superview accepted %</span><span><i class="ln" style="background:var(--cd)"></i>CDIS accepted %</span><span><i class="dash" style="border-color:var(--sv)"></i>Superview rejected %</span><span><i class="dash" style="border-color:var(--cd)"></i>CDIS rejected %</span></div><div id="dd_rate"></div></div>
+</div>
+
+<h3>Script summary <small>(all days)</small></h3>
+<div class="panel"><table id="t_scr"></table></div>
+<p class="note">Δ accepted % = CDIS accepted % − Superview accepted %, in percentage points (positive = CDIS detections are accepted more often).</p>
+
+<h3>First 3 vs last 3 exam days <small>(pooled)</small></h3>
+<div class="panel"><table id="t_imp"></table></div>
+<p class="note">Pooled = counts summed over the three days before the rate is taken. The trend lines show each system's accepted % per day.</p>
+<div id="obs"></div>
+
+<h2>4 · Per-day detail</h2>
+<div class="tabs" id="daytabs"></div>
+<div id="days"></div>
+
+<h2>Method</h2>
+<ul class="note">
+<li>Source: the daily Superview vs CDIS comparison reports (<code>docs/comparison_report</code>), one per exam day, SSC CGL 2026 (exam 42). Day figures are the sum of that day's shifts.</li>
+<li>Superview = every event in Superview's event export for the session. CDIS = detections pushed to the client. Accepted / Pending / Rejected are each system's own client actions as recorded when that day's comparison report was built; the client may have reviewed more since.</li>
+<li>Superview camera figures come from one dashboard snapshot per day, taken after the sessions (or later, since the dashboard keeps no history), so all shifts of a day share them. CDIS online = cameras for which CDIS captured and classified a frame in the shift.</li>
+<li>CDIS configured cameras are 3,141 (41 centres) up to 15 Oct and 5,969 (157 centres) from 16 Oct, as recorded in the comparison reports.</li>
+<li>Cameras reported by both and same-event matches (same camera, same script, within ±3 minutes) are per shift; camera counts are averaged over shifts because a camera can appear in several shifts.</li>
+<li>30 Sep: Shift 1 did not run. 7 Oct Shift 3: CDIS online cameras not available. 23 Oct Shift 3: CDIS did not run (0 detections), so Superview is compared against nothing for that shift. No exam ran from 17 to 21 Oct.</li>
+<li>Generated __GEN__.</li>
+</ul>
+</div><div class="tip" id="tip"></div>
+<script>
+const D=__DATA__;
+const $=s=>document.querySelector(s), E=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const n=x=>x==null?'n/a':Math.round(x).toLocaleString('en-US'), pc=(a,b)=>b?(100*a/b):null, pf=v=>v==null?'–':v.toFixed(1)+'%';
+const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const dl=d=>{const[y,m,dd]=d.split('-');return +dd+' '+MON[m-1]};
+const days=D.days, L=days.map(dl), S=D.scripts;
+// per day totals: [svT,svA,svP,svR,cT,cA,cP,cR]
+const sum8=rows=>rows.reduce((a,b)=>a.map((v,i)=>v+b[i]),[0,0,0,0,0,0,0,0]);
+const DT=days.map(d=>sum8(S.map(s=>D.det[d][s])));
+const ALL=sum8(DT);
+const MT=days.map(d=>S.reduce((a,s)=>a+D.match[d][s],0));
+$('#subt').textContent=`SSC CGL 2026 (exam 42) · ${L[0]} – ${L[L.length-1]} 2026 · ${days.length} exam days · CDIS detections vs Superview events`;
+// ---------- tooltip
+const tip=$('#tip');
+function showTip(ev,html){tip.innerHTML=html;tip.style.display='block';const r=tip.getBoundingClientRect();let x=ev.clientX+14,y=ev.clientY+14;if(x+r.width>innerWidth-8)x=ev.clientX-r.width-14;if(y+r.height>innerHeight-8)y=ev.clientY-r.height-14;tip.style.left=x+'px';tip.style.top=y+'px'}
+const hideTip=()=>tip.style.display='none';
+const row=(k,v,c)=>`<div><span>${c?`<i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${c};margin-right:5px"></i>`:''}${k}</span><b style="display:inline;margin:0">${v}</b></div>`;
+const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+// ---------- KPIs
+(()=>{const k=(v,l,e,c)=>`<div class="k"><b>${v}</b><span>${c?`<i class="sw" style="background:var(${c})"></i>`:''}${l}</span>${e?`<em>${e}</em>`:''}</div>`;
+ const[sT,sA,sP,sR,cT,cA,cP,cR]=ALL;
+ $('#kpis').innerHTML=k(n(sT),'Superview events','','--sv')+k(n(cT),'CDIS detections (pushed)',`${(cT/sT*100).toFixed(0)}% of Superview's volume`,'--cd')
+  +k(pf(pc(sA,sT)),'Superview accepted %',`${n(sA)} accepted`,'--sv')+k(pf(pc(cA,cT)),'CDIS accepted %',`${n(cA)} accepted`,'--cd')
+  +k(pf(pc(sR,sT)),'Superview rejected %',`${n(sR)} rejected`,'--sv')+k(pf(pc(cR,cT)),'CDIS rejected %',`${n(cR)} rejected`,'--cd')
+  +k(n(MT.reduce((a,b)=>a+b,0)),'Same-event matches','same camera + script within ±3 min');
+})();
+// ---------- SVG helpers
+const W=560,H=250,M={l:44,r:14,t:12,b:28};
+function frame(max,fmt,ticks=4){let s='';for(let i=0;i<=ticks;i++){const v=max*i/ticks,y=M.t+(H-M.t-M.b)*(1-i/ticks);s+=`<line class="${i?'gl':'ax'}" x1="${M.l}" x2="${W-M.r}" y1="${y}" y2="${y}"/><text x="${M.l-6}" y="${y+3.5}" text-anchor="end">${fmt(v)}</text>`}return s}
+const niceMax=v=>{if(v<=0)return 1;const p=10**Math.floor(Math.log10(v)),m=v/p;return [1,1.2,1.6,2,2.4,3,4,5,6,8,10].find(s=>m<=s)*p};
+const kfmt=v=>v>=1000?(+(v/1000).toFixed(2))+'k':String(+v.toFixed(1));
+// with many days, repeat the month only where it changes (30 Sep, 1 Oct, 5, 6 …) so labels don't collide
+function xlab(labels,cx){const short=labels.length>12;return labels.map((l,i)=>{const[dd,mm]=l.split(' ');const t=short&&i>0&&labels[i-1].split(' ')[1]==mm?dd:l;return `<text x="${cx(i)}" y="${H-M.b+16}" text-anchor="middle">${t}</text>`}).join('')}
+const bar=(x,y0,w,h,c)=>h<=0?'':h>=5?`<path d="M${x},${y0}v${-h+4}q0,-4 4,-4h${w-8}q4,0 4,4v${h-4}z" fill="${c}"/>`:`<rect x="${x}" y="${y0-h}" width="${w}" height="${h}" fill="${c}"/>`;
+function hover(el,nB,cx,pw,tipf,xh){el.querySelectorAll('rect[data-i]').forEach(r=>{const i=+r.dataset.i;r.onmousemove=e=>{if(xh){xh.style.display='';xh.setAttribute('x1',cx(i));xh.setAttribute('x2',cx(i))}showTip(e,tipf(i))};r.onmouseleave=()=>{if(xh)xh.style.display='none';hideTip()}})}
+const hits=(labels,cx,pw)=>labels.map((_,i)=>`<rect x="${cx(i)-pw/2}" y="${M.t}" width="${pw}" height="${H-M.t-M.b}" fill="transparent" data-i="${i}"/>`).join('');
+// grouped bars: series=[{color,vals}]
+function grouped(el,labels,series,{tipf}={}){
+ const nB=labels.length,pw=(W-M.l-M.r)/nB,gw=Math.min(36,pw*0.74),bw=(gw-2*(series.length-1))/series.length,cx=i=>M.l+pw*(i+.5);
+ const max=niceMax(Math.max(1,...series.flatMap(s=>s.vals.map(v=>v||0))));const y=v=>M.t+(H-M.t-M.b)*(1-v/max);
+ let s=frame(max,kfmt);
+ labels.forEach((_,i)=>series.forEach((se,j)=>{const v=se.vals[i]||0;s+=bar(cx(i)-gw/2+j*(bw+2),y(0),bw,y(0)-y(v),se.color)}));
+ s+=hits(labels,cx,pw)+xlab(labels,cx);el.innerHTML=`<svg viewBox="0 0 ${W} ${H}" role="img">${s}</svg>`;hover(el,nB,cx,pw,tipf);
+}
+// stacked bars (counts or 100%)
+function stacked(el,labels,series,{pct=false,tipf}={}){
+ const nB=labels.length,pw=(W-M.l-M.r)/nB,bw=Math.min(30,pw*0.62),cx=i=>M.l+pw*(i+.5);
+ const tot=labels.map((_,i)=>series.reduce((a,s)=>a+s.vals[i],0)),max=pct?100:niceMax(Math.max(...tot));
+ const y=v=>M.t+(H-M.t-M.b)*(1-v/max);let s=frame(max,pct?v=>v+'%':kfmt);
+ labels.forEach((_,i)=>{let acc=0;const T=tot[i]||1;
+  series.forEach((se,j)=>{const v=pct?100*se.vals[i]/T:se.vals[i];if(v<=0)return;const y0=y(acc)-(acc>0?2:0),h=Math.max(0,y(acc)-y(acc+v)-(acc>0?2:0));
+   const top=series.slice(j+1).every(s2=>!s2.vals[i]);s+=top?bar(cx(i)-bw/2,y0,bw,h,se.color):`<rect x="${cx(i)-bw/2}" y="${y0-h}" width="${bw}" height="${h}" fill="${se.color}"/>`;acc+=v})});
+ s+=hits(labels,cx,pw)+xlab(labels,cx);el.innerHTML=`<svg viewBox="0 0 ${W} ${H}" role="img">${s}</svg>`;hover(el,nB,cx,pw,tipf);
+}
+// lines on a % axis; series=[{color,vals,dash}]
+function lines(el,labels,series,{tipf,max=null}={}){
+ const nB=labels.length,pw=(W-M.l-M.r)/nB,cx=i=>M.l+pw*(i+.5);
+ const mx=max||niceMax(Math.max(5,...series.flatMap(s=>s.vals.filter(v=>v!=null))));const y=v=>M.t+(H-M.t-M.b)*(1-v/mx);
+ let s=frame(mx,v=>(+v.toFixed(1))+'%');const used=[];
+ series.forEach(se=>{let d='',pen=false;se.vals.forEach((v,i)=>{if(v==null){pen=false;return}d+=(pen?'L':'M')+cx(i)+','+y(v);pen=true});
+  s+=`<path d="${d}" fill="none" stroke="${se.color}" stroke-width="2" stroke-linejoin="round" ${se.dash?'stroke-dasharray="5 4"':''}/>`;
+  se.vals.forEach((v,i)=>{if(v!=null)s+=`<circle cx="${cx(i)}" cy="${y(v)}" r="3.5" fill="${se.color}" stroke="var(--card)" stroke-width="1.5"/>`});
+  const li=se.vals.map((v,i)=>v==null?-1:i).filter(i=>i>=0).pop();
+  if(li!=null&&!se.dash){const py=y(se.vals[li]);let ly=[py-8,py+16,py-21,py+29,py-34].find(c=>c>M.t+4&&c<H-M.b-3&&!used.some(u=>Math.abs(u-c)<13))??py-8;used.push(ly);
+   s+=`<text class="dl" x="${cx(li)}" y="${ly}" text-anchor="middle">${se.vals[li].toFixed(1)}%</text>`}});
+ s+=`<line class="ax xh" x1="0" x2="0" y1="${M.t}" y2="${H-M.b}" style="display:none"/>`+hits(labels,cx,pw)+xlab(labels,cx);
+ el.innerHTML=`<svg viewBox="0 0 ${W} ${H}" role="img">${s}</svg>`;hover(el,nB,cx,pw,tipf,el.querySelector('.xh'));
+}
+// ---------- Section 2
+const camAvg=d=>{const v=D.shifts[d].map(s=>D.cdis_online[d][s]).filter(x=>x!=null);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null};
+const CA=days.map(camAvg);
+const cov=days.map(d=>{const sh=D.shifts[d],k=sh.length;const a=sh.map(s=>D.cams[d][s]);return[0,1,2,3,4].map(i=>a.reduce((x,r)=>x+r[i],0)/k)});  // [svc,cc,both,svo,cdo]
+function drawDay(){
+ grouped($('#c_vol'),L,[{color:'var(--sv)',vals:DT.map(t=>t[0])},{color:'var(--cd)',vals:DT.map(t=>t[4])}],
+  {tipf:i=>`<b>${L[i]}</b>`+row('Superview events',n(DT[i][0]),css('--sv'))+row('CDIS detections',n(DT[i][4]),css('--cd'))+row('CDIS ÷ Superview',pf(pc(DT[i][4],DT[i][0])))});
+ const sa=DT.map(t=>pc(t[1],t[0])),ca=DT.map(t=>pc(t[5],t[4])),sr=DT.map(t=>pc(t[3],t[0])),cr=DT.map(t=>pc(t[7],t[4]));
+ lines($('#c_acc'),L,[{color:'var(--sv)',vals:sa},{color:'var(--cd)',vals:ca}],{tipf:i=>`<b>${L[i]}</b>`+row('Superview accepted',`${n(DT[i][1])} · ${pf(sa[i])}`,css('--sv'))+row('CDIS accepted',`${n(DT[i][5])} · ${pf(ca[i])}`,css('--cd'))});
+ lines($('#c_rej'),L,[{color:'var(--sv)',vals:sr},{color:'var(--cd)',vals:cr}],{max:100,tipf:i=>`<b>${L[i]}</b>`+row('Superview rejected',`${n(DT[i][3])} · ${pf(sr[i])}`,css('--sv'))+row('CDIS rejected',`${n(DT[i][7])} · ${pf(cr[i])}`,css('--cd'))});
+ grouped($('#c_cam'),L,[{color:'var(--sv)',vals:days.map(d=>D.sv_cams[d].online)},{color:'var(--cd)',vals:CA}],
+  {tipf:i=>{const d=days[i],s=D.sv_cams[d];return `<b>${L[i]}</b>`+row('Superview online (dashboard)',n(s.online),css('--sv'))+row('Superview total cameras',n(s.total))+row('Superview centres',n(s.centres))
+   +D.shifts[d].map(sh=>row('CDIS online · '+sh,n(D.cdis_online[d][sh]),css('--cd'))).join('')+row('CDIS configured cameras',n(D.cdis_conf[d].cams))+row('CDIS centres',n(D.cdis_conf[d].centres))}});
+ const out=(off,el,lab)=>stacked($(el),L,[{color:'var(--ok)',vals:DT.map(t=>t[off+1])},{color:'var(--warn)',vals:DT.map(t=>t[off+2])},{color:'var(--bad)',vals:DT.map(t=>t[off+3])}],
+  {pct:true,tipf:i=>{const t=DT[i].slice(off,off+4);return `<b>${L[i]} · ${n(t[0])} ${lab}</b>`+row('Accepted',`${n(t[1])} · ${pf(pc(t[1],t[0]))}`,css('--ok'))+row('Pending',`${n(t[2])} · ${pf(pc(t[2],t[0]))}`,css('--warn'))+row('Rejected',`${n(t[3])} · ${pf(pc(t[3],t[0]))}`,css('--bad'))}});
+ out(0,'#c_osv','Superview events');out(4,'#c_ocd','CDIS detections');
+ grouped($('#c_mt'),L,[{color:'var(--cd)',vals:MT}],{tipf:i=>`<b>${L[i]}</b>`+row('Same-event matches',n(MT[i]))+S.filter(s=>D.match[days[i]][s]).map(s=>row(E(s),n(D.match[days[i]][s]))).join('')});
+ stacked($('#c_cov'),L,[{color:'var(--sv)',vals:cov.map(c=>c[3])},{color:'var(--ok)',vals:cov.map(c=>c[2])},{color:'var(--cd)',vals:cov.map(c=>c[4])}],
+  {tipf:i=>{const c=cov[i];return `<b>${L[i]} · average per shift</b>`+row('Superview cameras',n(c[0]))+row('CDIS cameras',n(c[1]))+row('Superview only',n(c[3]),css('--sv'))+row('Reported by both',n(c[2]),css('--ok'))+row('CDIS only',n(c[4]),css('--cd'))}});
+}
+// ---------- tables shared by day summary / per-day / script summary
+const head2=(first,extra='')=>`<thead><tr><th rowspan=2>${first}</th>${extra?`<th rowspan=2>${extra}</th>`:''}<th class="sep grp" colspan=7>Superview</th><th class="sep grp" colspan=7>CDIS</th><th class="sep" rowspan=2>Same-event<br>matches</th></tr><tr>`
+ +['sep',''].map(()=>'').join('')+[0,1].map(()=>`<th class="sep">Total</th><th class="sep">Accepted</th><th>Accepted %</th><th class="sep">Pending</th><th>Pending %</th><th class="sep">Rejected</th><th>Rejected %</th>`).join('')+`</tr></thead>`;
+const cells8=t=>[0,4].map(o=>{const[T,A,P,R]=t.slice(o,o+4);return `<td class="sep"><b>${n(T)}</b></td><td class="sep">${n(A)}</td><td><b>${pf(pc(A,T))}</b></td><td class="sep">${n(P)}</td><td>${pf(pc(P,T))}</td><td class="sep">${n(R)}</td><td>${pf(pc(R,T))}</td>`}).join('');
+(()=>{let h=head2('Day','Shifts')+'<tbody>';
+ days.forEach((d,i)=>h+=`<tr><td>${L[i]}</td><td>${D.shifts[d].map(s=>s.replace('Shift ','S')).join(' ')}</td>${cells8(DT[i])}<td class="sep">${n(MT[i])}</td></tr>`);
+ h+=`<tr class="tot"><td>Total</td><td></td>${cells8(ALL)}<td class="sep">${n(MT.reduce((a,b)=>a+b,0))}</td></tr>`;$('#t_days').innerHTML=h+'</tbody>'})();
+// ---------- Section 3: heatmap
+const MET=[
+ {id:'sa',name:'Superview accepted %',v:(d,s)=>{const x=D.det[d][s];return x[0]?pc(x[1],x[0]):null},hue:'o',fmt:v=>v.toFixed(0),pct:1},
+ {id:'ca',name:'CDIS accepted %',v:(d,s)=>{const x=D.det[d][s];return x[4]?pc(x[5],x[4]):null},hue:'b',fmt:v=>v.toFixed(0),pct:1},
+ {id:'sr',name:'Superview rejected %',v:(d,s)=>{const x=D.det[d][s];return x[0]?pc(x[3],x[0]):null},hue:'o',fmt:v=>v.toFixed(0),pct:1},
+ {id:'cr',name:'CDIS rejected %',v:(d,s)=>{const x=D.det[d][s];return x[4]?pc(x[7],x[4]):null},hue:'b',fmt:v=>v.toFixed(0),pct:1},
+ {id:'st',name:'Superview total',v:(d,s)=>D.det[d][s][0]||null,hue:'o',fmt:kfmt},
+ {id:'ct',name:'CDIS total',v:(d,s)=>D.det[d][s][4]||null,hue:'b',fmt:kfmt},
+ {id:'m',name:'Same-event matches',v:(d,s)=>D.match[d][s]||null,hue:'b',fmt:kfmt}];
+const RAMP={b:['#e8f1fc','#cde2fb','#9ec5f4','#6da7ec','#3987e5','#256abf','#184f95','#0d366b'],o:['#fdeee6','#fbd9c7','#f6b597','#f08f63','#eb6834','#c9501f','#9c3c15','#6e2a0e']};
+const hex=h=>[1,3,5].map(i=>parseInt(h.slice(i,i+2),16));
+function rampCol(h,t){const r=RAMP[h],p=t*(r.length-1),i=Math.min(r.length-2,Math.floor(p)),f=p-i,a=hex(r[i]),b=hex(r[i+1]);return 'rgb('+a.map((v,k)=>Math.round(v+(b[k]-v)*f)).join(',')+')'}
+let curM='ca';
+function drawHM(){const m=MET.find(x=>x.id==curM);const vals=S.map(s=>days.map(d=>m.v(d,s)));const all=vals.flat().filter(v=>v!=null);
+ const mx=m.pct?100:Math.log10(Math.max(1,...all)+1);
+ let h=`<thead><tr><th>Script</th>${L.map(l=>`<th>${l}</th>`).join('')}</tr></thead><tbody>`;
+ S.forEach((s,ri)=>{if(vals[ri].every(v=>v==null))return;h+=`<tr><td>${E(s)}</td>`;
+  vals[ri].forEach((v,di)=>{if(v==null){h+=`<td data-r="${ri}" data-d="${di}"></td>`;return}const t=m.pct?v/mx:Math.log10(v+1)/mx;
+   h+=`<td data-r="${ri}" data-d="${di}" style="background:${rampCol(m.hue,Math.max(0,Math.min(1,t)))};color:${t>0.5?'#fff':'#1b2430'}">${m.fmt(v)}</td>`});h+='</tr>'});
+ $('#hm').innerHTML=h+'</tbody>';
+ $('#hm').querySelectorAll('td[data-r]').forEach(td=>{const s=S[+td.dataset.r],d=days[+td.dataset.d],x=D.det[d][s];
+  td.onmousemove=e=>showTip(e,`<b>${E(s)} · ${dl(d)}</b>`+row('Superview',`${n(x[0])} · acc ${pf(pc(x[1],x[0]))} · rej ${pf(pc(x[3],x[0]))}`,css('--sv'))+row('CDIS',`${n(x[4])} · acc ${pf(pc(x[5],x[4]))} · rej ${pf(pc(x[7],x[4]))}`,css('--cd'))+row('Same-event matches',n(D.match[d][s])));td.onmouseleave=hideTip})}
+$('#hm_seg').innerHTML=MET.map(m=>`<button data-m="${m.id}" class="${m.id==curM?'on':''}">${m.name}</button>`).join('');
+$('#hm_seg').onclick=e=>{const b=e.target.closest('button');if(!b)return;curM=b.dataset.m;$('#hm_seg').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x==b));drawHM()};
+// ---------- drill-down
+const SA=S.filter(s=>days.some(d=>D.det[d][s][0]||D.det[d][s][4]));
+$('#sel').innerHTML=SA.map(s=>`<option>${E(s)}</option>`).join('');
+if(SA.includes('Phone (Server Room)'))$('#sel').value='Phone (Server Room)';
+function drawDD(){const s=$('#sel').value,X=days.map(d=>D.det[d][s]);
+ $('#dd_t1').textContent=s+': detections per day';$('#dd_t2').textContent=s+': accepted % and rejected % per day';
+ grouped($('#dd_vol'),L,[{color:'var(--sv)',vals:X.map(x=>x[0])},{color:'var(--cd)',vals:X.map(x=>x[4])}],{tipf:i=>`<b>${L[i]}</b>`+row('Superview',n(X[i][0]),css('--sv'))+row('CDIS',n(X[i][4]),css('--cd'))+row('Same-event matches',n(D.match[days[i]][s]))});
+ const sa=X.map(x=>x[0]?pc(x[1],x[0]):null),ca=X.map(x=>x[4]?pc(x[5],x[4]):null),sr=X.map(x=>x[0]?pc(x[3],x[0]):null),cr=X.map(x=>x[4]?pc(x[7],x[4]):null);
+ lines($('#dd_rate'),L,[{color:'var(--sv)',vals:sa},{color:'var(--cd)',vals:ca},{color:'var(--sv)',vals:sr,dash:1},{color:'var(--cd)',vals:cr,dash:1}],{max:100,
+  tipf:i=>`<b>${L[i]}</b>`+row('Superview accepted',`${pf(sa[i])} (${n(X[i][1])}/${n(X[i][0])})`,css('--sv'))+row('CDIS accepted',`${pf(ca[i])} (${n(X[i][5])}/${n(X[i][4])})`,css('--cd'))+row('Superview rejected',`${pf(sr[i])} (${n(X[i][3])})`,css('--sv'))+row('CDIS rejected',`${pf(cr[i])} (${n(X[i][7])})`,css('--cd'))})}
+$('#sel').onchange=drawDD;
+// ---------- script summary (all days)
+(()=>{let h=`<thead><tr><th rowspan=2>Script</th><th class="sep grp" colspan=5>Superview</th><th class="sep grp" colspan=5>CDIS</th><th class="sep" rowspan=2>Same-event<br>matches</th><th class="sep" rowspan=2>Δ accepted %</th></tr><tr>`+[0,1].map(()=>`<th class="sep">Total</th><th class="sep">Accepted</th><th>Accepted %</th><th class="sep">Pending %</th><th>Rejected %</th>`).join('')+`</tr></thead><tbody>`;
+ const rowS=(lab,t,m,cls='')=>{const sa=pc(t[1],t[0]),ca=pc(t[5],t[4]),dd=sa!=null&&ca!=null?ca-sa:null;
+  return `<tr class="${cls}"><td>${E(lab)}</td>`+[0,4].map(o=>`<td class="sep"><b>${n(t[o])}</b></td><td class="sep">${n(t[o+1])}</td><td><b>${pf(pc(t[o+1],t[o]))}</b></td><td class="sep">${pf(pc(t[o+2],t[o]))}</td><td>${pf(pc(t[o+3],t[o]))}</td>`).join('')
+  +`<td class="sep">${n(m)}</td><td class="sep">${dd==null?'–':`<span class="delta ${Math.abs(dd)<0.05?'':dd>0?'up':'down'}">${dd>0?'+':''}${dd.toFixed(1)}</span>`}</td></tr>`};
+ SA.forEach(s=>{h+=rowS(s,sum8(days.map(d=>D.det[d][s])),days.reduce((a,d)=>a+D.match[d][s],0))});
+ h+=rowS('Total',ALL,MT.reduce((a,b)=>a+b,0),'tot');$('#t_scr').innerHTML=h+'</tbody>'})();
+// ---------- first 3 vs last 3
+(()=>{const F=[0,1,2],La=[days.length-3,days.length-2,days.length-1];
+ const pool=(s,ix)=>sum8(ix.map(i=>s?D.det[days[i]][s]:DT[i]));
+ const spark=s=>{const w=150,hh=28,dx=w/(days.length-1);const ser=[0,4].map(o=>days.map(d=>{const x=s?D.det[d][s]:sum8(S.map(q=>D.det[d][q]));return x[o]?100*x[o+1]/x[o]:null}));
+  const mx=Math.max(5,...ser.flat().filter(v=>v!=null));
+  const path=v=>{let p='',pen=false;v.forEach((y,i)=>{if(y==null){pen=false;return}p+=(pen?'L':'M')+(i*dx).toFixed(1)+','+(hh-2-y/mx*(hh-4)).toFixed(1);pen=true});return p};
+  return `<svg viewBox="-3 0 ${w+6} ${hh}" style="width:156px;height:${hh}px"><line x1="0" x2="${w}" y1="${hh-2}" y2="${hh-2}" class="ax"/><path d="${path(ser[0])}" fill="none" stroke="var(--sv)" stroke-width="1.6"/><path d="${path(ser[1])}" fill="none" stroke="var(--cd)" stroke-width="1.6"/></svg>`};
+ const dlt=v=>v==null?'–':Math.abs(v)<0.05?'0.0':`<span class="delta ${v>0?'up':'down'}">${v>0?'+':''}${v.toFixed(1)}</span>`;
+ let h=`<thead><tr><th rowspan=2>Script</th><th class="sep grp" colspan=3>Superview accepted %</th><th class="sep grp" colspan=3>CDIS accepted %</th><th class="sep grp" colspan=2>CDIS ÷ Superview volume</th><th class="sep" rowspan=2>Accepted % by day<br><small>Superview / CDIS</small></th></tr><tr><th class="sep">First 3</th><th>Last 3</th><th>Δ</th><th class="sep">First 3</th><th>Last 3</th><th>Δ</th><th class="sep">First 3</th><th>Last 3</th></tr></thead><tbody>`;
+ const rowI=(lab,s,cls='')=>{const f=pool(s,F),l=pool(s,La);const fs=pc(f[1],f[0]),ls=pc(l[1],l[0]),fc=pc(f[5],f[4]),lc=pc(l[5],l[4]);
+  return `<tr class="${cls}"><td>${E(lab)}</td><td class="sep">${pf(fs)}</td><td>${pf(ls)}</td><td>${fs!=null&&ls!=null?dlt(ls-fs):'–'}</td><td class="sep">${pf(fc)}</td><td>${pf(lc)}</td><td>${fc!=null&&lc!=null?dlt(lc-fc):'–'}</td><td class="sep">${pf(pc(f[4],f[0]))}</td><td>${pf(pc(l[4],l[0]))}</td><td class="sep">${spark(s)}</td></tr>`};
+ SA.forEach(s=>h+=rowI(s,s));h+=rowI('All scripts',null,'tot');$('#t_imp').innerHTML=h+'</tbody>'})();
+$('#obs').innerHTML=__OBS__;
+// ---------- Section 4: per-day tabs
+(()=>{let tabs='',body='';
+ days.forEach((d,i)=>{const id='d'+d.replace(/-/g,'');tabs+=`<button data-t="${id}">${L[i]}</button>`;
+  let a=head2('Script')+'<tbody>';
+  S.forEach(s=>{const x=D.det[d][s];a+=`<tr class="${x[0]||x[4]?'':'dim'}"><td>${E(s)}</td>${cells8(x)}<td class="sep">${n(D.match[d][s])}</td></tr>`});
+  a+=`<tr class="tot"><td>Total</td>${cells8(DT[i])}<td class="sep">${n(MT[i])}</td></tr></tbody>`;
+  const sv=D.sv_cams[d];
+  let c=`<thead><tr><th rowspan=2>Shift</th><th class="sep grp" colspan=3>Superview <small>(dashboard snapshot)</small></th><th class="sep grp" colspan=4>CDIS</th><th class="sep grp" colspan=5>Cameras with a detection</th></tr><tr><th class="sep">Online</th><th>Total cameras</th><th>Centres</th><th class="sep">Online</th><th>Offline</th><th>Configured</th><th>Centres</th><th class="sep">Superview</th><th>CDIS</th><th>Both</th><th>Superview only</th><th>CDIS only</th></tr></thead><tbody>`;
+  D.shifts[d].forEach(sh=>{const on=D.cdis_online[d][sh],cf=D.cdis_conf[d],k=D.cams[d][sh];
+   c+=`<tr><td>${sh}</td><td class="sep">${n(sv.online)}</td><td>${n(sv.total)}</td><td>${n(sv.centres)}</td><td class="sep"><b>${n(on)}</b></td><td>${on==null?'n/a':n(cf.cams-on)}</td><td>${n(cf.cams)}</td><td>${n(cf.centres)}</td><td class="sep">${n(k[0])}</td><td>${n(k[1])}</td><td><b>${n(k[2])}</b></td><td>${n(k[3])}</td><td>${n(k[4])}</td></tr>`});
+  c+='</tbody>';
+  const sh=D.shifts[d].map(s=>{const t=sum8(S.map(q=>D.dets[d][s][q]));return `${s}: Superview ${n(t[0])} · CDIS ${n(t[4])}`}).join(' · ');
+  body+=`<section class="tab" id="${id}"><h3>SSC CGL 2026 (exam 42), ${L[i]} 2026</h3><p class="note" style="margin-top:0">${sh}${D.notes[d]?' · '+D.notes[d]:''}</p>
+   <h3>Superview vs CDIS <small>(all shifts combined)</small></h3><div class="panel"><table>${a}</table></div>
+   <h3>Cameras <small>(per shift)</small></h3><div class="panel"><table>${c}</table></div></section>`});
+ $('#daytabs').innerHTML=tabs;$('#days').innerHTML=body;
+ const show=t=>{document.querySelectorAll('#days .tab').forEach(e=>e.classList.toggle('on',e.id==t));document.querySelectorAll('#daytabs button').forEach(b=>b.classList.toggle('on',b.dataset.t==t))};
+ $('#daytabs').onclick=e=>{const b=e.target.closest('button');if(b)show(b.dataset.t)};show('d'+days[days.length-1].replace(/-/g,''));
+})();
+drawDay();drawHM();drawDD();
+</script></body></html>

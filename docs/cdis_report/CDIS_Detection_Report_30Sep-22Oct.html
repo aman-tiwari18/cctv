@@ -1,0 +1,230 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>CDIS Detection Report</title><style>
+:root{--bg:#f6f7f9;--card:#fff;--ink:#1b2430;--mut:#667085;--line:#e4e7ec;--grid:#eef0f3;--acc:#2456d6;
+--s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--np:#c3c9d2;--ok:#1a7f4b;--warn:#c98a00;--bad:#c0392b;--up:#1a7f4b;--down:#c0392b}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12161c;--card:#1a2029;--ink:#e8ecf2;--mut:#98a2b3;--line:#2a3340;--grid:#222a35;--acc:#6f9bff;
+--s1:#3987e5;--s2:#d95926;--s3:#199e70;--np:#4a5463;--ok:#4cc38a;--warn:#e0a800;--bad:#ef6b5b;--up:#4cc38a;--down:#ef6b5b}}
+:root[data-theme="dark"]{--bg:#12161c;--card:#1a2029;--ink:#e8ecf2;--mut:#98a2b3;--line:#2a3340;--grid:#222a35;--acc:#6f9bff;
+--s1:#3987e5;--s2:#d95926;--s3:#199e70;--np:#4a5463;--ok:#4cc38a;--warn:#e0a800;--bad:#ef6b5b;--up:#4cc38a;--down:#ef6b5b}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,Segoe UI,Roboto,sans-serif}.w{max-width:1280px;margin:0 auto;padding:24px 16px 60px}
+h1{margin:0 0 4px;font-size:26px}h2{margin:36px 0 10px;font-size:20px}h3{margin:20px 0 6px;font-size:16px}small{color:var(--mut);font-weight:400}.sub{color:var(--mut)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:14px 0}.k{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px}.k b{display:block;font-size:28px;line-height:1.1;font-variant-numeric:tabular-nums}.k span{color:var(--mut);font-size:13px}.k em{display:block;font-style:normal;font-size:12.5px;margin-top:4px;color:var(--mut)}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;overflow:auto}
+table{border-collapse:collapse;width:100%;font-size:13px;font-variant-numeric:tabular-nums}th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}th:first-child,td:first-child{text-align:left}
+th{color:var(--mut);font-weight:600;background:var(--card);text-align:center}td.sep,th.sep{border-left:2px solid var(--line)}tr.tot td{font-weight:700;border-top:2px solid var(--line)}td b{font-weight:700}tr.dim td{color:var(--mut)}
+code{background:var(--grid);border-radius:4px;padding:1px 5px;font-size:12px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 12px}.tabs button,.seg button{border:1px solid var(--line);background:var(--card);color:var(--ink);padding:6px 12px;border-radius:8px;cursor:pointer;font:inherit;font-size:13.5px}.tabs button.on,.seg button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+.tab{display:none}.tab.on{display:block}.seg{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 10px}
+.cg{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media(max-width:900px){.cg{grid-template-columns:1fr}}
+.ct{font-weight:600;margin:0 0 2px}.cs{color:var(--mut);font-size:12.5px;margin:0 0 8px}
+.leg{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12.5px;color:var(--mut);margin:0 0 6px}.leg i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}.leg i.ln{height:3px;border-radius:2px;vertical-align:2px;width:14px}
+svg{display:block;width:100%;height:auto;overflow:visible}svg text{font:11px system-ui,Segoe UI,Roboto,sans-serif;fill:var(--mut)}svg .gl{stroke:var(--grid)}svg .ax{stroke:var(--line)}svg text.dl{fill:var(--ink);font-weight:600}
+.tip{position:fixed;pointer-events:none;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12.5px;box-shadow:0 4px 16px rgba(0,0,0,.18);display:none;z-index:9;max-width:300px}.tip b{display:block;margin-bottom:2px}.tip div{display:flex;justify-content:space-between;gap:14px}
+.hm td{text-align:center;font-size:12px;padding:5px 4px;border:2px solid var(--card);min-width:46px;cursor:default}.hm td:first-child{text-align:left;border:0;border-bottom:1px solid var(--line);padding-right:10px}.hm th{font-size:12px}
+.delta.up{color:var(--up);font-weight:600}.delta.down{color:var(--down);font-weight:600}
+select{font:inherit;font-size:13.5px;padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+.note{font-size:13px;color:var(--mut)}.note li{margin:4px 0}.obs li{margin:6px 0}
+.stat{display:inline-block;padding:1px 8px;border-radius:99px;font-size:11.5px;font-weight:600;border:1px solid var(--line)}
+</style></head><body><div class="w">
+<h1>CDIS Detection Report</h1>
+<div class="sub" id="subt"></div>
+
+<h2>1 · Overview <small>(all days)</small></h2>
+<div class="kpis" id="kpis"></div>
+
+<h2>2 · Day-wise trend</h2>
+<div class="cg">
+ <div class="panel"><p class="ct">Alerts per day: pushed vs not pushed</p><p class="cs">Detections inside the scheduled script window</p><div class="leg"><span><i style="background:var(--s1)"></i>Pushed (TP)</span><span><i style="background:var(--np)"></i>Not pushed (FP)</span></div><div id="c_vol"></div></div>
+ <div class="panel"><p class="ct">Quality rates per day</p><p class="cs">% pushed = pushed ÷ total alerts · % removed and % accepted = ÷ pushed</p><div class="leg"><span><i class="ln" style="background:var(--s1)"></i>% pushed</span><span><i class="ln" style="background:var(--s2)"></i>% removed by client after push</span><span><i class="ln" style="background:var(--s3)"></i>% accepted by client</span></div><div id="c_rate"></div></div>
+ <div class="panel"><p class="ct">Client outcome of pushed detections</p><p class="cs">Share of each day's pushed detections</p><div class="leg"><span><i style="background:var(--ok)"></i>Accepted</span><span><i style="background:var(--warn)"></i>Pending</span><span><i style="background:var(--bad)"></i>Rejected</span></div><div id="c_out"></div></div>
+ <div class="panel"><p class="ct">Not-pushed share per day</p><p class="cs">False-positive load the operators had to filter (lower is better)</p><div class="leg"><span><i class="ln" style="background:var(--s2)"></i>% not pushed</span></div><div id="c_np"></div></div>
+</div>
+<h3>Day summary</h3>
+<div class="panel"><table id="t_days"></table></div>
+
+<h2>3 · Script-wise trend</h2>
+<p class="note" style="margin-top:0">Each cell is one script on one day. Darker = higher. Empty cells mean the script raised no alerts that day.</p>
+<div class="seg" id="hm_seg"></div>
+<div class="panel"><table class="hm" id="hm"></table></div>
+
+<h3>Script drill-down</h3>
+<div style="margin:0 0 10px"><select id="sel"></select></div>
+<div class="cg">
+ <div class="panel"><p class="ct" id="dd_t1"></p><div class="leg"><span><i style="background:var(--s1)"></i>Pushed</span><span><i style="background:var(--np)"></i>Not pushed</span></div><div id="dd_vol"></div></div>
+ <div class="panel"><p class="ct" id="dd_t2"></p><div class="leg"><span><i class="ln" style="background:var(--s1)"></i>% pushed</span><span><i class="ln" style="background:var(--s2)"></i>% removed after push</span><span><i class="ln" style="background:var(--s3)"></i>% accepted by client</span></div><div id="dd_rate"></div></div>
+</div>
+
+<h3>Improvement summary <small>(first 3 exam days vs last 3 exam days, pooled)</small></h3>
+<div class="panel"><table id="t_imp"></table></div>
+<p class="note">Pooled = counts summed over the three days before the rate is taken, so a day with few alerts can't swing the result. Δ is in percentage points. For % pushed, up is better (fewer false positives reaching operators); for % removed, down is better (fewer pushed alerts the client rejected). The trend line shows % pushed for each day.</p>
+<div id="obs"></div>
+
+<h2>4 · Per-day detail</h2>
+<div class="tabs" id="daytabs"></div>
+<div id="days"></div>
+
+<h2>Method</h2>
+<ul class="note">
+<li>Source: CDIS database (<code>camera_report_rtsp</code>), SSC CGL 2026 (exam 42), only shifts marked running in the exam slot schedule. On 30 Sep only Shifts 2 and 3 ran.</li>
+<li><b>Table 1 (client view)</b> counts every detection pushed to the client, the same basis as the CDIS columns of the Superview vs CDIS report. Accepted = accepted by the client; Rejected = removed by the client without acceptance; Pending = everything else. Phone is split into Inside Lab / Server Room by the class the camera had in that shift (camera classification history), so cameras reclassified between days are counted correctly; 51 of 756 pushed phone detections have no history row and use the camera's current class.</li>
+<li><b>Table 2 (internal)</b> counts only detections inside each script's scheduled window for that shift (from the shift's script assignments; scripts with no window that day, e.g. Intruder, count all their detections). Pushed = sent to the client by an operator; Not pushed = filtered out. % removed after push = removed ÷ pushed.</li>
+<li>The internal tables shared for 8, 9, 10, 12, 13 and 14 Oct were taken without the window filter, so their totals are higher than here; recomputed without the filter they match the database row for row. The window-filtered tables (30 Sep, 1, 5, 6, 7, 15, 16, 22 Oct) match to within 1–5 alerts per row (window-edge seconds).</li>
+<li>No exam ran from 17 to 21 Oct; 22 Oct follows 16 Oct directly in the charts.</li>
+<li>The Shift 1 script schedule for past dates was re-saved after 22 Oct (Scene Classification moved to 05:59–06:24, and the 15 and 16 Oct Intruder rows were dropped). Windows for 30 Sep – 16 Oct are taken from the export of 22 Oct, before that change, so they reflect what actually ran.</li>
+<li>15 Oct: the Intruder script was scheduled 05:00–06:00 but kept running until about 11:00, raising 54,204 alerts outside its window (none pushed). They are excluded here, so Intruder shows 6 alerts that day.</li>
+<li>5 Oct: the Superview vs CDIS report for that day left out 9 pushed “Less than 5” detections from Shift 1 (10:02–10:35). They are pushed in the database, so this report counts them (171 instead of 162).</li>
+<li>Client actions (accept / remove) are as recorded in the database on the generation date, so a few counts are higher than in tables shared on the day (e.g. 14 Oct proximity pushed 245 here vs 239 in the 18:11 comparison report).</li>
+<li>17 detections were accepted by the client and later removed (8 on 13 Oct, 8 on 16 Oct, 1 on 22 Oct). Table 1 counts them as Accepted; Table 2 counts them under Removed by client after push.</li>
+<li>Generated 23 Oct 2026 11:20 IST.</li>
+</ul>
+</div><div class="tip" id="tip"></div>
+<script>
+const D={"days": ["2026-09-30", "2026-10-01", "2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09", "2026-10-10", "2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15", "2026-10-16", "2026-10-22"], "a_order": ["Intruder", "Crowd (Entry/Exit)", "Less than 5 people in a lab", "Zero Person", "Monitor Tampering", "Phone (Inside Lab)", "Phone (Server Room)", "Server Room Threshold", "Entry/Exit Movement", "Close Proximity", "Invigilator Static", "Camera Inversion", "Less than 5 + Invigilator Static"], "b_order": [["Crowd ≥10 people", "crowd"], ["Fewer than 5 candidates", "crowd_five"], ["Zero candidates in room", "crowd_zero"], ["Invigilator absent: no invigilator in room", "invigilator · no_targets"], ["Invigilator not moving", "invigilator · static_person"], ["Crowd <5 + invigilator static", "crowd_five_invigilator"], ["Server room threshold", "server"], ["Entry/exit movement", "entry_exit"], ["Mobile phone", "phone"], ["Proximity", "proximity"], ["Intruder", "intruder"], ["Monitor tampering", "monitor_tamper"], ["Camera inverted", "inversion"]], "A": {"2026-09-30": {"Intruder": [0, 0, 0], "Crowd (Entry/Exit)": [495, 2, 63], "Less than 5 people in a lab": [3, 0, 0], "Zero Person": [419, 0, 0], "Monitor Tampering": [5, 0, 2], "Phone (Inside Lab)": [13, 1, 7], "Phone (Server Room)": [16, 1, 6], "Server Room Threshold": [12, 3, 2], "Entry/Exit Movement": [23, 0, 9], "Close Proximity": [49, 3, 18], "Invigilator Static": [21, 3, 1], "Camera Inversion": [1, 0, 1], "Less than 5 + Invigilator Static": [0, 0, 0]}, "2026-10-01": {"Intruder": [13, 0, 2], "Crowd (Entry/Exit)": [1052, 1, 6], "Less than 5 people in a lab": [87, 0, 16], "Zero Person": [818, 0, 0], "Monitor Tampering": [4, 0, 0], "Phone (Inside Lab)": [3, 0, 2], "Phone (Server Room)": [70, 3, 19], "Server Room Threshold": [12, 1, 4], "Entry/Exit Movement": [155, 0, 4], "Close Proximity": [93, 0, 9], "Invigilator Static": [109, 21, 16], "Camera Inversion": [0, 0, 0], "Less than 5 + Invigilator Static": [1, 0, 0]}, "2026-10-05": {"Intruder": [4, 0, 0], "Crowd (Entry/Exit)": [68, 3, 4], "Less than 5 people in a lab": [171, 0, 0], "Zero Person": [745, 0, 0], "Monitor Tampering": [0, 0, 0], "Phone (Inside Lab)": [0, 0, 0], "Phone (Server Room)": [30, 6, 3], "Server Room Threshold": [7, 1, 2], "Entry/Exit Movement": [139, 1, 0], "Close Proximity": [20, 0, 0], "Invigilator Static": [163, 24, 10], "Camera Inversion": [1, 0, 0], "Less than 5 + Invigilator Static": [0, 0, 0]}, "2026-10-06": {"Intruder": [3, 0, 0], "Crowd (Entry/Exit)": [112, 0, 0], "Less than 5 people in a lab": [109, 0, 0], "Zero Person": [317, 4, 0], "Monitor Tampering": [0, 0, 0], "Phone (Inside Lab)": [5, 0, 0], "Phone (Server Room)": [21, 2, 0], "Server Room Threshold": [4, 0, 0], "Entry/Exit Movement": [189, 0, 0], "Close Proximity": [37, 1, 0], "Invigilator Static": [201, 25, 1], "Camera Inversion": [0, 0, 0], "Less than 5 + Invigilator Static": [0, 0, 0]}, "2026-10-07": {"Intruder": [0, 0, 0], "Crowd (Entry/Exit)": [156, 1, 0], "Less than 5 people in a lab": [330, 0, 0], "Zero Person": [45, 0, 0], "Monitor Tampering": [0, 0, 0], "Phone (Inside Lab)": [3, 0, 0], "Phone (Server Room)": [26, 0, 4], "Server Room Threshold": [5, 0, 0], "Entry/Exit Movement": [226, 0, 0], "Close Proximity": [49, 0, 0], "Invigilator Static": [266, 0, 0], "Camera Inversion": [0, 0, 0], "Less than 5 + Invigilator Static": [0, 0, 0]}, "2026-10-08": {"Intruder": [0, 0, 0], "Crowd (Entry/Exit)": [57, 0, 0], "Less than 5 people in a lab": [297, 0, 0], "Zero Person": [47, 0, 0], "Monitor Tampering": [0, 0, 0], "Phone (Inside Lab)": [1, 0, 1], "Phone (Server Room)": [11, 0, 1], "Server Room Threshold": [4, 0, 0], "Entry/Exit Movement": [199, 0, 2], "Close Proximity": [30, 0, 0], "Invigilator Static": [262, 0, 0], "Camera Inversion": [0, 0, 0], "Less than 5 + Invigilator Static": [0, 0, 0]}, "2026-10-09": {"Intruder": [3, 0, 0], "Crowd (Entry/Exit)": [84, 0, 0], "Less than 5 people in a lab": [311, 0, 0], "Zero Person": [138, 0, 0], "Monitor Tampering": [0, 0, 0], "Phone (Inside Lab)": [4, 0, 0], "Phone (Server Room)": [13, 0, 0], "Server Room Threshold": [3, 0, 0], "Entry/Exit Movement": [282, 0, 0], "Close Proximity": [36, 0, 0], "Invigilator Static": [237, 0, 0], "Camera Inversion": [0, 0, 0], "Less than 5 + Invigilator Static": [0, 0, 0]}, "2026-10-10": {"Intruder": [0, 0, 0], "Crowd (Entry/Exit)": [48, 0, 7], "Less than 5 people in a lab": [352, 0, 0], "Zero Person": [150, 0, 0], "Monitor Tampering": [0, 0, 0], "Phone (Inside Lab)": [0, 0, 0], "Phone (Server Room)": [7, 0, 0], "Server Room Threshold": [8, 0, 1], "Entry/Exit Movement": [307, 0, 0], "Close Proximity": [31, 0, 0], "Invigilator Static": [244, 4, 0], "Camera Inversion": [0, 0, 0], "Less than 5 + Invigilator Static": [0, 0, 0]}, "2026-10-12": {"Intruder": [0, 0, 0], "Crowd (Entry/Exit)": [67, 0, 0], "Less than 5 people in a lab": [349, 0, 0], "Zero Person": [109, 0, 0], "Monitor Tampering": [0, 0, 0], "Phone (Inside Lab)": [0, 0, 0], "Phone (Server Room)": [39, 10, 3], "Server Room Threshold": [10, 0, 0], "Entry/Exit Movement": [359, 0, 0], "Close Proximity": [29, 0, 8], "Invigilator Static": [231, 46, 6], "Camera Inversion": [0, 0, 0], "Less than 5 + Invigilator Static": [0, 0, 0]}, "2026-10-13": {"Intruder": [0, 0, 0], "Crowd (Entry/Exit)": [38, 0, 30], "Less than 5 people in a lab": [955, 56, 108], "Zero Person": [518, 47, 43], "Monitor Tampering": [0, 0, 0], "Phone (Inside Lab)": [3, 1, 1], "Phone (Server Room)": [48, 15, 15], "Server Room Threshold": [55, 7, 0], "Entry/Exit Movement": [911, 22, 179], "Close Proximity": [113, 1, 33], "Invigilator Static": [441, 80, 65], "Camera Inversion": [0, 0, 0], "Less than 5 + Invigilator Static": [0, 0, 0]}, "2026-10-14": {"Intruder": [7, 0, 0], "Crowd (Entry/Exit)": [586, 0, 57], "Less than 5 people in a lab": [995, 5, 4], "Zero Person": [51, 0, 0], "Monitor Tampering": [0, 0, 0], "Phone (Inside Lab)": [18, 5, 6], "Phone (Server Room)": [76, 33, 24], "Server Room Threshold": [71, 3, 3], "Entry/Exit Movement": [2020, 0, 55], "Close Proximity": [245, 0, 4], "Invigilator Static": [775, 28, 24], "Camera Inversion": [0, 0, 0], "Less than 5 + Invigilator Static": [2, 0, 0]}, "2026-10-15": {"Intruder": [6, 0, 0], "Crowd (Entry/Exit)": [347, 0, 26], "Less than 5 people in a lab": [3180, 0, 13], "Zero Person": [126, 0, 0], "Monitor Tampering": [0, 0, 0], "Phone (Inside Lab)": [51, 3, 15], "Phone (Server Room)": [65, 12, 20], "Server Room Threshold": [42, 12, 6], "Entry/Exit Movement": [2382, 0, 395], "Close Proximity": [213, 0, 5], "Invigilator Static": [898, 6, 1], "Camera Inversion": [0, 0, 0], "Less than 5 + Invigilator Static": [0, 0, 0]}, "2026-10-16": {"Intruder": [0, 0, 0], "Crowd (Entry/Exit)": [539, 0, 242], "Less than 5 people in a lab": [2240, 1, 229], "Zero Person": [140, 0, 8], "Monitor Tampering": [0, 0, 0], "Phone (Inside Lab)": [42, 5, 37], "Phone (Server Room)": [91, 27, 64], "Server Room Threshold": [25, 2, 22], "Entry/Exit Movement": [2153, 2, 469], "Close Proximity": [5, 1, 2], "Invigilator Static": [379, 38, 61], "Camera Inversion": [0, 0, 0], "Less than 5 + Invigilator Static": [1, 0, 0]}, "2026-10-22": {"Intruder": [67, 0, 0], "Crowd (Entry/Exit)": [630, 0, 100], "Less than 5 people in a lab": [974, 0, 24], "Zero Person": [121, 0, 4], "Monitor Tampering": [0, 0, 0], "Phone (Inside Lab)": [15, 2, 9], "Phone (Server Room)": [85, 5, 23], "Server Room Threshold": [8, 2, 1], "Entry/Exit Movement": [906, 0, 1], "Close Proximity": [6, 0, 0], "Invigilator Static": [108, 30, 28], "Camera Inversion": [0, 0, 0], "Less than 5 + Invigilator Static": [0, 0, 0]}}, "B": {"2026-09-30": {"crowd": [585, 495, 63, 2], "crowd_five": [1299, 3, 0, 0], "crowd_zero": [1143, 418, 0, 0], "invigilator · no_targets": [643, 19, 0, 2], "invigilator · static_person": [4, 2, 1, 1], "crowd_five_invigilator": [0, 0, 0, 0], "server": [18, 11, 2, 2], "entry_exit": [90, 23, 9, 0], "phone": [771, 29, 13, 2], "proximity": [607, 49, 18, 3], "intruder": [0, 0, 0, 0], "monitor_tamper": [1833, 3, 2, 0], "inversion": [72, 1, 1, 0]}, "2026-10-01": {"crowd": [1983, 1052, 6, 1], "crowd_five": [1001, 86, 16, 0], "crowd_zero": [1514, 783, 0, 0], "invigilator · no_targets": [1213, 102, 14, 20], "invigilator · static_person": [36, 6, 2, 1], "crowd_five_invigilator": [4, 1, 0, 0], "server": [24, 12, 4, 1], "entry_exit": [602, 148, 4, 0], "phone": [469, 71, 21, 3], "proximity": [818, 85, 9, 0], "intruder": [140, 13, 2, 0], "monitor_tamper": [2676, 0, 0, 0], "inversion": [102, 0, 0, 0]}, "2026-10-05": {"crowd": [169, 68, 4, 3], "crowd_five": [709, 159, 0, 0], "crowd_zero": [1451, 720, 0, 0], "invigilator · no_targets": [966, 155, 7, 22], "invigilator · static_person": [23, 8, 3, 2], "crowd_five_invigilator": [6, 0, 0, 0], "server": [6, 6, 2, 1], "entry_exit": [545, 134, 0, 1], "phone": [66, 30, 3, 6], "proximity": [710, 18, 0, 0], "intruder": [135, 4, 0, 0], "monitor_tamper": [2512, 0, 0, 0], "inversion": [92, 1, 0, 0]}, "2026-10-06": {"crowd": [286, 112, 0, 0], "crowd_five": [772, 109, 0, 0], "crowd_zero": [632, 314, 0, 4], "invigilator · no_targets": [783, 186, 1, 23], "invigilator · static_person": [36, 14, 0, 2], "crowd_five_invigilator": [6, 0, 0, 0], "server": [6, 4, 0, 0], "entry_exit": [786, 187, 0, 0], "phone": [83, 26, 0, 2], "proximity": [855, 37, 0, 1], "intruder": [121, 3, 0, 0], "monitor_tamper": [2937, 0, 0, 0], "inversion": [83, 0, 0, 0]}, "2026-10-07": {"crowd": [278, 156, 0, 1], "crowd_five": [395, 318, 0, 0], "crowd_zero": [103, 44, 0, 0], "invigilator · no_targets": [656, 262, 0, 0], "invigilator · static_person": [35, 4, 0, 0], "crowd_five_invigilator": [0, 0, 0, 0], "server": [58, 5, 0, 0], "entry_exit": [1035, 221, 0, 0], "phone": [82, 29, 4, 0], "proximity": [938, 44, 0, 0], "intruder": [0, 0, 0, 0], "monitor_tamper": [2191, 0, 0, 0], "inversion": [44, 0, 0, 0]}, "2026-10-08": {"crowd": [187, 57, 0, 0], "crowd_five": [320, 292, 0, 0], "crowd_zero": [59, 43, 0, 0], "invigilator · no_targets": [561, 256, 0, 0], "invigilator · static_person": [18, 6, 0, 0], "crowd_five_invigilator": [0, 0, 0, 0], "server": [6, 3, 0, 0], "entry_exit": [930, 187, 2, 0], "phone": [39, 12, 2, 0], "proximity": [831, 26, 0, 0], "intruder": [0, 0, 0, 0], "monitor_tamper": [2485, 0, 0, 0], "inversion": [0, 0, 0, 0]}, "2026-10-09": {"crowd": [260, 84, 0, 0], "crowd_five": [345, 299, 0, 0], "crowd_zero": [151, 132, 0, 0], "invigilator · no_targets": [603, 232, 0, 0], "invigilator · static_person": [18, 3, 0, 0], "crowd_five_invigilator": [6, 0, 0, 0], "server": [9, 3, 0, 0], "entry_exit": [1116, 277, 0, 0], "phone": [74, 17, 0, 0], "proximity": [847, 34, 0, 0], "intruder": [3, 3, 0, 0], "monitor_tamper": [2699, 0, 0, 0], "inversion": [0, 0, 0, 0]}, "2026-10-10": {"crowd": [233, 48, 7, 0], "crowd_five": [364, 346, 0, 0], "crowd_zero": [160, 148, 0, 0], "invigilator · no_targets": [653, 241, 0, 4], "invigilator · static_person": [19, 2, 0, 0], "crowd_five_invigilator": [0, 0, 0, 0], "server": [22, 8, 1, 0], "entry_exit": [1194, 299, 0, 0], "phone": [82, 7, 0, 0], "proximity": [831, 28, 0, 0], "intruder": [0, 0, 0, 0], "monitor_tamper": [2409, 0, 0, 0], "inversion": [0, 0, 0, 0]}, "2026-10-12": {"crowd": [241, 67, 0, 0], "crowd_five": [427, 330, 0, 0], "crowd_zero": [181, 107, 0, 0], "invigilator · no_targets": [656, 225, 5, 45], "invigilator · static_person": [16, 1, 0, 1], "crowd_five_invigilator": [0, 0, 0, 0], "server": [10, 10, 0, 0], "entry_exit": [1165, 353, 0, 0], "phone": [227, 38, 3, 10], "proximity": [794, 29, 8, 0], "intruder": [0, 0, 0, 0], "monitor_tamper": [2428, 0, 0, 0], "inversion": [0, 0, 0, 0]}, "2026-10-13": {"crowd": [632, 38, 30, 0], "crowd_five": [1323, 954, 112, 56], "crowd_zero": [669, 515, 44, 47], "invigilator · no_targets": [1898, 324, 64, 80], "invigilator · static_person": [2248, 117, 2, 0], "crowd_five_invigilator": [138, 0, 0, 0], "server": [58, 55, 0, 7], "entry_exit": [5149, 894, 175, 22], "phone": [269, 50, 15, 16], "proximity": [4578, 109, 29, 1], "intruder": [0, 0, 0, 0], "monitor_tamper": [3373, 0, 0, 0], "inversion": [0, 0, 0, 0]}, "2026-10-14": {"crowd": [953, 586, 57, 0], "crowd_five": [8201, 993, 4, 5], "crowd_zero": [308, 51, 0, 0], "invigilator · no_targets": [3004, 758, 19, 28], "invigilator · static_person": [565, 16, 5, 0], "crowd_five_invigilator": [12, 2, 0, 0], "server": [168, 71, 3, 3], "entry_exit": [14460, 2019, 55, 0], "phone": [513, 94, 30, 38], "proximity": [12616, 245, 4, 0], "intruder": [23, 7, 0, 0], "monitor_tamper": [3881, 0, 0, 0], "inversion": [0, 0, 0, 0]}, "2026-10-15": {"crowd": [597, 347, 26, 0], "crowd_five": [7194, 3175, 13, 0], "crowd_zero": [276, 126, 0, 0], "invigilator · no_targets": [2700, 885, 1, 6], "invigilator · static_person": [341, 13, 0, 0], "crowd_five_invigilator": [6, 0, 0, 0], "server": [72, 42, 6, 12], "entry_exit": [13700, 2377, 395, 0], "phone": [370, 116, 35, 15], "proximity": [5085, 213, 5, 0], "intruder": [6, 6, 0, 0], "monitor_tamper": [3396, 0, 0, 0], "inversion": [0, 0, 0, 0]}, "2026-10-16": {"crowd": [1029, 539, 242, 0], "crowd_five": [3488, 2240, 229, 1], "crowd_zero": [258, 140, 8, 0], "invigilator · no_targets": [992, 376, 66, 38], "invigilator · static_person": [272, 3, 2, 0], "crowd_five_invigilator": [2, 1, 0, 0], "server": [92, 25, 22, 2], "entry_exit": [9032, 2153, 469, 2], "phone": [718, 133, 102, 32], "proximity": [221, 5, 2, 1], "intruder": [0, 0, 0, 0], "monitor_tamper": [4444, 0, 0, 0], "inversion": [0, 0, 0, 0]}, "2026-10-22": {"crowd": [1142, 630, 100, 0], "crowd_five": [1136, 971, 24, 0], "crowd_zero": [142, 121, 4, 0], "invigilator · no_targets": [295, 107, 28, 30], "invigilator · static_person": [56, 1, 0, 0], "crowd_five_invigilator": [4, 0, 0, 0], "server": [28, 8, 1, 2], "entry_exit": [3894, 904, 1, 0], "phone": [734, 100, 33, 7], "proximity": [73, 6, 0, 0], "intruder": [149, 67, 0, 0], "monitor_tamper": [3664, 0, 0, 0], "inversion": [0, 0, 0, 0]}}, "shifts": {"2026-09-30": {"Shift 2": [2295, 600], "Shift 3": [4770, 453]}, "2026-10-01": {"Shift 1": [4823, 1576], "Shift 2": [2937, 400], "Shift 3": [2822, 383]}, "2026-10-05": {"Shift 1": [2347, 467], "Shift 2": [2330, 484], "Shift 3": [2713, 352]}, "2026-10-06": {"Shift 1": [2379, 471], "Shift 2": [2583, 220], "Shift 3": [2424, 301]}, "2026-10-07": {"Shift 1": [2287, 343], "Shift 2": [1715, 266], "Shift 3": [1813, 474]}, "2026-10-08": {"Shift 1": [1752, 413], "Shift 2": [1799, 220], "Shift 3": [1885, 249]}, "2026-10-09": {"Shift 1": [2079, 405], "Shift 2": [1941, 331], "Shift 3": [2111, 348]}, "2026-10-10": {"Shift 1": [1847, 379], "Shift 2": [2036, 387], "Shift 3": [2084, 361]}, "2026-10-12": {"Shift 1": [1765, 355], "Shift 2": [1997, 416], "Shift 3": [2383, 389]}, "2026-10-13": {"Shift 1": [2375, 361], "Shift 2": [2386, 314], "Shift 3": [15574, 2381]}, "2026-10-14": {"Shift 1": [15615, 1589], "Shift 2": [14474, 1575], "Shift 3": [14615, 1678]}, "2026-10-15": {"Shift 1": [11330, 1820], "Shift 2": [12311, 2536], "Shift 3": [10102, 2944]}, "2026-10-16": {"Shift 1": [7772, 2426], "Shift 2": [6223, 1387], "Shift 3": [6553, 1802]}, "2026-10-22": {"Shift 1": [1870, 939], "Shift 2": [3086, 425], "Shift 3": [6361, 1551]}}};
+const $=s=>document.querySelector(s), E=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const n=x=>Math.round(x).toLocaleString('en-US'), pc=(a,b)=>b?(100*a/b):null, pf=v=>v==null?'–':v.toFixed(1)+'%';
+const MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const dl=d=>{const[y,m,dd]=d.split('-');return +dd+' '+MON[m-1]};
+const days=D.days, L=days.map(dl);
+// ---------- aggregates
+const sumB=d=>{let t=[0,0,0,0];for(const k in D.B[d])D.B[d][k].forEach((v,i)=>t[i]+=v);return t};   // total,pushed,removed,accepted
+const sumA=d=>{let t=[0,0,0];for(const k in D.A[d])D.A[d][k].forEach((v,i)=>t[i]+=v);return t};     // pushed,acc,rej
+const DB=days.map(sumB), DA=days.map(sumA);
+$('#subt').textContent=`SSC CGL 2026 (exam 42) · ${L[0]} – ${L[L.length-1]} 2026 · ${days.length} exam days · CDIS detections only`;
+// ---------- tooltip
+const tip=$('#tip');
+function showTip(ev,html){tip.innerHTML=html;tip.style.display='block';const r=tip.getBoundingClientRect();let x=ev.clientX+14,y=ev.clientY+14;if(x+r.width>innerWidth-8)x=ev.clientX-r.width-14;if(y+r.height>innerHeight-8)y=ev.clientY-r.height-14;tip.style.left=x+'px';tip.style.top=y+'px'}
+const hideTip=()=>tip.style.display='none';
+const row=(k,v,c)=>`<div><span>${c?`<i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${c};margin-right:5px"></i>`:''}${k}</span><b style="display:inline;margin:0">${v}</b></div>`;
+// ---------- KPIs
+(()=>{const T=DB.reduce((a,b)=>a.map((v,i)=>v+b[i])),A=DA.reduce((a,b)=>a.map((v,i)=>v+b[i]));
+ const f3=DB.slice(0,3).reduce((a,b)=>a.map((v,i)=>v+b[i])),l3=DB.slice(-3).reduce((a,b)=>a.map((v,i)=>v+b[i]));
+ const dp=pc(l3[1],l3[0])-pc(f3[1],f3[0]), dr=pc(l3[2],l3[1])-pc(f3[2],f3[1]);
+ const k=(v,l,e)=>`<div class="k"><b>${v}</b><span>${l}</span>${e?`<em>${e}</em>`:''}</div>`;
+ const dd=(v,good)=>`<span class="delta ${(v>0)==good?'up':'down'}">${v>0?'▲':'▼'} ${Math.abs(v).toFixed(1)} pp</span> first 3 → last 3 days`;
+ $('#kpis').innerHTML=k(n(T[0]),'Total alerts (in window)')+k(n(T[1]),'Pushed to client (TP)')+k(pf(pc(T[1],T[0])),'% pushed',dd(dp,true))
+  +k(pf(pc(T[0]-T[1],T[0])),'% not pushed (FP)')+k(pf(pc(T[2],T[1])),'% removed by client after push',dd(dr,false))
+  +k(n(A[1]),'Accepted by client',pf(pc(A[1],A[0]))+' of all pushed')+k(n(A[0]-A[1]-A[2]),'Pending with client',pf(pc(A[0]-A[1]-A[2],A[0]))+' of all pushed');
+})();
+// ---------- SVG helpers
+const W=560,H=250,M={l:44,r:14,t:12,b:28};
+function frame(max,fmt,ticks=4){let s='';for(let i=0;i<=ticks;i++){const v=max*i/ticks,y=M.t+(H-M.t-M.b)*(1-i/ticks);s+=`<line class="${i?'gl':'ax'}" x1="${M.l}" x2="${W-M.r}" y1="${y}" y2="${y}"/><text x="${M.l-6}" y="${y+3.5}" text-anchor="end">${fmt(v)}</text>`}return s}
+const niceMax=v=>{if(v<=0)return 1;const p=10**Math.floor(Math.log10(v)),m=v/p;return (m<=1?1:m<=2?2:m<=2.5?2.5:m<=5?5:10)*p};
+const kfmt=v=>v>=1000?(v/1000).toFixed(v%1000?1:0)+'k':String(Math.round(v));
+function xlab(labels,cx){return labels.map((l,i)=>`<text x="${cx(i)}" y="${H-M.b+16}" text-anchor="middle">${l}</text>`).join('')}
+// stacked bar: series=[{name,color,vals}], tipf(i)
+function stacked(el,labels,series,{pct=false,tipf}={}){
+ const nB=labels.length,pw=(W-M.l-M.r)/nB,bw=Math.min(30,pw*0.62),cx=i=>M.l+pw*(i+.5);
+ const tot=labels.map((_,i)=>series.reduce((a,s)=>a+s.vals[i],0)),max=pct?100:niceMax(Math.max(...tot));
+ const y=v=>M.t+(H-M.t-M.b)*(1-v/max);let s=frame(max,pct?v=>v+'%':kfmt);
+ labels.forEach((_,i)=>{let acc=0;const T=tot[i]||1;
+  series.forEach((se,j)=>{const v=pct?100*se.vals[i]/T:se.vals[i];if(v<=0)return;const y0=y(acc),y1=y(acc+v);const top=j==series.length-1||series.slice(j+1).every(s2=>!s2.vals[i]);
+   const h=Math.max(0,y0-y1-(acc>0?2:0));s+=top&&h>=5?`<path d="M${cx(i)-bw/2},${y0-(acc>0?2:0)}v${-h+4}q0,-4 4,-4h${bw-8}q4,0 4,4v${h-4}z" fill="${se.color}"/>`:`<rect x="${cx(i)-bw/2}" y="${y0-h-(acc>0?2:0)}" width="${bw}" height="${h}" fill="${se.color}"/>`;acc+=v});
+  s+=`<rect x="${cx(i)-pw/2}" y="${M.t}" width="${pw}" height="${H-M.t-M.b}" fill="transparent" data-i="${i}"/>`});
+ if(!pct){/* total label on the last bar only */}
+ s+=xlab(labels,cx);el.innerHTML=`<svg viewBox="0 0 ${W} ${H}" role="img">${s}</svg>`;
+ el.querySelectorAll('rect[data-i]').forEach(r=>{r.onmousemove=e=>showTip(e,tipf(+r.dataset.i));r.onmouseleave=hideTip});
+}
+// line chart on % axis; series=[{name,color,vals(null allowed)}]
+function lines(el,labels,series,{tipf,max=null}={}){
+ const nB=labels.length,pw=(W-M.l-M.r)/nB,cx=i=>M.l+pw*(i+.5);
+ const mx=max||niceMax(Math.max(5,...series.flatMap(s=>s.vals.filter(v=>v!=null))));const y=v=>M.t+(H-M.t-M.b)*(1-v/mx);
+ let s=frame(mx,v=>(+v.toFixed(1))+'%');
+ const used=[];
+ series.forEach(se=>{let d='',pen=false;se.vals.forEach((v,i)=>{if(v==null){pen=false;return}d+=(pen?'L':'M')+cx(i)+','+y(v);pen=true});
+  s+=`<path d="${d}" fill="none" stroke="${se.color}" stroke-width="2" stroke-linejoin="round"/>`;
+  se.vals.forEach((v,i)=>{if(v!=null)s+=`<circle cx="${cx(i)}" cy="${y(v)}" r="3.5" fill="${se.color}" stroke="var(--card)" stroke-width="1.5"/>`});
+  const li=se.vals.map((v,i)=>v==null?-1:i).filter(i=>i>=0).pop();if(li!=null&&se.label!==false){const py=y(se.vals[li]);let ly=[py-8,py+16,py-21,py+29,py-34].find(c=>!used.some(u=>Math.abs(u-c)<13))??py-8;used.push(ly);
+   s+=`<text class="dl" x="${cx(li)}" y="${ly}" text-anchor="middle">${se.vals[li].toFixed(1)}%</text>`}});
+ s+=`<line id="xh" class="ax" x1="0" x2="0" y1="${M.t}" y2="${H-M.b}" style="display:none"/>`;
+ labels.forEach((_,i)=>s+=`<rect x="${cx(i)-pw/2}" y="${M.t}" width="${pw}" height="${H-M.t-M.b}" fill="transparent" data-i="${i}"/>`);
+ s+=xlab(labels,cx);el.innerHTML=`<svg viewBox="0 0 ${W} ${H}" role="img">${s}</svg>`;const xh=el.querySelector('#xh');
+ el.querySelectorAll('rect[data-i]').forEach(r=>{const i=+r.dataset.i;r.onmousemove=e=>{xh.style.display='';xh.setAttribute('x1',cx(i));xh.setAttribute('x2',cx(i));showTip(e,tipf(i))};r.onmouseleave=()=>{xh.style.display='none';hideTip()}});
+}
+const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+// ---------- Section 2 charts
+function drawDay(){
+ stacked($('#c_vol'),L,[{name:'Pushed',color:'var(--s1)',vals:DB.map(t=>t[1])},{name:'Not pushed',color:'var(--np)',vals:DB.map(t=>t[0]-t[1])}],
+  {tipf:i=>`<b>${L[i]}</b>`+row('Total alerts',n(DB[i][0]))+row('Pushed',n(DB[i][1]),css('--s1'))+row('Not pushed',n(DB[i][0]-DB[i][1]),css('--np'))+row('% pushed',pf(pc(DB[i][1],DB[i][0])))});
+ const rp=DB.map(t=>pc(t[1],t[0])),rr=DB.map(t=>pc(t[2],t[1])),ra=DA.map(t=>pc(t[1],t[0]));
+ lines($('#c_rate'),L,[{color:'var(--s1)',vals:rp},{color:'var(--s2)',vals:rr},{color:'var(--s3)',vals:ra}],
+  {tipf:i=>`<b>${L[i]}</b>`+row('% pushed',pf(rp[i]),css('--s1'))+row('% removed after push',pf(rr[i]),css('--s2'))+row('% accepted by client',pf(ra[i]),css('--s3'))});
+ stacked($('#c_out'),L,[{color:'var(--ok)',vals:DA.map(t=>t[1])},{color:'var(--warn)',vals:DA.map(t=>t[0]-t[1]-t[2])},{color:'var(--bad)',vals:DA.map(t=>t[2])}],
+  {pct:true,tipf:i=>{const[p,a,r]=DA[i];return `<b>${L[i]} · ${n(p)} pushed</b>`+row('Accepted',`${n(a)} · ${pf(pc(a,p))}`,css('--ok'))+row('Pending',`${n(p-a-r)} · ${pf(pc(p-a-r,p))}`,css('--warn'))+row('Rejected',`${n(r)} · ${pf(pc(r,p))}`,css('--bad'))}});
+ const rn=DB.map(t=>pc(t[0]-t[1],t[0]));
+ lines($('#c_np'),L,[{color:'var(--s2)',vals:rn}],{max:100,tipf:i=>`<b>${L[i]}</b>`+row('Not pushed',`${n(DB[i][0]-DB[i][1])} of ${n(DB[i][0])}`)+row('% not pushed',pf(rn[i]),css('--s2'))});
+}
+// day summary table
+(()=>{let h=`<thead><tr><th>Day</th><th>Shifts</th><th class="sep">Total alerts</th><th>Pushed</th><th>% pushed</th><th>Not pushed</th><th>% not pushed</th><th>Removed after push</th><th>% removed</th><th class="sep">Accepted</th><th>Accepted %</th><th>Pending</th><th>Pending %</th><th>Rejected</th><th>Rejected %</th></tr></thead><tbody>`;
+ const tr=(lab,sh,b,a,cls='')=>`<tr class="${cls}"><td>${lab}</td><td>${sh}</td><td class="sep">${n(b[0])}</td><td><b>${n(b[1])}</b></td><td><b>${pf(pc(b[1],b[0]))}</b></td><td>${n(b[0]-b[1])}</td><td>${pf(pc(b[0]-b[1],b[0]))}</td><td>${n(b[2])}</td><td>${pf(pc(b[2],b[1]))}</td><td class="sep">${n(a[1])}</td><td>${pf(pc(a[1],a[0]))}</td><td>${n(a[0]-a[1]-a[2])}</td><td>${pf(pc(a[0]-a[1]-a[2],a[0]))}</td><td>${n(a[2])}</td><td>${pf(pc(a[2],a[0]))}</td></tr>`;
+ days.forEach((d,i)=>h+=tr(L[i],Object.keys(D.shifts[d]).sort().map(s=>s.replace('Shift ','S')).join(' '),DB[i],DA[i]));
+ h+=tr('Total','',DB.reduce((a,b)=>a.map((v,i)=>v+b[i])),DA.reduce((a,b)=>a.map((v,i)=>v+b[i])),'tot');$('#t_days').innerHTML=h+'</tbody>'})();
+// ---------- Section 3: heatmap
+const B=D.b_order.map(([l,c])=>({l,c})), A=D.a_order;
+const MET=[
+ {id:'p',name:'% pushed',src:'B',v:(d,c)=>{const x=D.B[d][c];return x[0]?pc(x[1],x[0]):null},hue:'b',fmt:v=>v.toFixed(0)},
+ {id:'np',name:'% not pushed',src:'B',v:(d,c)=>{const x=D.B[d][c];return x[0]?pc(x[0]-x[1],x[0]):null},hue:'o',fmt:v=>v.toFixed(0)},
+ {id:'r',name:'% removed after push',src:'B',v:(d,c)=>{const x=D.B[d][c];return x[1]?pc(x[2],x[1]):null},hue:'o',fmt:v=>v.toFixed(0)},
+ {id:'t',name:'Total alerts',src:'B',v:(d,c)=>D.B[d][c][0]||null,hue:'b',fmt:kfmt,log:true},
+ {id:'a',name:'Client accepted %',src:'A',v:(d,s)=>{const x=D.A[d][s];return x[0]?pc(x[1],x[0]):null},hue:'b',fmt:v=>v.toFixed(0)},
+ {id:'pe',name:'Client pending %',src:'A',v:(d,s)=>{const x=D.A[d][s];return x[0]?pc(x[0]-x[1]-x[2],x[0]):null},hue:'b',fmt:v=>v.toFixed(0)},
+ {id:'rj',name:'Client rejected %',src:'A',v:(d,s)=>{const x=D.A[d][s];return x[0]?pc(x[2],x[0]):null},hue:'o',fmt:v=>v.toFixed(0)}];
+const RAMP={b:['#e8f1fc','#cde2fb','#9ec5f4','#6da7ec','#3987e5','#256abf','#184f95','#0d366b'],o:['#fdeee6','#fbd9c7','#f6b597','#f08f63','#eb6834','#c9501f','#9c3c15','#6e2a0e']};
+const hex=h=>[1,3,5].map(i=>parseInt(h.slice(i,i+2),16));
+function rampCol(h,t){const r=RAMP[h],p=t*(r.length-1),i=Math.min(r.length-2,Math.floor(p)),f=p-i,a=hex(r[i]),b=hex(r[i+1]);return 'rgb('+a.map((v,k)=>Math.round(v+(b[k]-v)*f)).join(',')+')'}
+let curM='p';
+function drawHM(){const m=MET.find(x=>x.id==curM),rows=m.src=='B'?B.map(r=>({l:r.l,code:r.c,k:r.c})):A.map(s=>({l:s,k:s}));
+ const vals=rows.map(r=>days.map(d=>m.v(d,r.k)));const all=vals.flat().filter(v=>v!=null);
+ const mx=m.log?Math.log10(Math.max(...all)+1):100;
+ let h=`<thead><tr><th>${m.src=='B'?'Analytic':'Script'}</th>${L.map(l=>`<th>${l}</th>`).join('')}</tr></thead><tbody>`;
+ rows.forEach((r,ri)=>{if(vals[ri].every(v=>v==null))return;h+=`<tr><td>${E(r.l)}${r.code?` <code>${E(r.code)}</code>`:''}</td>`;
+  vals[ri].forEach((v,di)=>{if(v==null){h+=`<td data-r="${ri}" data-d="${di}"></td>`;return}const t=m.log?Math.log10(v+1)/mx:v/mx;
+   h+=`<td data-r="${ri}" data-d="${di}" style="background:${rampCol(m.hue,Math.max(0,Math.min(1,t)))};color:${t>0.5?'#fff':'#1b2430'}">${m.fmt(v)}</td>`});h+='</tr>'});
+ $('#hm').innerHTML=h+'</tbody>';
+ $('#hm').querySelectorAll('td[data-r]').forEach(td=>{const r=rows[+td.dataset.r],d=days[+td.dataset.d];
+  td.onmousemove=e=>{let s=`<b>${E(r.l)} · ${dl(d)}</b>`;
+   if(m.src=='B'){const x=D.B[d][r.k];s+=row('Total alerts',n(x[0]))+row('Pushed',n(x[1]))+row('Not pushed',n(x[0]-x[1]))+row('% pushed',pf(pc(x[1],x[0])))+row('Removed after push',`${n(x[2])} · ${pf(pc(x[2],x[1]))}`)}
+   else{const x=D.A[d][r.k];s+=row('Pushed',n(x[0]))+row('Accepted',`${n(x[1])} · ${pf(pc(x[1],x[0]))}`)+row('Pending',`${n(x[0]-x[1]-x[2])} · ${pf(pc(x[0]-x[1]-x[2],x[0]))}`)+row('Rejected',`${n(x[2])} · ${pf(pc(x[2],x[0]))}`)}
+   showTip(e,s)};td.onmouseleave=hideTip})}
+$('#hm_seg').innerHTML=MET.map(m=>`<button data-m="${m.id}" class="${m.id==curM?'on':''}">${m.name}</button>`).join('');
+$('#hm_seg').onclick=e=>{const b=e.target.closest('button');if(!b)return;curM=b.dataset.m;$('#hm_seg').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x==b));drawHM()};
+// ---------- drill-down
+$('#sel').innerHTML=B.map((r,i)=>`<option value="${i}">${E(r.l)} (${E(r.c)})</option>`).join('');
+function drawDD(){const r=B[+$('#sel').value],X=days.map(d=>D.B[d][r.c]);
+ $('#dd_t1').textContent=r.l+': alerts per day';$('#dd_t2').textContent=r.l+': rates per day';
+ stacked($('#dd_vol'),L,[{color:'var(--s1)',vals:X.map(x=>x[1])},{color:'var(--np)',vals:X.map(x=>x[0]-x[1])}],{tipf:i=>`<b>${L[i]}</b>`+row('Total alerts',n(X[i][0]))+row('Pushed',n(X[i][1]),css('--s1'))+row('Not pushed',n(X[i][0]-X[i][1]),css('--np'))+row('Accepted by client',n(X[i][3]))+row('Removed by client',n(X[i][2]))});
+ const rp=X.map(x=>x[0]?pc(x[1],x[0]):null),rr=X.map(x=>x[1]?pc(x[2],x[1]):null),ra=X.map(x=>x[1]?pc(x[3],x[1]):null);
+ lines($('#dd_rate'),L,[{color:'var(--s1)',vals:rp},{color:'var(--s2)',vals:rr},{color:'var(--s3)',vals:ra}],{max:100,tipf:i=>`<b>${L[i]}</b>`+row('% pushed',`${pf(rp[i])} (${n(X[i][1])}/${n(X[i][0])})`,css('--s1'))+row('% removed after push',`${pf(rr[i])} (${n(X[i][2])}/${n(X[i][1])})`,css('--s2'))+row('% accepted by client',`${pf(ra[i])} (${n(X[i][3])}/${n(X[i][1])})`,css('--s3'))})}
+$('#sel').onchange=drawDD;
+// ---------- improvement table
+(()=>{const pool=(c,ix)=>ix.reduce((a,i)=>a.map((v,k)=>v+D.B[days[i]][c][k]),[0,0,0,0]);
+ let h=`<thead><tr><th>Analytic</th><th class="sep">Alerts first 3</th><th>Alerts last 3</th><th class="sep">% pushed first 3</th><th>% pushed last 3</th><th>Δ % pushed</th><th class="sep">% removed first 3</th><th>% removed last 3</th><th>Δ % removed</th><th class="sep">% pushed by day</th></tr></thead><tbody>`;
+ const dlt=(v,good)=>v==null?'–':Math.abs(v)<0.05?'0.0':`<span class="delta ${Math.abs(v)<0.05?'':(v>0)==good?'up':'down'}">${v>0?'+':''}${v.toFixed(1)}</span>`;
+ const spark=c=>{const v=days.map(d=>{const x=D.B[d][c];return x[0]?100*x[1]/x[0]:null});const w=150,hh=28,dx=w/(v.length-1);let p='',pen=false;
+  v.forEach((y,i)=>{if(y==null){pen=false;return}p+=(pen?'L':'M')+(i*dx).toFixed(1)+','+(hh-2-y/100*(hh-4)).toFixed(1);pen=true});
+  return `<svg viewBox="-3 0 ${w+6} ${hh}" style="width:156px;height:${hh}px"><line x1="0" x2="${w}" y1="${hh-2}" y2="${hh-2}" class="ax"/><path d="${p}" fill="none" stroke="var(--s1)" stroke-width="1.6"/></svg>`};
+ B.forEach(r=>{const f=pool(r.c,[0,1,2]),l=pool(r.c,[days.length-3,days.length-2,days.length-1]);if(!f[0]&&!l[0])return;
+  const fp=pc(f[1],f[0]),lp=pc(l[1],l[0]),fr=pc(f[2],f[1]),lr=pc(l[2],l[1]);
+  h+=`<tr><td>${E(r.l)} <code>${E(r.c)}</code></td><td class="sep">${n(f[0])}</td><td>${n(l[0])}</td><td class="sep">${pf(fp)}</td><td>${pf(lp)}</td><td>${fp!=null&&lp!=null?dlt(lp-fp,true):'–'}</td><td class="sep">${pf(fr)}</td><td>${pf(lr)}</td><td>${fr!=null&&lr!=null?dlt(lr-fr,false):'–'}</td><td class="sep">${spark(r.c)}</td></tr>`});
+ $('#t_imp').innerHTML=h+'</tbody>'})();
+$('#obs').innerHTML="<h3>Key observations</h3><ul class=\"note obs\">\n<li><b>Overall precision has improved.</b> % pushed rose from 18.8% on the first 3 exam days (30 Sep, 1 Oct, 5 Oct) to 24.1% on the last 3 (15, 16, 22 Oct), while in-window alerts grew 2.6\u00d7 (25,037 \u2192 65,608). The best days are 16 Oct (27.3%) and 22 Oct (25.8%). 22 Oct also had the lowest alert volume since 12 Oct (11,317).</li>\n<li><b>Improved:</b> fewer than 5 candidates (% pushed 8.2% \u2192 54.0%), invigilator absent (9.8% \u2192 34.3%), zero candidates (46.8% \u2192 57.2%), mobile phone (10.0% \u2192 19.2%) and intruder (6.2% \u2192 47.1%, on small counts).</li>\n<li><b>Got worse:</b> invigilator not moving (25.4% \u2192 2.5%, alerts 63 \u2192 669), server room threshold (60.4% \u2192 39.1%), entry/exit (24.7% \u2192 20.4%, with 21\u00d7 the alerts), proximity (7.1% \u2192 4.2%, with 2.5\u00d7 the alerts) and crowd \u226510 (59.0% \u2192 54.8%).</li>\n<li><b>The client is removing more of what we push:</b> 4.4% \u2192 11.5% overall (20.3% on 16 Oct, 6.6% on 22 Oct). Mobile phone (48.7% removed in the last 3 days), server room threshold (38.7%), crowd \u226510 (24.3%) and entry/exit (15.9%) drive it.</li>\n<li><b>Monitor tampering is effectively never pushed:</b> 3 pushes on 30 Sep, none since, out of about 1,800\u20134,400 alerts per day. Camera inversion produced no alerts after 7 Oct.</li></ul>";
+// ---------- Section 4: per-day tabs
+(()=>{let tabs='',body='';
+ days.forEach((d,i)=>{const id='d'+d.replace(/-/g,'');tabs+=`<button data-t="${id}">${L[i]}</button>`;
+  let a=`<table><thead><tr><th>Script</th><th class="sep">CDIS total</th><th class="sep">Accepted</th><th>Accepted %</th><th class="sep">Pending</th><th>Pending %</th><th class="sep">Rejected</th><th>Rejected %</th></tr></thead><tbody>`,T=[0,0,0];
+  const ra=(p,ac,rj)=>`<td class="sep">${n(p)}</td><td class="sep">${n(ac)}</td><td>${pf(pc(ac,p))}</td><td class="sep">${n(p-ac-rj)}</td><td>${pf(pc(p-ac-rj,p))}</td><td class="sep">${n(rj)}</td><td>${pf(pc(rj,p))}</td>`;
+  A.forEach(s=>{const[p,ac,rj]=D.A[d][s];T[0]+=p;T[1]+=ac;T[2]+=rj;a+=`<tr class="${p?'':'dim'}"><td>${E(s)}</td>${ra(p,ac,rj)}</tr>`});
+  a+=`<tr class="tot"><td>Total</td>${ra(...T)}</tr></tbody></table>`;
+  const rows=B.map(r=>({...r,x:D.B[d][r.c]})).sort((p,q)=>(pc(q.x[1],q.x[0])??-1)-(pc(p.x[1],p.x[0])??-1)||q.x[0]-p.x[0]);
+  let b=`<table><thead><tr><th>Analytic</th><th class="sep">Total alerts</th><th class="sep">✅ Pushed (TP)</th><th>% pushed</th><th class="sep">❌ Not pushed (FP)</th><th>% not pushed</th><th class="sep">Removed by client after push</th><th>% removed after push</th></tr></thead><tbody>`,U=[0,0,0];
+  const rb=(t,p,rm)=>`<td class="sep">${n(t)}</td><td class="sep"><b>${n(p)}</b></td><td><b>${pf(pc(p,t))}</b></td><td class="sep">${n(t-p)}</td><td>${pf(pc(t-p,t))}</td><td class="sep">${n(rm)}</td><td>${pf(pc(rm,p))}</td>`;
+  rows.forEach(r=>{const[t,p,rm]=r.x;U[0]+=t;U[1]+=p;U[2]+=rm;b+=`<tr class="${t?'':'dim'}"><td>${E(r.l)} <code>${E(r.c)}</code></td>${rb(t,p,rm)}</tr>`});
+  b+=`<tr class="tot"><td>Total</td>${rb(...U)}</tr></tbody></table>`;
+  const sh=Object.entries(D.shifts[d]).sort().map(([s,[t,p]])=>`${s}: ${n(t)} alerts, ${n(p)} pushed (${pf(pc(p,t))})`).join(' · ');
+  body+=`<section class="tab" id="${id}"><h3>SSC CGL 2026 (exam 42), ${L[i]} 2026</h3><p class="note" style="margin-top:0">${sh}${d=='2026-09-30'?' · Shift 1 did not run on this day.':''}</p>
+   <h3>Table 1 · Client view: CDIS pushed detections <small>(all shifts combined)</small></h3><div class="panel">${a}</div>
+   <h3>Table 2 · Internal: only detections inside the scheduled shift window <small>(sorted by % pushed)</small></h3><div class="panel">${b}</div></section>`});
+ $('#daytabs').innerHTML=tabs;$('#days').innerHTML=body;
+ const show=t=>{document.querySelectorAll('#days .tab').forEach(e=>e.classList.toggle('on',e.id==t));document.querySelectorAll('#daytabs button').forEach(b=>b.classList.toggle('on',b.dataset.t==t))};
+ $('#daytabs').onclick=e=>{const b=e.target.closest('button');if(b)show(b.dataset.t)};show('d'+days[days.length-1].replace(/-/g,''));
+})();
+drawDay();drawHM();drawDD();
+</script></body></html>

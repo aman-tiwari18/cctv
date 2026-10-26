@@ -272,6 +272,13 @@ exports.getCentreSchedule = async (req, res) => {
         const cams = await camerasByTc(exam);
         const camBy = new Map(cams.map((r) => [S.normalizeTc(r.tc_code), Number(r.n)]));
         const infoBy = new Map(info.map((r) => [r.tc_code, r]));
+        // Centres missing from exam_centre_info (or listed there without a region) take region / name /
+        // city / state from their cameras, so the Region filter covers every centre.
+        const camInfo = await query(
+            `SELECT tc_code, ${camTable(exam) === 'camera_links_rtsp' ? 'MAX(region)' : 'NULL'} AS region, MAX(centre_name) AS centre_name,
+                    MAX(city) AS city, MAX(state) AS state
+               FROM ${camTable(exam)} WHERE exam_id = ? AND is_active = 1 GROUP BY tc_code`, [exam.id]);
+        const camInfoBy = new Map(camInfo.map((r) => [S.normalizeTc(r.tc_code), r]));
         const slotKeys = new Map();
         const byTc = new Map();
         for (const r of cells) {
@@ -281,9 +288,16 @@ exports.getCentreSchedule = async (req, res) => {
             byTc.get(r.tc_code)[`${d}#${r.shift_id}`] = r.is_running ? (r.source === 'manual' ? 2 : 1) : (r.source === 'manual' ? -1 : 0);
         }
         const slots = [...slotKeys.values()].sort((a, b) => a.date.localeCompare(b.date) || a.shift_id - b.shift_id);
-        const centres = [...byTc.keys()].sort().map((tc) => ({
-            tc_code: tc, ...(infoBy.get(tc) || {}), cameras: camBy.get(tc) || 0, cells: byTc.get(tc),
-        }));
+        const centres = [...byTc.keys()].sort().map((tc) => {
+            const inf = infoBy.get(tc) || {};
+            const ci = camInfoBy.get(S.normalizeTc(tc)) || {};
+            return {
+                tc_code: tc, ...inf,
+                centre_name: inf.centre_name || ci.centre_name || null, region: inf.region || ci.region || null,
+                city: inf.city || ci.city || null, state: inf.state || ci.state || null,
+                cameras: camBy.get(tc) || 0, cells: byTc.get(tc),
+            };
+        });
         const totals = {};
         for (const s of slots) {
             const k = `${s.date}#${s.shift_id}`;

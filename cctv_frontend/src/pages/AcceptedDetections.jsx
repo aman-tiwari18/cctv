@@ -43,6 +43,7 @@ import {
   DesktopAccessDisabled,
 } from '@mui/icons-material';
 import { useSearchParams, useNavigate } from 'react-router-dom';
+import axios from 'axios';
 import { API_BASE_1 } from '../constants/data';
 import { useDetectionCounts } from '../contexts/DetectionCountsContext';
 import { examsAPI, clientDetectionsAPI } from '../services/api';
@@ -623,6 +624,9 @@ const AcceptedDetections = () => {
   const [examFilter, setExamFilter] = useState('');
   const [exams, setExams] = useState([]);
   const [shiftFilter, setShiftFilter] = useState('');
+  // Region (RTSP centres only) — same options as the Detections pages.
+  const [regionFilter, setRegionFilter] = useState('');
+  const [regionOptions, setRegionOptions] = useState([]);
   const [examShifts, setExamShifts] = useState([]);
   const [dateFilter, setDateFilter] = useState(todayDate);
   const [startTime, setStartTime] = useState('');
@@ -645,6 +649,7 @@ const AcceptedDetections = () => {
       if (appliedEndTime) params.end_time = appliedEndTime;
       if (examFilter) params.exam_id = examFilter;
       if (shiftFilter) params.shift_id = shiftFilter;
+      if (regionFilter) params.region = regionFilter;
 
       const res = await clientDetectionsAPI.getAccepted(params);
       if (res.data?.success) {
@@ -673,7 +678,7 @@ const AcceptedDetections = () => {
     } finally {
       setLoading(false);
     }
-  }, [shiftFilter, typeFilter, dateFilter, search, appliedStartTime, appliedEndTime, examFilter, rowsPerPage, setUnfilteredCounts]);
+  }, [shiftFilter, regionFilter, typeFilter, dateFilter, search, appliedStartTime, appliedEndTime, examFilter, rowsPerPage, setUnfilteredCounts]);
 
   useEffect(() => {
     const fetchExams = async () => {
@@ -683,6 +688,12 @@ const AcceptedDetections = () => {
       } catch (err) { console.error('Failed to fetch exams:', err); }
     };
     fetchExams();
+  }, []);
+
+  useEffect(() => {
+    axios.get(`${API_BASE_1}/detections/regions`)
+      .then((res) => setRegionOptions(Array.isArray(res?.data?.data) ? res.data.data : []))
+      .catch((err) => console.error('Failed to load regions:', err));
   }, []);
 
   useEffect(() => {
@@ -795,6 +806,24 @@ const AcceptedDetections = () => {
               <MenuItem value=""><em>All Shifts</em></MenuItem>
               {examShifts.map((sh) => (
                 <MenuItem key={sh.id} value={sh.id}>{sh.shift_name || `Shift #${sh.id}`}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        )}
+
+        {/* Region filter — RTSP centres only (no region on HLS cameras) */}
+        {regionOptions.length > 0 && (
+          <FormControl size="small" sx={{ minWidth: 130 }}>
+            <InputLabel sx={{ fontSize: 13 }}>Region</InputLabel>
+            <Select
+              value={regionFilter}
+              label="Region"
+              onChange={(e) => { setRegionFilter(e.target.value); setPage(1); }}
+              sx={{ borderRadius: '8px', bgcolor: '#f8fafc', height: 36, fontSize: 14, '& fieldset': { border: 'none' } }}
+            >
+              <MenuItem value=""><em>All Regions</em></MenuItem>
+              {regionOptions.map((r) => (
+                <MenuItem key={r} value={r}>{r}</MenuItem>
               ))}
             </Select>
           </FormControl>
@@ -930,10 +959,10 @@ const AcceptedDetections = () => {
             }}
           />
 
-          {(typeFilter.length > 0 || dateFilter !== todayDate || search || shiftFilter || startTime || endTime) && (
+          {(typeFilter.length > 0 || dateFilter !== todayDate || search || shiftFilter || regionFilter || startTime || endTime) && (
             <Button
               size="small"
-              onClick={() => { setTypeFilter([]); setDateFilter(todayDate); setSearch(''); setShiftFilter(''); setStartTime(''); setEndTime(''); setAppliedStartTime(''); setAppliedEndTime(''); }}
+              onClick={() => { setTypeFilter([]); setDateFilter(todayDate); setSearch(''); setShiftFilter(''); setRegionFilter(''); setStartTime(''); setEndTime(''); setAppliedStartTime(''); setAppliedEndTime(''); }}
               sx={{ height: 36, borderRadius: '8px', fontSize: 13, textTransform: 'none', color: '#64748b' }}
             >
               Clear

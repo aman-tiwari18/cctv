@@ -133,6 +133,20 @@ function parseFilename(filename, typeKey) {
     return out;
 }
 
+/**
+ * SQL condition restricting camera_report_rtsp rows to the centres of `region`
+ * (camera_links_rtsp.region, RTSP only). Matched on exam + tc_code: region belongs to the
+ * centre, and a device id + camera no can be two centres in different regions.
+ */
+async function regionCentreCondition(region, examId) {
+    const params = [region];
+    let sql = "SELECT DISTINCT CONCAT(exam_id, '|', tc_code) AS k FROM camera_links_rtsp WHERE region = ? AND tc_code IS NOT NULL AND tc_code <> ''";
+    if (examId) { sql += ' AND exam_id = ?'; params.push(examId); }
+    const keys = (await query(sql, params)).map(r => r.k).filter(Boolean);
+    if (!keys.length) return { cond: '1 = 0', params: [] };
+    return { cond: `CONCAT(exam_id, '|', tc_code) IN (${keys.map(() => '?').join(',')})`, params: keys };
+}
+
 function emptyCounts() {
     return Object.keys(DETECTION_FOLDERS).reduce((acc, k) => { acc[k] = 0; return acc; }, {});
 }
@@ -367,6 +381,7 @@ exports.getRemovedDetections = async (req, res) => {
         let endTime = req.query.end_time || '';
         const search = (req.query.search || '').trim().toLowerCase();
         const examIdParam = req.query.exam_id;
+        const region = (req.query.region || '').trim();
         ({ startTime, endTime } = await applyShiftWindow(req.query.shift_id, startTime, endTime));
 
         const userRole = req.user?.role;
@@ -418,10 +433,17 @@ exports.getRemovedDetections = async (req, res) => {
             const lk = `%${search}%`; whereParams.push(lk, lk, lk, lk, lk, lk);
         }
 
+        // Region is RTSP-only (no region on HLS cameras), so a region filter drops the HLS table below.
+        if (region) {
+            const rc = await regionCentreCondition(region, examIdParam);
+            whereConds.push(rc.cond);
+            whereParams.push(...rc.params);
+        }
+
         const whereClause = whereConds.join(' AND ');
 
         const tables = [];
-        if (source !== 'rtsp') tables.push({ name: 'camera_report_hls', source: 'hls' });
+        if (source !== 'rtsp' && !region) tables.push({ name: 'camera_report_hls', source: 'hls' });
         if (source !== 'hls') tables.push({ name: 'camera_report_rtsp', source: 'rtsp' });
 
         // Type filter (SQL) applies to total + page data; the counts query omits it
@@ -593,6 +615,7 @@ exports.getAcceptedDetections = async (req, res) => {
         let endTime = req.query.end_time || '';
         const search = (req.query.search || '').trim().toLowerCase();
         const examIdParam = req.query.exam_id;
+        const region = (req.query.region || '').trim();
         ({ startTime, endTime } = await applyShiftWindow(req.query.shift_id, startTime, endTime));
 
         const userRole = req.user?.role;
@@ -646,10 +669,17 @@ exports.getAcceptedDetections = async (req, res) => {
             const lk = `%${search}%`; whereParams.push(lk, lk, lk, lk, lk, lk);
         }
 
+        // Region is RTSP-only (no region on HLS cameras), so a region filter drops the HLS table below.
+        if (region) {
+            const rc = await regionCentreCondition(region, examIdParam);
+            whereConds.push(rc.cond);
+            whereParams.push(...rc.params);
+        }
+
         const whereClause = whereConds.join(' AND ');
 
         const tables = [];
-        if (source !== 'rtsp') tables.push({ name: 'camera_report_hls', source: 'hls' });
+        if (source !== 'rtsp' && !region) tables.push({ name: 'camera_report_hls', source: 'hls' });
         if (source !== 'hls') tables.push({ name: 'camera_report_rtsp', source: 'rtsp' });
 
         // Type filter (SQL) applies to total + page data; the counts query omits it
