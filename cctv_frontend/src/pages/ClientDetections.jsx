@@ -1690,7 +1690,7 @@ const ClientDetections = () => {
     }
 
     return true;
-  }, [search, typeFilter, sourceFilter, dateFilter, appliedStartTime, appliedEndTime, examFilter, shiftFilter]);
+  }, [search, typeFilter, sourceFilter, dateFilter, appliedStartTime, appliedEndTime, examFilter, shiftFilter, regionFilter]);
 
   const isReviewing = useCallback(() => (
     Boolean(selectedRef.current)
@@ -1717,6 +1717,12 @@ const ClientDetections = () => {
 
   const handleFeedMouseEnter = () => { hoverRef.current = true; };
   const handleFeedMouseLeave = () => { hoverRef.current = false; };
+    // Region filter: RTSP pushes carry `region` (script-server copy_client_detections);
+    // HLS has no region, so it is kept out while a region is selected (same as the REST feed).
+    if (regionFilter && String(item.region || '') !== String(regionFilter)) {
+      return false;
+    }
+
 
   // Switching modes mid-session shouldn't leave a hybrid view (e.g. an old
   // anchor lingering under legacy mode) — clear queue state and reload page 1
