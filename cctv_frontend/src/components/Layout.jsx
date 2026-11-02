@@ -65,6 +65,8 @@ import { dashboardAPI, examsAPI } from '../services/api';
 
 const DRAWER_WIDTH = 260;
 const APPBAR_HEIGHT = 64;
+// "Accepted by CDIS" header shortcut (VIEWER, /detections) — hidden for now.
+const SHOW_CDIS_ACCEPTED_SHORTCUT = false;
 
 const sidebarPalette = {
   bg: '#ffffff',
@@ -264,7 +266,7 @@ function SidebarContent({ items, currentPath, onNavigate, user }) {
   const { unfilteredCounts, typeFilter, setTypeFilter, invigilatorIssue, setInvigilatorIssue, invigilatorIssueCounts } = useDetectionCounts();
   const [detectionsOpen, setDetectionsOpen] = useState(false);
 
-  const isDetectionPage = currentPath === '/detections' || currentPath === '/client-detections' || currentPath === '/detections/removed' || currentPath === '/detections/accepted';
+  const isDetectionPage = currentPath === '/detections' || currentPath === '/client-detections' || currentPath === '/detections/removed' || currentPath === '/detections/accepted' || currentPath === '/detections/cdis-accepted';
 
   useEffect(() => {
     if (isDetectionPage) setDetectionsOpen(true);
@@ -314,7 +316,7 @@ function SidebarContent({ items, currentPath, onNavigate, user }) {
           // the Detections sidebar item active so the user has visual anchor
           // and the type sub-items stay accessible.
           const isActive = currentPath === item.path
-            || (item.path === '/detections' && (currentPath === '/detections/removed' || currentPath === '/detections/accepted'));
+            || (item.path === '/detections' && (currentPath === '/detections/removed' || currentPath === '/detections/accepted' || currentPath === '/detections/cdis-accepted'));
           const isDetectionItem = item.hasSubItems;
 
           return (
@@ -515,7 +517,7 @@ function LayoutInner() {
       : menuItems.filter(item => item.text !== 'Client Detections' && item.text !== 'Client Dashboard');
 
   // Allow certain paths that are not in the main menu (footer items)
-  const allowedPaths = ['/user-verification', '/gpu-monitor', '/detections/removed', '/detections/accepted'];
+  const allowedPaths = ['/user-verification', '/gpu-monitor', '/detections/removed', '/detections/accepted', '/detections/cdis-accepted'];
 
   useEffect(() => {
     const isAllowedPath = allowedPaths.includes(location.pathname);
@@ -557,7 +559,8 @@ function LayoutInner() {
     adminFooterItems.find((item) => item.path === location.pathname)?.text ||
     filteredMenuItems.find((item) => item.path === location.pathname)?.text ||
     (location.pathname === '/detections/removed' ? 'Removed Detections' : '') ||
-    (location.pathname === '/detections/accepted' ? 'Accepted Detections' : '');
+    (location.pathname === '/detections/accepted' ? 'Accepted Detections' : '') ||
+    (location.pathname === '/detections/cdis-accepted' ? 'Accepted by CDIS' : '');
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh' }}>
@@ -669,6 +672,34 @@ function LayoutInner() {
                 }}
               >
                 <Box component="span" sx={{ display: { xs: 'none', md: 'inline' } }}>Accepted Detections</Box>
+              </Button>
+            )}
+
+            {/* Accepted by CDIS shortcut (temporary) — only shown to VIEWER on /detections.
+                Copies land here via the per-card CDIS button. */}
+            {/* Hidden for now (SHOW_CDIS_ACCEPTED_SHORTCUT); set true to bring it back. */}
+            {SHOW_CDIS_ACCEPTED_SHORTCUT && location.pathname === '/detections' && user?.role === 'VIEWER' && (
+              <Button
+                variant="outlined"
+                startIcon={<CheckCircle sx={{ fontSize: 16 }} />}
+                disableElevation
+                onClick={() => navigate('/detections/cdis-accepted')}
+                sx={{
+                  height: 34,
+                  borderRadius: '8px',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  textTransform: 'none',
+                  borderColor: '#c7d2fe',
+                  color: '#4338ca',
+                  bgcolor: '#eef2ff',
+                  px: { xs: 1, md: 2 },
+                  minWidth: { xs: 40, md: 'auto' },
+                  '& .MuiButton-startIcon': { mr: { xs: 0, md: 1 }, ml: { xs: 0, md: -0.5 } },
+                  '&:hover': { bgcolor: '#e0e7ff', borderColor: '#a5b4fc' },
+                }}
+              >
+                <Box component="span" sx={{ display: { xs: 'none', md: 'inline' } }}>Accepted by CDIS</Box>
               </Button>
             )}
 

@@ -224,6 +224,10 @@ export const clientDetectionsAPI = {
     // SMS alert to the observer number(s) mapped to its tc_code. Hits cctv_backend
     // (JWT-scoped) where the SMS service + observer list live.
     accept: (uid) => api.post('/client-detections/accept', { uid }),
+    // Temporary "Accepted by CDIS" copy: flags cdis_accepted=1 without removing the
+    // detection from the live list; getCdisAccepted feeds the CDIS section page.
+    cdisAccept: (uid) => api.post('/client-detections/cdis-accept', { uid }),
+    getCdisAccepted: (params) => api.get('/client-detections/cdis-accepted', { params }),
 };
 
 export const clientDashboardAPI = {
@@ -283,5 +287,6 @@ export const dashboardAPI = {
             params: { page, limit, ...(exam_id ? { exam_id } : {}) },
         }),
 };
+
 
 export default api;

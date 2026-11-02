@@ -604,7 +604,9 @@ exports.getRemovedDetections = async (req, res) => {
     }
 };
 
-exports.getAcceptedDetections = async (req, res) => {
+// Shared by "Accepted" (accepted_by_client, hides later-removed rows) and
+// "Accepted by CDIS" (cdis_accepted, a plain copy that ignores removal).
+const buildAcceptedListHandler = ({ label, noun, flagCol, excludeRemoved, extraCols }) => async (req, res) => {
     try {
         const page = Math.max(1, parseInt(req.query.page, 10) || 1);
         const limit = Math.max(1, Math.min(500, parseInt(req.query.limit, 10) || 100));
@@ -633,7 +635,8 @@ exports.getAcceptedDetections = async (req, res) => {
         // Build shared WHERE clause for both tables. A detection later removed
         // by an admin should drop out of "Accepted" (mirrors script-server's
         // live-feed convention of excluding remove_from_client=1 rows).
-        const whereConds = ['pushed_to_client = 1', 'accepted_by_client = 1', '(remove_from_client IS NULL OR remove_from_client = 0)'];
+        const whereConds = ['pushed_to_client = 1', `${flagCol} = 1`];
+        if (excludeRemoved) whereConds.push('(remove_from_client IS NULL OR remove_from_client = 0)');
         const whereParams = [];
         if (examIdParam) {
             whereConds.push('exam_id = ?');
@@ -699,7 +702,7 @@ exports.getAcceptedDetections = async (req, res) => {
                 const r = await query(`SELECT COUNT(*) AS c FROM ${tbl.name} WHERE ${whereData}`, paramsData);
                 total += Number((r[0] && r[0].c) || 0);
             } catch (err) {
-                console.error(`[getAcceptedDetections] count failed for ${tbl.name}:`, err.message);
+                console.error(`[${label}] count failed for ${tbl.name}:`, err.message);
             }
         }
 
@@ -716,7 +719,7 @@ exports.getAcceptedDetections = async (req, res) => {
                     if (key in counts) counts[key] += Number(g.c || 0);
                 }
             } catch (err) {
-                console.error(`[getAcceptedDetections] counts failed for ${tbl.name}:`, err.message);
+                console.error(`[${label}] counts failed for ${tbl.name}:`, err.message);
             }
         }
 
@@ -729,7 +732,7 @@ exports.getAcceptedDetections = async (req, res) => {
                                 camera_name, ${tbl.source === 'rtsp' ? 'device_id, camera_no,' : 'camera_category, ch_code,'}
                                 tc_code, state, camera_status, events, date_time,
                                 imageurl, detection_type, unique_id, created_at,
-                                pushed_to_client, remove_from_client, accepted_by_client, accepted_at,
+                                pushed_to_client, remove_from_client, accepted_by_client, accepted_at,${extraCols}
                                 sms_sent, sms_sent_at, updated_at, violation_count, client_violation_count
                          FROM ${tbl.name}
                          WHERE ${whereData}
@@ -740,7 +743,7 @@ exports.getAcceptedDetections = async (req, res) => {
                 fetched.forEach(r => { r._source = tbl.source; });
                 rows = rows.concat(fetched);
             } catch (err) {
-                console.error(`[getAcceptedDetections] fetch failed for ${tbl.name}:`, err.message);
+                console.error(`[${label}] fetch failed for ${tbl.name}:`, err.message);
             }
         }
         rows.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
@@ -796,6 +799,8 @@ exports.getAcceptedDetections = async (req, res) => {
                 remove_from_client: row.remove_from_client,
                 accepted_by_client: row.accepted_by_client,
                 accepted_at: row.accepted_at,
+                cdis_accepted: row.cdis_accepted,
+                cdis_accepted_at: row.cdis_accepted_at,
                 sms_sent: row.sms_sent,
                 sms_sent_at: row.sms_sent_at,
                 // Client-facing proximity count (set at push); raw worker count for older rows.
@@ -820,7 +825,7 @@ exports.getAcceptedDetections = async (req, res) => {
                     if (nm) { d.shiftName = nm; d.shift_name = nm; }
                 });
             } catch (err) {
-                console.error('[getAcceptedDetections] shift name resolve failed:', err.message);
+                console.error(`[${label}] shift name resolve failed:`, err.message);
             }
         }
 
@@ -833,11 +838,54 @@ exports.getAcceptedDetections = async (req, res) => {
             data,
         });
     } catch (err) {
-        console.error('[getAcceptedDetections] error:', err);
+        console.error(`[${label}] error:`, err);
         return res.status(500).json({
             success: false,
-            message: 'Failed to fetch accepted detections',
+            message: `Failed to fetch ${noun} detections`,
             error: err.message,
         });
     }
 };
+
+exports.getAcceptedDetections = buildAcceptedListHandler({
+    label: 'getAcceptedDetections', noun: 'accepted', flagCol: 'accepted_by_client', excludeRemoved: true, extraCols: '',
+});
+
+/**
+ * GET /client-detections/cdis-accepted — detections the user copied into the
+ * "Accepted by CDIS" section (temporary feature). They also stay on the live list.
+ */
+exports.getCdisAcceptedDetections = buildAcceptedListHandler({
+    label: 'getCdisAcceptedDetections', noun: 'CDIS-accepted', flagCol: 'cdis_accepted', excludeRemoved: false,
+    extraCols: ' cdis_accepted, cdis_accepted_at,',
+});
+
+/**
+ * POST /client-detections/cdis-accept   Body: { uid }
+ * Flags the report row cdis_accepted = 1 (who/when recorded). Copy only — the
+ * detection is NOT removed from the live list. Idempotent.
+ */
+exports.cdisAcceptDetection = async (req, res) => {
+    const uid = req.body?.uid;
+    if (!uid) return res.status(400).json({ success: false, message: 'uid is required' });
+    try {
+        for (const t of ['camera_report_hls', 'camera_report_rtsp']) {
+            const found = await query(`SELECT 1 AS x FROM ${t} WHERE unique_id = ? LIMIT 1`, [uid]);
+            if (!found || !found.length) continue;
+            await query(
+                `UPDATE ${t}
+                    SET cdis_accepted = 1,
+                        cdis_accepted_at = COALESCE(cdis_accepted_at, NOW()),
+                        cdis_accepted_by = COALESCE(cdis_accepted_by, ?)
+                  WHERE unique_id = ?`,
+                [req.user?.id || null, uid]
+            );
+            return res.json({ success: true, uid, cdis_accepted: 1 });
+        }
+        return res.status(404).json({ success: false, message: 'Detection not found' });
+    } catch (err) {
+        console.error('[cdisAcceptDetection] error:', err);
+        return res.status(500).json({ success: false, message: 'Failed to mark accepted by CDIS', error: err.message });
+    }
+};
+

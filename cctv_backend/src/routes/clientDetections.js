@@ -65,4 +65,28 @@ router.post(
     asyncHandler(ClientDetectionsController.acceptDetection)
 );
 
+/**
+ * @route   GET /cctv_analytics/api/client-detections/cdis-accepted
+ * @access  Authenticated
+ * @returns same shape as /accepted — rows with cdis_accepted = 1 (not hidden when removed).
+ */
+router.get(
+    '/cdis-accepted',
+    authenticate,
+    asyncHandler(ClientDetectionsController.getCdisAcceptedDetections)
+);
+
+/**
+ * @route   POST /cctv_analytics/api/client-detections/cdis-accept
+ * @body    { uid: string }
+ * @access  Authenticated
+ * @returns { success, uid, cdis_accepted } — copies the detection into the
+ *          "Accepted by CDIS" section; the live list is untouched.
+ */
+router.post(
+    '/cdis-accept',
+    authenticate,
+    asyncHandler(ClientDetectionsController.cdisAcceptDetection)
+);
+
 module.exports = router;

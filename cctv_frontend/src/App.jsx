@@ -21,6 +21,7 @@ const Executions = lazy(() => import('./pages/Executions'));
 const Detections = lazy(() => import('./pages/Detections'));
 const ClientDetections = lazy(() => import('./pages/ClientDetections'));
 const RemovedDetections = lazy(() => import('./pages/RemovedDetections'));
+const CdisAcceptedDetections = lazy(() => import('./pages/CdisAcceptedDetections'));
 const AcceptedDetections = lazy(() => import('./pages/AcceptedDetections'));
 const ClientDetectionDashboard = lazy(() => import('./pages/ClientDetectionDashboard'));
 const ClientExams = lazy(() => import('./pages/ClientExams'));
@@ -196,6 +197,7 @@ function App() {
             <Route path="detections" element={<Suspense fallback={null}><RoleBasedRoute AdminComp={Detections} ViewerComp={ClientDetections} OperatorComp={Detections} /></Suspense>} />
             <Route path="video-uploads" element={<Suspense fallback={null}><ClientVideoUploads /></Suspense>} />
             <Route path="detections/removed" element={<Suspense fallback={null}><RemovedDetections /></Suspense>} />
+            <Route path="detections/cdis-accepted" element={<Suspense fallback={null}><CdisAcceptedDetections /></Suspense>} />
             <Route path="detections/accepted" element={<Suspense fallback={null}><AcceptedDetections /></Suspense>} />
             <Route path="user-verification" element={<Suspense fallback={null}><UserVerification /></Suspense>} />
           </Route>

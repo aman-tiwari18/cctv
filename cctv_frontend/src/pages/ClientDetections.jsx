@@ -178,7 +178,10 @@ const getDetectionPushedBy = (item = {}) => (
 // "Pushed by" is internal info — only ADMIN/OPERATOR see it, never the client (VIEWER).
 const canViewPushedBy = (role) => role === 'ADMIN' || role === 'OPERATOR';
 
-function DetectionCard({ item, onClick, onRemove, onUndo, onAccept, isRemoving, isPendingRemoval, isAccepting, isAccepted }) {
+// "Accepted by CDIS" card button — hidden for now; set true to bring it back.
+const SHOW_CDIS_ACCEPT_BUTTON = false;
+
+function DetectionCard({ item, onClick, onRemove, onUndo, onAccept, onCdisAccept, isRemoving, isPendingRemoval, isAccepting, isAccepted, isCdisAccepting, isCdisAccepted }) {
   const { user } = useAuth();
   const meta = TYPE_META[item.type] || { label: item.type, color: '#94a3b8', bg: '#f1f5f9' };
   const [imgError, setImgError] = useState(false);
@@ -471,6 +474,28 @@ function DetectionCard({ item, onClick, onRemove, onUndo, onAccept, isRemoving, 
               {isRemoving ? 'Removing...' : 'Remove'}
             </Button>
           </Box>
+        )}
+        {/* Temporary: copy to the "Accepted by CDIS" section; the card stays here. */}
+        {!isPendingRemoval && onCdisAccept && (
+          <Button
+            variant="contained"
+            disableElevation
+            startIcon={isCdisAccepted ? <Check sx={{ fontSize: 16 }} /> : null}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!isCdisAccepting && !isCdisAccepted) onCdisAccept(item);
+            }}
+            disabled={isCdisAccepting || isCdisAccepted}
+            sx={{
+              mt: 1.5, width: '100%', height: '40px', borderRadius: 3,
+              bgcolor: '#4f46e5', color: '#fff', fontWeight: 900,
+              textTransform: 'none', fontSize: 12, whiteSpace: 'nowrap',
+              '&:hover': { bgcolor: '#4338ca' },
+              '&.Mui-disabled': { bgcolor: isCdisAccepted ? '#4f46e5' : '#cbd5e1', color: '#fff', opacity: isCdisAccepted ? 0.9 : 0.7 },
+            }}
+          >
+            {isCdisAccepted ? 'Accepted by CDIS ✓' : isCdisAccepting ? 'Saving...' : 'Accepted by CDIS'}
+          </Button>
         )}
       </Box>
     </Card>
@@ -1380,6 +1405,9 @@ const ClientDetections = () => {
   const scrolledRef = useRef(false);
   const [removingId, setRemovingId] = useState(null);
   const [acceptingId, setAcceptingId] = useState(null);
+  // "Accepted by CDIS" (temporary): uids copied this session / currently saving.
+  const [cdisAcceptedIds, setCdisAcceptedIds] = useState(new Set());
+  const [cdisAcceptingId, setCdisAcceptingId] = useState(null);
   const [keyboardHintShown, setKeyboardHintShown] = useState(false);
 
   const UNDO_WINDOW_MS = 15000;
@@ -1689,6 +1717,12 @@ const ClientDetections = () => {
       return false;
     }
 
+    // Region filter: RTSP pushes carry `region` (script-server copy_client_detections);
+    // HLS has no region, so it is kept out while a region is selected (same as the REST feed).
+    if (regionFilter && String(item.region || '') !== String(regionFilter)) {
+      return false;
+    }
+
     return true;
   }, [search, typeFilter, sourceFilter, dateFilter, appliedStartTime, appliedEndTime, examFilter, shiftFilter, regionFilter]);
 
@@ -1717,12 +1751,6 @@ const ClientDetections = () => {
 
   const handleFeedMouseEnter = () => { hoverRef.current = true; };
   const handleFeedMouseLeave = () => { hoverRef.current = false; };
-    // Region filter: RTSP pushes carry `region` (script-server copy_client_detections);
-    // HLS has no region, so it is kept out while a region is selected (same as the REST feed).
-    if (regionFilter && String(item.region || '') !== String(regionFilter)) {
-      return false;
-    }
-
 
   // Switching modes mid-session shouldn't leave a hybrid view (e.g. an old
   // anchor lingering under legacy mode) — clear queue state and reload page 1
@@ -2088,12 +2116,31 @@ const ClientDetections = () => {
     }
   };
 
+  // Copies the detection into the "Accepted by CDIS" section (stored in DB); it
+  // stays on this list.
+  const handleCdisAccept = async (item) => {
+    const uid = item?.uid;
+    if (!uid || cdisAcceptedIds.has(uid)) return;
+    setCdisAcceptingId(uid);
+    try {
+      await clientDetectionsAPI.cdisAccept(uid);
+      setCdisAcceptedIds(prev => new Set(prev).add(uid));
+      setSnackbar({ open: true, message: 'Added to Accepted by CDIS', severity: 'success' });
+    } catch (err) {
+      console.error('CDIS accept failed:', err);
+      setSnackbar({ open: true, message: 'Failed to mark as Accepted by CDIS. Please try again.', severity: 'error' });
+    } finally {
+      setCdisAcceptingId(null);
+    }
+  };
+
   // Stable identities for memoized cards/list; always call the latest handler.
   const actionsRef = useRef({});
-  actionsRef.current = { handleRemove, handleUndo, handleAccept };
+  actionsRef.current = { handleRemove, handleUndo, handleAccept, handleCdisAccept };
   const onRemoveStable = useCallback((item) => actionsRef.current.handleRemove(item), []);
   const onUndoStable = useCallback((item) => actionsRef.current.handleUndo(item), []);
   const onAcceptStable = useCallback((item) => actionsRef.current.handleAccept(item), []);
+  const onCdisAcceptStable = useCallback((item) => actionsRef.current.handleCdisAccept(item), []);
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: '#f8fafc' }}>
@@ -2485,10 +2532,13 @@ const ClientDetections = () => {
                 onRemove={onRemoveStable}
                 onUndo={onUndoStable}
                 onAccept={onAcceptStable}
+                onCdisAccept={SHOW_CDIS_ACCEPT_BUTTON ? onCdisAcceptStable : undefined}
                 isRemoving={removingId === item.uid}
                 isPendingRemoval={pendingRemovals.has(item.uid)}
                 isAccepting={acceptingId === item.uid}
                 isAccepted={isDetectionAccepted(item)}
+                isCdisAccepting={cdisAcceptingId === item.uid}
+                isCdisAccepted={cdisAcceptedIds.has(item.uid) || item.cdis_accepted === 1}
               />
             </Grid>
           ))}
