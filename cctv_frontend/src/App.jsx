@@ -30,6 +30,7 @@ const ClientVideoUploads = lazy(() => import('./pages/ClientVideoUploads'));
 const UserVerification = lazy(() => import('./pages/UserVerification'));
 const GPUMonitor = lazy(() => import('./pages/GPUMonitor'));
 const SummaryReports = lazy(() => import('./pages/SummaryReports'));
+const CameraUptime = lazy(() => import('./pages/CameraUptime'));
 
 // Role-based route wrapper
 const RoleBasedRoute = ({ AdminComp, ViewerComp, OperatorComp }) => {
@@ -192,6 +193,7 @@ function App() {
             <Route path="shifts" element={<Suspense fallback={null}><RoleBasedRoute AdminComp={Shifts} /></Suspense>} />
             <Route path="analytics" element={<Suspense fallback={null}><RoleBasedRoute AdminComp={Analytics} /></Suspense>} />
             <Route path="summary-report" element={<Suspense fallback={null}><RoleBasedRoute AdminComp={SummaryReports} /></Suspense>} />
+            <Route path="camera-uptime" element={<Suspense fallback={null}><RoleBasedRoute AdminComp={CameraUptime} /></Suspense>} />
             <Route path="executions" element={<Suspense fallback={null}><RoleBasedRoute AdminComp={Executions} /></Suspense>} />
             <Route path="gpu-monitor" element={<Suspense fallback={null}><RoleBasedRoute AdminComp={GPUMonitor} /></Suspense>} />
             <Route path="detections" element={<Suspense fallback={null}><RoleBasedRoute AdminComp={Detections} ViewerComp={ClientDetections} OperatorComp={Detections} /></Suspense>} />

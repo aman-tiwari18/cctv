@@ -56,8 +56,10 @@ scrape_configs:
       # so it no longer drags the fleet average down (re-add '192.168.19.43:8030' to bring it back).
       - targets: ['192.168.19.42:8030']
       - targets: ['192.168.19.41:8030']
-      - targets: ['192.168.19.44:8030']   # worker-4 (server_id worker-4-gpu0)
+      # worker-4 (192.168.19.44) is not in the fleet (container down, no login since 26 Oct) -> not scraped;
+      # re-add '192.168.19.44:8030' to bring it back.
       - targets: ['192.168.19.46:8030']   # worker-5 (server_id worker-5-gpu0)
+      - targets: ['192.168.19.40:8030']   # worker-9 = gpu-h200-9 (server_id worker-9-gpu0), added 2 Nov 2026
 
   # ── Host system metrics (node_exporter) — CPU / RAM / disk / network ──
   # LAN workers expose node_exporter directly on :9100; the 8-GPU VMs (5/6)

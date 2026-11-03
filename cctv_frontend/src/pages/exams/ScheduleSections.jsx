@@ -3,7 +3,7 @@ import {
   Alert, Box, Button, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, IconButton,
   InputAdornment, MenuItem, Table, TableBody, TableCell, TableHead, TableRow, TextField, Tooltip, Typography,
 } from '@mui/material';
-import { Close, DeleteOutline, Download, EventAvailable, GridOn, Search, TuneOutlined, UploadFile } from '@mui/icons-material';
+import { CalendarMonth, Close, DeleteOutline, Download, EventAvailable, GridOn, LocationOn, Search, TuneOutlined, UploadFile } from '@mui/icons-material';
 import { examsAPI } from '../../services/api';
 
 /*
@@ -74,6 +74,25 @@ function Heading({ children, right }) {
     </Box>
   );
 }
+
+// Numbered card used by the full-page edit view (Exams → edit exam).
+export function PageCard({ n, icon, title, desc, action, children }) {
+  return (
+    <Box sx={{ bgcolor: '#ffffff', border: '1px solid #e6ebf3', borderRadius: 3, p: 2.5, mb: 2, display: 'flex', gap: 2, alignItems: 'flex-start' }}>
+      <Box sx={{ width: 28, height: 28, borderRadius: '50%', bgcolor: '#eef3fe', color: BLUE, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8rem', flexShrink: 0, mt: 1.2 }}>{n}</Box>
+      <Box sx={{ width: 52, height: 52, borderRadius: 2.5, bgcolor: '#eef3fe', color: BLUE, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{icon}</Box>
+      <Box sx={{ flex: 1, minWidth: 0 }}>
+        <Typography className="exam-title" sx={{ fontSize: '1.02rem', color: INK }}>{title}</Typography>
+        {desc && <Typography sx={{ fontSize: '0.82rem', color: MUTED, mt: 0.3, mb: 1.2 }}>{desc}</Typography>}
+        {children}
+      </Box>
+      {action && <Box sx={{ flexShrink: 0 }}>{action}</Box>}
+    </Box>
+  );
+}
+
+const viewBtnSx = { color: BLUE, border: `1px solid ${BLUE}`, bgcolor: '#fff', textTransform: 'none', borderRadius: 2, px: 2.5, py: 0.8, fontSize: '0.85rem', '&:hover': { bgcolor: '#eef3fe' } };
+const statusChipSx = (ok) => ({ bgcolor: ok ? '#e7f6ec' : '#f1f5f9', color: ok ? '#166534' : MUTED, border: `1px solid ${ok ? '#bfe5cc' : '#e2e8f0'}`, height: 28, '& .MuiChip-icon': { color: 'inherit' } });
 
 function ErrorList({ title, items, severity, max = 40 }) {
   if (!items?.length) return null;
@@ -477,7 +496,7 @@ export function SlotRunningChip({ examId, date, shiftId, shiftName }) {
 }
 
 // ── the three sections ───────────────────────────────────────────────────────
-export default function ExamScheduleSections({ exam, linkType, notify }) {
+export default function ExamScheduleSections({ exam, linkType, notify, page = false }) {
   const examId = exam?.id;
   const [slots, setSlots] = useState(null);
   const [centres, setCentres] = useState(null);
@@ -543,6 +562,73 @@ export default function ExamScheduleSections({ exam, linkType, notify }) {
   const thrLine = !thr ? '—' : thr.has_thresholds
     ? `${thr.centres} centres · ${thr.shape === 'flat' ? 'one limit per centre' : thr.shape === 'sitting' ? 'per date + shift' : 'mixed'}${thr.last_upload ? ` · ${thr.last_upload.uploaded_by || ''} ${fmtWhen(thr.last_upload.created_at)}` : ''}`
     : 'Not uploaded — the legacy constants (if any) apply.';
+
+  if (page) {
+    const tmpl = (promise, name) => (
+      <Button onClick={() => dl(promise, name)} startIcon={<Download sx={{ fontSize: 16 }} />} sx={{ color: BLUE, textTransform: 'none', fontSize: '0.78rem' }}>Template</Button>
+    );
+    return (
+      <>
+        {loadErr && <Alert severity="error" sx={{ mb: 2 }} action={<Button size="small" onClick={refresh}>Retry</Button>}>{loadErr.message}</Alert>}
+
+        <PageCard n={1} icon={<CalendarMonth />} title="Exam Date & Shift Schedule"
+          desc={'Which dates and shifts the exam runs in (Date \u00d7 Shift 1/2/3, Yes/No).'}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.2, flexWrap: 'wrap' }}>
+            <Chip size="small" icon={<EventAvailable />} label={slotLine} sx={statusChipSx(slots?.has_schedule)} />
+            <PickButton onPick={slotPick.pick} />
+            {slots?.has_schedule && <Button onClick={() => clear('Every date and shift runs again.', 'exam date & shift schedule', () => examsAPI.deleteSlotSchedule(examId))} disabled={!!busy} startIcon={<DeleteOutline sx={{ fontSize: 16 }} />} sx={dangerSx}>Clear</Button>}
+            {tmpl(examsAPI.slotScheduleTemplate(), 'exam_schedule_template.xlsx')}
+          </Box>
+        </PageCard>
+
+        <PageCard n={2} icon={<LocationOn />} title="Centre-wise Schedule"
+          desc="Which centres (TC code) run in which date + shift, YES / NO per cell. Centres marked NO load no cameras, so no detection, classification or alert for that shift."
+          action={centres?.has_schedule && <Button className="exam-medium" onClick={() => setMatrixOpen(true)} endIcon={<GridOn sx={{ fontSize: 16 }} />} sx={viewBtnSx}>View / Edit</Button>}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.2, flexWrap: 'wrap' }}>
+            <Chip size="small" icon={<EventAvailable />} label={centreLine} sx={statusChipSx(centres?.has_schedule)} />
+            <PickButton onPick={centrePick.pick} />
+            {centres?.has_schedule && (
+              <>
+                <Button onClick={() => dl(examsAPI.exportCentreSchedule(examId), `centre_schedule_exam_${examId}.xlsx`)} startIcon={<Download sx={{ fontSize: 16 }} />} sx={btnSx}>Export</Button>
+                <Button onClick={() => clear('Every centre runs in every shift again.', 'centre schedule', () => examsAPI.deleteCentreSchedule(examId))} disabled={!!busy} startIcon={<DeleteOutline sx={{ fontSize: 16 }} />} sx={dangerSx}>Clear</Button>
+              </>
+            )}
+            {tmpl(examsAPI.centreScheduleTemplate(), 'centre_schedule_template.xlsx')}
+          </Box>
+          {centres?.has_schedule && centres.cameras_not_in_schedule > 0 && (
+            <Alert severity="warning" sx={{ mt: 1.5 }}>{centres.cameras_not_in_schedule} TC code(s) with cameras are not in this schedule and will not run in any shift.</Alert>
+          )}
+        </PageCard>
+
+        <PageCard n={3} icon={<TuneOutlined />} title="Server Room Thresholds"
+          desc="Maximum people allowed in the server room per centre (TC code); more than that raises a server-room detection. Replaces editing the constants file."
+          action={thr?.has_thresholds && <Button className="exam-medium" onClick={() => setThrOpen(true)} endIcon={<TuneOutlined sx={{ fontSize: 16 }} />} sx={viewBtnSx}>View / Edit</Button>}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.2, flexWrap: 'wrap' }}>
+            <Chip size="small" icon={<EventAvailable />} label={thrLine} sx={statusChipSx(thr?.has_thresholds)} />
+            <PickButton onPick={thrPick.pick} />
+            {thr?.has_thresholds && (
+              <>
+                <Button onClick={() => dl(examsAPI.exportThresholds(examId), `server_room_thresholds_exam_${examId}.xlsx`)} startIcon={<Download sx={{ fontSize: 16 }} />} sx={btnSx}>Export</Button>
+                <Button onClick={() => clear('Until a new sheet is uploaded the legacy constants (if any) apply to this exam.', 'server room thresholds', () => examsAPI.clearThresholds(examId))} disabled={!!busy} startIcon={<DeleteOutline sx={{ fontSize: 16 }} />} sx={dangerSx}>Clear</Button>
+              </>
+            )}
+            {tmpl(examsAPI.thresholdTemplate(), 'server_room_threshold_template.xlsx')}
+          </Box>
+          {thr?.has_thresholds && thr.centres_without_threshold?.length > 0 && (
+            <Alert severity="warning" sx={{ mt: 1.5 }}>{thr.centres_without_threshold.length} centre(s) with server-room cameras have no threshold, so no server-room alerts there.</Alert>
+          )}
+        </PageCard>
+
+        {preview && (
+          <UploadPreviewDialog open title={uploaders[preview.kind].title} file={preview.file} upload={uploaders[preview.kind].fn}
+            onClose={() => { setPreview(null); slotPick.clear(); centrePick.clear(); thrPick.clear(); }}
+            onSaved={(r) => { notify(r?.message || 'Saved', 'success'); refresh(); }} />
+        )}
+        <CentreScheduleDialog open={matrixOpen} examId={examId} onClose={() => setMatrixOpen(false)} onChanged={refresh} notify={notify} />
+        <ThresholdsDialog open={thrOpen} examId={examId} onClose={() => setThrOpen(false)} onChanged={refresh} notify={notify} />
+      </>
+    );
+  }
 
   return (
     <>

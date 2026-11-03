@@ -288,5 +288,15 @@ export const dashboardAPI = {
         }),
 };
 
+// Camera uptime checker data (camera-uptime-service), ADMIN only.
+export const cameraUptimeAPI = {
+    getDates: (examId) => api.get('/camera-uptime/dates', { params: { exam_id: examId } }),
+    getRuns: (examId, date) => api.get('/camera-uptime/runs', { params: { exam_id: examId, date } }),
+    getCentres: (runId) => api.get('/camera-uptime/centres', { params: { run_id: runId } }),
+    getCameras: (params) => api.get('/camera-uptime/cameras', { params }),
+    getFrame: (path) => api.get('/camera-uptime/frame', { params: { path }, responseType: 'blob' }),
+    getLive: () => api.get('/camera-uptime/live'),
+    download: (params) => api.get('/camera-uptime/download', { params, responseType: 'blob' }),
+};
 
 export default api;

@@ -176,7 +176,8 @@ const tickTime = (ms) =>
 const COMPACT_LABEL_SX = { fontFamily: INTER, fontWeight: 700, fontSize: 11, letterSpacing: '0.5px', color: COLOR.faint, textTransform: 'uppercase', mb: 0.5 };
 
 const UtilizationChart = ({ serverId, gpuId, rangeKey, compact }) => {
-  const query = `gpu_utilization_percent{server_id="${serverId}",gpu_id="${gpuId}"}`;
+  // job="gpu-workers" = this setup's exporters only; the new setup's fleet job reuses server ids (e.g. worker-2-gpu0).
+  const query = `gpu_utilization_percent{job="gpu-workers",server_id="${serverId}",gpu_id="${gpuId}"}`;
   const { data, error, loading, stepSec } = usePromTimeseries(query, rangeKey);
   const stats = useMemo(() => seriesStats(data, stepSec), [data, stepSec]);
 
@@ -217,7 +218,7 @@ const UtilizationChart = ({ serverId, gpuId, rangeKey, compact }) => {
 };
 
 const MemoryChart = ({ serverId, gpuId, memoryTotalMb, memoryUsedMb, rangeKey, compact }) => {
-  const query = `gpu_memory_used_mb{server_id="${serverId}",gpu_id="${gpuId}"}`;
+  const query = `gpu_memory_used_mb{job="gpu-workers",server_id="${serverId}",gpu_id="${gpuId}"}`;
   const { data, error, loading, stepSec } = usePromTimeseries(query, rangeKey);
   const stats = useMemo(() => seriesStats(data, stepSec, 0), [data, stepSec]);
   const freeGb = memoryTotalMb && memoryUsedMb != null

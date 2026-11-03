@@ -156,3 +156,6 @@ docs/report_mod/
 docs/proximity_temporal_test_*/
 /UPCISB_*SCHEDULING*.xlsx
 docs/superview_detection_reports/**/*.csv
+
+# detection photos copied into comparison reports (docs/report_*/images/sv, /cd): keep out of git
+docs/report_*/images/

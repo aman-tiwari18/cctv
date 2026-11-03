@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>CDIS vs Superview: Summary</title>
+<style>
+  @page { size: A4; margin: 0; }
+  * { box-sizing: border-box; }
+  body { zoom: 1.297; margin: 0; font-family: "DejaVu Sans", Arial, sans-serif; color: #1e293b; font-size: 9.6pt; line-height: 1.38; }
+  .page { width: 210mm; height: 296mm; padding: 11mm 13mm 9mm; position: relative; overflow: hidden; page-break-after: always; }
+  .page:last-child { page-break-after: auto; }
+  .band { background: #0f2a4a; color: #fff; margin: -11mm -13mm 0; padding: 8mm 13mm 6mm; }
+  .band h1 { margin: 0; font-size: 18pt; letter-spacing: .2px; }
+  .band .sub { margin-top: 2mm; font-size: 8.6pt; color: #c7d5e8; }
+  .lead { margin: 4.5mm 0 3.5mm; font-size: 10.2pt; color: #0f2a4a; }
+  table.kpi { width: 100%; border-collapse: separate; border-spacing: 2.2mm 0; margin: 0 -2.2mm 4mm; }
+  table.kpi td { width: 25%; background: #f1f5f9; border-radius: 2mm; padding: 3mm 3mm 2.6mm; vertical-align: top; }
+  .kv { font-size: 17pt; font-weight: bold; color: #0f7a4f; line-height: 1.1; }
+  .kv small { font-size: 10pt; color: #64748b; font-weight: normal; }
+  .kl { font-size: 8pt; color: #475569; margin-top: 1.2mm; }
+  h2 { font-size: 12.4pt; color: #0f2a4a; margin: 4.5mm 0 1.8mm; padding-bottom: 1mm; border-bottom: 1.4pt solid #0f2a4a; }
+  h2 .n { display: inline-block; background: #0f2a4a; color: #fff; min-width: 6mm; padding: 0 1mm; text-align: center; border-radius: 1mm; margin-right: 2mm; }
+  .headline { font-size: 10.4pt; font-weight: bold; color: #0f7a4f; margin: 1.5mm 0 1.6mm; }
+  ul { margin: 1mm 0 1.5mm 4.5mm; padding: 0; }
+  li { margin: .7mm 0; }
+  table.t { width: 100%; border-collapse: collapse; font-size: 8.5pt; margin: 1.6mm 0 1.4mm; }
+  table.t th { background: #e2e8f0; color: #0f2a4a; text-align: left; padding: 1.3mm 2mm; font-weight: bold; }
+  table.t td { padding: 1.15mm 2mm; border-bottom: .5pt solid #e2e8f0; }
+  table.t td.r, table.t th.r { text-align: right; }
+  .bar { height: 3.2mm; border-radius: 1mm; display: inline-block; vertical-align: middle; }
+  .cd { background: #0f7a4f; } .sv { background: #94a3b8; }
+  .bl { display: inline-block; width: 15mm; text-align: right; font-weight: bold; margin-left: 1.5mm; }
+  td.lab { width: 30mm; color: #334155; }
+  .next { background: #ecfdf5; border-left: 1.2mm solid #0f7a4f; padding: 2.2mm 3mm; margin: 2mm 0 1mm; }
+  .next b { color: #0f7a4f; }
+  .callout { background: #f8fafc; border: .6pt solid #cbd5e1; border-radius: 1.5mm; padding: 2.4mm 3mm; margin: 2mm 0; }
+  .grid2 { width: 100%; border-collapse: collapse; }
+  .grid2 > tbody > tr > td { vertical-align: top; width: 50%; }
+  .grid2 > tbody > tr > td:first-child { padding-right: 3mm; }
+  .grid2 > tbody > tr > td:last-child { padding-left: 3mm; }
+  .notes { position: absolute; left: 13mm; right: 13mm; bottom: 8mm; font-size: 7.2pt; color: #64748b; border-top: .5pt solid #cbd5e1; padding-top: 1.5mm; line-height: 1.35; }
+  .pg { position: absolute; right: 13mm; top: 6mm; font-size: 7.5pt; color: #c7d5e8; }
+  .muted { color: #64748b; }
+  .win { color: #0f7a4f; font-weight: bold; }
+</style></head>
+<body>
+
+<!-- ============================ PAGE 1 ============================ -->
+<div class="page">
+  <div class="band">
+    <div class="pg">Page 1 of 2</div>
+    <h1>CDIS vs Superview</h1>
+    <div class="sub"><b style="color:#fff">Data compared: 16 Oct 2026 Shift 2 to 28 Oct 2026 Shift 3</b> (17 day-shifts) · SSC CGL 2026 · Source: CDIS vs Superview comparison report (Superview event and camera exports; CDIS database of 31 Oct 2026)</div>
+  </div>
+
+  <div class="lead">Across every exam shift compared, CDIS kept more cameras online for the whole exam, delivered <b>8 times as many client-confirmed incidents</b>, and its alerts were accepted about <b>14 times as often</b> as Superview's.</div>
+
+  <table class="kpi"><tr>
+    <td><div class="kv">85.6% <small>vs 45.7%</small></div><div class="kl">Cameras online for the whole shift, average</div></td>
+    <td><div class="kv">2,371 <small>vs 288</small></div><div class="kl">True-positive alerts: accepted by the client</div></td>
+    <td><div class="kv">8.3% <small>vs 0.6%</small></div><div class="kl">Acceptance rate at the client</div></td>
+    <td><div class="kv">12 <small>vs 169</small></div><div class="kl">Alerts the client reviews for each confirmed incident</div></td>
+  </tr></table>
+
+  <h2><span class="n">1</span>Camera status: more cameras online for the whole exam</h2>
+  <div class="headline">85.6% of CDIS cameras were online for the whole shift. For Superview it was 45.7%.</div>
+  <ul>
+    <li><b>Superview's 95.5% "online" includes cameras that dropped out.</b> Superview counts a camera as online even if it went offline during the shift. Of its cameras, <b>45.7%</b> stayed online for the whole shift and <b>49.7%</b> were only partly online: they went offline at some point. Together that makes its 95.5%.</li>
+    <li><b>Only half of Superview's cameras watched the whole exam.</b> Nearly one in two Superview cameras had a gap in coverage. CDIS kept <b>85.6%</b> of its cameras online for the whole shift.</li>
+    <li><b>Twice as many cameras watching the whole exam.</b> On average CDIS had <b>3,766</b> cameras online for the whole shift; Superview had <b>1,832</b>. That is <span class="win">2.1 times as many</span>.</li>
+    <li><b>More cameras covered.</b> CDIS covered <b>4,391</b> cameras in 119 centres per shift; Superview scheduled <b>4,015</b> in 113 centres. CDIS covered more in <span class="win">all 17 shifts</span>.</li>
+    <li><b>Steady every shift.</b> CDIS was between <b>80.8% and 88.8%</b> online for the whole shift in every shift it ran. Superview was between 28.8% and 56.5%.</li>
+  </ul>
+  <table class="t">
+    <tr><th>Average per shift</th><th class="r">Cameras</th><th class="r">Online whole shift</th><th class="r">Partly online</th><th class="r">Total online</th><th class="r">Offline</th></tr>
+    <tr><td><b>CDIS</b></td><td class="r">4,391</td><td class="r"><b>3,766 (85.6%)</b></td><td class="r">–</td><td class="r">3,766 (85.6%)</td><td class="r">633 (14.4%)</td></tr>
+    <tr><td>Superview</td><td class="r">4,015</td><td class="r">1,832 (45.7%)</td><td class="r">2,002 (49.7%)</td><td class="r">3,834 (95.5%)</td><td class="r">181 (4.5%)</td></tr>
+  </table>
+  <div class="muted" style="font-size:8pt;margin:-.4mm 0 1mm">Partly online = the camera went offline for part of the shift. Total online = online whole shift + partly online.</div>
+  <div class="next"><b>Planned enhancement (from the next examination):</b> CDIS will monitor camera availability continuously throughout each shift and will also report partially online cameras, that is, cameras that go offline for part of the shift. Each camera will be classified as online for the whole shift, partially online, or offline, giving the client a complete record of camera coverage for the entire examination.</div>
+
+  <h2><span class="n">2.1</span>Necessary, true-positive events: incidents only CDIS found</h2>
+  <div class="headline">The client confirmed 2,371 CDIS alerts against 288 Superview events: 8.2 times as many true positives.</div>
+  <ul>
+    <li><b>Incidents Superview missed.</b> <b>2,240</b> of CDIS's accepted alerts (<b>94.5%</b>) were incidents Superview did not report at all. Only 253 accepted Superview events had no CDIS alert.</li>
+    <li><b>Net gain.</b> For every confirmed incident only Superview caught, CDIS caught <span class="win">8.9</span> that Superview missed.</li>
+    <li><b>Fewer, more useful alerts.</b> CDIS sent 28,410 alerts against Superview's 48,657 (<b>42% fewer</b>), yet delivered 8.2 times the confirmed incidents.</li>
+  </ul>
+
+  <div class="notes">Superview figures are from its own camera report for each session: online whole shift, partly online (offline for part of the shift) and offline for the whole shift. CDIS online = cameras CDIS reached and checked in the shift. Averages are per shift over the 17 shifts.</div>
+</div>
+
+<!-- ============================ PAGE 2 ============================ -->
+<div class="page">
+  <div class="band" style="padding-top:5mm;padding-bottom:4mm">
+    <div class="pg">Page 2 of 2</div>
+    <h1 style="font-size:14pt">CDIS vs Superview (continued)</h1>
+    <div class="sub" style="margin-top:1mm">Data compared: 16 Oct 2026 Shift 2 to 28 Oct 2026 Shift 3 (17 day-shifts)</div>
+  </div>
+
+  <h2 style="margin-top:4mm"><span class="n">2.2</span>True-positive events by analytic</h2>
+  <div class="muted" style="margin-bottom:1mm">Client-accepted alerts (true positives), 16–28 Oct. CDIS confirmed more incidents in 9 of the 10 analytics both systems run.</div>
+  <table class="t">
+    <tr><th>Analytic</th><th class="r">CDIS accepted</th><th class="r">Superview accepted</th><th class="r">CDIS vs Superview</th></tr>
+    <tr><td>Invigilator Static</td><td class="r"><b>1,669</b></td><td class="r">181</td><td class="r win">9.2×</td></tr>
+    <tr><td>Entry/Exit Movement</td><td class="r"><b>231</b></td><td class="r">8</td><td class="r win">29×</td></tr>
+    <tr><td>Less than 5 people in a lab</td><td class="r"><b>144</b></td><td class="r">16</td><td class="r win">9.0×</td></tr>
+    <tr><td>Crowd (Entry/Exit)</td><td class="r"><b>115</b></td><td class="r">1</td><td class="r win">115×</td></tr>
+    <tr><td>Phone (Server Room)</td><td class="r"><b>98</b></td><td class="r">53</td><td class="r win">1.8×</td></tr>
+    <tr><td>Zero Person</td><td class="r"><b>48</b></td><td class="r">9</td><td class="r win">5.3×</td></tr>
+    <tr><td>Server Room Threshold</td><td class="r"><b>45</b></td><td class="r">13</td><td class="r win">3.5×</td></tr>
+    <tr><td>Phone (Inside Lab)</td><td class="r"><b>11</b></td><td class="r">0</td><td class="r win">only CDIS</td></tr>
+    <tr><td>Close Proximity</td><td class="r"><b>9</b></td><td class="r">2</td><td class="r win">4.5×</td></tr>
+    <tr><td><b>All analytics</b></td><td class="r"><b>2,371</b></td><td class="r"><b>288</b></td><td class="r win">8.2×</td></tr>
+  </table>
+  
+  <h2><span class="n">3</span>Accuracy: a higher acceptance rate at the client</h2>
+  <div class="headline">8.3% of CDIS alerts were accepted by the client, against 0.6% of Superview's: about 14 times more accurate.</div>
+  <table class="grid2"><tr><td>
+    <ul>
+      <li><b>Every shift.</b> CDIS had the higher acceptance rate in <span class="win">16 of 16</span> day-shifts it ran: <b>4.2%–13.7%</b>, against 0.1%–1.1% for Superview.</li>
+      <li><b>Every analytic.</b> Higher acceptance rate in <span class="win">10 of 10</span> analytics both systems run, e.g. Invigilator Static <b>55.8%</b> vs 21.0%, Phone (Server Room) <b>20.8%</b> vs 1.2%, Phone (Inside Lab) <b>13.8%</b> vs 0.0%, Server Room Threshold <b>11.7%</b> vs 1.5%.</li>
+      <li><b>Less review work.</b> The client reviewed <b>12</b> CDIS alerts per confirmed incident, against <b>169</b> Superview events, <span class="win">14 times less effort</span> per finding.</li>
+      <li><b>Improving.</b> CDIS reached its best rates on the last exam day: <b>13.7%</b> (28 Oct Shift 2) and <b>11.0%</b> for the day.</li>
+    </ul>
+  </td><td>
+    <table class="t" style="margin-top:0">
+      <tr><th>Acceptance rate</th><th>CDIS</th><th>Superview</th></tr>
+      <tr><td class="lab">Shift 1</td><td><span class="bar cd" style="width:12.6mm"></span><span class="bl" style="width:9mm">6.9%</span></td><td><span class="bar sv" style="width:1.3mm"></span><span class="bl" style="width:9mm">0.7%</span></td></tr>
+      <tr><td class="lab">Shift 2</td><td><span class="bar cd" style="width:20mm"></span><span class="bl" style="width:9mm">11.0%</span></td><td><span class="bar sv" style="width:1.1mm"></span><span class="bl" style="width:9mm">0.6%</span></td></tr>
+      <tr><td class="lab">Shift 3</td><td><span class="bar cd" style="width:12.9mm"></span><span class="bl" style="width:9mm">7.1%</span></td><td><span class="bar sv" style="width:.9mm"></span><span class="bl" style="width:9mm">0.5%</span></td></tr>
+      <tr><td class="lab"><b>All shifts</b></td><td><span class="bar cd" style="width:15.1mm"></span><span class="bl" style="width:9mm">8.3%</span></td><td><span class="bar sv" style="width:1.1mm"></span><span class="bl" style="width:9mm">0.6%</span></td></tr>
+    </table>
+    <table class="t">
+      <tr><th>By exam day</th><th class="r">CDIS</th><th class="r">Superview</th></tr>
+      <tr><td>16 Oct</td><td class="r"><b>8.3%</b></td><td class="r">0.5%</td></tr>
+      <tr><td>22 Oct</td><td class="r"><b>5.5%</b></td><td class="r">0.6%</td></tr>
+      <tr><td>23 Oct</td><td class="r"><b>4.9%</b></td><td class="r">0.8%</td></tr>
+      <tr><td>24 Oct</td><td class="r"><b>10.0%</b></td><td class="r">0.2%</td></tr>
+      <tr><td>27 Oct</td><td class="r"><b>7.6%</b></td><td class="r">0.6%</td></tr>
+      <tr><td>28 Oct</td><td class="r"><b>11.0%</b></td><td class="r">0.9%</td></tr>
+    </table>
+  </td></tr></table>
+
+  <div class="callout"><b>In short:</b> CDIS watches more cameras and keeps more of them fully online, finds incidents Superview misses (2,240 confirmed incidents Superview did not report), and gives the client alerts that are about 14 times more likely to be real, with 42% fewer alerts to review.</div>
+
+  <div class="notes">Scope: data compared from 16 Oct Shift 2 to 28 Oct Shift 3, 17 day-shifts (16 Oct Shifts 2–3; 22, 23, 24, 27 and 28 Oct, all shifts). 16 Oct Shift 1 excluded; CDIS did not run on 23 Oct Shift 3. Accepted = accepted by the client (Superview: Verified). Acceptance rate = accepted ÷ all alerts sent; items still pending review count as not accepted for both systems, so both rates are lower bounds. Same incident = same camera and analytic within ±3 minutes. Sources: Superview Events Reports and session camera reports (exported 29–30 Oct 2026); CDIS database of 31 Oct 2026.</div>
+</div>
+</body></html>

@@ -56,6 +56,7 @@ import {
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import VideoLibraryIcon from '@mui/icons-material/VideoLibrary';
 import SummarizeIcon from '@mui/icons-material/Summarize';
+import NetworkCheckIcon from '@mui/icons-material/NetworkCheck';
 import { useAuth } from '../contexts/AuthContext';
 import { useDetectionCounts } from '../contexts/DetectionCountsContext';
 import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
@@ -110,6 +111,7 @@ const menuItems = [
   { text: 'Dashboard', icon: <Dashboard />, path: '/' },
   { text: 'Exams', icon: <ExamsSvgIcon />, path: '/exams' },
   { text: 'Cameras', icon: <CameraAltIcon />, path: '/cameras' },
+  { text: 'Camera Uptime', icon: <NetworkCheckIcon />, path: '/camera-uptime' },
   { text: 'Schedule Analysis', icon: <Analytics />, path: '/analytics' },
   { text: 'Executions', icon: <Slideshow />, path: '/executions' },
   { text: 'Detections', icon: <CustomSvgIcon />, path: '/detections', hasSubItems: true },

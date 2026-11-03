@@ -807,9 +807,9 @@ const fetchFleetGpu = async () => {
     // reach the server through the public site (filtered in front of it), so the fleet totals are
     // added up here from the per-GPU values.
     const [util, usedBy, totalBy] = await Promise.all([
-        promScalar('avg(avg_over_time(gpu_utilization_percent[5m]))'),
-        promByServer('gpu_memory_used_mb'),
-        promByServer('gpu_memory_total_mb'),
+        promScalar('avg(avg_over_time(gpu_utilization_percent{job="gpu-workers"}[5m]))'),
+        promByServer('gpu_memory_used_mb{job="gpu-workers"}'),
+        promByServer('gpu_memory_total_mb{job="gpu-workers"}'),
     ]);
     const ids = Object.keys(usedBy);
     if (util == null && ids.length === 0) return null;

@@ -19,6 +19,7 @@ const clientDashboardRoutes = require('./routes/clientDashboard');
 const clientDetectionsRoutes = require('./routes/clientDetections');
 const dashboardRoutes = require('./routes/dashboard');
 const clientApiRoutes = require('./routes/clientApi');
+const cameraUptimeRoutes = require('./routes/cameraUptime');
 
 const path = require('path');
 
@@ -179,6 +180,7 @@ app.use(`${BASE}/api/sms`, smsRoutes);
 app.use(`${BASE}/api/client-dashboard`, clientDashboardRoutes);
 app.use(`${BASE}/api/client-detections`, clientDetectionsRoutes);
 app.use(`${BASE}/api/dashboard`, dashboardRoutes);
+app.use(`${BASE}/api/camera-uptime`, cameraUptimeRoutes); // camera-uptime-service data (admin)
 app.use(`${BASE}/api/v1`, clientApiRoutes); // external client API (CCTV_API_v1.2)
 
 // ==========================
