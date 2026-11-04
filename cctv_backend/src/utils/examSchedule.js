@@ -110,6 +110,14 @@ function findHeaderRow(rows, test) {
  * Centre-wise schedule: one row per centre (TC CODE), one column per "<date> Shift <n>"
  * holding YES / NO. Other columns are descriptive only.
  */
+/** One warning for TC codes repeated in a sheet: the first row of each is kept, the rest dropped. */
+function duplicateRowsWarning(firstRow, dupRows) {
+    if (!dupRows.size) return null;
+    const nDup = [...dupRows.values()].reduce((n, rs) => n + rs.length, 0);
+    const list = [...dupRows].map(([tc, rs]) => `${tc} (row ${firstRow.get(tc)} kept; row${rs.length > 1 ? 's' : ''} ${rs.join(', ')} dropped)`).join('; ');
+    return `This sheet contains duplicate rows: ${nDup} extra row${nDup !== 1 ? 's' : ''} for ${dupRows.size} TC code${dupRows.size !== 1 ? 's' : ''}. Only the first row of each TC code will be saved: ${list}`;
+}
+
 function parseCentreSchedule(filePath) {
     const { rows } = readSheet(filePath);
     const hi = findHeaderRow(rows, (h) => h.includes('tc code'));
@@ -142,7 +150,8 @@ function parseCentreSchedule(filePath) {
     }
 
     const centres = [];
-    const tcSeen = new Set();
+    const tcSeen = new Map();        // tc -> sheet row number of its first (kept) row
+    const dupRows = new Map();       // tc -> sheet row numbers of the extra rows that are dropped
     for (let r = hi + 1; r < rows.length; r++) {
         const row = rows[r] || [];
         const tc = normalizeTc(row[c.tc]);
@@ -150,8 +159,12 @@ function parseCentreSchedule(filePath) {
             if (row.some((v) => v != null && String(v).trim() !== '')) warnings.push(`Row ${r + 1}: no TC code — skipped`);
             continue;
         }
-        if (tcSeen.has(tc)) { errors.push(`Row ${r + 1}: TC code ${tc} appears more than once`); continue; }
-        tcSeen.add(tc);
+        if (tcSeen.has(tc)) {           // duplicate TC code: keep only the first row, drop this one
+            if (!dupRows.has(tc)) dupRows.set(tc, []);
+            dupRows.get(tc).push(r + 1);
+            continue;
+        }
+        tcSeen.set(tc, r + 1);
         const slots = {};
         for (const s of slotCols) {
             const raw = row[s.i];
@@ -170,6 +183,8 @@ function parseCentreSchedule(filePath) {
         });
         if (part === false) warnings.push(`${tc}: "Part of CCTV Analytics" is No`);
     }
+    const dupWarning = duplicateRowsWarning(tcSeen, dupRows);
+    if (dupWarning) warnings.unshift(dupWarning);
     if (!centres.length) throw new ScheduleError('No centre rows found under the header');
     return { centres, slotCols, errors, warnings };
 }
@@ -270,7 +285,8 @@ function parseThresholds(filePath) {
     const errors = [];
     const warnings = [];
     const entries = [];
-    const tcSeen = new Set();
+    const tcSeen = new Map();        // tc -> sheet row number of its first (kept) row
+    const dupRows = new Map();       // tc -> sheet row numbers of the extra rows that are dropped
     for (let r = hi + 1; r < rows.length; r++) {
         const row = rows[r] || [];
         const tc = normalizeTc(row[c.tc]);
@@ -278,8 +294,12 @@ function parseThresholds(filePath) {
             if (row.some((v) => v != null && String(v).trim() !== '')) warnings.push(`Row ${r + 1}: no TC code — skipped`);
             continue;
         }
-        if (tcSeen.has(tc)) { errors.push(`Row ${r + 1}: TC code ${tc} appears more than once`); continue; }
-        tcSeen.add(tc);
+        if (tcSeen.has(tc)) {           // duplicate TC code: keep only the first row, drop this one
+            if (!dupRows.has(tc)) dupRows.set(tc, []);
+            dupRows.get(tc).push(r + 1);
+            continue;
+        }
+        tcSeen.set(tc, r + 1);
         const base = {
             tc_code: tc,
             centre_name: c.name >= 0 && row[c.name] != null ? String(row[c.name]).trim() : null,
@@ -309,6 +329,8 @@ function parseThresholds(filePath) {
             }
         }
     }
+    const dupWarning = duplicateRowsWarning(tcSeen, dupRows);
+    if (dupWarning) warnings.unshift(dupWarning);
     if (!entries.length) throw new ScheduleError('No usable threshold rows found');
     return { shape, entries, errors, warnings, centres: tcSeen.size };
 }
