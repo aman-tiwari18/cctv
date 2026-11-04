@@ -46,6 +46,7 @@ import {
   ErrorOutline as ErrorOutlineIcon,
   Close as CloseIcon,
   Videocam as VideocamIcon,
+  CheckCircleOutline as CheckCircleOutlineIcon,
 } from '@mui/icons-material';
 import { useSearchParams } from 'react-router-dom';
 import { examsAPI, camerasAPI, clientDashboardAPI, executionsAPI } from '../services/api';
@@ -622,48 +623,51 @@ const ClientCameras = () => {
                 }
               }
               const nDv = camServerStats?.servers?.length || 0;
-              const nNot = camServerStats?.totalNotAccessible || 0;
-              const allOk = nNot === 0 && camStatusCounts.accessible > 0 && camStatusCounts.notAccessible === 0 && camStatusCounts.unknown === 0;
-              const unchecked = nNot === 0 && !allOk && (camStatusCounts.accessible + camStatusCounts.notAccessible + camStatusCounts.unknown) > 0;
-              const showRight = !isHLS && (nNot > 0 || allOk || unchecked);
-              if (!left && !showRight) return null;
+              const nAcc = camStatusCounts.accessible || 0;
+              const nNotAcc = camStatusCounts.notAccessible || 0;
+              const nUnknown = camStatusCounts.unknown || 0;
+              const nTotal = nAcc + nNotAcc + nUnknown;
+              const showStats = nTotal > 0;
+              if (!left && !showStats) return null;
+              const Sep = () => <Box sx={{ width: '1px', alignSelf: 'stretch', bgcolor: '#cbd5e1', my: 0.5, display: { xs: 'none', md: 'block' } }} />;
+              const Stat = ({ icon, label, value, color, extra, tip }) => (
+                <Tooltip title={tip || ''} arrow disableHoverListener={!tip}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: { xs: 0, md: 2 }, flexShrink: 0 }}>
+                    {icon}
+                    <Typography sx={{ fontSize: '0.92rem', fontWeight: 500, color }}>{label}</Typography>
+                    <Typography sx={{ fontSize: '1.05rem', fontWeight: 800, color }}>{value.toLocaleString()}</Typography>
+                    {extra}
+                  </Box>
+                </Tooltip>
+              );
               return (
-                <Box sx={{ display: 'flex', gap: 2, mb: 2, flexWrap: 'wrap', alignItems: 'stretch' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', rowGap: 1.25, columnGap: 1, mb: 2, px: 2, py: 1.5, borderRadius: 2,
+                  bgcolor: warn ? '#fffbeb' : '#eff6ff' }}>
                   {left && (
-                    <Box sx={{ flex: '1 1 260px', minWidth: 0, display: 'flex', alignItems: 'center', gap: 1.25, px: 2, py: 1.25, borderRadius: 2,
-                      bgcolor: warn ? '#fffbeb' : '#eff6ff', color: warn ? '#92400e' : '#1e3a8a' }}>
+                    <Box sx={{ flex: '1 1 240px', minWidth: 0, display: 'flex', alignItems: 'center', gap: 1.25, pr: 2,
+                      color: warn ? '#92400e' : '#1e3a8a' }}>
                       <Tooltip title={leftTip} arrow placement="bottom-start">
                         <InfoOutlinedIcon sx={{ fontSize: 22, color: warn ? '#d97706' : '#2563eb', cursor: 'help' }} />
                       </Tooltip>
-                      <Typography sx={{ fontSize: '0.92rem', fontWeight: 600, minWidth: 0, overflowWrap: 'anywhere' }}>{left}</Typography>
+                      <Typography sx={{ fontSize: '0.92rem', fontWeight: 700, minWidth: 0, overflowWrap: 'anywhere' }}>{left}</Typography>
                     </Box>
                   )}
-                  {showRight && (
-                  <Box sx={{ flex: '1 1 260px', minWidth: 0, display: 'flex', alignItems: 'center', gap: 1.25, px: 2, py: 1.25, borderRadius: 2,
-                    bgcolor: nNot > 0 ? '#fef2f2' : allOk ? '#f0fdf4' : '#f8fafc', color: nNot > 0 ? '#7f1d1d' : allOk ? '#14532d' : '#475569' }}>
-                    {nNot > 0 ? (
-                      <>
-                        <Tooltip title="Show the not-accessible cameras per DV (camview server)" arrow>
-                          <IconButton size="small" onClick={() => setDvOpen(true)} sx={{ p: 0 }}>
-                            <ErrorOutlineIcon sx={{ fontSize: 24, color: '#dc2626' }} />
-                          </IconButton>
-                        </Tooltip>
-                        <Typography sx={{ fontSize: '0.92rem', fontWeight: 600, minWidth: 0, overflowWrap: 'anywhere' }}>
-                          {nNot.toLocaleString()} non-accessible camera{nNot !== 1 ? 's' : ''} in {nDv} DV{nDv !== 1 ? 's' : ''}
-                        </Typography>
-                      </>
-                    ) : allOk ? (
-                      <>
-                        <CheckCircleIcon sx={{ fontSize: 22, color: '#16a34a' }} />
-                        <Typography sx={{ fontSize: '0.92rem', fontWeight: 600, minWidth: 0, overflowWrap: 'anywhere' }}>All cameras in this view were accessible in the last check</Typography>
-                      </>
-                    ) : (
-                      <>
-                        <InfoOutlinedIcon sx={{ fontSize: 22, color: '#64748b' }} />
-                        <Typography sx={{ fontSize: '0.92rem', fontWeight: 600, minWidth: 0, overflowWrap: 'anywhere' }}>Accessibility not checked yet{camStatusCounts.unknown ? ` - ${camStatusCounts.unknown.toLocaleString()} camera${camStatusCounts.unknown !== 1 ? 's' : ''} unchecked` : ''}</Typography>
-                      </>
-                    )}
-                  </Box>
+                  {showStats && (
+                    <>
+                      {left && <Sep />}
+                      <Stat icon={<CheckCircleOutlineIcon sx={{ fontSize: 22, color: '#2563eb' }} />} label="Accessible" value={nAcc} color="#1e3a8a"
+                        tip="Reachable in the last check" />
+                      <Sep />
+                      <Stat icon={<ErrorOutlineIcon sx={{ fontSize: 22, color: '#dc2626' }} />} label="Not Accessible" value={nNotAcc} color="#dc2626"
+                        tip="Cameras that could not be reached"
+                        extra={!isHLS && nDv > 0 ? (
+                          <Chip size="small" clickable onClick={() => setDvOpen(true)} label={`Across ${nDv} DV${nDv !== 1 ? 's' : ''}`}
+                            sx={{ ml: 0.5, height: 22, fontSize: '0.75rem', fontWeight: 600, bgcolor: '#fee2e2', color: '#b91c1c', '&:hover': { bgcolor: '#fecaca' } }} />
+                        ) : null} />
+                      <Sep />
+                      <Stat icon={<VideocamIcon sx={{ fontSize: 22, color: '#16a34a' }} />} label="Total Cameras" value={nTotal} color="#15803d"
+                        tip={nUnknown > 0 ? `Incl. ${nUnknown.toLocaleString()} not checked yet` : 'Every camera in this view'} />
+                    </>
                   )}
                 </Box>
               );
