@@ -159,3 +159,33 @@ docs/superview_detection_reports/**/*.csv
 
 # detection photos copied into comparison reports (docs/report_*/images/sv, /cd): keep out of git
 docs/report_*/images/
+
+# untracked local files/folders (not committed)
+/docs/Exam_Onboarding_Guide_HLS.pdf
+/docs/Exam_Onboarding_Guide_RTSP.pdf
+/docs/HLS/
+/docs/OneDrive_1_25-09-2026.zip
+/docs/RTSP/
+/docs/client_onboarding_guide.html
+/docs/client_templates/
+/docs/images_for_intruder/
+/docs/images_for_inversion/
+/docs/intruder_poster_test_2026-10-06/frames/
+/docs/intruder_poster_test_2026-10-06/summary_cam26_0_continuous.json
+/docs/intruder_poster_test_2026-10-06/summary_cam26_0_rr.json
+/docs/intruder_poster_test_2026-10-06/summary_cam26_synth_continuous.json
+/docs/intruder_poster_test_2026-10-06/summary_cam26_synth_rr.json
+/docs/intruder_poster_test_2026-10-06/summary_lab_people_1_continuous.json
+/docs/intruder_poster_test_2026-10-06/summary_lab_people_1_rr.json
+/docs/intruder_poster_test_2026-10-06/summary_lab_people_2_continuous.json
+/docs/intruder_poster_test_2026-10-06/summary_lab_people_2_rr.json
+/docs/intruder_poster_test_2026-10-06/synthetic_intruder_off_vs_on.mp4
+/docs/inversion_test_2026-10-06/
+/docs/invigilator_test_2026-10-06/
+/docs/invigilator_test_result/
+/docs/monitor_results/
+/monitor_script/
+/proximity_temporal_system(1).py
+/script-server/monitor_alerts_deploy_v2/
+/script-server/scripts/detection/rtsp_urls_exam_19_20261011_135035.json
+/script-server/scripts/detection/rtsp_urls_exam_19_20261011_135058.json
