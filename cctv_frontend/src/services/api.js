@@ -189,6 +189,8 @@ export const shiftScriptsAPI = {
 export const smsAPI = {
     // exam_body clients that have an enabled SMS config -> { bodies: [...] }
     getClients: () => api.get('/sms/clients'),
+    // Credit balance per client gateway account (ADMIN) -> { accounts, fetched_at }
+    getBalance: () => api.get('/sms/balance'),
 };
 
 export const reportAPI = {

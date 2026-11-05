@@ -278,6 +278,25 @@ async function sendAlertWithConfig(config, typeKey, metadata, recipientList) {
 }
 
 /**
+ * Read one SMSGatewayHub account's balance. The gateway reports it as text,
+ * e.g. { ErrorCode: "0", Balance: "Unified Credits:21980.00" }. Returns
+ * { credit_type, credits } or throws. The API key travels in the URL, so only
+ * error.message (never the axios config) may be logged by the caller.
+ */
+async function fetchGatewayBalance(apiKey) {
+    const { data } = await axios.get('https://www.smsgatewayhub.com/api/mt/GetBalance', {
+        params: { APIKey: apiKey },
+        timeout: 8000,
+    });
+    if (Number(data?.ErrorCode) !== 0) {
+        throw new Error(`Gateway error ${data?.ErrorCode ?? 'unknown'}: ${data?.ErrorMessage ?? 'none'}`);
+    }
+    const match = /^([^:]+):\s*(-?\d+(?:\.\d+)?)\s*$/.exec(String(data?.Balance ?? ''));
+    if (!match) throw new Error('Unrecognised balance format');
+    return { credit_type: match[1].trim(), credits: Number(match[2]) };
+}
+
+/**
  * 📱 Send OTP SMS
  */
 async function sendOTPSMS(phoneNumber, otp) {
@@ -317,6 +336,7 @@ module.exports = {
     sendAlertWithConfig,
     sendSMS,
     sendOTPSMS,
+    fetchGatewayBalance,
     renderMessage,
     missingPlaceholders,
     SMS_TEMPLATES,

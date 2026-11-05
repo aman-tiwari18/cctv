@@ -44,11 +44,12 @@ import TuneRoundedIcon from '@mui/icons-material/TuneRounded';
 import HistoryRoundedIcon from '@mui/icons-material/HistoryRounded';
 import axios from 'axios';
 import { API_BASE_1 } from '../constants/data';
-import { dashboardAPI, examsAPI } from '../services/api';
+import { dashboardAPI, examsAPI, smsAPI } from '../services/api';
 import { ExamsSvgIcon } from '../components/ExamsSvgIcon';
 import { ShiftSvgIcon } from '../components/ShiftSvgIcon';
 import { CustomSvgIcon } from '../components/DetectionSvgIcon';
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
+import SmsOutlinedIcon from '@mui/icons-material/SmsOutlined';
 
 // ---------------------------------------------------------------------------
 // Constants — kept identical to V1 so other pages that reuse the same mapping
@@ -1223,6 +1224,75 @@ const GpuPerformanceCard = ({ accessibleCameras = 0 }) => {
 };
 
 // ---------------------------------------------------------------------------
+// SmsCreditsCard — remaining SMS credits per client gateway account. Independent
+// of the date/exam filters: a balance is always "right now".
+// ---------------------------------------------------------------------------
+const SMS_BALANCE_REFRESH_MS = 5 * 60 * 1000;
+
+const SmsCreditsCard = () => {
+    const [balance, setBalance] = useState(null);
+    const [failed, setFailed] = useState(false);
+
+    useEffect(() => {
+        let cancelled = false;
+        const refresh = () => smsAPI.getBalance()
+            .then((res) => {
+                if (cancelled) return;
+                setBalance(res?.data?.data || null);
+                setFailed(false);
+            })
+            .catch((err) => {
+                if (cancelled) return;
+                console.error('[Dashboard.getSmsBalance]', err);
+                setFailed(true);
+            });
+        refresh();
+        const id = setInterval(refresh, SMS_BALANCE_REFRESH_MS);
+        return () => { cancelled = true; clearInterval(id); };
+    }, []);
+
+    const accounts = balance?.accounts || [];
+    const message = failed ? 'SMS balance unavailable' : (balance && accounts.length === 0 ? 'No SMS accounts configured' : null);
+
+    return (
+        <Card sx={{ mb: { xs: 2, sm: 2.5 }, bgcolor: '#fff', borderRadius: '8px', border: '1px solid #eef0f3' }}>
+            <CardContent sx={{ p: { xs: 2, sm: 2.5 }, '&:last-child': { pb: { xs: 2, sm: 2.5 } } }}>
+                <Stack direction="row" alignItems="center" useFlexGap flexWrap="wrap" sx={{ gap: { xs: 1.5, sm: 3 } }}>
+                    <Stack direction="row" alignItems="center" spacing={1.5}>
+                        <Box sx={{ bgcolor: KPI_ICON_BG, borderRadius: '8px', width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <SmsOutlinedIcon sx={{ fontSize: 18, color: KPI_ICON_COLOR }} />
+                        </Box>
+                        <Typography sx={{ color: '#5C5F61', fontWeight: 700, fontSize: '12px', lineHeight: '16px', letterSpacing: '1px', textTransform: 'uppercase' }}>
+                            SMS Credits
+                        </Typography>
+                    </Stack>
+
+                    {!balance && !failed && <CircularProgress size={22} />}
+                    {message && <Typography sx={{ color: '#5C5F61', fontSize: '13px' }}>{message}</Typography>}
+
+                    {!failed && accounts.map((a) => (
+                        <Box key={a.account}>
+                            <Typography sx={{ color: '#5C5F61', fontSize: '12px', fontWeight: 600, lineHeight: '16px' }}>
+                                {a.account}
+                            </Typography>
+                            <Typography sx={{ color: a.error ? '#94A3B8' : '#2E68C9', fontSize: a.error ? '14px' : '22px', fontWeight: 700, lineHeight: '28px' }}>
+                                {a.error ? 'Unavailable' : a.credits.toLocaleString()}
+                            </Typography>
+                        </Box>
+                    ))}
+
+                    {!failed && balance?.fetched_at && (
+                        <Typography sx={{ ml: { sm: 'auto' }, color: '#94A3B8', fontSize: '11px', lineHeight: '14px' }}>
+                            Independent of selected filters | Last Update {new Date(balance.fetched_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                        </Typography>
+                    )}
+                </Stack>
+            </CardContent>
+        </Card>
+    );
+};
+
+// ---------------------------------------------------------------------------
 // LiveExamsCard — paginated table from /api/dashboard/live-exams
 // ---------------------------------------------------------------------------
 
@@ -2385,6 +2455,8 @@ const Dashboard = () => {
                         />
                     </Grid>
                 </Grid>
+
+                <SmsCreditsCard />
 
                 {/* Row 2 — Distribution + GPU */}
                 <Grid container spacing={2.5} sx={{ mb: 2.5 }}>

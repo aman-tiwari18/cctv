@@ -1,7 +1,29 @@
 const { query } = require('../config/database');
-const { sendAlertWithConfig, TYPE_MAP, SMS_ELIGIBLE_TYPES } = require('../services/smsService');
+const { sendAlertWithConfig, fetchGatewayBalance, TYPE_MAP, SMS_ELIGIBLE_TYPES } = require('../services/smsService');
 const { getExamObserverNumbers } = require('../utils/examObservers');
 const logger = require('../utils/logger');
+
+// Dashboards refresh on a timer and several admins can be open at once, so
+// balances are shared for a minute rather than hitting the gateway per request.
+const BALANCE_CACHE_MS = 60 * 1000;
+let balanceCache = null; // { expires, promise }
+
+// One entry per enabled client account. A failing account reports its own error
+// so the others still show. API keys stay on the server.
+async function loadBalances() {
+    const rows = await query(
+        "SELECT exam_body, api_key FROM sms_configs WHERE enabled = 1 AND api_key IS NOT NULL AND api_key <> '' ORDER BY exam_body"
+    );
+    const accounts = await Promise.all((rows || []).map(async ({ exam_body, api_key }) => {
+        try {
+            return { account: exam_body, ...(await fetchGatewayBalance(api_key)), error: null };
+        } catch (error) {
+            logger.warn(`SMS balance failed for '${exam_body}': ${error.message}`);
+            return { account: exam_body, credit_type: null, credits: null, error: 'Unavailable' };
+        }
+    }));
+    return { accounts, fetched_at: new Date().toISOString() };
+}
 
 /**
  * SMS Controller handles triggering alerts based on database reports.
@@ -154,6 +176,25 @@ class SMSController {
                 success: false,
                 message: 'Internal server error while processing SMS'
             });
+        }
+    }
+
+    /**
+     * Current SMS credit balance of every enabled client gateway account (ADMIN).
+     */
+    async getBalances(req, res) {
+        try {
+            if (!balanceCache || balanceCache.expires <= Date.now()) {
+                const promise = loadBalances();
+                const entry = { expires: Date.now() + BALANCE_CACHE_MS, promise };
+                balanceCache = entry;
+                // Don't keep a rejected lookup (e.g. DB down) for the whole minute.
+                promise.catch(() => { if (balanceCache === entry) balanceCache = null; });
+            }
+            return res.json({ success: true, data: await balanceCache.promise });
+        } catch (error) {
+            logger.error(`Error in getBalances: ${error.message}`);
+            return res.status(500).json({ success: false, message: 'Failed to load SMS balance' });
         }
     }
 

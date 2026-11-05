@@ -45,6 +45,31 @@
       '500':
         $ref: '#/components/responses/ServerError'
 
+/api/sms/balance:
+  get:
+    tags: [SMS]
+    summary: SMS credit balance per client account (ADMIN)
+    description: |
+      Reads the SMSGatewayHub balance of every enabled `sms_configs` account.
+      Results are cached for 60 seconds. An account whose lookup fails is
+      returned with `credits: null` and an `error`; the others are unaffected.
+    responses:
+      '200':
+        description: Balance per account.
+        content:
+          application/json:
+            example:
+              success: true
+              data:
+                accounts:
+                  - account: NTA
+                    credit_type: Unified Credits
+                    credits: 21980
+                    error: null
+                fetched_at: '2026-11-05T10:00:00.000Z'
+      '500':
+        $ref: '#/components/responses/ServerError'
+
 /api/sms/test:
   post:
     tags: [SMS]
