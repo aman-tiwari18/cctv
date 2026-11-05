@@ -56,6 +56,7 @@ import {
 import CameraAltIcon from '@mui/icons-material/CameraAlt';
 import VideoLibraryIcon from '@mui/icons-material/VideoLibrary';
 import SummarizeIcon from '@mui/icons-material/Summarize';
+import ScheduleSendIcon from '@mui/icons-material/ScheduleSend';
 import NetworkCheckIcon from '@mui/icons-material/NetworkCheck';
 import { useAuth } from '../contexts/AuthContext';
 import { useDetectionCounts } from '../contexts/DetectionCountsContext';
@@ -118,6 +119,7 @@ const menuItems = [
   { text: 'Client Detections', icon: <Visibility />, path: '/client-detections', hasSubItems: true },
   { text: 'Client Dashboard', icon: <Dashboard />, path: '/client-dashboard' },
   { text: 'Summary Report', icon: <SummarizeIcon />, path: '/summary-report' },
+  { text: 'Report Automation', icon: <ScheduleSendIcon />, path: '/report-automation' },
 ];
 
 // Menu items for VIEWER role (reordered with Client Dashboard first)

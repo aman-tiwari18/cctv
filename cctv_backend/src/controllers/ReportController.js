@@ -861,6 +861,419 @@ exports.downloadReport = async (req, res) => {
  * matches downloadReport line-for-line so the two exports look identical to
  * the user.
  */
+/**
+ * Build the client consolidated report ("Violations report"): only pushed_to_client = 1
+ * detections. Used by the download route below and by scheduled report emails.
+ * shiftId set: that shift only. Empty: all shifts.
+ * Returns { buffer, filename, detectionCount }. Throws (statusCode 404) for an unknown exam.
+ */
+async function buildClientReport({ examId, mysqlDate, shiftId = null }) {
+    // ── 1. Exam metadata ─────────────────────────────────────────────────
+    const examRows = await query(
+        `SELECT id, exam_name, link_type FROM exams WHERE id = ? LIMIT 1`,
+        [examId]
+    );
+    if (!examRows || examRows.length === 0) {
+        const notFound = new Error(`Exam with id=${examId} not found.`);
+        notFound.statusCode = 404;
+        throw notFound;
+    }
+    const examName = examRows[0].exam_name || `Exam_${examId}`;
+    const isRTSP = (examRows[0].link_type || '').toLowerCase() === 'rtsp';
+
+    // ── 2. Shift metadata ────────────────────────────────────────────────
+    const shifts = await query(
+        `SELECT id, shift_name, start_time, end_time
+         FROM exam_shifts
+         WHERE exam_id = ? AND is_active = 1
+         ORDER BY start_time ASC, id ASC`,
+        [examId]
+    );
+    const shiftMap = {};
+    shifts.forEach((s, i) => {
+        shiftMap[s.id] = {
+            index: i + 1,
+            label: `Shift ${i + 1}`,
+            shift_name: s.shift_name,
+            start_time: s.start_time,
+            end_time: s.end_time,
+        };
+    });
+
+    // ── 3. Master camera list ────────────────────────────────────────────
+    const masterCameras = isRTSP ? await query(
+        `SELECT id, device_id, camera_no, camera_name, classification, tc_code,
+                centre_name, city, state, null as shift_id,
+                null as exam_date, status
+         FROM camera_links_rtsp
+         WHERE exam_id = ? AND is_active = 1
+         ORDER BY device_id ASC, camera_no ASC`,
+        [examId]
+    ) : await query(
+        `SELECT id, ch_code, camera_name, camera_category, tc_code,
+                centre_name, city, state, shift_id, exam_date, status
+         FROM camera_links_hls
+         WHERE exam_id = ? AND is_active = 1
+         ORDER BY shift_id ASC, ch_code ASC`,
+        [examId]
+    );
+
+    const [y, m, d] = mysqlDate.split('-');
+    const searchDate = `${d}/${m}/${y}`;
+
+    // RTSP: each shift uses its own (latest) classification run instead of
+    // the final live classification — see rtspShiftCameraLists. HLS keeps
+    // the shift/date-scoped camera_links list.
+    const rtspShift = isRTSP ? await rtspShiftCameraLists(examId, mysqlDate, shifts, masterCameras) : null;
+    const shiftCamsOf = (sid) => (rtspShift
+        ? rtspShift.camsByShift[sid]
+        : camerasForShiftAndDate(masterCameras, sid, mysqlDate));
+
+    // ── 4. Client-only detection set: pushed_to_client = 1 ───────────────
+    // Carry remove_from_client through so the aggregated "Rejected Events"
+    // count can use it, and accepted_by_client so the Detections List can
+    // resolve the per-row Status (Accepted / Rejected / Not Verified).
+    let detections = isRTSP ? await query(
+        `SELECT id, shift_id, city, center_name, camera_id, camera_name, camera_no,
+                '' as camera_category, tc_code, device_id, state, camera_status,
+                events, rejected_events, date_time, imageurl, detection_type,
+                unique_id, pushed_to_client, remove_from_client, accepted_by_client
+         FROM camera_report_rtsp
+         WHERE exam_id = ?
+           AND date_time LIKE CONCAT(?, '%')
+           AND pushed_to_client = 1
+         ORDER BY shift_id ASC`,
+        [examId, searchDate]
+    ) : await query(
+        `SELECT id, shift_id, city, center_name, camera_id, camera_name,
+                camera_category, tc_code, ch_code, state, camera_status,
+                events, rejected_events, date_time, imageurl, detection_type,
+                unique_id, created_at, pushed_to_client, remove_from_client, accepted_by_client
+         FROM camera_report_hls
+         WHERE exam_id = ?
+           AND date_time LIKE CONCAT(?, '%')
+           AND pushed_to_client = 1
+         ORDER BY shift_id ASC, created_at ASC`,
+        [examId, searchDate]
+    );
+
+    // One shift picked (not "All shifts"): the report carries only that shift - its sheet, its
+    // detections and its analysis. All shifts: the full consolidated report.
+    const onlyShiftId = (shiftId && shifts.some(s => Number(s.id) === Number(shiftId)))
+        ? Number(shiftId) : null;
+    const reportShifts = onlyShiftId ? shifts.filter(s => Number(s.id) === onlyShiftId) : shifts;
+    if (onlyShiftId) {
+        detections = detections.filter(d => Number((d.shift_id != null) ? d.shift_id : determineShiftId(d.date_time, shifts)) === onlyShiftId);
+    }
+
+    // ── 4b. Server-address (cctv_url) lookup from camera_links ───────────
+    // The report tables don't carry the server URL, so map it per camera.
+    // Keyed the same way as detections: device_id_camera_no (RTSP) / ch_code (HLS).
+    const linkRows = isRTSP
+        ? await query(`SELECT device_id, camera_no, cctv_url FROM camera_links_rtsp WHERE exam_id = ?`, [examId])
+        : await query(`SELECT ch_code, cctv_url FROM camera_links_hls WHERE exam_id = ?`, [examId]);
+    const serverByKey = {};
+    linkRows.forEach(l => {
+        const k = isRTSP ? `${l.device_id}_${l.camera_no}` : String(l.ch_code);
+        if (serverByKey[k] === undefined) serverByKey[k] = l.cctv_url || '';
+    });
+
+    // ── 5. Aggregate detections per (shift, camera) ──────────────────────
+    const aggregated = {};
+    detections.forEach(d => {
+        // ✅ NULL shift_id → date_time se dynamically determine karo
+        const sid = (d.shift_id != null) ? d.shift_id : determineShiftId(d.date_time, shifts);
+        
+        const key = isRTSP ? `${d.device_id}_${d.camera_no}` : d.ch_code;
+        if (!aggregated[sid]) aggregated[sid] = {};
+        if (!aggregated[sid][key]) {
+            aggregated[sid][key] = {
+                events: 0,
+                rejected: 0,
+                status: (d.camera_status || 'Online'),
+                details: {
+                    city: d.city,
+                    center: d.center_name,
+                    cam_id: key,
+                    camera_name: d.camera_name,
+                    cam_type: d.camera_category,
+                    tc_code: d.tc_code,
+                }
+            };
+        }
+        if (Number(d.remove_from_client) === 1) {
+            aggregated[sid][key].rejected += 1;
+        } else {
+            aggregated[sid][key].events += 1;
+        }
+    });
+
+    // ── 6. Workbook ──────────────────────────────────────────────────────
+    const wb = XLSX.utils.book_new();
+
+    // RTSP: Device ID, Camera No and Server Address instead of Channel Id (an HLS-only field).
+    const SHIFT_HEADERS = isRTSP ? [
+        'City', 'Center', 'Cam ID', 'Device ID', 'Camera No', 'Server Address', 'Camera Name',
+        'Cam Type', 'TC Code', 'Events (Excluding Rejected)', 'Rejected Events', 'Camera Status'
+    ] : [
+        'City', 'Center', 'Cam ID', 'Channel Id', 'Camera Name',
+        'Cam Type', 'TC Code', 'Events (Excluding Rejected)', 'Rejected Events', 'Camera Status'
+    ];
+    const SHIFT_WIDTHS = isRTSP
+        ? [15, 30, 15, 12, 11, 22, 35, 15, 12, 28, 16, 15]
+        : [15, 30, 15, 18, 35, 15, 12, 28, 16, 15];
+
+    reportShifts.forEach((shiftMeta) => {
+        const idx = shiftMap[shiftMeta.id].index - 1;
+        const shiftId = shiftMeta.id;
+        const sheetName = `Shift ${idx + 1}`;
+        const shiftCams = shiftCamsOf(shiftId);
+
+        let sheetData = [];
+
+        if (isRTSP) {
+            sheetData = shiftCams.map(cam => {
+                const key = `${cam.device_id}_${cam.camera_no}`;
+                const agg = (aggregated[shiftId] || {})[key];
+                const camType = cam.classification || (cam._notClassified ? 'Not Classified' : 'Failed to Classify');
+
+                if (agg) {
+                    return {
+                        'City': cam.city || agg.details.city || '',
+                        'Center': cam.centre_name || agg.details.center || '',
+                        'Cam ID': key,
+                        'Device ID': cam.device_id || '',
+                        'Camera No': cam.camera_no ?? '',
+                        'Server Address': serverByKey[key] || cam.cctv_url || '',
+                        'Camera Name': cam.camera_name || agg.details.camera_name || '',
+                        'Cam Type': camType,
+                        'TC Code': cam.tc_code || agg.details.tc_code || '',
+                        'Events (Excluding Rejected)': agg.events,
+                        'Rejected Events': agg.rejected,
+                        'Camera Status': cameraIsOnline(cam, isRTSP) ? 'Online' : 'Offline',
+                    };
+                } else {
+                    const isOnline = cameraIsOnline(cam, isRTSP);
+                    return {
+                        'City': cam.city || '',
+                        'Center': cam.centre_name || '',
+                        'Cam ID': key,
+                        'Device ID': cam.device_id || '',
+                        'Camera No': cam.camera_no ?? '',
+                        'Server Address': serverByKey[key] || cam.cctv_url || '',
+                        'Camera Name': cam.camera_name || '',
+                        'Cam Type': camType,
+                        'TC Code': cam.tc_code || '',
+                        'Events (Excluding Rejected)': 0,
+                        'Rejected Events': 0,
+                        'Camera Status': isOnline ? 'Online' : 'Offline',
+                    };
+                }
+            });
+        } else {
+            sheetData = shiftCams.map(cam => {
+                const agg = (aggregated[shiftId] || {})[cam.ch_code];
+                const camIdDisplay = formatHlsCamId(cam.camera_name, cam.ch_code);
+
+                if (agg) {
+                    return {
+                        'City': cam.city || '',
+                        'Center': cam.centre_name || '',
+                        'Cam ID': camIdDisplay,
+                        'Channel Id': cam.ch_code || '',
+                        'Camera Name': cam.camera_name || '',
+                        'Cam Type': cam.camera_category || '',
+                        'TC Code': cam.tc_code || '',
+                        'Events (Excluding Rejected)': agg.events,
+                        'Rejected Events': agg.rejected,
+                        'Camera Status': cameraIsOnline(cam, isRTSP) ? 'Online' : 'Offline',
+                    };
+                } else {
+                    const isOnline = cameraIsOnline(cam, isRTSP);
+                    return {
+                        'City': cam.city || '',
+                        'Center': cam.centre_name || '',
+                        'Cam ID': camIdDisplay,
+                        'Channel Id': cam.ch_code || '',
+                        'Camera Name': cam.camera_name || '',
+                        'Cam Type': cam.camera_category || '',
+                        'TC Code': cam.tc_code || '',
+                        'Events (Excluding Rejected)': 0,
+                        'Rejected Events': 0,
+                        'Camera Status': isOnline ? 'Online' : 'Offline',
+                    };
+                }
+            });
+        }
+
+        const ws = makeSheet(SHIFT_HEADERS, sheetData, SHIFT_WIDTHS);
+        XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    });
+
+    // ── 7. Detections List — admin layout + per-row "Status" ────────────
+    // Each row is one pushed detection. Status collapses the client's two
+    // review actions into one column:
+    //   Accepted      accepted_by_client = 1 (client confirmed it; the SMS
+    //                 alert to the tc_code observer fired on that click)
+    //   Rejected      remove_from_client = 1 (pulled off the client view)
+    //   Not Verified  neither — still sitting unreviewed on the client page
+    // Accept wins when a row carries both flags: accepting is the terminal,
+    // irreversible action (an SMS went out), whereas a later Remove only
+    // tidies the feed. Flip the order in detectionStatus to reverse that.
+    const DET_HEADERS = isRTSP ? [
+        'Shift', 'Device ID', 'Camera No', 'Cam ID', 'TC Code', 'Camera Name',
+        'Center Name', 'City', 'Server Address', 'Detection Type', 'Detection Time',
+        'Status', 'Image URL', 'View'
+    ] : [
+        'Shift', 'Device ID', 'Camera No', 'Cam ID', 'Channel Id', 'TC Code', 'Camera Name',
+        'Center Name', 'City', 'Server Address', 'Detection Type', 'Detection Time',
+        'Status', 'Image URL', 'View'
+    ];
+    const DET_WIDTHS = isRTSP
+        ? [10, 15, 12, 15, 14, 35, 30, 15, 28, 20, 22, 14, 70, 8]
+        : [10, 15, 12, 15, 18, 14, 35, 30, 15, 28, 20, 22, 14, 70, 8];
+
+    const detectionStatus = (d) => {
+        if (Number(d.accepted_by_client) === 1) return 'Accepted';
+        if (Number(d.remove_from_client) === 1) return 'Rejected';
+        return 'Not Verified';
+    };
+
+    const detSheetData = detections.map(d => {
+        const resolvedSid = (d.shift_id != null) ? d.shift_id : determineShiftId(d.date_time, shifts);
+        const row = {
+            'Shift': (shiftMap[resolvedSid] || {}).label || `Shift ${resolvedSid}`,
+            'Cam ID': isRTSP ? `${d.device_id}_${d.camera_no}` : formatHlsCamId(d.camera_name, d.ch_code),
+            'TC Code': d.tc_code || '',
+            'Camera Name': d.camera_name || '',
+            'Center Name': d.center_name || '',
+            'City': d.city || '',
+            'Server Address': serverByKey[isRTSP ? `${d.device_id}_${d.camera_no}` : String(d.ch_code)] || '',
+            'Detection Type': d.detection_type || '',
+            'Detection Time': d.date_time || '',
+            'Status': detectionStatus(d),
+            'Image URL': d.imageurl || '',
+            'View': d.imageurl ? 'View' : '',
+        };
+        if (isRTSP) {
+            row['Device ID'] = d.device_id || '';
+            row['Camera No'] = d.camera_no || '';
+        } else {
+            const { device, cameraNo } = hlsDeviceAndCameraNo(d);
+            row['Device ID'] = device;
+            row['Camera No'] = cameraNo;
+            row['Channel Id'] = d.ch_code || '';
+        }
+        return row;
+    });
+
+    const detWs = makeSheet(DET_HEADERS, detSheetData, DET_WIDTHS);
+
+    // Hyperlinks on the "View" column — resolved by header name, since
+    // Status sits between Detection Time and Image URL.
+    const range = XLSX.utils.decode_range(detWs['!ref'] || 'A1');
+    for (let R = range.s.r + 1; R <= range.e.r; R++) {
+        const cellAddr = XLSX.utils.encode_cell({ r: R, c: DET_HEADERS.indexOf('View') });
+        const url = detSheetData[R - 1]['Image URL'];
+        if (url) {
+            detWs[cellAddr] = { t: 's', v: 'View', l: { Target: url, Tooltip: 'Click to view image' } };
+        }
+    }
+
+    XLSX.utils.book_append_sheet(wb, detWs, 'Detections List');
+
+    // ── 8. Analysis sheet ────────────────────────────────────────────────
+    const analysisData = [];
+    let cumulativeOnline = 0;
+    const uniqueOnlineKeys = new Set();
+    let totalDurationMinutes = 0;
+    let scheduledDetections = 0;
+
+    const parseTimeToMinutes = (t) => {
+        if (!t) return 0;
+        const [h, m] = t.split(':').map(Number);
+        return (h * 60) + m;
+    };
+
+    reportShifts.forEach((shiftMeta) => {
+        const idx = shiftMap[shiftMeta.id].index - 1;
+        const shiftId = shiftMeta.id;
+
+        const shiftScope = rtspShift ? rtspShift.scopeByShift[shiftId] : null;
+        if (shiftMeta && shiftMeta.start_time && shiftMeta.end_time && !shiftNotRunning(shiftScope)) {
+            let diff = parseTimeToMinutes(shiftMeta.end_time) - parseTimeToMinutes(shiftMeta.start_time);
+            if (diff < 0) diff += 1440;
+            totalDurationMinutes += diff;
+        }
+
+        const shiftCams = shiftCamsOf(shiftId);
+        const shiftDets = detections.filter(d => {
+            const resolvedSid = (d.shift_id != null) ? d.shift_id : determineShiftId(d.date_time, shifts);
+            return resolvedSid === shiftId && detectionInSchedule(d, shiftScope);
+        });
+        scheduledDetections += shiftDets.length;
+
+        const total = shiftCams.length;
+        const online = shiftCams.filter(c => cameraIsOnline(c, isRTSP)).length;
+        const offline = total - online;
+        const detCount = shiftDets.length;
+        const rate = total > 0 ? ((online / total) * 100).toFixed(2) + '%' : '0%';
+
+        cumulativeOnline += online;
+        shiftCams.filter(c => cameraIsOnline(c, isRTSP))
+            .forEach(c => uniqueOnlineKeys.add(cameraUniqueKey(c, isRTSP)));
+
+        analysisData.push([`Shift ${idx + 1} ANALYSIS`, '']);
+        if (rtspShift) analysisData.push(['Classification Used', rtspShift.runByShift[shiftId]]);
+        analysisData.push(['Total Cameras Monitored', total]);
+        analysisData.push(['Online Cameras', online]);
+        analysisData.push(['Offline Cameras', offline]);
+        analysisData.push(['Total Detections', detCount]);
+        analysisData.push(['Online Rate', rate]);
+        analysisData.push(['']);
+
+        analysisData.push([`Top 5 Most Active Cameras (Shift ${idx + 1})`, '']);
+        const counts = {};
+        shiftDets.forEach(d => { counts[d.camera_name] = (counts[d.camera_name] || 0) + 1; });
+        Object.entries(counts)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 5)
+            .forEach((t, i) => analysisData.push([`${i + 1}. ${t[0]}`, `${t[1]} detections`]));
+
+        analysisData.push(['']);
+        analysisData.push(['']);
+    });
+
+    // Unique online cameras across all shifts, from the master camera list
+    // (same rule as the per-shift "Online Cameras"), independent of detections.
+    const uniqueOnline = uniqueOnlineKeys.size;
+    const totalHours = (totalDurationMinutes / 60).toFixed(1);
+
+    if (!onlyShiftId) {
+        analysisData.push(['OVERALL SUMMARY', '']);
+        analysisData.push(['Total Unique Cameras Online Today', uniqueOnline]);
+        analysisData.push(['Total Online Cameras (Sum of Shifts)', cumulativeOnline]);
+        // With an uploaded schedule only detections of scheduled centres/shifts count (same
+        // rule as each shift's total); without one this is every detection, as before.
+        const anyRestricted = !!(rtspShift && Object.values(rtspShift.scopeByShift).some(sc => sc && sc.restricted));
+        analysisData.push(['Total Detections (All Shifts)', anyRestricted ? scheduledDetections : detections.length]);
+        analysisData.push(['Total Scheduled Duration (Active Shifts)', `${totalHours} hours`]);
+    }
+
+    const analysisWs = XLSX.utils.aoa_to_sheet(analysisData);
+    analysisWs['!cols'] = [{ wch: 40 }, { wch: 60 }];
+    XLSX.utils.book_append_sheet(wb, analysisWs, 'Analysis');
+
+    // ── 9. Stream ────────────────────────────────────────────────────────
+    const buffer = await applyReportTheme(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
+    const safeName = sanitizeFilename(examName);
+    const shiftTag = onlyShiftId ? `_Shift${shiftMap[onlyShiftId].index}` : '_AllShifts';
+    const filename = `${safeName}_Client_Report_${mysqlDate}${shiftTag}.xlsx`;
+
+    return { buffer, filename, detectionCount: detections.length };
+}
+exports.buildClientReport = buildClientReport;
+
 exports.downloadClientReport = async (req, res) => {
     const rawDate = req.query.date;
     const examId = req.query.exam_id;
@@ -874,411 +1287,20 @@ exports.downloadClientReport = async (req, res) => {
     }
 
     try {
-        // ── 1. Exam metadata ─────────────────────────────────────────────────
-        const examRows = await query(
-            `SELECT id, exam_name, link_type FROM exams WHERE id = ? LIMIT 1`,
-            [examId]
-        );
-        if (!examRows || examRows.length === 0) {
-            return res.status(404).json({ success: false, message: `Exam with id=${examId} not found.` });
-        }
-        const examName = examRows[0].exam_name || `Exam_${examId}`;
-        const isRTSP = (examRows[0].link_type || '').toLowerCase() === 'rtsp';
-
-        // ── 2. Shift metadata ────────────────────────────────────────────────
-        const shifts = await query(
-            `SELECT id, shift_name, start_time, end_time
-             FROM exam_shifts
-             WHERE exam_id = ? AND is_active = 1
-             ORDER BY start_time ASC, id ASC`,
-            [examId]
-        );
-        const shiftMap = {};
-        shifts.forEach((s, i) => {
-            shiftMap[s.id] = {
-                index: i + 1,
-                label: `Shift ${i + 1}`,
-                shift_name: s.shift_name,
-                start_time: s.start_time,
-                end_time: s.end_time,
-            };
+        const { buffer, filename } = await buildClientReport({
+            examId,
+            mysqlDate,
+            shiftId: req.query.all_shifts !== 'true' ? req.query.shift_id : null,
         });
-
-        // ── 3. Master camera list ────────────────────────────────────────────
-        const masterCameras = isRTSP ? await query(
-            `SELECT id, device_id, camera_no, camera_name, classification, tc_code,
-                    centre_name, city, state, null as shift_id,
-                    null as exam_date, status
-             FROM camera_links_rtsp
-             WHERE exam_id = ? AND is_active = 1
-             ORDER BY device_id ASC, camera_no ASC`,
-            [examId]
-        ) : await query(
-            `SELECT id, ch_code, camera_name, camera_category, tc_code,
-                    centre_name, city, state, shift_id, exam_date, status
-             FROM camera_links_hls
-             WHERE exam_id = ? AND is_active = 1
-             ORDER BY shift_id ASC, ch_code ASC`,
-            [examId]
-        );
-
-        const [y, m, d] = mysqlDate.split('-');
-        const searchDate = `${d}/${m}/${y}`;
-
-        // RTSP: each shift uses its own (latest) classification run instead of
-        // the final live classification — see rtspShiftCameraLists. HLS keeps
-        // the shift/date-scoped camera_links list.
-        const rtspShift = isRTSP ? await rtspShiftCameraLists(examId, mysqlDate, shifts, masterCameras) : null;
-        const shiftCamsOf = (sid) => (rtspShift
-            ? rtspShift.camsByShift[sid]
-            : camerasForShiftAndDate(masterCameras, sid, mysqlDate));
-
-        // ── 4. Client-only detection set: pushed_to_client = 1 ───────────────
-        // Carry remove_from_client through so the aggregated "Rejected Events"
-        // count can use it, and accepted_by_client so the Detections List can
-        // resolve the per-row Status (Accepted / Rejected / Not Verified).
-        let detections = isRTSP ? await query(
-            `SELECT id, shift_id, city, center_name, camera_id, camera_name, camera_no,
-                    '' as camera_category, tc_code, device_id, state, camera_status,
-                    events, rejected_events, date_time, imageurl, detection_type,
-                    unique_id, pushed_to_client, remove_from_client, accepted_by_client
-             FROM camera_report_rtsp
-             WHERE exam_id = ?
-               AND date_time LIKE CONCAT(?, '%')
-               AND pushed_to_client = 1
-             ORDER BY shift_id ASC`,
-            [examId, searchDate]
-        ) : await query(
-            `SELECT id, shift_id, city, center_name, camera_id, camera_name,
-                    camera_category, tc_code, ch_code, state, camera_status,
-                    events, rejected_events, date_time, imageurl, detection_type,
-                    unique_id, created_at, pushed_to_client, remove_from_client, accepted_by_client
-             FROM camera_report_hls
-             WHERE exam_id = ?
-               AND date_time LIKE CONCAT(?, '%')
-               AND pushed_to_client = 1
-             ORDER BY shift_id ASC, created_at ASC`,
-            [examId, searchDate]
-        );
-
-        // One shift picked (not "All shifts"): the report carries only that shift - its sheet, its
-        // detections and its analysis. All shifts: the full consolidated report.
-        const onlyShiftId = (req.query.all_shifts !== 'true' && req.query.shift_id && shifts.some(s => Number(s.id) === Number(req.query.shift_id)))
-            ? Number(req.query.shift_id) : null;
-        const reportShifts = onlyShiftId ? shifts.filter(s => Number(s.id) === onlyShiftId) : shifts;
-        if (onlyShiftId) {
-            detections = detections.filter(d => Number((d.shift_id != null) ? d.shift_id : determineShiftId(d.date_time, shifts)) === onlyShiftId);
-        }
-
-        // ── 4b. Server-address (cctv_url) lookup from camera_links ───────────
-        // The report tables don't carry the server URL, so map it per camera.
-        // Keyed the same way as detections: device_id_camera_no (RTSP) / ch_code (HLS).
-        const linkRows = isRTSP
-            ? await query(`SELECT device_id, camera_no, cctv_url FROM camera_links_rtsp WHERE exam_id = ?`, [examId])
-            : await query(`SELECT ch_code, cctv_url FROM camera_links_hls WHERE exam_id = ?`, [examId]);
-        const serverByKey = {};
-        linkRows.forEach(l => {
-            const k = isRTSP ? `${l.device_id}_${l.camera_no}` : String(l.ch_code);
-            if (serverByKey[k] === undefined) serverByKey[k] = l.cctv_url || '';
-        });
-
-        // ── 5. Aggregate detections per (shift, camera) ──────────────────────
-        const aggregated = {};
-        detections.forEach(d => {
-            // ✅ NULL shift_id → date_time se dynamically determine karo
-            const sid = (d.shift_id != null) ? d.shift_id : determineShiftId(d.date_time, shifts);
-            
-            const key = isRTSP ? `${d.device_id}_${d.camera_no}` : d.ch_code;
-            if (!aggregated[sid]) aggregated[sid] = {};
-            if (!aggregated[sid][key]) {
-                aggregated[sid][key] = {
-                    events: 0,
-                    rejected: 0,
-                    status: (d.camera_status || 'Online'),
-                    details: {
-                        city: d.city,
-                        center: d.center_name,
-                        cam_id: key,
-                        camera_name: d.camera_name,
-                        cam_type: d.camera_category,
-                        tc_code: d.tc_code,
-                    }
-                };
-            }
-            if (Number(d.remove_from_client) === 1) {
-                aggregated[sid][key].rejected += 1;
-            } else {
-                aggregated[sid][key].events += 1;
-            }
-        });
-
-        // ── 6. Workbook ──────────────────────────────────────────────────────
-        const wb = XLSX.utils.book_new();
-
-        // RTSP: Device ID, Camera No and Server Address instead of Channel Id (an HLS-only field).
-        const SHIFT_HEADERS = isRTSP ? [
-            'City', 'Center', 'Cam ID', 'Device ID', 'Camera No', 'Server Address', 'Camera Name',
-            'Cam Type', 'TC Code', 'Events (Excluding Rejected)', 'Rejected Events', 'Camera Status'
-        ] : [
-            'City', 'Center', 'Cam ID', 'Channel Id', 'Camera Name',
-            'Cam Type', 'TC Code', 'Events (Excluding Rejected)', 'Rejected Events', 'Camera Status'
-        ];
-        const SHIFT_WIDTHS = isRTSP
-            ? [15, 30, 15, 12, 11, 22, 35, 15, 12, 28, 16, 15]
-            : [15, 30, 15, 18, 35, 15, 12, 28, 16, 15];
-
-        reportShifts.forEach((shiftMeta) => {
-            const idx = shiftMap[shiftMeta.id].index - 1;
-            const shiftId = shiftMeta.id;
-            const sheetName = `Shift ${idx + 1}`;
-            const shiftCams = shiftCamsOf(shiftId);
-
-            let sheetData = [];
-
-            if (isRTSP) {
-                sheetData = shiftCams.map(cam => {
-                    const key = `${cam.device_id}_${cam.camera_no}`;
-                    const agg = (aggregated[shiftId] || {})[key];
-                    const camType = cam.classification || (cam._notClassified ? 'Not Classified' : 'Failed to Classify');
-
-                    if (agg) {
-                        return {
-                            'City': cam.city || agg.details.city || '',
-                            'Center': cam.centre_name || agg.details.center || '',
-                            'Cam ID': key,
-                            'Device ID': cam.device_id || '',
-                            'Camera No': cam.camera_no ?? '',
-                            'Server Address': serverByKey[key] || cam.cctv_url || '',
-                            'Camera Name': cam.camera_name || agg.details.camera_name || '',
-                            'Cam Type': camType,
-                            'TC Code': cam.tc_code || agg.details.tc_code || '',
-                            'Events (Excluding Rejected)': agg.events,
-                            'Rejected Events': agg.rejected,
-                            'Camera Status': cameraIsOnline(cam, isRTSP) ? 'Online' : 'Offline',
-                        };
-                    } else {
-                        const isOnline = cameraIsOnline(cam, isRTSP);
-                        return {
-                            'City': cam.city || '',
-                            'Center': cam.centre_name || '',
-                            'Cam ID': key,
-                            'Device ID': cam.device_id || '',
-                            'Camera No': cam.camera_no ?? '',
-                            'Server Address': serverByKey[key] || cam.cctv_url || '',
-                            'Camera Name': cam.camera_name || '',
-                            'Cam Type': camType,
-                            'TC Code': cam.tc_code || '',
-                            'Events (Excluding Rejected)': 0,
-                            'Rejected Events': 0,
-                            'Camera Status': isOnline ? 'Online' : 'Offline',
-                        };
-                    }
-                });
-            } else {
-                sheetData = shiftCams.map(cam => {
-                    const agg = (aggregated[shiftId] || {})[cam.ch_code];
-                    const camIdDisplay = formatHlsCamId(cam.camera_name, cam.ch_code);
-
-                    if (agg) {
-                        return {
-                            'City': cam.city || '',
-                            'Center': cam.centre_name || '',
-                            'Cam ID': camIdDisplay,
-                            'Channel Id': cam.ch_code || '',
-                            'Camera Name': cam.camera_name || '',
-                            'Cam Type': cam.camera_category || '',
-                            'TC Code': cam.tc_code || '',
-                            'Events (Excluding Rejected)': agg.events,
-                            'Rejected Events': agg.rejected,
-                            'Camera Status': cameraIsOnline(cam, isRTSP) ? 'Online' : 'Offline',
-                        };
-                    } else {
-                        const isOnline = cameraIsOnline(cam, isRTSP);
-                        return {
-                            'City': cam.city || '',
-                            'Center': cam.centre_name || '',
-                            'Cam ID': camIdDisplay,
-                            'Channel Id': cam.ch_code || '',
-                            'Camera Name': cam.camera_name || '',
-                            'Cam Type': cam.camera_category || '',
-                            'TC Code': cam.tc_code || '',
-                            'Events (Excluding Rejected)': 0,
-                            'Rejected Events': 0,
-                            'Camera Status': isOnline ? 'Online' : 'Offline',
-                        };
-                    }
-                });
-            }
-
-            const ws = makeSheet(SHIFT_HEADERS, sheetData, SHIFT_WIDTHS);
-            XLSX.utils.book_append_sheet(wb, ws, sheetName);
-        });
-
-        // ── 7. Detections List — admin layout + per-row "Status" ────────────
-        // Each row is one pushed detection. Status collapses the client's two
-        // review actions into one column:
-        //   Accepted      accepted_by_client = 1 (client confirmed it; the SMS
-        //                 alert to the tc_code observer fired on that click)
-        //   Rejected      remove_from_client = 1 (pulled off the client view)
-        //   Not Verified  neither — still sitting unreviewed on the client page
-        // Accept wins when a row carries both flags: accepting is the terminal,
-        // irreversible action (an SMS went out), whereas a later Remove only
-        // tidies the feed. Flip the order in detectionStatus to reverse that.
-        const DET_HEADERS = isRTSP ? [
-            'Shift', 'Device ID', 'Camera No', 'Cam ID', 'TC Code', 'Camera Name',
-            'Center Name', 'City', 'Server Address', 'Detection Type', 'Detection Time',
-            'Status', 'Image URL', 'View'
-        ] : [
-            'Shift', 'Device ID', 'Camera No', 'Cam ID', 'Channel Id', 'TC Code', 'Camera Name',
-            'Center Name', 'City', 'Server Address', 'Detection Type', 'Detection Time',
-            'Status', 'Image URL', 'View'
-        ];
-        const DET_WIDTHS = isRTSP
-            ? [10, 15, 12, 15, 14, 35, 30, 15, 28, 20, 22, 14, 70, 8]
-            : [10, 15, 12, 15, 18, 14, 35, 30, 15, 28, 20, 22, 14, 70, 8];
-
-        const detectionStatus = (d) => {
-            if (Number(d.accepted_by_client) === 1) return 'Accepted';
-            if (Number(d.remove_from_client) === 1) return 'Rejected';
-            return 'Not Verified';
-        };
-
-        const detSheetData = detections.map(d => {
-            const resolvedSid = (d.shift_id != null) ? d.shift_id : determineShiftId(d.date_time, shifts);
-            const row = {
-                'Shift': (shiftMap[resolvedSid] || {}).label || `Shift ${resolvedSid}`,
-                'Cam ID': isRTSP ? `${d.device_id}_${d.camera_no}` : formatHlsCamId(d.camera_name, d.ch_code),
-                'TC Code': d.tc_code || '',
-                'Camera Name': d.camera_name || '',
-                'Center Name': d.center_name || '',
-                'City': d.city || '',
-                'Server Address': serverByKey[isRTSP ? `${d.device_id}_${d.camera_no}` : String(d.ch_code)] || '',
-                'Detection Type': d.detection_type || '',
-                'Detection Time': d.date_time || '',
-                'Status': detectionStatus(d),
-                'Image URL': d.imageurl || '',
-                'View': d.imageurl ? 'View' : '',
-            };
-            if (isRTSP) {
-                row['Device ID'] = d.device_id || '';
-                row['Camera No'] = d.camera_no || '';
-            } else {
-                const { device, cameraNo } = hlsDeviceAndCameraNo(d);
-                row['Device ID'] = device;
-                row['Camera No'] = cameraNo;
-                row['Channel Id'] = d.ch_code || '';
-            }
-            return row;
-        });
-
-        const detWs = makeSheet(DET_HEADERS, detSheetData, DET_WIDTHS);
-
-        // Hyperlinks on the "View" column — resolved by header name, since
-        // Status sits between Detection Time and Image URL.
-        const range = XLSX.utils.decode_range(detWs['!ref'] || 'A1');
-        for (let R = range.s.r + 1; R <= range.e.r; R++) {
-            const cellAddr = XLSX.utils.encode_cell({ r: R, c: DET_HEADERS.indexOf('View') });
-            const url = detSheetData[R - 1]['Image URL'];
-            if (url) {
-                detWs[cellAddr] = { t: 's', v: 'View', l: { Target: url, Tooltip: 'Click to view image' } };
-            }
-        }
-
-        XLSX.utils.book_append_sheet(wb, detWs, 'Detections List');
-
-        // ── 8. Analysis sheet ────────────────────────────────────────────────
-        const analysisData = [];
-        let cumulativeOnline = 0;
-        const uniqueOnlineKeys = new Set();
-        let totalDurationMinutes = 0;
-        let scheduledDetections = 0;
-
-        const parseTimeToMinutes = (t) => {
-            if (!t) return 0;
-            const [h, m] = t.split(':').map(Number);
-            return (h * 60) + m;
-        };
-
-        reportShifts.forEach((shiftMeta) => {
-            const idx = shiftMap[shiftMeta.id].index - 1;
-            const shiftId = shiftMeta.id;
-
-            const shiftScope = rtspShift ? rtspShift.scopeByShift[shiftId] : null;
-            if (shiftMeta && shiftMeta.start_time && shiftMeta.end_time && !shiftNotRunning(shiftScope)) {
-                let diff = parseTimeToMinutes(shiftMeta.end_time) - parseTimeToMinutes(shiftMeta.start_time);
-                if (diff < 0) diff += 1440;
-                totalDurationMinutes += diff;
-            }
-
-            const shiftCams = shiftCamsOf(shiftId);
-            const shiftDets = detections.filter(d => {
-                const resolvedSid = (d.shift_id != null) ? d.shift_id : determineShiftId(d.date_time, shifts);
-                return resolvedSid === shiftId && detectionInSchedule(d, shiftScope);
-            });
-            scheduledDetections += shiftDets.length;
-
-            const total = shiftCams.length;
-            const online = shiftCams.filter(c => cameraIsOnline(c, isRTSP)).length;
-            const offline = total - online;
-            const detCount = shiftDets.length;
-            const rate = total > 0 ? ((online / total) * 100).toFixed(2) + '%' : '0%';
-
-            cumulativeOnline += online;
-            shiftCams.filter(c => cameraIsOnline(c, isRTSP))
-                .forEach(c => uniqueOnlineKeys.add(cameraUniqueKey(c, isRTSP)));
-
-            analysisData.push([`Shift ${idx + 1} ANALYSIS`, '']);
-            if (rtspShift) analysisData.push(['Classification Used', rtspShift.runByShift[shiftId]]);
-            analysisData.push(['Total Cameras Monitored', total]);
-            analysisData.push(['Online Cameras', online]);
-            analysisData.push(['Offline Cameras', offline]);
-            analysisData.push(['Total Detections', detCount]);
-            analysisData.push(['Online Rate', rate]);
-            analysisData.push(['']);
-
-            analysisData.push([`Top 5 Most Active Cameras (Shift ${idx + 1})`, '']);
-            const counts = {};
-            shiftDets.forEach(d => { counts[d.camera_name] = (counts[d.camera_name] || 0) + 1; });
-            Object.entries(counts)
-                .sort((a, b) => b[1] - a[1])
-                .slice(0, 5)
-                .forEach((t, i) => analysisData.push([`${i + 1}. ${t[0]}`, `${t[1]} detections`]));
-
-            analysisData.push(['']);
-            analysisData.push(['']);
-        });
-
-        // Unique online cameras across all shifts, from the master camera list
-        // (same rule as the per-shift "Online Cameras"), independent of detections.
-        const uniqueOnline = uniqueOnlineKeys.size;
-        const totalHours = (totalDurationMinutes / 60).toFixed(1);
-
-        if (!onlyShiftId) {
-            analysisData.push(['OVERALL SUMMARY', '']);
-            analysisData.push(['Total Unique Cameras Online Today', uniqueOnline]);
-            analysisData.push(['Total Online Cameras (Sum of Shifts)', cumulativeOnline]);
-            // With an uploaded schedule only detections of scheduled centres/shifts count (same
-            // rule as each shift's total); without one this is every detection, as before.
-            const anyRestricted = !!(rtspShift && Object.values(rtspShift.scopeByShift).some(sc => sc && sc.restricted));
-            analysisData.push(['Total Detections (All Shifts)', anyRestricted ? scheduledDetections : detections.length]);
-            analysisData.push(['Total Scheduled Duration (Active Shifts)', `${totalHours} hours`]);
-        }
-
-        const analysisWs = XLSX.utils.aoa_to_sheet(analysisData);
-        analysisWs['!cols'] = [{ wch: 40 }, { wch: 60 }];
-        XLSX.utils.book_append_sheet(wb, analysisWs, 'Analysis');
-
-        // ── 9. Stream ────────────────────────────────────────────────────────
-        const buffer = await applyReportTheme(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
-        const safeName = sanitizeFilename(examName);
-        const shiftTag = onlyShiftId ? `_Shift${shiftMap[onlyShiftId].index}` : '_AllShifts';
-        const filename = `${safeName}_Client_Report_${mysqlDate}${shiftTag}.xlsx`;
 
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         res.setHeader('Content-Length', buffer.length);
         return res.send(buffer);
     } catch (error) {
+        if (error.statusCode === 404) {
+            return res.status(404).json({ success: false, message: error.message });
+        }
         console.error('[ReportController.downloadClientReport] Error:', error);
         return res.status(500).json({ success: false, message: 'Internal Server Error while generating client report.' });
     }

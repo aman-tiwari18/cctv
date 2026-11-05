@@ -3,6 +3,7 @@ require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 const app = require('./app');
 const { testConnection } = require('./config/database');
 const scheduler = require('./services/scheduler');
+const reportAutomation = require('./services/reportAutomationService');
 const logger = require('./utils/logger');
 
 
@@ -27,6 +28,7 @@ const startServer = async () => {
         // Start scheduler service
         logger.info('Starting scheduler service...');
         scheduler.start();
+        reportAutomation.start();
 
         // Graceful shutdown
         const gracefulShutdown = (signal) => {
@@ -34,6 +36,7 @@ const startServer = async () => {
 
             // Stop scheduler
             scheduler.stop();
+            reportAutomation.stop();
 
             // Close server
             server.close(() => {

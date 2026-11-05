@@ -301,4 +301,14 @@ export const cameraUptimeAPI = {
     download: (params) => api.get('/camera-uptime/download', { params, responseType: 'blob' }),
 };
 
+// Scheduled client report emails, ADMIN only.
+export const reportAutomationAPI = {
+    meta: () => api.get('/report-automation/meta'),
+    list: (params) => api.get('/report-automation', { params }),
+    create: (data) => api.post('/report-automation', data),
+    update: (id, data) => api.put(`/report-automation/${id}`, data),
+    remove: (id) => api.delete(`/report-automation/${id}`),
+    sendNow: (id) => api.post(`/report-automation/${id}/send-now`),
+};
+
 export default api;

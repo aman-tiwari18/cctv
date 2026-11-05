@@ -32,8 +32,11 @@ if (isEmailConfigured()) {
  * Low-level send. Returns { success, skipped?, messageId?, message? } and never
  * throws — callers treat email as best-effort so a mail failure can't break the
  * surrounding auth flow.
+ *
+ * attachments: [{ filename, content }] with content as a base64 string (the SDK
+ * forwards it into the JSON body as is, so a raw Buffer must not be passed).
  */
-async function sendEmail(to, subject, html, { cc = [] } = {}) {
+async function sendEmail(to, subject, html, { cc = [], attachments = [] } = {}) {
     if (!isEmailConfigured()) {
         logger.warn(`Email service not configured - email to ${to} skipped (subject: ${subject})`);
         return { success: true, skipped: true, message: 'Email service not configured (RESEND_API_KEY missing).' };
@@ -48,6 +51,7 @@ async function sendEmail(to, subject, html, { cc = [] } = {}) {
             ...(ccList.length ? { cc: ccList } : {}),
             subject,
             html,
+            ...(attachments.length ? { attachments } : {}),
         });
 
         if (error) {
@@ -233,6 +237,8 @@ async function verifyEmailConfig() {
 }
 
 module.exports = {
+    sendEmail,
+    escapeHtml,
     sendOTPEmail,
     sendRegistrationNotification,
     sendVerificationNotification,
