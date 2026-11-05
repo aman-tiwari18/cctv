@@ -1251,8 +1251,10 @@ const SmsCreditsCard = () => {
         return () => { cancelled = true; clearInterval(id); };
     }, []);
 
-    const accounts = balance?.accounts || [];
-    const message = failed ? 'SMS balance unavailable' : (balance && accounts.length === 0 ? 'No SMS accounts configured' : null);
+    // Accounts whose lookup failed are left out. The account name only appears
+    // when more than one balance is showing, to tell them apart.
+    const accounts = (balance?.accounts || []).filter((a) => !a.error);
+    const message = failed || (balance && accounts.length === 0) ? 'SMS balance unavailable' : null;
 
     return (
         <Card sx={{ mb: { xs: 2, sm: 2.5 }, bgcolor: '#fff', borderRadius: '8px', border: '1px solid #eef0f3' }}>
@@ -1272,11 +1274,13 @@ const SmsCreditsCard = () => {
 
                     {!failed && accounts.map((a) => (
                         <Box key={a.account}>
-                            <Typography sx={{ color: '#5C5F61', fontSize: '12px', fontWeight: 600, lineHeight: '16px' }}>
-                                {a.account}
-                            </Typography>
-                            <Typography sx={{ color: a.error ? '#94A3B8' : '#2E68C9', fontSize: a.error ? '14px' : '22px', fontWeight: 700, lineHeight: '28px' }}>
-                                {a.error ? 'Unavailable' : a.credits.toLocaleString()}
+                            {accounts.length > 1 && (
+                                <Typography sx={{ color: '#5C5F61', fontSize: '12px', fontWeight: 600, lineHeight: '16px' }}>
+                                    {a.account}
+                                </Typography>
+                            )}
+                            <Typography sx={{ color: '#2E68C9', fontSize: '22px', fontWeight: 700, lineHeight: '28px' }}>
+                                {a.credits.toLocaleString()}
                             </Typography>
                         </Box>
                     ))}
